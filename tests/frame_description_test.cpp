@@ -93,6 +93,29 @@ namespace {
         assert(placesOriginAt(frame.draws[1].model, 10.0f, 2.0f, 0.0f));
     }
 
+    /*
+    * Room for draws still to come (the terrain's): appending them never moves the list, which with 35,000 draws of
+    * 520 bytes copied 18 MB a frame.
+    */
+    void testTheFrameKeepsRoomForLaterDraws() {
+        World world;
+        const Entity entity = world.create();
+        world.add(entity, placedAt(0.0f, 0.0f, 0.0f));
+        ModelRenderer renderer;
+        renderer.parts.push_back(RenderPart{MeshHandle{1}, Material{}, Mat4::identity()});
+        world.add(entity, renderer);
+
+        FrameDescription frame = buildFrame(world, makeTestCamera(), 0.0f, nullptr, serialJobs(), 40);
+        assert(frame.draws.size() == 1 && frame.draws.capacity() >= 41);
+        const DrawItem* before = frame.draws.data();
+
+        for (int added = 0; added < 40; ++added) {
+            frame.draws.push_back(DrawItem{});
+        }
+
+        assert(frame.draws.data() == before);
+    }
+
     // Hidden models and models with nowhere to be drawn (no Transform) are left out.
     void testHiddenAndUnplacedModelsAreSkipped() {
         World world;
@@ -293,6 +316,7 @@ void testFrameDescription() {
     testCameraIsCopied();
     testLightingIsCollected();
     testEachPartIsOneDraw();
+    testTheFrameKeepsRoomForLaterDraws();
     testStaticModelsDrawStatic();
     testHiddenAndUnplacedModelsAreSkipped();
     testMovingEntitiesAreInterpolated();

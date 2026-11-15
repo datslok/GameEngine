@@ -308,6 +308,8 @@ void SkyVisibilityGrid::startAfresh() {
 
     allChanged = true;
     changedCells.clear();
+    batchGridAllChanged = true;
+    batchGridChanges.clear();
     ++generation;
     ++version;
 }
@@ -330,10 +332,26 @@ void SkyVisibilityGrid::wait(int cell) {
     deepening.remove(cell);
 }
 
-void SkyVisibilityGrid::arrive(std::size_t cascade, int cell, const ProbeCascade& now) {
+void SkyVisibilityGrid::noteChanged(int cell) {
     if (!allChanged) {
         changedCells.push_back(cell);
     }
+
+    if (batchGridAllChanged) {
+        return;
+    }
+
+    if (batchGridChanges.size() >= cells.size()) {
+        batchGridAllChanged = true;
+        batchGridChanges.clear();
+        return;
+    }
+
+    batchGridChanges.push_back(cell);
+}
+
+void SkyVisibilityGrid::arrive(std::size_t cascade, int cell, const ProbeCascade& now) {
+    noteChanged(cell);
 
     const std::optional<StoredSkyCell> found = store.find(static_cast<int>(cascade), probeLatticeCoord(now, cell - now.firstProbe));
 
@@ -450,8 +468,29 @@ void bakeSkyBatch(const StaticLevel& level, JobSystem& jobs, std::span<const Vec
     batch.secondsPerCell = (profilerSeconds() - start) / static_cast<double>(batch.entries.size());
 }
 
+/*
+* The kept copy is written only when no batch holds it: a batch the background baker still bakes, or one not yet let go,
+* keeps reading what it took. The baker hands its batch back under its lock, so once the count says the grid alone holds
+* the copy, nothing else reads it.
+*/
+std::shared_ptr<const std::vector<SkyCell>> SkyVisibilityGrid::batchGridNow() {
+    if (!batchGrid || batchGrid.use_count() > 1) {
+        batchGrid = std::make_shared<std::vector<SkyCell>>(cells);
+    } else if (batchGridAllChanged || batchGrid->size() != cells.size()) {
+        batchGrid->assign(cells.begin(), cells.end());
+    } else {
+        for (const int cell : batchGridChanges) {
+            (*batchGrid)[static_cast<std::size_t>(cell)] = cells[static_cast<std::size_t>(cell)];
+        }
+    }
+
+    batchGridAllChanged = false;
+    batchGridChanges.clear();
+    return batchGrid;
+}
+
 // The places and positions are worked out now, while the cascades are those the points belong to.
-SkyBakeBatch SkyVisibilityGrid::makeBatch(std::span<const int> points, int rays, bool quick, bool refining, bool deepening) const {
+SkyBakeBatch SkyVisibilityGrid::makeBatch(std::span<const int> points, int rays, bool quick, bool refining, bool deepening) {
     SkyBakeBatch batch;
     batch.rays = rays;
     batch.rayLength = shape.rayLength;
@@ -471,7 +510,7 @@ SkyBakeBatch SkyVisibilityGrid::makeBatch(std::span<const int> points, int rays,
 
     if (!batch.entries.empty()) {
         batch.cascades = cascades;
-        batch.grid = std::make_shared<const std::vector<SkyCell>>(cells);
+        batch.grid = batchGridNow();
     }
 
     return batch;
@@ -632,10 +671,7 @@ void SkyVisibilityGrid::applyBatch(const SkyBakeBatch& batch) {
         }
 
         queueNext(entry.cell, next);
-
-        if (!allChanged) {
-            changedCells.push_back(entry.cell);
-        }
+        noteChanged(entry.cell);
     }
 
     ++version;

@@ -1020,6 +1020,131 @@ namespace {
         }
     }
 
+    // Whether a batch's grid is the grid's points as they stand now, word for word as the shaders and hits read them.
+    bool readsTheGridAsItStands(const SkyBakeBatch& batch, const SkyVisibilityGrid& grid) {
+        const std::span<const SkyCell> cells = grid.getCells();
+
+        if (!batch.grid || batch.grid->size() != cells.size()) {
+            return false;
+        }
+
+        for (std::size_t cell = 0; cell < cells.size(); ++cell) {
+            const GpuSkyCell a = packSkyCell((*batch.grid)[cell]);
+            const GpuSkyCell b = packSkyCell(cells[cell]);
+
+            for (std::size_t word = 0; word < std::size(a.words); ++word) {
+                if (a.words[word] != b.words[word]) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /*
+    * A batch reads the grid as it stood when taken, from one copy the grid keeps and brings up to date with only the
+    * points changed since (copying all 110,000 points for every batch cost the frame 4-5 ms):
+    * - the copy matches the grid after bakes and moves;
+    * - while a batch still holds it, the next batch gets a copy of its own and the held one is left as it was;
+    * - once no batch holds it, the next batch reuses its memory.
+    */
+    void testABatchReadsTheGridAsItStood() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 6;
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        const Vec3 east{settings.spacing, 0.0f, 0.0f};
+
+        SkyVisibilityGrid grid;
+        grid.follow(centre, settings, 1);
+        SkyBakeBatch first = grid.takeBatch(100, false);
+        assert(readsTheGridAsItStands(first, grid));
+        bakeSkyBatch(level, serialJobs(), {}, first);
+        grid.applyBatch(first);
+
+        // The first still held: the second gets its own copy, with the first's points; the first's is untouched.
+        SkyBakeBatch second = grid.takeBatch(100, false);
+        assert(readsTheGridAsItStands(second, grid) && second.grid != first.grid);
+        for (const SkyCell& cell : *first.grid) {
+            assert(cell.state == SkyCellState::Unknown);
+        }
+
+        // Moves and bakes, then every batch let go: the next reuses the kept copy's memory, brought up to date.
+        bakeSkyBatch(level, serialJobs(), {}, second);
+        grid.follow(centre + east, settings, 1);
+        grid.applyBatch(second);
+        const std::vector<SkyCell>* kept = second.grid.get();
+        first = SkyBakeBatch{};
+        second = SkyBakeBatch{};
+        SkyBakeBatch third = grid.takeBatch(300, false);
+        assert(readsTheGridAsItStands(third, grid) && third.grid.get() == kept);
+
+        // Many moves with no batch between (a long backlog), then a fresh start: still the grid as it stands.
+        bakeSkyBatch(level, serialJobs(), {}, third);
+        grid.applyBatch(third);
+        third = SkyBakeBatch{};
+        for (int step = 0; step < 6; ++step) {
+            grid.follow(centre + east * static_cast<float>(step % 3), settings, 1);
+            grid.bake(level, serialJobs(), 200);
+        }
+        SkyBakeBatch fourth = grid.takeBatch(50, false);
+        assert(readsTheGridAsItStands(fourth, grid));
+        fourth = SkyBakeBatch{};
+        grid.follow(centre, settings, 2);
+        SkyBakeBatch fifth = grid.takeBatch(50, false);
+        assert(readsTheGridAsItStands(fifth, grid));
+    }
+
+    // Every slot whose lattice point changed, walking them all: scrolledProbes' oracle.
+    std::vector<int> everySlotWalked(const ProbeCascade& before, const ProbeCascade& after) {
+        const bool resized = before.volume.counts.x != after.volume.counts.x || before.volume.counts.y != after.volume.counts.y ||
+                             before.volume.counts.z != after.volume.counts.z || before.volume.spacing.x != after.volume.spacing.x;
+        std::vector<int> scrolled;
+
+        for (int slot = 0; slot < probeCount(after.volume.counts); ++slot) {
+            const ProbeGridCoord a = probeLatticeCoord(before, slot);
+            const ProbeGridCoord b = probeLatticeCoord(after, slot);
+
+            if (resized || a.x != b.x || a.y != b.y || a.z != b.z) {
+                scrolled.push_back(after.firstProbe + slot);
+            }
+        }
+
+        return scrolled;
+    }
+
+    /*
+    * The slots a move brought new points into, found from the planes the move brought in rather than by walking every
+    * slot (110,000 every frame, 2 ms, even standing still): the same slots in the same order, for still windows, small and
+    * diagonal moves, moves up and down, moves longer than the window, and a change of size.
+    */
+    void testOnlyTheNewPlanesAreWalked() {
+        SkyVisibilitySettings settings;
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        const std::vector<ProbeCascade> start = skyVisibilityCascades(centre, settings);
+        const Vec3 moves[] = {Vec3{}, Vec3{0.3f, 0.0f, 0.0f}, Vec3{0.6f, 0.0f, 0.0f}, Vec3{-1.2f, 0.0f, 0.7f}, Vec3{0.0f, 2.6f, 0.0f},
+                              Vec3{3.1f, -1.4f, -5.2f}, Vec3{-30.0f, 0.0f, 0.0f}, Vec3{80.0f, 40.0f, -90.0f}};
+
+        for (const Vec3& move : moves) {
+            const std::vector<ProbeCascade> after = skyVisibilityCascades(centre + move, settings);
+
+            for (std::size_t c = 0; c < start.size(); ++c) {
+                assert(scrolledProbes(start[c], after[c]) == everySlotWalked(start[c], after[c]));
+                assert(scrolledProbes(after[c], start[c]) == everySlotWalked(after[c], start[c]));
+            }
+        }
+
+        assert(scrolledProbes(start[0], start[0]).empty());
+
+        // Another size or spacing: every slot.
+        SkyVisibilitySettings finer = settings;
+        finer.spacing = 0.5f * settings.spacing;
+        const std::vector<ProbeCascade> resized = skyVisibilityCascades(centre, finer);
+        assert(scrolledProbes(start[0], resized[0]) == everySlotWalked(start[0], resized[0]));
+        assert(static_cast<int>(scrolledProbes(start[0], resized[0]).size()) == probeCount(resized[0].volume.counts));
+    }
+
     // The background baker: a batch started on its thread comes back baked as on the caller's.
     void testTheBackgroundBaker() {
         const auto level = std::make_shared<const StaticLevel>(roomWithADoor());
@@ -1411,6 +1536,8 @@ void testSkyVisibility() {
     testTheGridFollowsTheCamera();
     testQuickBakesAreRefined();
     testBatchesBakeApart();
+    testABatchReadsTheGridAsItStood();
+    testOnlyTheNewPlanesAreWalked();
     testTheBackgroundBaker();
     testFallingBehindBakesWhatMattersFirst();
     testTheStoreKeepsBakedPoints();

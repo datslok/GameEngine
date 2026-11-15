@@ -288,8 +288,18 @@ private:
     void startAfresh();
     void wait(int cell);
 
-    // A batch of these points (the grid as it stands copied for its hits), to bake at rays rays.
-    SkyBakeBatch makeBatch(std::span<const int> points, int rays, bool quick, bool refining, bool deepening) const;
+    // A batch of these points (the grid as it stands, for its hits: batchGridNow), to bake at rays rays.
+    SkyBakeBatch makeBatch(std::span<const int> points, int rays, bool quick, bool refining, bool deepening);
+
+    // A point changed: the GPU's copy and the batches' copy are to take it.
+    void noteChanged(int cell);
+
+    /*
+    * The grid as it stands, for a batch: the kept copy brought up to date with only the points changed since (copying
+    * all of them for every batch cost the frame 4-5 ms), or a new copy while an earlier batch still holds the kept one,
+    * which is left as that batch took it.
+    */
+    std::shared_ptr<const std::vector<SkyCell>> batchGridNow();
 
     // Each fresh start counts one, so a batch taken before it is known to be stale.
     std::uint64_t generation = 0;
@@ -353,6 +363,12 @@ private:
     // What changed since takeChanges last ran: every point, or these.
     bool allChanged = true;
     std::vector<int> changedCells;
+
+    // The copy batches read, and what changed since it was last brought up to date: every point, or these (a backlog
+    // longer than the grid counts as every point).
+    std::shared_ptr<std::vector<SkyCell>> batchGrid;
+    bool batchGridAllChanged = true;
+    std::vector<int> batchGridChanges;
 };
 
 /*

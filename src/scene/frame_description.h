@@ -159,6 +159,7 @@ struct FrameDescription {
 void attachShapes(std::vector<DrawItem>& draws, const std::vector<DeformedMesh>& deformedMeshes);
 
 // Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks. With a history, each draw
-// gets its matrix from last frame, and this frame's are remembered for the next.
+// gets its matrix from last frame, and this frame's are remembered for the next. The list keeps room for laterDraws
+// more (the terrain's), so appending them never moves it.
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history = nullptr,
-                            JobSystem& jobs = serialJobs());
+                            JobSystem& jobs = serialJobs(), std::size_t laterDraws = 0);

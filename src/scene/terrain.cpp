@@ -265,14 +265,12 @@ namespace {
     }
 }
 
-void appendTerrainDraws(const Terrain& terrain, const Vec3& eye, const TerrainSettings& settings, std::vector<DrawItem>& draws,
+void appendTerrainDraws(const Terrain& terrain, std::span<const TerrainNode> nodes, std::vector<DrawItem>& draws,
                         std::vector<TerrainPatch>& patches) {
     if (terrain.regions.empty()) {
         throw std::invalid_argument("A terrain needs a region to take its material from");
     }
 
-    const std::vector<TerrainNode> nodes = selectTerrainNodes(terrain, eye, settings);
-    draws.reserve(draws.size() + nodes.size());
     patches.reserve(patches.size() + nodes.size());
 
     for (const TerrainNode& node : nodes) {

@@ -422,7 +422,22 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
         partStart = now;
     };
 
-    FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory, jobs);
+    /*
+    * The terrain's patches round the camera (scene/terrain.h), chosen first so the frame keeps room for their draws:
+    * added to a full list, they moved all of it (35,000 draws, 18 MB, 6 ms a frame). Drawn after the other draws, since
+    * their bounds are their own. Its time is the choosing here and the adding below, recorded once.
+    */
+    validateTerrain(settings.render.terrain);
+    std::vector<std::pair<const Terrain*, std::vector<TerrainNode>>> terrains;
+    std::size_t terrainDraws = 0;
+    world.each<Terrain>([&](Entity, const Terrain& terrain) {
+        terrains.emplace_back(&terrain, selectTerrainNodes(terrain, game.getCamera().getPosition(), settings.render.terrain));
+        terrainDraws += terrains.back().second.size();
+    });
+    double terrainSeconds = profilerSeconds() - partStart;
+    partStart = profilerSeconds();
+
+    FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory, jobs, terrainDraws);
     frame.lightFocus = game.getLightFocus();
 
     // Probe events last one frame: this one carries them.
@@ -461,14 +476,14 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     attachMeshLevels(frame.draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
     partDone(SceneStage::Attach);
 
-    // The terrain's patches round the camera (scene/terrain.h), after the other draws: their bounds are their own.
-    validateTerrain(settings.render.terrain);
-    world.each<Terrain>([&](Entity, const Terrain& terrain) {
-        appendTerrainDraws(terrain, game.getCamera().getPosition(), settings.render.terrain, frame.draws, frame.terrainPatches);
-        frame.terrainHeights = terrain.heights;
-        frame.terrainHeightsVersion = terrain.heightsVersion;
-    });
-    partDone(SceneStage::Terrain);
+    for (const auto& [terrain, nodes] : terrains) {
+        appendTerrainDraws(*terrain, nodes, frame.draws, frame.terrainPatches);
+        frame.terrainHeights = terrain->heights;
+        frame.terrainHeightsVersion = terrain->heightsVersion;
+    }
+    terrainSeconds += profilerSeconds() - partStart;
+    sceneProfiler.record(sceneStageSection(SceneStage::Terrain), terrainSeconds);
+    partStart = profilerSeconds();
 
     // The sky visibility grid's level, while its settings want it (each frame's check is a hash of the static draws).
     if (settings.render.skyVisibility.enabled) {
