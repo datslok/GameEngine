@@ -24,9 +24,10 @@ inline constexpr int climberShadowCascades = 2;
 
 // How many climbers and how they grow (F5 Forest, Climbers; start-up: the meshes are built once).
 struct ForestClimberSettings {
-    // The share of big trees' variants carrying climbers, and the most on one.
-    float treeShare = 0.7f;
-    int mostPerTree = 2;
+    // The share of big trees' variants carrying climbers, and the most on one. Fuller than first grown (0.7 and 2, a
+    // thin strip up one side of a trunk), the user's choice.
+    float treeShare = 0.8f;
+    int mostPerTree = 4;
 
     // How high one climbs: a random share between these of the trunk's height to its fork.
     float leastHeightShare = 0.5f;
@@ -41,10 +42,10 @@ struct ForestClimberSettings {
     // Below this height (metres) the leaves are shingles, small and pressed to the bark, their length and the metres
     // between them along the stem; above it, big stalked leaves.
     float shingleHeight = 4.0f;
-    float shingleLeafLength = 0.12f;
-    float shingleSpacing = 0.15f;
-    float bigLeafLength = 0.5f;
-    float bigLeafSpacing = 0.6f;
+    float shingleLeafLength = 0.2f;
+    float shingleSpacing = 0.12f;
+    float bigLeafLength = 0.8f;
+    float bigLeafSpacing = 0.4f;
 
     // The metres between feeder roots up the stem, and the share ending in mid air.
     float rootSpacing = 1.5f;
