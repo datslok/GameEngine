@@ -6,7 +6,9 @@
 #include "render/gpu/probe_relocation.h"
 #include "render/gpu/upscaling.h"
 #include "render/gpu/video_memory.h"
+#include "scene/mesh_level.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -16,6 +18,14 @@
 struct RenderStats {
     std::size_t drawn = 0;
     std::size_t culled = 0;
+
+    // How many of the camera's draws drew each level of detail (scene/level_of_detail.h): the meshes themselves first.
+    std::array<std::size_t, meshLevelSlots> drawnByLevel{};
+
+    // The triangles the camera's draws drew (the cut-outs' among them), and the reflection probe's faces drawn this frame.
+    std::size_t drawnTriangles = 0;
+    std::size_t drawnCutOutTriangles = 0;
+    std::size_t probeTriangles = 0;
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
 

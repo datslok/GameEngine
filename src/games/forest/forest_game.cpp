@@ -306,11 +306,13 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
                               .warpMetres = rockSettings.warpMetres};
     std::vector<IndexedMesh> shapes(pillars.size() + islands.size());
     std::vector<IslandHangings> hangings(islands.size());
+    std::vector<std::vector<SimplifiedLevel>> shapeLevels(shapes.size());
     std::vector<IndexedMesh> moss(shapes.size());
     getJobs().parallelFor(shapes.size(), 1, [&](std::size_t index) {
         if (index < pillars.size()) {
             const SurfaceGrid surface = pillarSurface(pillars[index], carving);
             shapes[index] = wrappedSurfaceIndexedMesh(surface);
+            shapeLevels[index] = simplifiedLevels(shapes[index], {rockLevelShare, rockFarLevelShare}, rockLevelError);
             moss[index] = pillarMoss(pillars[index], surface, mossSettings);
             return;
         }
@@ -318,6 +320,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         const IslandPlacement& island = islands[index - pillars.size()];
         const SurfaceGrid surface = islandSurface(island, carving);
         shapes[index] = wrappedSurfaceIndexedMesh(surface);
+        shapeLevels[index] = simplifiedLevels(shapes[index], {rockLevelShare, rockFarLevelShare}, rockLevelError);
         IslandHangings& hung = hangings[index - pillars.size()];
         hung = islandHangings(island, surface, hangingSettings);
         moss[index] = islandMoss(island, surface, hung.tips, mossSettings);
@@ -329,7 +332,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         const bool isPillar = index < pillars.size();
         const Vec3 place = isPillar ? pillars[index].foot : islands[index - pillars.size()].rim;
         const float turn = isPillar ? pillars[index].turnRadians : islands[index - pillars.size()].turnRadians;
-        rockShapes.push_back(addShape(world, assets.addDrawnMesh(std::move(shapes[index])), rock,
+        rockShapes.push_back(addShape(world, assets.addDrawnMeshWithLevels(std::move(shapes[index]), std::move(shapeLevels[index])), rock,
                                       Transform{.position = place, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, turn)}));
     }
 
@@ -360,9 +363,11 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     // The rocks drifting round the islands and some pillars, each its own shape at its size, built on every core. Their
     // rock is the shapes' painted in one bed's tones: beds by world height would slide over a rock that bobs.
     const std::vector<DriftingRock> drifting = valleyRocks(pillars, islands, driftSettings);
+    std::vector<std::vector<SimplifiedLevel>> driftingLevels(drifting.size());
     std::vector<IndexedMesh> driftingShapes(drifting.size());
     getJobs().parallelFor(drifting.size(), 1, [&](std::size_t index) {
         driftingShapes[index] = wrappedSurfaceIndexedMesh(driftingRockSurface(drifting[index], drifting[index].seed));
+        driftingLevels[index] = simplifiedLevels(driftingShapes[index], {rockLevelShare, rockFarLevelShare}, rockLevelError);
     });
 
     Material driftingRock = rock;
@@ -371,7 +376,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
 
     for (std::size_t index = 0; index < drifting.size(); ++index) {
         const Transform pose = driftingRockPose(drifting[index], 0.0);
-        const Entity entity = addShape(world, assets.addDrawnMesh(std::move(driftingShapes[index])), driftingRock, pose);
+        const Entity entity = addShape(world, assets.addDrawnMeshWithLevels(std::move(driftingShapes[index]), std::move(driftingLevels[index])), driftingRock, pose);
         world.add(entity, drifting[index]);
         world.add(entity, PreviousTransform{pose});
         driftingRocks.push_back(entity);
@@ -508,10 +513,19 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
                 vertex.position = vertex.position * scale;
             }
 
-            variants[static_cast<std::size_t>(kind)].push_back(PlantVariant{
-                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.keepShare, understoreySimplifyError, true)),
-                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.shadowKeepShare, understoreySimplifyError, false)),
-                materials[plant]});
+            /*
+            * The leaves seen keep their outline; their levels of detail (docs/LOD.md) let it go, as the shadow's stand-in
+            * does, which is the coarsest. Both are simplified within the same error, so the first strays no further.
+            */
+            float levelError = 0.0f;
+            float shadowError = 0.0f;
+            const MeshHandle leaves = assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.keepShare, understoreySimplifyError, true));
+            const MeshHandle level =
+                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.levelKeepShare, understoreySimplifyError, false, &levelError));
+            const MeshHandle shadow =
+                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.shadowKeepShare, understoreySimplifyError, false, &shadowError));
+            assets.setMeshLevels(leaves, {MeshLevel{level, levelError}, MeshLevel{shadow, std::max(shadowError, levelError)}});
+            variants[static_cast<std::size_t>(kind)].push_back(PlantVariant{leaves, shadow, materials[plant]});
         }
     }
 
@@ -568,6 +582,12 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
         shadowLeafMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowLeaves)));
         shadowBarkMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowBark)));
+
+        // The levels of detail (docs/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in.
+        assets.setMeshLevels(barkMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
+                                                 MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}});
+        assets.setMeshLevels(leafMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError},
+                                                 MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}});
     }
 
     const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);

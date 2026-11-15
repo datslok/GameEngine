@@ -28,7 +28,8 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 }
 
 /*
-* Six lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
+* Seven lines of text, in the same colour as the bounding boxes: the camera's view (and a line of how many of its draws drew each level
+* of detail, the meshes themselves first, and the thousands of triangles drawn: all, the cut-outs', the probe's), all shadow views together (each
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
 * tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
@@ -37,6 +38,10 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled) +
                                "  CALLS " + std::to_string(stats.drawCalls);
+    const std::string detail = "LEVELS " + std::to_string(stats.drawnByLevel[0]) + " " +
+                               std::to_string(stats.drawnByLevel[1]) + " " + std::to_string(stats.drawnByLevel[2]) + " " + std::to_string(stats.drawnByLevel[3]) +
+                               "  TRIS " + std::to_string(stats.drawnTriangles / 1000) + "K  CUT " + std::to_string(stats.drawnCutOutTriangles / 1000) +
+                               "K  PROBE " + std::to_string(stats.probeTriangles / 1000) + "K";
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled) +
                                 "  CALLS " + std::to_string(stats.shadowDrawCalls);
     std::string tiles = "TILES DRAWN " + std::to_string(stats.shadowTilesDrawn) + "  CACHED " + std::to_string(stats.shadowTilesCached) +
@@ -52,7 +57,7 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed) +
                                (stats.imageLights > 0 ? "  IN MIRRORS " + std::to_string(stats.imageLights) : std::string{});
 
-    return {camera, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory),
+    return {camera, detail, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory),
             exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)};
 }
 

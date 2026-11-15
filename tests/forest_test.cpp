@@ -910,6 +910,8 @@ namespace {
             const RenderPart& part = forest.world.get<ModelRenderer>(shape).parts.front();
             assert(part.material.groundWeights == rock.groundWeights);
             assert(forest.assets.isDrawnOnly(part.mesh) && part.mesh != lastShape);
+            // Two coarser levels of detail, simplified from it (docs/LOD.md): pillars and islands stand hundreds of metres off.
+            assert(forest.assets.getMeshLevels().at(part.mesh.index).size() == 2);
             assert(forest.world.get<Transform>(shape).scale.x == 1.0f && forest.world.get<Transform>(shape).scale.y == 1.0f);
             lastShape = part.mesh;
         }

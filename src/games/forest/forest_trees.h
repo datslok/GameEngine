@@ -205,6 +205,12 @@ struct ForestTreeSettings {
     // while the bark seen casts none. Bark was nine tenths of the triangles the sun's cascades redrew as the camera
     // turned (1,300 trees: 19 ms of shadows on the RTX 4070 Laptop, Nov 15 2026).
     float shadowBarkShare = 0.1f;
+
+    // The levels of detail between the seen meshes and the shadows' stand-ins, which are the coarsest (docs/LOD.md):
+    // levelCardShare of the leaf cards, each grown to keep their area (SpeedTree's fewer, bigger cards), and the bark
+    // simplified to levelBarkShare of its triangles.
+    float levelCardShare = 0.5f;
+    float levelBarkShare = 0.3f;
 };
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
@@ -248,11 +254,13 @@ Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOu
 * every way, shading with the crown's way out. Normals by foliageNormal. Returns the cards made.
 */
 // Each leaf-cluster cell's outline (clusterOutline), in cell order; a card is drawn as its cell's outline.
+// nodeCardStride (0: cardsPerNode) numbers each node's cards as if it had that many, so the same seed with fewer cards
+// makes the first of the same cards (a level of detail's, its survivors only grown).
 using ClusterOutlines = std::array<std::vector<Vec2>, 4>;
 
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
                        const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
-                       const ClusterOutlines* outlines = nullptr);
+                       const ClusterOutlines* outlines = nullptr, int nodeCardStride = 0);
 
 // The fixed parts of a tree's shape. Leonardo's n of 2.5 keeps the limbs thick against the twigs (measured trees: 2-3).
 inline constexpr float leonardoExponent = 2.5f;
@@ -271,10 +279,20 @@ struct TreeMeshes {
     IndexedMesh leaves;
     IndexedMesh shadowLeaves; // the shadow passes' stand-in for the leaves (ForestTreeSettings::shadowCardsPerNode)
     IndexedMesh shadowBark;   // and for the bark (ForestTreeSettings::shadowBarkShare)
+    IndexedMesh leafLevel;    // the leaves' first coarser level (ForestTreeSettings::levelCardShare); the shadow leaves the second
+    IndexedMesh barkLevel;    // the bark's (ForestTreeSettings::levelBarkShare); the shadow bark the second
     int tipCount = 0;
     int leafyCount = 0;
     int cardCount = 0;
     int shadowCardCount = 0;
+    int leafLevelCardCount = 0;
+
+    // Each level's error (metres, scene/level_of_detail.h): for the cards how much longer their sides grew, for the bark
+    // how far the simplifier moved its surface.
+    float leafLevelError = 0.0f;
+    float shadowLeafError = 0.0f;
+    float barkLevelError = 0.0f;
+    float shadowBarkError = 0.0f;
     float trunkRadius = 0.0f; // Leonardo's, at the fork; the foot is trunkTaper thicker
 };
 

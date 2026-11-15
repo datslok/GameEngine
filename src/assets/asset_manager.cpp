@@ -50,6 +50,44 @@ MeshHandle AssetManager::addDrawnMesh(IndexedMesh mesh) {
     return handle;
 }
 
+void AssetManager::setMeshLevels(MeshHandle base, std::vector<MeshLevel> levels) {
+    if (!base.isValid() || base.index >= meshes.size() || levels.size() >= meshLevelSlots) {
+        throw std::invalid_argument("A mesh takes up to three coarser levels of a mesh already added");
+    }
+
+    float lastError = 0.0f;
+
+    for (const MeshLevel& level : levels) {
+        if (!level.mesh.isValid() || level.mesh.index >= meshes.size() || level.mesh == base || !(level.errorMetres >= lastError)) {
+            throw std::invalid_argument("A mesh's levels must be other meshes already added, coarsest last, their errors rising from 0");
+        }
+
+        lastError = level.errorMetres;
+    }
+
+    if (meshLevels.size() <= base.index) {
+        meshLevels.resize(base.index + 1);
+    }
+
+    meshLevels[base.index] = std::move(levels);
+}
+
+MeshHandle AssetManager::addDrawnMeshWithLevels(IndexedMesh mesh, std::vector<SimplifiedLevel> levels) {
+    const MeshHandle base = addDrawnMesh(std::move(mesh));
+    std::vector<MeshLevel> named;
+
+    for (SimplifiedLevel& level : levels) {
+        named.push_back(MeshLevel{addDrawnMesh(std::move(level.mesh)), level.errorMetres});
+    }
+
+    setMeshLevels(base, std::move(named));
+    return base;
+}
+
+const std::vector<std::vector<MeshLevel>>& AssetManager::getMeshLevels() const {
+    return meshLevels;
+}
+
 bool AssetManager::isDrawnOnly(MeshHandle handle) const {
     return handle.isValid() && drawnMeshes.contains(handle.index);
 }

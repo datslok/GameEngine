@@ -20,6 +20,7 @@
 #include "render/gpu/transparency.h"
 #include "render/gpu/upscaling.h"
 #include "render/gpu/volumetric_fog.h"
+#include "scene/level_of_detail.h"
 
 /*
 * Everything about drawing that a game, the debug UI or a player may tune, in one place. The renderer reads it every
@@ -67,6 +68,9 @@ struct RenderSettings {
 
     // What materials may draw (render/gpu/material_settings.h): clear coats and parallax occlusion mapping.
     MaterialSettings materials;
+
+    // Coarser meshes far away (scene/level_of_detail.h): each view picks the coarsest level whose error fits its pixels.
+    LevelOfDetailSettings levelOfDetail;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

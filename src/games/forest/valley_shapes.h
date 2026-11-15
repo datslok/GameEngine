@@ -101,6 +101,13 @@ float carvingWarp(const RockCarving& carving, float x, float z);
 inline constexpr float rockLedgeMetres = 2.0f;
 inline constexpr float rockUndercutMetres = 1.5f;
 inline constexpr float rockUndercutReach = 4.0f;
+
+// The rock shapes' levels of detail (docs/LOD.md): a quarter and a sixteenth of their triangles, each moving the surface
+// by at most 2% of the shape's size (a 300 m pillar's 6 m, a few pixels from a kilometre). They stand hundreds of metres
+// to kilometres off: drawn at full detail, hundreds of unique shapes were most of the camera's triangles (Nov 15 2026).
+inline constexpr float rockLevelShare = 0.25f;
+inline constexpr float rockFarLevelShare = 0.06f;
+inline constexpr float rockLevelError = 0.02f;
 float strataRelief(const std::vector<StrataBand>& bands, float height);
 
 // The shapes' resolution in metres: a row every rockRowMetres up and a column every rockColumnMetres round.

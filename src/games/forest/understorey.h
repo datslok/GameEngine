@@ -50,8 +50,10 @@ struct ForestUnderstoreySettings {
     float calatheaHeight = 1.5f;
     float anthuriumHeight = 1.7f;
 
-    // The share of each scan's triangles drawn (its border kept), and the share its shadow's stand-in keeps.
+    // The share of each scan's triangles drawn (its border kept), the share its first level of detail keeps (docs/LOD.md;
+    // the shadow's stand-in is the second), and the share its shadow's stand-in keeps.
     float keepShare = 0.3f;
+    float levelKeepShare = 0.12f;
     float shadowKeepShare = 0.05f;
 
     // How many of the sun's cascades its shadows are drawn into, nearest first (ModelRenderer::shadowCascades): a plant's
