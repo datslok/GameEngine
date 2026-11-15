@@ -343,6 +343,8 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - **Sight lines (the user, Nov 14 2026):** some of the Monolith and the Ring stays in view from the path, the meadow and the clearing at all times: a tree whose crown meets a sight line from the path to them is not planted.
 - [x] Smooth moving shadows in the far shadow map (`far-shadow-movers`)
 - [x] Staggered far cascades: the far two take turns redrawing while the camera turns (`cascade-stagger`)
+- [x] Building the frame on every core: the motion history flat, the draws and instances built in parallel (`frame-build-speed`)
+- [ ] A persistent scene: static objects' instances uploaded once, only moving ones each frame (Unreal's GPU Scene, Unity's BatchRendererGroup)
 - [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance

@@ -99,6 +99,13 @@ public:
         return storage ? storage->tryGet(entity) : nullptr;
     }
 
+    // The packed storage of one component type (null when none was ever added): its entities and components side by side,
+    // for a walk split across threads (each thread its own range, reading only).
+    template <typename Component>
+    const ComponentStorage<Component>* storageOf() const {
+        return findStorage<Component>();
+    }
+
     // Throws when the entity does not have the component, for code that requires it.
     template <typename Component>
     Component& get(Entity entity) {

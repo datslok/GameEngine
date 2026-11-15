@@ -401,7 +401,7 @@ void Application::handOverClothWork(float alpha) {
 }
 
 FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
-    FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory);
+    FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory, jobs);
     frame.lightFocus = game.getLightFocus();
 
     // Probe events last one frame: this one carries them.

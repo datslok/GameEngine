@@ -118,21 +118,69 @@ std::uint32_t MaterialTable::add(const Material& material) {
         }
     }
 
+    return addPacked(packed, materialHash(packed));
+}
+
+std::uint64_t materialHash(const GpuMaterial& packed) {
     Fnv1aHash hash;
     hash.addBytes(&packed, sizeof(packed));
+    return hash.value;
+}
 
-    const auto [first, last] = byHash.equal_range(hash.value);
-
-    for (auto found = first; found != last; ++found) {
-        if (std::memcmp(&entries[found->second], &packed, sizeof(packed)) == 0) {
-            return found->second;
+std::uint32_t MaterialTable::addPacked(const GpuMaterial& packed, std::uint64_t hash) {
+    for (std::size_t slot = 0; slot < recentFilled; ++slot) {
+        if (recentHashes[slot] == hash && std::memcmp(&entries[recentIndices[slot]], &packed, sizeof(packed)) == 0) {
+            return recentIndices[slot];
         }
     }
 
-    const std::uint32_t index = static_cast<std::uint32_t>(entries.size());
-    entries.push_back(packed);
-    byHash.emplace(hash.value, index);
+    std::uint32_t index = static_cast<std::uint32_t>(entries.size());
+    bool found = false;
+    const auto [first, last] = byHash.equal_range(hash);
+
+    for (auto entry = first; entry != last && !found; ++entry) {
+        if (std::memcmp(&entries[entry->second], &packed, sizeof(packed)) == 0) {
+            index = entry->second;
+            found = true;
+        }
+    }
+
+    if (!found) {
+        entries.push_back(packed);
+        byHash.emplace(hash, index);
+    }
+
+    recentHashes[recentNext] = hash;
+    recentIndices[recentNext] = index;
+    recentNext = (recentNext + 1) % recentCount;
+    recentFilled = std::min(recentFilled + 1, recentCount);
     return index;
+}
+
+std::vector<GpuInstance> packInstances(const std::vector<DrawItem>& draws, MaterialTable& materials, JobSystem& jobs) {
+    constexpr std::size_t drawsPerPiece = 256;
+    std::vector<GpuMaterial> packed(draws.size());
+    std::vector<std::uint64_t> hashes(draws.size(), 0);
+    jobs.parallelFor(draws.size(), drawsPerPiece, [&](std::size_t draw) {
+        if (draws[draw].material.groundLayers.empty()) {
+            packed[draw] = packMaterial(draws[draw].material);
+            hashes[draw] = materialHash(packed[draw]);
+        }
+    });
+
+    // In draw order, so the table's entries are what adding one by one would give; a blended ground adds its layers too.
+    std::vector<std::uint32_t> indices(draws.size());
+
+    for (std::size_t draw = 0; draw < draws.size(); ++draw) {
+        indices[draw] = draws[draw].material.groundLayers.empty() ? materials.addPacked(packed[draw], hashes[draw])
+                                                                   : materials.add(draws[draw].material);
+    }
+
+    std::vector<GpuInstance> instances(draws.size());
+    jobs.parallelFor(draws.size(), drawsPerPiece, [&](std::size_t draw) {
+        instances[draw] = packInstance(draws[draw], indices[draw]);
+    });
+    return instances;
 }
 
 const std::vector<GpuMaterial>& MaterialTable::getEntries() const {

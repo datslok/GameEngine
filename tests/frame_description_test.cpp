@@ -5,6 +5,8 @@
 #include "scene/light.h"
 #include "scene/model_renderer.h"
 
+#include "test_jobs.h"
+
 #include <cassert>
 #include <cmath>
 
@@ -157,6 +159,89 @@ namespace {
         assert(reused.index == entity.index && reused.generation != entity.generation);
         assert(!buildFrame(world, makeTestCamera(), 0.0f, &history).draws[0].previousModel);
     }
+
+    // An entity not drawn for a frame (hidden) has no matrix from before it on the frame after: last frame is last frame.
+    void testASkippedFrameForgetsTheMatrix() {
+        World world;
+        MotionHistory history;
+        const Entity entity = world.create();
+        world.add(entity, placedAt(1.0f, 0.0f, 0.0f));
+        world.add(entity, makeMeshRenderer(MeshHandle{0}));
+        buildFrame(world, makeTestCamera(), 0.0f, &history);
+
+        world.get<ModelRenderer>(entity).visible = false;
+        assert(buildFrame(world, makeTestCamera(), 0.0f, &history).draws.empty());
+
+        world.get<ModelRenderer>(entity).visible = true;
+        assert(!buildFrame(world, makeTestCamera(), 0.0f, &history).draws[0].previousModel);
+        assert(buildFrame(world, makeTestCamera(), 0.0f, &history).draws[0].previousModel);
+    }
+
+    /*
+    * The draws built on every core are exactly the serial ones, in the same order (the order world.each walks): meshes,
+    * matrices, last frame's matrices, flags and materials, over a few frames with entities moving, interpolated, hidden,
+    * with several parts, and one destroyed and its slot reused.
+    */
+    void testBuildingOnManyCoresIsTheSame() {
+        World world;
+        std::vector<Entity> entities;
+
+        for (int i = 0; i < 700; ++i) {
+            const Entity entity = world.create();
+            world.add(entity, placedAt(static_cast<float>(i), 0.0f, static_cast<float>(i % 7)));
+            ModelRenderer renderer = makeMeshRenderer(MeshHandle{static_cast<std::uint32_t>(i % 5)});
+            renderer.parts[0].material.roughness = 0.1f * static_cast<float>(i % 3);
+
+            if (i % 4 == 0) {
+                RenderPart second = renderer.parts[0];
+                second.localTransform = Mat4::translation(0.0f, 2.0f, 0.0f);
+                renderer.parts.push_back(second);
+            }
+
+            renderer.castsShadows = i % 3 != 0;
+            renderer.shadowOnly = i % 11 == 0;
+            renderer.isStatic = i % 2 == 0;
+            renderer.visible = i % 13 != 0;
+            world.add(entity, renderer);
+
+            if (i % 5 == 0) {
+                world.add(entity, PreviousTransform{placedAt(static_cast<float>(i) - 1.0f, 0.0f, 0.0f)});
+            }
+
+            entities.push_back(entity);
+        }
+
+        MotionHistory serialHistory;
+        MotionHistory parallelHistory;
+
+        for (int frame = 0; frame < 3; ++frame) {
+            const FrameDescription serial = buildFrame(world, makeTestCamera(), 0.25f, &serialHistory, serialJobs());
+            const FrameDescription parallel = buildFrame(world, makeTestCamera(), 0.25f, &parallelHistory, testJobs());
+            assert(serial.draws.size() == parallel.draws.size() && !serial.draws.empty());
+
+            for (std::size_t draw = 0; draw < serial.draws.size(); ++draw) {
+                const DrawItem& a = serial.draws[draw];
+                const DrawItem& b = parallel.draws[draw];
+                assert(a.mesh == b.mesh && a.model == b.model && a.castsShadows == b.castsShadows && a.shadowOnly == b.shadowOnly);
+                assert(a.isStatic == b.isStatic && a.material.roughness == b.material.roughness);
+                assert(a.previousModel.has_value() == b.previousModel.has_value() && (!a.previousModel || *a.previousModel == *b.previousModel));
+            }
+
+            // Between frames: some move, one goes and another takes its slot.
+            for (std::size_t i = 0; i < entities.size(); i += 3) {
+                if (world.isAlive(entities[i])) {
+                    world.get<Transform>(entities[i]).position.y += 1.0f;
+                }
+            }
+
+            if (frame == 0) {
+                world.destroy(entities[10]);
+                const Entity reused = world.create();
+                world.add(reused, placedAt(0.0f, 5.0f, 0.0f));
+                world.add(reused, makeMeshRenderer(MeshHandle{9}));
+            }
+        }
+    }
 }
 
 namespace {
@@ -200,6 +285,8 @@ namespace {
 }
 
 void testFrameDescription() {
+    testASkippedFrameForgetsTheMatrix();
+    testBuildingOnManyCoresIsTheSame();
     testShadowCastingIsCarried();
     testCameraIsCopied();
     testLightingIsCollected();
