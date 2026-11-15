@@ -228,11 +228,16 @@ namespace {
     void testTheTerrainBecomesDraws() {
         const Terrain terrain = flatTerrain();
         const Vec3 eye{30.0f, 2.0f, -10.0f};
-        std::vector<DrawItem> draws(3);
-        std::vector<TerrainPatch> patches;
-        appendTerrainDraws(terrain, eye, ranges, draws, patches);
         const std::vector<TerrainNode> nodes = selectTerrainNodes(terrain, eye, ranges);
+        std::vector<DrawItem> draws(3);
+        draws.reserve(3 + nodes.size());
+        const DrawItem* before = draws.data();
+        std::vector<TerrainPatch> patches;
+        appendTerrainDraws(terrain, nodes, draws, patches);
         assert(draws.size() == 3 + nodes.size() && patches.size() == nodes.size());
+
+        // Into the room the frame kept for them, the list never moving (a reserve of its own copied every draw).
+        assert(draws.data() == before);
 
         bool sawRegions[2] = {false, false};
 

@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 /*
@@ -104,7 +105,8 @@ std::vector<TerrainNode> selectTerrainNodes(const Terrain& terrain, const Vec3& 
 /*
 * The terrain's draws, appended: a node each, its grid mesh placed by its model matrix (corner, size across x and z),
 * its bounds round the node's box, still, casting shadows, its region's material, and its patch (appended to patches,
-* DrawItem::terrainPatch its index).
+* DrawItem::terrainPatch its index). The nodes are selectTerrainNodes', chosen before the frame was built so it kept
+* room for them (buildFrame's laterDraws): reserving here would move every draw already in the list.
 */
-void appendTerrainDraws(const Terrain& terrain, const Vec3& eye, const TerrainSettings& settings, std::vector<DrawItem>& draws,
+void appendTerrainDraws(const Terrain& terrain, std::span<const TerrainNode> nodes, std::vector<DrawItem>& draws,
                         std::vector<TerrainPatch>& patches);

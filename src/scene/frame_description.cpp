@@ -62,11 +62,13 @@ void MotionHistory::reserveSlots(std::size_t count) {
 * list; then the entities are built on every core, each writing only its own draws and its own motion record, so the
 * list is the same whatever order the threads finish in (with 20,000 objects, one thread took 12 ms).
 */
-FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history, JobSystem& jobs) {
+FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history, JobSystem& jobs, std::size_t laterDraws) {
     FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}, {}, {}, 0, {}, {}, {}, 0};
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();
 
-    if (renderers != nullptr) {
+    if (renderers == nullptr) {
+        frame.draws.reserve(laterDraws);
+    } else {
         const std::vector<Entity>& entities = renderers->getEntities();
         const std::vector<ModelRenderer>& components = renderers->getComponents();
         std::vector<std::size_t> firstDraw(entities.size() + 1, 0);
@@ -78,6 +80,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             slots = std::max<std::size_t>(slots, entities[index].index + 1);
         }
 
+        frame.draws.reserve(firstDraw.back() + laterDraws);
         frame.draws.resize(firstDraw.back());
 
         if (history != nullptr) {

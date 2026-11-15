@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace {
     // value mod count, never negative.
@@ -153,6 +154,30 @@ ProbeGridCoord probeLatticeCoord(const ProbeCascade& cascade, int slot) {
     return ProbeGridCoord{cascade.start.x + grid.x, cascade.start.y + grid.y, cascade.start.z + grid.z};
 }
 
+namespace {
+    // Whether a window keeps lattice point p in slot p mod counts along each axis, as probeWindow places them.
+    bool scrollFollowsStart(const ProbeCascade& cascade) {
+        const ProbeCounts& counts = cascade.volume.counts;
+        return cascade.volume.scroll.x == wrapped(cascade.start.x, counts.x) && cascade.volume.scroll.y == wrapped(cascade.start.y, counts.y) &&
+               cascade.volume.scroll.z == wrapped(cascade.start.z, counts.z);
+    }
+
+    // The places along an axis of a window starting at to whose lattice points a window starting at from also holds
+    // (count points each): [first, end), empty when they share none.
+    std::pair<int, int> sharedRange(int from, int to, int count) {
+        const int first = std::clamp(from - to, 0, count);
+        const int end = std::clamp(from + count - to, 0, count);
+        return {first, std::max(first, end)};
+    }
+}
+
+/*
+* With each window's scroll following its start, a slot holds lattice point p before and after exactly when p lies in
+* both windows (the one point of each window that p's slot can hold is the one congruent to it, mod counts). So the
+* scrolled slots are the new window's points outside the old one: the planes a move brought in, walked row by row,
+* skipping each row's shared run. Sorted, they come in slot order, as walking every slot gave them (110,000 a frame
+* for the sky visibility grid, 2 ms even standing still). Other volumes walk every slot.
+*/
 std::vector<int> scrolledProbes(const ProbeCascade& before, const ProbeCascade& after) {
     const ProbeCounts& counts = after.volume.counts;
     const int probes = probeCount(counts);
@@ -160,6 +185,34 @@ std::vector<int> scrolledProbes(const ProbeCascade& before, const ProbeCascade& 
                          before.volume.spacing.x != after.volume.spacing.x || before.volume.spacing.y != after.volume.spacing.y ||
                          before.volume.spacing.z != after.volume.spacing.z;
     std::vector<int> scrolled;
+
+    if (!resized && scrollFollowsStart(before) && scrollFollowsStart(after)) {
+        if (sameCoord(before.start, after.start)) {
+            return scrolled;
+        }
+
+        const auto [sharedX, sharedXEnd] = sharedRange(before.start.x, after.start.x, counts.x);
+        const auto [sharedY, sharedYEnd] = sharedRange(before.start.y, after.start.y, counts.y);
+        const auto [sharedZ, sharedZEnd] = sharedRange(before.start.z, after.start.z, counts.z);
+
+        for (int z = 0; z < counts.z; ++z) {
+            for (int y = 0; y < counts.y; ++y) {
+                const bool rowShared = z >= sharedZ && z < sharedZEnd && y >= sharedY && y < sharedYEnd;
+
+                for (int x = 0; x < counts.x; ++x) {
+                    if (rowShared && x == sharedX && sharedX < sharedXEnd) {
+                        x = sharedXEnd - 1;
+                        continue;
+                    }
+
+                    scrolled.push_back(after.firstProbe + probeSlot(after.volume, ProbeGridCoord{x, y, z}));
+                }
+            }
+        }
+
+        std::sort(scrolled.begin(), scrolled.end());
+        return scrolled;
+    }
 
     for (int slot = 0; slot < probes; ++slot) {
         if (resized || !sameCoord(probeLatticeCoord(before, slot), probeLatticeCoord(after, slot))) {
