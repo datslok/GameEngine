@@ -59,6 +59,7 @@ void testDriftingRocks();
 void testForestTrees();
 void testUnderstorey();
 void testPalms();
+void testLianas();
 void testSimplifyMesh();
 void testLevelOfDetail();
 void testTerrain();
@@ -353,6 +354,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testForestTrees", testForestTrees);
     runTest("testUnderstorey", testUnderstorey);
     runTest("testPalms", testPalms);
+    runTest("testLianas", testLianas);
     runTest("testSimplifyMesh", testSimplifyMesh);
     runTest("testLevelOfDetail", testLevelOfDetail);
     runTest("testTerrain", testTerrain);

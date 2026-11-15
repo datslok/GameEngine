@@ -245,6 +245,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildGround(world, assets);
     buildShapes(world, assets);
     buildTrees(world, assets);
+    buildLianas(world, assets);
     buildUnderstorey(world, assets);
     buildPalms(world, assets);
 
@@ -672,6 +673,50 @@ void ForestGame::buildPalms(World& world, AssetManager& assets) {
     }
 }
 
+namespace {
+    // The lianas' own seed, and the squares of ground their meshes are grouped by.
+    constexpr std::uint64_t lianaSeed = 0x4c69616eull;
+    constexpr float lianaChunkMetres = 40.0f;
+}
+
+/*
+* From the canopy and emergent trees' crowns (the mid layer's are too thin for these woody ones), over the valley's
+* ground, more along the path. Bark as the trees', ivy as the islands' vines; still, drawn only, into the nearest
+* cascades only.
+*/
+void ForestGame::buildLianas(World& world, AssetManager& assets) {
+    std::vector<LianaCrown> crowns;
+
+    for (const TreePlacement& tree : treePlacements) {
+        crowns.push_back(LianaCrown{placedCrownCentre(tree, treeSettings), placedCrownRadius(tree, treeSettings)});
+    }
+
+    for (const TreePlacement& tree : emergentPlacements) {
+        crowns.push_back(LianaCrown{placedCrownCentre(tree, emergentSettings), placedCrownRadius(tree, emergentSettings)});
+    }
+
+    const std::vector<Liana> lianas = chooseLianas(crowns, lianaSettings, lianaSeed, forestHeight, forestPathDistance);
+
+    if (lianas.empty()) {
+        return;
+    }
+
+    std::vector<LianaMeshes> chunks = lianaMeshes(lianas, crowns, lianaSettings, forestTreeBarkLayer.tileMetres, lianaChunkMetres, getJobs());
+    const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
+    const Material leaf = withLeafLight(forestLeafMaterial(assets, assetFolder), leafLightSettings);
+    const auto add = [&](IndexedMesh mesh, const Material& material) {
+        if (!mesh.vertices.empty()) {
+            lianaEntities.push_back(addShape(world, assets.addDrawnMesh(std::move(mesh)), material, Transform{}));
+            world.get<ModelRenderer>(lianaEntities.back()).shadowCascades = lianaShadowCascades;
+        }
+    };
+
+    for (LianaMeshes& chunk : chunks) {
+        add(std::move(chunk.bark), bark);
+        add(std::move(chunk.leaves), leaf);
+    }
+}
+
 void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
                             std::uint32_t variantSeed, const Material& leaf) {
     if (placements.empty()) {
@@ -930,6 +975,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Palms", [&] {
         visit(palmSettings, visitor);
     });
+    visitor.group("Lianas", [&] {
+        visit(lianaSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -1130,4 +1178,12 @@ const std::vector<Entity>& ForestGame::getPalms() const {
 
 const std::vector<Entity>& ForestGame::getPalmImpostors() const {
     return palmImpostors;
+}
+
+ForestLianaSettings& ForestGame::getLianaSettings() {
+    return lianaSettings;
+}
+
+const std::vector<Entity>& ForestGame::getLianas() const {
+    return lianaEntities;
 }

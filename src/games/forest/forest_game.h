@@ -8,6 +8,7 @@
 #include "games/forest/forest_trees.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
+#include "games/forest/lianas.h"
 #include "games/forest/palms.h"
 #include "games/forest/understorey.h"
 #include "games/forest/valley_shapes.h"
@@ -191,6 +192,9 @@ public:
     const std::vector<PalmPlacement>& getPalmPlacements() const;
     const std::vector<Entity>& getPalms() const;
     const std::vector<Entity>& getPalmImpostors() const;
+    // The lianas' settings and their meshes' entities (bark and ivy, a chunk of ground each).
+    ForestLianaSettings& getLianaSettings();
+    const std::vector<Entity>& getLianas() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -217,6 +221,9 @@ private:
     // The understorey palms (docs/JUNGLE.md, Palms): a few variants grown on every core, placed many times.
     void buildPalms(World& world, AssetManager& assets);
 
+    // The lianas hanging from the canopy and emergent trees' crowns (docs/VINES.md, stage 1), a chunk of ground a mesh.
+    void buildLianas(World& world, AssetManager& assets);
+
     // Every tree's trunk as far round as the floor's plants keep from it: the big trees' buttresses, the mid layer's trunk.
     std::vector<StandingCrown> floorTrunks() const;
 
@@ -242,6 +249,7 @@ private:
     ForestTreeSettings midSettings = midTreeSettings();
     ForestUnderstoreySettings understoreySettings;
     ForestPalmSettings palmSettings;
+    ForestLianaSettings lianaSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
 
@@ -266,6 +274,7 @@ private:
     std::vector<PalmPlacement> palmPlacements;
     std::vector<Entity> palms;
     std::vector<Entity> palmImpostors; // a card each palm, in the placements' order
+    std::vector<Entity> lianaEntities;
     std::vector<Entity> trees;
     std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;
