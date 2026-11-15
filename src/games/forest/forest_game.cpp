@@ -495,11 +495,13 @@ namespace {
     // The stand-in plant's green.
     constexpr Pixel understoreyStandInColour{58, 92, 40};
 
-    // One variant of a kind: its seen mesh, its shadow's stand-in and its material.
+    // One variant of a kind: its seen mesh, its shadow's stand-in and its material, and its card and the card's material.
     struct PlantVariant {
         MeshHandle leaves;
         MeshHandle shadow;
         Material material;
+        MeshHandle card;
+        Material cardMaterial;
     };
 }
 
@@ -552,17 +554,43 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
             */
             float levelError = 0.0f;
             float shadowError = 0.0f;
-            const MeshHandle leaves = assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.keepShare, understoreySimplifyError, true));
+            IndexedMesh seen = simplifyMesh(plants[plant], understoreySettings.keepShare, understoreySimplifyError, true);
+            const Material& material = materials[plant];
+
+            /*
+            * The card (scene/impostor.h), baked from the leaves seen as the trees' are from theirs (the texture copied
+            * first: adding the atlases can move the asset manager's textures). The leaves end on a level drawing nothing
+            * at its error, where the card begins, both choosing by the plant's one box, so exactly one is drawn.
+            */
+            const ImageData colour = material.texture.isValid() ? assets.getTexture(material.texture) : ImageData{};
+            const ImpostorBake baked = bakeImpostor({ImpostorPart{.mesh = &seen,
+                                                                  .colour = material.texture.isValid() ? &colour : nullptr,
+                                                                  .tint = material.colour,
+                                                                  .alphaCutoff = isCutOut(material) ? material.alphaCutoff : 0.0f}},
+                                                    understoreySettings.impostorFrames, understoreySettings.impostorTexels, getJobs());
+            const Aabb plantBox = indexedMeshBounds(seen);
+
+            const MeshHandle leaves = assets.addDrawnMesh(std::move(seen));
             const MeshHandle level =
                 assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.levelKeepShare, understoreySimplifyError, false, &levelError));
             const MeshHandle shadow =
                 assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.shadowKeepShare, understoreySimplifyError, false, &shadowError));
-            assets.setMeshLevels(leaves, {MeshLevel{level, levelError}, MeshLevel{shadow, std::max(shadowError, levelError)}});
-            variants[static_cast<std::size_t>(kind)].push_back(PlantVariant{leaves, shadow, materials[plant]});
+            const float shadowLevelError = std::max(shadowError, levelError);
+            const float impostorError = std::max(understoreySettings.impostorErrorMetres, shadowLevelError);
+            assets.setMeshLevels(leaves, {MeshLevel{level, levelError}, MeshLevel{shadow, shadowLevelError}, MeshLevel{MeshHandle{}, impostorError}});
+            assets.setMeshLevelOptions(leaves, MeshLevelOptions{.hiddenBelowError = 0.0f, .chooseBounds = plantBox});
+
+            const MeshHandle card = assets.addDrawnMesh(impostorCardMesh(baked.centre, baked.radius));
+            assets.setMeshLevelOptions(card, MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = plantBox});
+            Material cardMaterial = impostorMaterial(assets.addTexture(baked.colour, impostorCoverageCutoff), assets.addTexture(baked.normal),
+                                                     understoreySettings.impostorFrames);
+            cardMaterial.roughness = material.roughness;
+            variants[static_cast<std::size_t>(kind)].push_back(PlantVariant{leaves, shadow, material, card, cardMaterial});
         }
     }
 
     understorey.reserve(2 * understoreyPlacements.size());
+    understoreyImpostors.reserve(understoreyPlacements.size());
 
     for (const UnderstoreyPlacement& plant : understoreyPlacements) {
         const std::vector<PlantVariant>& kind = variants[static_cast<std::size_t>(plant.kind)];
@@ -574,6 +602,10 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
         understorey.push_back(addShape(world, variant.shadow, variant.material, pose));
         world.get<ModelRenderer>(understorey.back()).shadowOnly = true;
         world.get<ModelRenderer>(understorey.back()).shadowCascades = understoreySettings.shadowCascades;
+
+        // The card, drawn only far away; the shadow's stand-in above keeps its shadow.
+        understoreyImpostors.push_back(addShape(world, variant.card, variant.cardMaterial, pose));
+        world.get<ModelRenderer>(understoreyImpostors.back()).castsShadows = false;
     }
 }
 
@@ -627,10 +659,7 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
                           ImpostorPart{.mesh = &variant.leaves, .colour = leaf.texture.isValid() ? &leafTexture : nullptr, .tint = leaf.colour, .alphaCutoff = leaf.alphaCutoff}},
                          settings.impostorFrames, settings.impostorTexels, getJobs());
         const float impostorError = std::max({settings.impostorErrorMetres, variant.shadowLeafError, variant.shadowBarkError});
-        Aabb treeBox = indexedMeshBounds(variant.bark);
-        const Aabb leafBox = indexedMeshBounds(variant.leaves);
-        treeBox = Aabb{Vec3{std::min(treeBox.minimum.x, leafBox.minimum.x), std::min(treeBox.minimum.y, leafBox.minimum.y), std::min(treeBox.minimum.z, leafBox.minimum.z)},
-                       Vec3{std::max(treeBox.maximum.x, leafBox.maximum.x), std::max(treeBox.maximum.y, leafBox.maximum.y), std::max(treeBox.maximum.z, leafBox.maximum.z)}};
+        const Aabb treeBox = enclosing(indexedMeshBounds(variant.bark), indexedMeshBounds(variant.leaves));
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
 
         barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
@@ -987,6 +1016,10 @@ const std::vector<UnderstoreyPlacement>& ForestGame::getUnderstoreyPlacements() 
 
 const std::vector<Entity>& ForestGame::getUnderstorey() const {
     return understorey;
+}
+
+const std::vector<Entity>& ForestGame::getUnderstoreyImpostors() const {
+    return understoreyImpostors;
 }
 
 const std::vector<Entity>& ForestGame::getTrees() const {

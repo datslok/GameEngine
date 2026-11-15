@@ -145,7 +145,12 @@ namespace {
 
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 15 && counter.live == 0);
+        assert(counter.fields == 18 && counter.live == 0);
+
+        // Its cards (scene/impostor.h) take over a few tens of metres away: a plant is a twentieth of a tree's height, so
+        // its card's error is about that share of the trees' too, and its frames fewer texels, never big on screen.
+        assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < ForestTreeSettings{}.impostorErrorMetres / 10.0f);
+        assert(settings.impostorFrames >= 4 && settings.impostorTexels > 0 && settings.impostorTexels < ForestTreeSettings{}.impostorTexels);
 
         // Its shadows only in the nearest cascades: a knee-high plant's shadow is a few metres long.
         assert(settings.shadowCascades >= 1 && settings.shadowCascades <= 2);
@@ -154,7 +159,7 @@ namespace {
     /*
     * The game plants them (stand-ins without the scans): each plant its leaves, seen and casting no shadow, and its
     * shadow's stand-in, drawn into shadows only, placed, turned and scaled as its placement says; clear of every tree's
-    * trunk.
+    * trunk. Far away its card takes over, as a tree's does.
     */
     void testTheGamePlantsTheUnderstorey() {
         TestForest forest;
@@ -163,6 +168,7 @@ namespace {
         const std::vector<UnderstoreyPlacement>& placed = game.getUnderstoreyPlacements();
         const std::vector<Entity>& plants = game.getUnderstorey();
         assert(!placed.empty() && plants.size() == 2 * placed.size());
+        assert(game.getUnderstoreyImpostors().size() == placed.size());
 
         for (std::size_t plant = 0; plant < placed.size(); plant += 97) {
             const ModelRenderer& leaves = world.get<ModelRenderer>(plants[2 * plant]);
@@ -170,9 +176,25 @@ namespace {
             assert(!leaves.castsShadows && !leaves.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
             assert(shadow.shadowCascades == ForestUnderstoreySettings{}.shadowCascades);
 
-            // The leaves seen have two coarser levels (docs/LOD.md): simplified further, then the shadow's own stand-in.
+            // The leaves seen have two coarser levels (docs/LOD.md): simplified further, then the shadow's own stand-in,
+            // then nothing, where the card begins.
             const std::vector<MeshLevel>& levels = forest.assets.getMeshLevels().at(leaves.parts.front().mesh.index);
-            assert(levels.size() == 2 && levels[1].mesh == shadow.parts.front().mesh && levels[1].errorMetres >= levels[0].errorMetres);
+            assert(levels.size() == 3 && levels[1].mesh == shadow.parts.front().mesh && levels[1].errorMetres >= levels[0].errorMetres);
+            assert(!levels[2].mesh.isValid() && levels[2].errorMetres >= levels[1].errorMetres);
+            assert(levels[2].errorMetres >= ForestUnderstoreySettings{}.impostorErrorMetres);
+
+            // The card (scene/impostor.h): drawn only from the error the leaves end on, both chosen by the plant's one
+            // box; a cut-out of its baked atlases, casting no shadow, standing where the plant stands.
+            const Entity cardEntity = game.getUnderstoreyImpostors()[plant];
+            const ModelRenderer& card = world.get<ModelRenderer>(cardEntity);
+            const MeshLevelOptions& cardOptions = forest.assets.getMeshLevelOptions().at(card.parts.front().mesh.index);
+            const MeshLevelOptions& leafOptions = forest.assets.getMeshLevelOptions().at(leaves.parts.front().mesh.index);
+            assert(cardOptions.hiddenBelowError == levels[2].errorMetres && leafOptions.hiddenBelowError == 0.0f);
+            assert(cardOptions.chooseBounds && leafOptions.chooseBounds && cardOptions.chooseBounds->maximum.y == leafOptions.chooseBounds->maximum.y);
+            assert(card.parts.front().material.impostorFrames == ForestUnderstoreySettings{}.impostorFrames && !card.castsShadows);
+            assert(isCutOut(card.parts.front().material));
+            const Transform& cardPose = world.get<Transform>(cardEntity);
+            assert(cardPose.position.x == placed[plant].foot.x && cardPose.position.z == placed[plant].foot.z && cardPose.scale.y == placed[plant].scale);
             const Transform& pose = world.get<Transform>(plants[2 * plant]);
             assert(pose.position.x == placed[plant].foot.x && pose.scale.y == placed[plant].scale);
             assert(world.get<Transform>(plants[2 * plant + 1]).position.z == placed[plant].foot.z);
