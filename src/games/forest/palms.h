@@ -121,6 +121,25 @@ struct PalmDetail {
 };
 
 /*
+* A strap leaf's shape beyond its size: folded along its midrib into a V opening down, each half foldRadians below
+* level, and drooping under its own weight, its midrib's tip falling droop of its length (a parabola, so a leaf rising
+* steeply arches over when droop is large).
+*/
+struct StrapFold {
+    float foldRadians = 0.0f;
+    float droop = 0.0f;
+};
+
+/*
+* One strap leaf appended to mesh (a palm's leaflet, an epiphyte's frond): from base along direction, length long, its
+* widest width across (palmLeafletWidth's outline), its midrib's up lift (made square to it), segments along it, folded
+* and drooping as fold says. u runs across it (0 and 1 at the edges, 0.5 on the midrib), v from its base to its tip;
+* each triangle faces the way its corners' normals do.
+*/
+void appendStrapLeaf(IndexedMesh& mesh, const Vec3& base, const Vec3& direction, const Vec3& lift, float length, float width, int segments,
+                     const StrapFold& fold);
+
+/*
 * A frond's rachis: count + 1 points from base, length long, leaving at azimuth (radians round up from +x towards -z, as
 * turns about +y go) and elevation (radians above level), turning down by droop * frondBendShare(s) as it goes, in the
 * upright plane of its azimuth.

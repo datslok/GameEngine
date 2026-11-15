@@ -772,6 +772,8 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
         radii[node] *= 1.0f + trunkTaper * (1.0f - share);
     }
 
+    meshes.skeleton = TreeSkeleton{.nodes = nodes, .radii = radii, .chains = chains, .trunkRadius = meshes.trunkRadius};
+
     for (std::size_t index = 0; index < chains.size(); ++index) {
         const std::vector<int>& chain = chains[index];
 

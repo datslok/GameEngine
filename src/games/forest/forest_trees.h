@@ -282,6 +282,17 @@ inline constexpr float trunkTaper = 0.5f;           // the trunk at its foot is 
 inline constexpr float leastLeanShare = 0.3f;       // each variant leans 30-100% of the setting
 inline constexpr float treeGravity = 0.2f;          // the trees' tropism (TreeGrowth::gravity)
 
+/*
+* A grown tree's skeleton, kept for what grows on it (games/forest/epiphytes.h): its nodes, each one's radius as its
+* bark was built (the trunk's tapered), its chains (branchChains) and Leonardo's radius at the fork.
+*/
+struct TreeSkeleton {
+    std::vector<TreeNode> nodes;
+    std::vector<float> radii;
+    std::vector<std::vector<int>> chains;
+    float trunkRadius = 0.0f;
+};
+
 // A grown tree in its own frame (its foot at the origin on the ground, the trunk up y): bark and leaves.
 struct TreeMeshes {
     IndexedMesh bark;
@@ -306,6 +317,9 @@ struct TreeMeshes {
 
     // The trunk's strand and lobes as its tube was built, up to its fork, for climbers (games/forest/climbers.h).
     ClimbHost trunk;
+
+    // The whole skeleton, for epiphytes (games/forest/epiphytes.h).
+    TreeSkeleton skeleton;
 };
 
 // The crown a tree of these settings grows into, in its own frame: from the fork to the top, crownRadius across.
