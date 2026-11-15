@@ -82,8 +82,17 @@ struct GpuRayDebugView {
     float up[4];
     float forward[4];
     float originAndView[4];
-    float screen[4];
+    float screen[4]; // xy the picture's size; z whether the sky draws the lights' discs (skyWithDiscs, skyWithoutDiscs)
 };
+
+/*
+* Whether a sky drawn through these rays (sky.frag) shows the sun's and the moon's discs: the camera's and a flat
+* mirror's do; a reflection probe's capture does not, since those lights' highlights come from the lights themselves,
+* shadowed, and the probe's copy, unshadowed, doubled them (leaves tucked against a trunk turned white at grazing
+* angles with the sun behind it).
+*/
+inline constexpr float skyWithDiscs = static_cast<float>(SKY_WITH_DISCS);
+inline constexpr float skyWithoutDiscs = static_cast<float>(SKY_WITHOUT_DISCS);
 
 static_assert(sizeof(GpuRayDebugView) == 80, "GpuRayDebugView must match ray_debug.frag's push constants");
 

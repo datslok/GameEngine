@@ -110,11 +110,16 @@ namespace {
         }
     }
 
-    // The sky's camera rays for a face go through the same directions its picture holds.
+    /*
+    * The sky's camera rays for a face go through the same directions its picture holds; and the probe's sky leaves out
+    * the lights' discs (skyWithoutDiscs): their highlights come from the lights themselves, shadowed, and the probe's
+    * copy, unshadowed, turned leaves tucked against a trunk white at grazing angles.
+    */
     void testFaceRays() {
         for (int face = 0; face < cubeFaceCount; ++face) {
             const GpuRayDebugView rays = packCubeFaceRays(face, Vec3{1.0f, 2.0f, 3.0f}, 64);
             assert(rays.screen[0] == 64.0f && rays.screen[1] == 64.0f && rays.originAndView[1] == 2.0f);
+            assert(rays.screen[2] == skyWithoutDiscs);
             const Vec3 right{rays.right[0], rays.right[1], rays.right[2]};
             const Vec3 up{rays.up[0], rays.up[1], rays.up[2]};
             const Vec3 forward{rays.forward[0], rays.forward[1], rays.forward[2]};

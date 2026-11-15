@@ -30,4 +30,8 @@
 #define RAY_DEBUG_ALBEDO 2
 #define RAY_DEBUG_FACES 3
 
+// Whether a sky drawn through a view's rays (sky.frag, the view's screen.z) shows the lights' discs (skyWithDiscs).
+#define SKY_WITH_DISCS 0.0
+#define SKY_WITHOUT_DISCS 1.0
+
 #endif

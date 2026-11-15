@@ -5,10 +5,12 @@
 * The sky (render/gpu/atmosphere.h), added over the background wherever nothing was drawn (the full-screen triangle at
 * the far depth, depth test equal): each pixel's camera ray, as the ray debug view finds it, looks up the sky view table,
 * and inside the sun's disc as drawn adds its radiance through the air, and inside the moon's its radiance shaded by its
-* phase.
+* phase; but not in a reflection probe's capture (screen.z, SKY_WITHOUT_DISCS), whose reflections would add the lights'
+* highlights a second time, unshadowed.
 */
 #include "atmosphere_tables.glsl"
 #include "ray_tracing.glsl"
+#include "render/gpu/ray_tracing_shared.h"
 
 layout(location = 0) out vec4 colour;
 
@@ -31,6 +33,11 @@ void main() {
     vec2 onScreen = gl_FragCoord.xy / camera.screen.xy;
     vec3 direction = normalize(cameraRayDirection(camera.right.xyz, camera.up.xyz, camera.forward.xyz, onScreen.x * 2.0 - 1.0, 1.0 - onScreen.y * 2.0));
     vec3 sky = skyFromTable(skyViewTable, data.atmosphere, direction);
+
+    if (camera.screen.z > 0.5 * (SKY_WITH_DISCS + SKY_WITHOUT_DISCS)) {
+        colour = vec4(sky, 1.0);
+        return;
+    }
 
     if (dot(direction, data.atmosphere.sun.xyz) >= data.atmosphere.sun.w) {
         sky += data.atmosphere.sunDisc.rgb;

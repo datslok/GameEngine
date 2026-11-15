@@ -108,6 +108,7 @@ GpuRayDebugView packCubeFaceRays(int face, const Vec3& origin, std::uint32_t siz
     write(rays.originAndView, origin);
     rays.screen[0] = static_cast<float>(size);
     rays.screen[1] = static_cast<float>(size);
+    rays.screen[2] = skyWithoutDiscs;
     return rays;
 }
 
