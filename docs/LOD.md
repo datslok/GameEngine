@@ -126,3 +126,29 @@ Vendored v0.22:
 3. **Dithered fade at the big steps only**, a hashed pattern turned per frame for TAA and DLSS.
 4. **Impostors** for the valley's far trees, when the trees spread past the patch.
 5. **Vertex morphing** and anything Nanite-like: not now.
+
+## Terrain
+
+Researched on Nov 15, 2026, after the camera's triangle count showed the ground's nearest ring (1280 m square at 2 m, 819 thousand triangles, one draw, also the collision mesh) as the largest single cost left.
+
+| Design | How | Numbers | Source |
+|---|---|---|---|
+| Chunked LOD | a quadtree of pre-decimated meshes, cracks hidden by skirts | 4 m error drawn at about 2 pixels | Ulrich, SIGGRAPH 2002 |
+| Unreal Landscape | components of 1 or 2 x 2 sections (7-255 quads a side); a section is the LOD unit, chosen by screen size, morphed in the vertex shader between heightmap mips | at most 1024 components; "each section is a draw call" | Epic's Landscape Technical Guide |
+| Unity Terrain | Pixel Error: how far the mesh may stray, in pixels | default 5 **(unverified)** | Unity manual |
+| Battlefield 3 | quadtree of 16 x 16 patches, heights sampled in the vertex shader, cracks stitched by index permutations | 2.5-3 ms of G-buffer on PS3 | Widmark, GDC 2012 |
+| Far Cry 5 | 64 m sectors, 6 levels, 129^2 heights a node, 16 x 16 vertex patches stitched in the vertex shader, culled on the GPU | about 1.5-2 ms **(secondary source)** | Moore, GDC 2018 |
+| CDLOD | one grid mesh instanced over the selected quadtree nodes, heights in the vertex shader; each level's range twice the last; vertices morph to the coarser level over the last 15-30% of a range, so no cracks and no pops | 7-9 levels, 105-446 thousand triangles, 0.08 ms of CPU selection | Strugar 2010 |
+| Geometry clipmaps | nested grids following the camera, updated toroidally, blended over the outer tenth | triangles about 3-5 pixels | Losasso & Hoppe 2004; GPU Gems 2 ch. 2 |
+
+- **Shadows:** CDLOD's advice is to choose the terrain's levels from the main camera and only cull with the shadow camera, so the shadowing surface is the seen one; a coarser shadow terrain leaks light on hilltops and darkens hollows by its error (Unreal users report it).
+- **TAA:** a continuous morph moves vertices a sliver of a pixel a frame, which reprojection follows; swapping chunks pops depth and normals in one frame.
+- **Density:** targets range from 2-pixel error (Ulrich) to 5-pixel triangles (GPU Gems); below about 2 pixels the rasteriser wastes its quads.
+
+**What it means here:**
+
+- The 2 m quad covers 15 pixels at 100 m and 2.4 at the ring's edge: too coarse by the path, too fine over most of the ring, and the jump to 16 m at 640 m is a visible step.
+- **CDLOD fits best:** one instanced grid per view is this renderer's own model; the morph suits TAA and DLSS; choosing by 3D distance does not change as the camera turns; one scheme covers all 20 km. About 8 levels from 2 m (a quad about 8 pixels); an estimated 130-250 thousand triangles in view against 819 thousand plus the outer rings.
+- **Its cost:** a terrain vertex path (heights from a texture, normals from differences at the level's spacing, the morph), mirrored on the CPU and tested like the other shader libraries; a CPU quadtree walk.
+- **Collision and rays keep the mesh:** the 2 m ring stays as the `StaticLevel` (never drawn), and as the sky visibility bake's and ray tracing's stand-in; CDLOD's level 0 at the same 2 m points matches it where the player stands.
+- **A first step with no new vertex path:** the near ring cut into 64 m chunks, each culled per view (about a third of the triangles in the camera's view, most chunks gone from the near cascades), which also become CDLOD's leaf nodes.

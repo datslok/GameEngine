@@ -1450,7 +1450,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible, 0, &cameraLevels);
     std::tie(stats.drawnTriangles, stats.drawnCutOutTriangles) = batchTriangles(mainDraws.batches);
 
-    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows);
+    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows, settings.levelOfDetail);
 
     // The shaders read a tile's coloured shadow map only where it holds glass.
     for (std::size_t tile = 0; tile < shadows.tileData.size(); ++tile) {
@@ -2270,7 +2270,7 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
 * listed one tile after another, from entry firstEntry of the draw list.
 */
 VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles,
-                                                               std::uint32_t firstEntry, bool colouredShadows) {
+                                                               std::uint32_t firstEntry, bool colouredShadows, const LevelOfDetailSettings& levelSettings) {
     ShadowDraws prepared;
     prepared.tileGlass.assign(tiles.size(), false);
     std::vector<std::size_t> inReach;
@@ -2282,8 +2282,8 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
     };
 
     // Each batch's entries follow the draw list's so far.
-    const auto listed = [&](const std::vector<std::size_t>& draws) {
-        BatchedDraws batched = batchByMesh(description.draws, draws, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()));
+    const auto listed = [&](const std::vector<std::size_t>& draws, const LevelView* levels) {
+        BatchedDraws batched = batchByMesh(description.draws, draws, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()), levels);
 
         for (std::size_t index : batched.order) {
             prepared.drawList.push_back(static_cast<std::uint32_t>(index));
@@ -2307,6 +2307,8 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         }
 
         const Frustum view = Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero);
+        // Each tile draws its casters' levels of detail by its own texels (tileLevelView), not the camera's distance.
+        const LevelView tileLevels = tileLevelView(tile, levelSettings);
         const std::vector<std::size_t> found = castersForCascade(
             description.draws, castersAtLeast(description.draws, shadowCasters(description.draws, inReach, view), tile.smallestCaster), tile.sunCascade);
         const std::vector<std::size_t> glass = castersAtLeast(description.draws, shadowCasters(description.draws, glassReached, view), tile.smallestCaster);
@@ -2315,7 +2317,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         // A tile keeping its movers apart is fingerprinted by its still casters alone.
         const ShadowCasterSplit split = tile.separateMovers ? splitMovingCasters(description.draws, found)
                                                             : ShadowCasterSplit{found, {}};
-        const std::uint64_t signature = tintedShadowSignature(description.draws, split.still, glass);
+        const std::uint64_t signature = tintedShadowSignature(description.draws, split.still, glass, &tileLevels);
         const bool still = !shadowMemory.isCurrent(tile, signature);
 
         if (tile.separateMovers) {
@@ -2333,8 +2335,8 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
             continue;
         }
 
-        ShadowTileDraw drawing{&tile, still ? listed(split.still) : BatchedDraws{}, still ? listed(glass) : BatchedDraws{}, signature, still,
-                               listed(split.moving), {}};
+        ShadowTileDraw drawing{&tile, still ? listed(split.still, &tileLevels) : BatchedDraws{}, still ? listed(glass, nullptr) : BatchedDraws{}, signature,
+                               still, listed(split.moving, &tileLevels), {}};
 
         // What to copy back from the still copy: all of it after a redraw, else where movers were and are.
         if (tile.separateMovers) {

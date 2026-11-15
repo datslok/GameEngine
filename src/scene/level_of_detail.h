@@ -36,11 +36,15 @@ struct LevelView {
     float pixelsPerMetre = 0.0f;
     float pixelError = 1.0f;
     bool enabled = false;
+
+    // A view without perspective (the sun's shadow tiles): pixelsPerMetre holds everywhere in it, whatever the distance.
+    bool orthographic = false;
 };
 
 LevelView levelView(const Vec3& eye, float viewHeightPixels, float verticalFovRadians, const LevelOfDetailSettings& settings);
 
-// How many pixels an error of errorMetres covers distance metres from the view; everything at 0 (or nearer).
+// How many pixels an error of errorMetres covers distance metres from the view; everything at 0 (or nearer). In an
+// orthographic view, errorMetres times its pixels a metre, wherever it is.
 float errorInPixels(float errorMetres, float distance, const LevelView& view);
 
 // The level to draw distance metres away: 0 the mesh itself, k levels[k - 1], the coarsest whose error fits the budget.

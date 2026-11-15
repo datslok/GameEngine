@@ -24,6 +24,10 @@ LevelView levelView(const Vec3& eye, float viewHeightPixels, float verticalFovRa
 }
 
 float errorInPixels(float errorMetres, float distance, const LevelView& view) {
+    if (view.orthographic) {
+        return errorMetres * view.pixelsPerMetre;
+    }
+
     if (distance <= 0.0f) {
         return std::numeric_limits<float>::infinity();
     }

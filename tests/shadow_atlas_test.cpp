@@ -2,8 +2,10 @@
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/shadow_map.h"
 #include "scene/frame_description.h"
+#include "scene/level_of_detail.h"
 
 #include <cassert>
+#include <cmath>
 #include <optional>
 #include <vector>
 
@@ -161,6 +163,42 @@ namespace {
         std::vector<DrawItem> elsewhere = draws;
         elsewhere[2].model = Mat4::translation(50.0f, 0.0f, 0.0f);
         assert(shadowCasterSignature(elsewhere, {0, 1}) == before);
+
+        /*
+        * With a view, the mesh each caster draws there counts (its level of detail, scene/level_of_detail.h): the same
+        * casters drawn at another level are another picture. Without levels, the view changes nothing.
+        */
+        const std::vector<MeshLevel> levels{MeshLevel{MeshHandle{9}, 0.5f}};
+        std::vector<DrawItem> detailed = draws;
+        detailed[1].levels = levels;
+        detailed[1].bounds = BoundingSphere{Vec3{2.0f, 0.0f, 0.0f}, 1.0f};
+        const LevelView fine{.eye = Vec3{}, .pixelsPerMetre = 100.0f, .pixelError = 2.0f, .enabled = true, .orthographic = true};
+        const LevelView coarse{.eye = Vec3{}, .pixelsPerMetre = 1.0f, .pixelError = 2.0f, .enabled = true, .orthographic = true};
+        assert(shadowCasterSignature(detailed, {0, 1}, &fine) == before);
+        assert(shadowCasterSignature(detailed, {0, 1}, &coarse) != before);
+        assert(shadowCasterSignature(draws, {0, 1}, &coarse) == before);
+    }
+
+    /*
+    * A tile's level view comes from its own matrix: the sun's tiles are orthographic, so a texel covers the same metres
+    * all through them (size over the box's width) and a level's error is measured in texels wherever it stands; a
+    * lamp's tile is a perspective from the lamp, its pixels a metre at a metre size / (2 tan(fov / 2)).
+    */
+    void testATileChoosesLevelsByItsTexels() {
+        ShadowTile sun;
+        sun.size = 1024;
+        sun.matrix = Mat4::orthographic(-64.0f, 64.0f, -64.0f, 64.0f, 0.0f, 500.0f) * Mat4::lookAt(Vec3{0.0f, 100.0f, 0.0f}, Vec3{}, Vec3{0.0f, 0.0f, -1.0f});
+        sun.lightPlace = Vec4{0.0f, 1.0f, 0.0f, 0.0f};
+        const LevelView sunView = tileLevelView(sun, LevelOfDetailSettings{});
+        assert(sunView.orthographic && std::abs(sunView.pixelsPerMetre - 8.0f) < 1e-3f);
+
+        ShadowTile lamp;
+        lamp.size = 512;
+        lamp.matrix = Mat4::perspective(1.5707963f, 1.0f, 0.1f, 50.0f) * Mat4::lookAt(Vec3{3.0f, 4.0f, 5.0f}, Vec3{3.0f, 0.0f, 5.0f}, Vec3{0.0f, 0.0f, -1.0f});
+        lamp.lightPlace = Vec4{3.0f, 4.0f, 5.0f, 1.0f};
+        const LevelView lampView = tileLevelView(lamp, LevelOfDetailSettings{});
+        assert(!lampView.orthographic && std::abs(lampView.pixelsPerMetre - 256.0f) < 0.05f);
+        assert(lampView.eye.x == 3.0f && lampView.eye.y == 4.0f && lampView.eye.z == 5.0f);
     }
 
     /*
@@ -361,6 +399,7 @@ void testShadowAtlas() {
     testSquaresStayPut();
     testCrumbledAtlasIsRepacked();
     testCasterSignature();
+    testATileChoosesLevelsByItsTexels();
     testGlassSignature();
     testTileMemory();
     testMovingCasters();

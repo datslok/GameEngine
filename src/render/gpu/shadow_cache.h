@@ -2,6 +2,7 @@
 
 #include "render/gpu/shadow_map.h"
 #include "scene/frame_description.h"
+#include "scene/level_of_detail.h"
 
 #include <cstdint>
 #include <optional>
@@ -15,14 +16,16 @@
 
 // A fingerprint of the casters a tile would draw: each one's mesh, model matrix and shape (a deforming mesh's,
 // DrawItem::shape), in order. Any caster moving, changing mesh or shape, or entering or leaving the view changes it
-// (barring a one in 2^64 coincidence).
-std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters);
+// (barring a one in 2^64 coincidence). With levels, the mesh each caster draws in that view (its level of detail) is
+// fingerprinted, so a caster changing level redraws the tile.
+std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const LevelView* levels = nullptr);
 
 // The same for a tile that also holds its glass in the coloured shadow map (render/gpu/transparency.h): the solid
 // casters' signature, then each pane's mesh, matrix, shape and everything its tint comes from (its material's colour,
 // coverage, transmission, metalness, thickness, absorption, sides and their textures). Without glass, exactly
 // shadowCasterSignature, so tiles without glass are kept as before.
-std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass);
+std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass,
+                                    const LevelView* levels = nullptr);
 
 /*
 * Still and moving casters (docs/SHADOWCACHE.md): a tile that keeps them apart (ShadowTile::separateMovers, the far
