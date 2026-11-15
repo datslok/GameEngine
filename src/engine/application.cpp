@@ -437,7 +437,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     // Spheres around each draw let the renderer skip what a view cannot see.
     attachBoundingSpheres(frame.draws, boundsByMesh);
     attachFlatFaces(frame.draws, flatFacesByMesh);
-    attachMeshLevels(frame.draws, assets.getMeshLevels());
+    attachMeshLevels(frame.draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
 
     // The terrain's patches round the camera (scene/terrain.h), after the other draws: their bounds are their own.
     validateTerrain(settings.render.terrain);

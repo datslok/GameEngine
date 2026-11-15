@@ -48,7 +48,8 @@ GpuMaterial packMaterial(const Material& material) {
     data.textures[3] = bindlessTextureSlot(material.emissiveTexture);
     data.extra[0] = bindlessTextureSlot(material.occlusionTexture);
     data.extra[1] = (material.doubleSided ? MATERIAL_DOUBLE_SIDED : 0u) | (isCutOut(material) ? MATERIAL_CUT_OUT : 0u) |
-                    (material.alphaMode == AlphaMode::Blend ? MATERIAL_BLEND : 0u) | (isRefractive(material) ? MATERIAL_REFRACTS : 0u);
+                    (material.alphaMode == AlphaMode::Blend ? MATERIAL_BLEND : 0u) | (isRefractive(material) ? MATERIAL_REFRACTS : 0u) |
+                    (material.impostorFrames > 0 ? MATERIAL_IMPOSTOR : 0u);
     data.extra[2] = bindlessTextureSlot(material.transmissionTexture);
     data.extra[3] = bindlessTextureSlot(material.thicknessTexture);
     data.transmission[0] = std::clamp(material.transmission, 0.0f, 1.0f);
@@ -58,6 +59,7 @@ GpuMaterial packMaterial(const Material& material) {
     data.attenuation[0] = material.attenuationColour.x;
     data.attenuation[1] = material.attenuationColour.y;
     data.attenuation[2] = material.attenuationColour.z;
+    data.attenuation[3] = static_cast<float>(material.impostorFrames);
 
     if (!isTransparent(material)) {
         data.coatAndHeight[0] = std::clamp(material.clearCoat, 0.0f, 1.0f);

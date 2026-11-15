@@ -174,7 +174,22 @@ namespace {
 
         threw = false;
         try {
-            assets.setMeshLevels(base, {MeshLevel{MeshHandle{}, 0.01f}});
+            assets.setMeshLevels(base, {MeshLevel{MeshHandle{}, 0.01f}, MeshLevel{coarse, 0.02f}});
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        assert(threw);
+
+        // A last level without a mesh draws nothing there (a tree past where its impostor takes over).
+        assets.setMeshLevels(base, {MeshLevel{coarse, 0.01f}, MeshLevel{MeshHandle{}, 0.5f}});
+        assert(!assets.getMeshLevels()[base.index][1].mesh.isValid());
+
+        // Options: an impostor hidden near (its error not below 0), the box a tree's parts are chosen by.
+        assets.setMeshLevelOptions(coarser, MeshLevelOptions{.hiddenBelowError = 0.5f, .chooseBounds = Aabb{Vec3{-1.0f, 0.0f, -1.0f}, Vec3{1.0f, 4.0f, 1.0f}}});
+        assert(assets.getMeshLevelOptions().at(coarser.index).hiddenBelowError == 0.5f);
+        threw = false;
+        try {
+            assets.setMeshLevelOptions(coarser, MeshLevelOptions{.hiddenBelowError = -1.0f, .chooseBounds = std::nullopt});
         } catch (const std::invalid_argument&) {
             threw = true;
         }
@@ -227,6 +242,58 @@ namespace {
         assert(named.size() == 2 && named[1].errorMetres == levels[1].errorMetres && assets.isDrawnOnly(named[0].mesh));
     }
 
+    /*
+    * Impostors (docs/LOD.md): a tree's parts end on a level without a mesh, drawing nothing past it; its impostor is
+    * hidden until the same error fits, so at every distance exactly one of them is drawn. Both choose by one shared box
+    * (MeshLevelOptions::chooseBounds), placed by each draw's model matrix, so they switch at the same place; batching
+    * leaves out a draw drawing nothing.
+    */
+    void testAnImpostorTakesOverWhereATreeEnds() {
+        const std::vector<MeshLevel> treeLevels{MeshLevel{MeshHandle{7}, 0.01f}, MeshLevel{MeshHandle{}, 0.1f}};
+        const std::vector<std::vector<MeshLevel>> table{{}, {}, {}, treeLevels};
+        std::vector<MeshLevelOptions> options(10);
+        const Aabb treeBox{Vec3{-2.0f, 0.0f, -2.0f}, Vec3{2.0f, 10.0f, 2.0f}};
+        options[3] = MeshLevelOptions{.chooseBounds = treeBox};
+        options[9] = MeshLevelOptions{.hiddenBelowError = 0.1f, .chooseBounds = treeBox};
+
+        const LevelView view = squareView(Vec3{}, 2.0f);
+        int drawnSomewhere = 0;
+
+        for (float distance = 5.0f; distance < 60.0f; distance += 0.37f) {
+            std::vector<DrawItem> draws(2);
+            draws[0].mesh = MeshHandle{3};
+            draws[1].mesh = MeshHandle{9};
+
+            for (DrawItem& draw : draws) {
+                draw.model = Mat4::translation(0.0f, 0.0f, -distance);
+                draw.bounds = BoundingSphere{Vec3{0.0f, 1.0f, -distance}, 1.0f}; // each mesh's own, unlike the shared box
+            }
+
+            attachMeshLevels(draws, table, options);
+            assert(draws[0].levelBounds.radius > 5.0f && draws[1].levelBounds.centre.y == 5.0f);
+            const bool tree = chosenMesh(draws[0], view).isValid();
+            const bool impostor = chosenMesh(draws[1], view).isValid();
+            assert(tree != impostor);
+            drawnSomewhere += impostor ? 1 : 0;
+
+            const BatchedDraws batched = batchByMesh(draws, {0, 1}, 0, &view);
+            assert(batched.order.size() == 1 && batched.batches.size() == 1 && batched.batches[0].mesh.isValid());
+        }
+
+        assert(drawnSomewhere > 0 && drawnSomewhere < 140);
+
+        // With levels off, the tree is drawn whole and its impostor never.
+        LevelOfDetailSettings off;
+        off.enabled = false;
+        std::vector<DrawItem> far(2);
+        far[0].mesh = MeshHandle{3};
+        far[1].mesh = MeshHandle{9};
+        far[0].bounds = far[1].bounds = BoundingSphere{Vec3{0.0f, 1.0f, -500.0f}, 1.0f};
+        attachMeshLevels(far, table, options);
+        const LevelView offView = levelView(Vec3{}, 1000.0f, 1.5707963f, off);
+        assert(chosenMesh(far[0], offView) == MeshHandle{3} && !chosenMesh(far[1], offView).isValid());
+    }
+
     // The settings: on, a budget of pixels, both live; a budget not above 0 is refused.
     void testTheSettingsAreChecked() {
         validateLevelOfDetail(LevelOfDetailSettings{});
@@ -263,6 +330,7 @@ namespace {
 }
 
 void testLevelOfDetail() {
+    testAnImpostorTakesOverWhereATreeEnds();
     testTheReadoutCountsEachLevel();
     testAnErrorCoversPixelsByDistance();
     testTheCoarsestLevelWithinTheBudgetIsChosen();

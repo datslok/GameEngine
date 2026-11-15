@@ -835,7 +835,7 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 26 && counter.live == 0);
+        assert(counter.fields == 29 && counter.live == 0);
         assert(settings.shadowBarkShare > 0.0f && settings.shadowBarkShare <= 0.2f);
 
         // Four times the first patch's crown cover (the user, Nov 14 2026): more trees, their crowns interlocking.
@@ -1002,8 +1002,18 @@ namespace {
             // for both).
             const std::vector<MeshLevel>& barkLevels = assets.getMeshLevels().at(barkRenderer.parts.front().mesh.index);
             const std::vector<MeshLevel>& leafLevels = assets.getMeshLevels().at(world.get<ModelRenderer>(leaves).parts.front().mesh.index);
-            assert(barkLevels.size() == 2 && barkLevels[1].mesh == shadows.parts[1].mesh);
-            assert(leafLevels.size() == 2 && leafLevels[1].mesh == shadows.parts[0].mesh);
+            assert(barkLevels.size() == 3 && barkLevels[1].mesh == shadows.parts[1].mesh && !barkLevels[2].mesh.isValid());
+            assert(leafLevels.size() == 3 && leafLevels[1].mesh == shadows.parts[0].mesh && !leafLevels[2].mesh.isValid());
+
+            // Past the last level the impostor takes over (scene/impostor.h): its card drawn only from the error the bark and
+            // leaves end on, all three chosen by the tree's one box; a cut-out of its baked atlases, casting no shadow.
+            const ModelRenderer& card = world.get<ModelRenderer>(game.getTreeImpostors()[tree]);
+            const MeshLevelOptions& cardOptions = assets.getMeshLevelOptions().at(card.parts.front().mesh.index);
+            const MeshLevelOptions& barkOptions = assets.getMeshLevelOptions().at(barkRenderer.parts.front().mesh.index);
+            assert(cardOptions.hiddenBelowError == barkLevels[2].errorMetres && leafLevels[2].errorMetres == barkLevels[2].errorMetres);
+            assert(cardOptions.chooseBounds && barkOptions.chooseBounds && cardOptions.chooseBounds->maximum.y == barkOptions.chooseBounds->maximum.y);
+            assert(card.parts.front().material.impostorFrames == game.getTreeSettings().impostorFrames && !card.castsShadows);
+            assert(world.get<Transform>(game.getTreeImpostors()[tree]).position.x == placed[tree].foot.x);
 
             const Material& leaf = world.get<ModelRenderer>(leaves).parts.front().material;
             assert(isCutOut(leaf) && leaf.doubleSided);
@@ -1015,6 +1025,7 @@ namespace {
         const std::vector<TreePlacement>& emergents = game.getEmergentPlacements();
         const std::vector<TreePlacement>& mid = game.getMidPlacements();
         assert(!emergents.empty() && !mid.empty() && trees.size() == 3 * (placed.size() + emergents.size() + mid.size()));
+        assert(game.getTreeImpostors().size() == placed.size() + emergents.size() + mid.size());
 
         for (std::size_t tree = 0; tree < emergents.size(); ++tree) {
             const Transform& pose = world.get<Transform>(trees[3 * (placed.size() + tree)]);

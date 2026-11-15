@@ -57,8 +57,11 @@ void AssetManager::setMeshLevels(MeshHandle base, std::vector<MeshLevel> levels)
 
     float lastError = 0.0f;
 
-    for (const MeshLevel& level : levels) {
-        if (!level.mesh.isValid() || level.mesh.index >= meshes.size() || level.mesh == base || !(level.errorMetres >= lastError)) {
+    for (std::size_t index = 0; index < levels.size(); ++index) {
+        const MeshLevel& level = levels[index];
+        const bool nothing = !level.mesh.isValid() && index + 1 == levels.size();
+
+        if ((!nothing && (!level.mesh.isValid() || level.mesh.index >= meshes.size() || level.mesh == base)) || !(level.errorMetres >= lastError)) {
             throw std::invalid_argument("A mesh's levels must be other meshes already added, coarsest last, their errors rising from 0");
         }
 
@@ -86,6 +89,22 @@ MeshHandle AssetManager::addDrawnMeshWithLevels(IndexedMesh mesh, std::vector<Si
 
 const std::vector<std::vector<MeshLevel>>& AssetManager::getMeshLevels() const {
     return meshLevels;
+}
+
+void AssetManager::setMeshLevelOptions(MeshHandle mesh, MeshLevelOptions options) {
+    if (!mesh.isValid() || mesh.index >= meshes.size() || !(options.hiddenBelowError >= 0.0f)) {
+        throw std::invalid_argument("Level options need a mesh already added and an error not below 0");
+    }
+
+    if (meshLevelOptions.size() <= mesh.index) {
+        meshLevelOptions.resize(mesh.index + 1);
+    }
+
+    meshLevelOptions[mesh.index] = options;
+}
+
+const std::vector<MeshLevelOptions>& AssetManager::getMeshLevelOptions() const {
+    return meshLevelOptions;
 }
 
 bool AssetManager::isDrawnOnly(MeshHandle handle) const {

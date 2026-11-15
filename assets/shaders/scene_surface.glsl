@@ -13,6 +13,7 @@
 #include "normal_mapping.glsl"
 #include "parallax.glsl"
 #include "ground_layers.glsl"
+#include "impostor.glsl"
 #include "lighting.glsl"
 #include "mirrored_light.glsl"
 #include "soft_shadow.glsl"
@@ -47,6 +48,7 @@ layout(location = 8) flat in mat3 frameAxes;
 
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"
+#include "impostor_sampling.glsl"
 
 // The frame's uniform block: ambient light, light counts and the atlas texel size are what this shader reads of it.
 #include "frame_data.glsl"
@@ -891,6 +893,23 @@ void main() {
     float occlusionTexel = surfaceTexture(material.extra.x, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias).r;
 
     /*
+    * An impostor's card (scene/impostor.h): its colour and normal from the four frames round the view, read where the card
+    * point falls on each (impostor_sampling.glsl), the normal turned from the tree's frame into the world. The flag is
+    * the material's, the same for a whole quad of pixels, so the reads keep their derivatives (the card point's steps,
+    * taken above).
+    */
+    bool impostor = (material.extra.y & MATERIAL_IMPOSTOR) != 0u;
+    vec3 impostorNormal = vec3(0.0);
+
+    if (impostor) {
+        ImpostorSample tree = sampleImpostor(material.textureSlots.x, material.textureSlots.z, material.attenuation.w, framePosition, worldTangent.xyz,
+                                             frameStepAcross, frameStepDown, mipBias);
+        albedo = tree.colour * material.baseColour;
+        normalTexel = vec3(0.5, 0.5, 1.0);
+        impostorNormal = frameAxes * tree.normal;
+    }
+
+    /*
     * A blended ground (render/gpu/ground_layers.h): in place of its own textures, its layers' (each an ordinary material
     * in the table), each repeating at its own scale, blended by the painted weights sharpened by their height maps
     * (groundBlendWeights). Read only on such a material, which is the same for a primitive's whole 2 x 2 quads, so the
@@ -1136,7 +1155,9 @@ void main() {
     vec3 geometricNormal = normalLength > 0.0 ? surfaceNormal / normalLength : vec3(0.0, 1.0, 0.0);
     vec3 normal = geometricNormal;
 
-    if (normalLength > 0.0 && projectedBump) {
+    if (impostor && dot(impostorNormal, impostorNormal) > 0.0) {
+        normal = normalize(impostorNormal);
+    } else if (normalLength > 0.0 && projectedBump) {
         normal = normalize(projectedWorldNormal);
     } else if (normalLength > 0.0) {
         vec3 tilt = decodeNormalTexel(normalTexel, material.surfaceParameters.z);

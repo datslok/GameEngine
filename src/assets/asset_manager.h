@@ -58,8 +58,8 @@ public:
 
     /*
     * Name a mesh's coarser levels (scene/mesh_level.h), coarsest last: each view draws the coarsest whose error fits
-    * (scene/level_of_detail.h). At most meshLevelSlots - 1, each a mesh already added other than the base, their errors
-    * not below 0 and rising; anything else throws std::invalid_argument. Naming them again replaces them.
+    * (scene/level_of_detail.h). At most meshLevelSlots - 1, each a mesh already added other than the base (the last may be none: nothing
+    * drawn there), their errors not below 0 and rising; anything else throws std::invalid_argument. Naming them again replaces them.
     */
     void setMeshLevels(MeshHandle base, std::vector<MeshLevel> levels);
 
@@ -68,6 +68,11 @@ public:
 
     // Every mesh's levels, indexed like MeshHandle (shorter than the meshes when the last have none).
     const std::vector<std::vector<MeshLevel>>& getMeshLevels() const;
+
+    // How a mesh's level is chosen beyond its levels (MeshLevelOptions: an impostor's, a tree part's shared box); an
+    // error below 0 throws std::invalid_argument. And every mesh's, indexed like MeshHandle.
+    void setMeshLevelOptions(MeshHandle mesh, MeshLevelOptions options);
+    const std::vector<MeshLevelOptions>& getMeshLevelOptions() const;
 
     // Whether a mesh was added as drawn only, and its render format (std::invalid_argument for one that was not).
     bool isDrawnOnly(MeshHandle handle) const;
@@ -145,4 +150,5 @@ private:
 
     // Each mesh's coarser levels, by mesh number.
     std::vector<std::vector<MeshLevel>> meshLevels;
+    std::vector<MeshLevelOptions> meshLevelOptions;
 };

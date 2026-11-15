@@ -1510,7 +1510,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             const LevelView faceLevels = levelView(probeCycleOrigin, static_cast<float>(reflectionProbe->getSize()), 0.25f * fullTurnRadians, settings.levelOfDetail);
             captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstCaptureEntry, &faceLevels);
             stats.probeTriangles += batchTriangles(captureDraws[static_cast<std::size_t>(face)].batches).first;
-            firstCaptureEntry += static_cast<std::uint32_t>(inView.size());
+            firstCaptureEntry += static_cast<std::uint32_t>(captureDraws[static_cast<std::size_t>(face)].order.size());
         }
     }
 

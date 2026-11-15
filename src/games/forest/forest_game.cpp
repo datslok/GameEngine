@@ -13,6 +13,7 @@
 #include "scene/light.h"
 #include "scene/model_renderer.h"
 #include "scene/probe_volume.h"
+#include "scene/impostor.h"
 #include "scene/sun.h"
 #include "scene/terrain.h"
 
@@ -608,21 +609,48 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
     std::vector<MeshHandle> leafMeshes;
     std::vector<MeshHandle> shadowLeafMeshes;
     std::vector<MeshHandle> shadowBarkMeshes;
+    std::vector<MeshHandle> cardMeshes;
+    std::vector<Material> cardMaterials;
+    const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
+    // Copies, not references: adding each variant's atlases to the asset manager can move its textures.
+    const ImageData barkTexture = bark.texture.isValid() ? assets.getTexture(bark.texture) : ImageData{};
+    const ImageData leafTexture = leaf.texture.isValid() ? assets.getTexture(leaf.texture) : ImageData{};
 
     for (TreeMeshes& variant : grown) {
+        /*
+        * The impostor (scene/impostor.h), baked from the bark's first level and the leaves before they go to the asset
+        * manager: its atlases, its card round the tree's sphere. The tree's parts end on a level drawing nothing at its
+        * error, where the card begins, and all three choose by the tree's one box, so exactly one of them is drawn.
+        */
+        const ImpostorBake baked =
+            bakeImpostor({ImpostorPart{.mesh = &variant.barkLevel, .colour = bark.texture.isValid() ? &barkTexture : nullptr, .tint = bark.colour, .alphaCutoff = 0.0f},
+                          ImpostorPart{.mesh = &variant.leaves, .colour = leaf.texture.isValid() ? &leafTexture : nullptr, .tint = leaf.colour, .alphaCutoff = leaf.alphaCutoff}},
+                         settings.impostorFrames, settings.impostorTexels, getJobs());
+        const float impostorError = std::max({settings.impostorErrorMetres, variant.shadowLeafError, variant.shadowBarkError});
+        Aabb treeBox = indexedMeshBounds(variant.bark);
+        const Aabb leafBox = indexedMeshBounds(variant.leaves);
+        treeBox = Aabb{Vec3{std::min(treeBox.minimum.x, leafBox.minimum.x), std::min(treeBox.minimum.y, leafBox.minimum.y), std::min(treeBox.minimum.z, leafBox.minimum.z)},
+                       Vec3{std::max(treeBox.maximum.x, leafBox.maximum.x), std::max(treeBox.maximum.y, leafBox.maximum.y), std::max(treeBox.maximum.z, leafBox.maximum.z)}};
+        const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
+
         barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
         shadowLeafMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowLeaves)));
         shadowBarkMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowBark)));
+        cardMeshes.push_back(assets.addDrawnMesh(impostorCardMesh(baked.centre, baked.radius)));
+        cardMaterials.push_back(impostorMaterial(assets.addTexture(baked.colour, impostorCoverageCutoff), assets.addTexture(baked.normal),
+                                                 settings.impostorFrames));
+        cardMaterials.back().roughness = leaf.roughness;
 
-        // The levels of detail (docs/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in.
+        // The levels of detail (docs/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing.
         assets.setMeshLevels(barkMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
-                                                 MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}});
+                                                 MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}, MeshLevel{MeshHandle{}, impostorError}});
         assets.setMeshLevels(leafMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError},
-                                                 MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}});
+                                                 MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}, MeshLevel{MeshHandle{}, impostorError}});
+        assets.setMeshLevelOptions(barkMeshes.back(), sharedBox);
+        assets.setMeshLevelOptions(leafMeshes.back(), sharedBox);
+        assets.setMeshLevelOptions(cardMeshes.back(), MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = treeBox});
     }
-
-    const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
 
     for (const TreePlacement& tree : placements) {
         const Transform pose{.position = tree.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, tree.turnRadians),
@@ -638,6 +666,10 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         ModelRenderer& shadows = world.get<ModelRenderer>(trees.back());
         shadows.shadowOnly = true;
         shadows.parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
+
+        // The card, drawn only far away; the stand-ins above keep its shadow.
+        treeImpostors.push_back(addShape(world, cardMeshes[variant], cardMaterials[variant], pose));
+        world.get<ModelRenderer>(treeImpostors.back()).castsShadows = false;
     }
 }
 
@@ -959,4 +991,8 @@ const std::vector<Entity>& ForestGame::getUnderstorey() const {
 
 const std::vector<Entity>& ForestGame::getTrees() const {
     return trees;
+}
+
+const std::vector<Entity>& ForestGame::getTreeImpostors() const {
+    return treeImpostors;
 }

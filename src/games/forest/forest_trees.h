@@ -211,6 +211,14 @@ struct ForestTreeSettings {
     // simplified to levelBarkShare of its triangles.
     float levelCardShare = 0.5f;
     float levelBarkShare = 0.3f;
+
+    // The impostor past them (scene/impostor.h, docs/LOD.md): the error, in metres, from which the tree is drawn as its
+    // card (at least the shadow stand-ins'; 1.5 m switches about 580 m off at 1080 pixels and a 70 degree view, about
+    // 90 m in the reflection probe's faces), and its atlas: frames a side over the hemisphere, texels a frame (8 x 128:
+    // 1024 square, Fortnite's trees 12 x 12 in 2048).
+    float impostorErrorMetres = 1.5f;
+    int impostorFrames = 8;
+    int impostorTexels = 128;
 };
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);

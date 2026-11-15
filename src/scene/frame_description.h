@@ -59,6 +59,11 @@ struct DrawItem {
     // distance allows (scene/level_of_detail.h). The other uses of mesh (bounds, rays, flat faces) keep the mesh itself.
     std::span<const MeshLevel> levels{};
 
+    // The mesh's level options (MeshLevelOptions, set by attachMeshLevels): drawn only where this error fits (an impostor;
+    // 0 always), and the sphere levels are chosen by (radius below 0: bounds).
+    float hiddenBelowError = 0.0f;
+    BoundingSphere levelBounds{};
+
     // Drawn by no view and met by no ray, but part of the static level (ModelRenderer::hidden).
     bool hidden = false;
 
