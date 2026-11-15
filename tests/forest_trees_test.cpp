@@ -1,5 +1,6 @@
 #include "games/forest/forest_trees.h"
 #include "games/forest/forest_game.h"
+#include "games/forest/forest_ground.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/island_hangings.h"
 #include "games/forest/leaf_clusters.h"
@@ -1017,6 +1018,12 @@ namespace {
 
             const Material& leaf = world.get<ModelRenderer>(leaves).parts.front().material;
             assert(isCutOut(leaf) && leaf.doubleSided);
+
+            // Light comes through the leaves (docs/JUNGLE.md, Light through leaves), and through their card alike.
+            const ForestLeafLightSettings leafLight;
+            assert(leaf.diffuseTransmission == leafLight.share && leaf.diffuseTransmissionTint.z == leafLight.tintBlue);
+            assert(card.parts.front().material.diffuseTransmission == leaf.diffuseTransmission);
+            assert(card.parts.front().material.diffuseTransmissionTint.x == leaf.diffuseTransmissionTint.x);
         }
 
         assert(barkMeshes.size() <= static_cast<std::size_t>(game.getTreeSettings().variants));
@@ -1044,7 +1051,33 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The leaves' light (docs/JUNGLE.md, Light through leaves): about as much through as reflected, deeper and yellower
+    * (least blue), read at start-up; withLeafLight gives a material that share and tint, and a share of nothing lets
+    * nothing through.
+    */
+    void testTheLeafLight() {
+        ForestLeafLightSettings settings;
+        assert(settings.share > 0.5f && settings.share <= 1.0f);
+        assert(settings.tintBlue < settings.tintRed && settings.tintRed <= settings.tintGreen);
+
+        FieldCounter counter;
+        visit(settings, counter);
+        assert(counter.fields == 4 && counter.live == 0);
+
+        const Material leaf = withLeafLight(Material{}, settings);
+        assert(leaf.diffuseTransmission == settings.share);
+        assert(leaf.diffuseTransmissionTint.x == settings.tintRed && leaf.diffuseTransmissionTint.y == settings.tintGreen &&
+               leaf.diffuseTransmissionTint.z == settings.tintBlue);
+
+        settings.share = 0.0f;
+        assert(withLeafLight(Material{}, settings).diffuseTransmission == 0.0f);
+    }
+}
+
 void testForestTrees() {
+    testTheLeafLight();
     testAttractorsFillTheCrown();
     testATreeGrowsIntoItsCrown();
     testGravityDrooping();

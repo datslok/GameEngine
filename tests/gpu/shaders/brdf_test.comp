@@ -63,6 +63,21 @@ void main() {
         testOutput(4, vec4(specular, 0.0));
         testOutput(5, vec4(shadeAmbient(point, radiance), 0.0));
         testOutput(6, vec4(shadeProbeAmbient(point, radiance, radiance.zyx), 0.0));
+    } else if (function == GPU_TEST_DIFFUSE_TRANSMISSION) {
+        // Inputs: the shading point's six, then (tint, share), (geometric normal, 0).
+        ShadingPoint point = shadingPoint();
+        vec4 tintShare = testInput(6);
+        addDiffuseTransmission(point, tintShare.w, tintShare.xyz);
+        vec3 radiance = testInput(4).xyz;
+        vec3 toLight = testInput(5).xyz;
+        vec3 diffuse = vec3(0.0);
+        vec3 specular = vec3(0.0);
+        addLight(radiance, toLight, point, diffuse, specular);
+        testOutput(0, vec4(point.transmitted, transmitsLight(point) ? 1.0 : 0.0));
+        testOutput(1, vec4(diffuse, facesLight(point, toLight) ? 1.0 : 0.0));
+        testOutput(2, vec4(specular, throughSurface(point, toLight) ? 1.0 : 0.0));
+        testOutput(3, vec4(shadeTransmittedAmbient(point, radiance), 0.0));
+        testOutput(4, vec4(shadowLiftNormal(point, testInput(7).xyz, toLight), 0.0));
     } else if (function == GPU_TEST_GGX_SAMPLE) {
         // Inputs: (sample, samples, alpha, 0), (normal, 0), (local direction, 0).
         uint index = uint(a.x + 0.5);

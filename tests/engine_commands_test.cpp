@@ -47,6 +47,8 @@ namespace {
         assert(setup.registry.execute("set engine.render.materials.parallax false").ok && !setup.settings.render.materials.parallax);
         assert(setup.registry.execute("set engine.render.materials.parallaxSelfShadows false").ok && !setup.settings.render.materials.parallaxSelfShadows);
         assert(setup.registry.execute("set engine.render.materials.parallaxSteps 16").ok && setup.settings.render.materials.parallaxSteps == 16);
+        assert(setup.settings.render.materials.lightThroughLeaves);
+        assert(setup.registry.execute("set engine.render.materials.lightThroughLeaves false").ok && !setup.settings.render.materials.lightThroughLeaves);
 
         assert(setup.registry.execute("set engine.clothOnGPU false").ok);
         assert(!setup.settings.clothOnGpu);

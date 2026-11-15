@@ -87,6 +87,7 @@ struct ShadingPoint {
     float coatAlpha;
     float coatCompensation;
     float coatAlbedo;
+    vec3 transmitted;
 };
 
 // tableEntry is the specular albedo table's scale and bias at viewCosine(normal, toCamera) and this roughness.
@@ -108,6 +109,7 @@ ShadingPoint prepareShading(vec3 baseColour, float metallic, float roughness, ve
     point.coatAlpha = point.alpha;
     point.coatCompensation = 1.0;
     point.coatAlbedo = 0.0;
+    point.transmitted = vec3(0.0);
     return point;
 }
 
@@ -132,6 +134,36 @@ void addClearCoat(inout ShadingPoint point, float amount, float roughness, vec3 
     point.energyCompensation *= baseShare;
     point.specularAlbedo *= baseShare;
     point.diffuse *= baseShare;
+    point.transmitted *= baseShare;
+}
+
+/*
+* Light through a thin surface such as a leaf (addDiffuseTransmission in brdf.cpp): its far side's light comes through
+* as diffuse light, the diffuse colour times tint times share, cut so reflected and let through add to at most 1; the
+* reflection left as it was. Before addClearCoat.
+*/
+void addDiffuseTransmission(inout ShadingPoint point, float share, vec3 tint) {
+    if (!(share > 0.0)) {
+        return;
+    }
+
+    vec3 wanted = point.diffuse * tint * share;
+    vec3 room = vec3(1.0) - point.diffuse - point.specularAlbedo;
+    point.transmitted = clamp(wanted, vec3(0.0), max(room, vec3(0.0)));
+}
+
+bool transmitsLight(ShadingPoint point) {
+    return any(greaterThan(point.transmitted, vec3(0.0)));
+}
+
+// A light reaching the side seen through the surface, from behind it: its contact shadow would meet the surface itself.
+bool throughSurface(ShadingPoint point, vec3 toLight) {
+    return transmitsLight(point) && dot(point.normal, toLight) <= 0.0;
+}
+
+// The normal a shadow lookup lifts its point along: the geometric one, turned to the light's side for light coming through.
+vec3 shadowLiftNormal(ShadingPoint point, vec3 geometricNormal, vec3 toLight) {
+    return transmitsLight(point) && dot(geometricNormal, toLight) < 0.0 ? -geometricNormal : geometricNormal;
 }
 
 // Whether the reflection pass follows the coat's reflection rather than the base's: the smoother, the coat on a tie.
@@ -142,7 +174,8 @@ bool reflectsCoat(ShadingPoint point) {
 // Whether a light along toLight reaches the side of the surface the eye sees (facesLight in brdf.cpp), either layer's
 // with a clear coat: grazing or from behind gives nothing, so callers skip such a light before its shadow lookups.
 bool facesLight(ShadingPoint point, vec3 toLight) {
-    return dot(point.normal, toLight) > 0.0 || (point.coat > 0.0 && dot(point.coatNormal, toLight) > 0.0);
+    return dot(point.normal, toLight) > 0.0 || (point.coat > 0.0 && dot(point.coatNormal, toLight) > 0.0) ||
+           (transmitsLight(point) && dot(point.normal, toLight) < 0.0);
 }
 
 /*
@@ -168,6 +201,8 @@ void addLight(vec3 radiance, vec3 toLight, ShadingPoint point, inout vec3 diffus
             vec3 brdf = schlickFresnel(point.f0, vDotH) * (ggxDistribution(nDotH, point.alpha) * smithVisibility(point.nDotV, nDotL, point.alpha));
             specular += brdf * point.energyCompensation * incoming * pi;
         }
+    } else if (nDotL < 0.0 && transmitsLight(point)) {
+        diffuse += point.transmitted * radiance * -nDotL;
     }
 
     if (point.coat > 0.0) {
@@ -194,6 +229,11 @@ vec3 shadeAmbient(ShadingPoint point, vec3 ambient) {
     }
 
     return reflected;
+}
+
+// The light from all around behind a surface letting light through, come through to the side seen.
+vec3 shadeTransmittedAmbient(ShadingPoint point, vec3 behindLight) {
+    return behindLight * point.transmitted;
 }
 
 // A clear coat reflects the mirror light too, the base's stand-in.

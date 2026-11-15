@@ -272,6 +272,27 @@ namespace {
     }
 
     /*
+    * Light through a leaf (render/gpu/brdf.h, addDiffuseTransmission): its tint in diffuseTransmission's rgb (linear,
+    * never below 0) and its share in w (0 for none or below). Glass lets light through its own way, so a transparent
+    * material's packs as none.
+    */
+    void testDiffuseTransmissionIsPacked() {
+        Material leaf;
+        leaf.diffuseTransmission = 0.9f;
+        leaf.diffuseTransmissionTint = Vec3{0.8f, 1.0f, -0.4f};
+        assert(nearlyEqual(packMaterial(leaf).diffuseTransmission, 0.8f, 1.0f, 0.0f, 0.9f));
+
+        // None by default, below nothing, and none on glass.
+        assert(packMaterial(Material{}).diffuseTransmission[3] == 0.0f);
+        Material negative = leaf;
+        negative.diffuseTransmission = -1.0f;
+        assert(packMaterial(negative).diffuseTransmission[3] == 0.0f);
+        Material glass = leaf;
+        glass.transmission = 1.0f;
+        assert(packMaterial(glass).diffuseTransmission[3] == 0.0f);
+    }
+
+    /*
     * A height map for parallax occlusion mapping (render/gpu/parallax.h): its depth (texture units) in coatAndHeight.w,
     * 0 without the texture, and its slot in coatAndHeightTextures.w. Cut-outs and transparent materials take none: a
     * cut-out's holes come from the depth prepass at the unshifted place, and glass is drawn over what is behind it.
@@ -317,4 +338,5 @@ void testMaterialUniforms() {
     testThickGlassIsPacked();
     testClearCoatIsPacked();
     testHeightIsPacked();
+    testDiffuseTransmissionIsPacked();
 }

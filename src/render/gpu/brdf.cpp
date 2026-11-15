@@ -220,6 +220,31 @@ void addClearCoat(ShadingPoint& point, const ClearCoatProperties& coat, const Br
     point.energyCompensation = point.energyCompensation * baseShare;
     point.specularAlbedo = point.specularAlbedo * baseShare;
     point.diffuse = point.diffuse * baseShare;
+    point.transmitted = point.transmitted * baseShare;
+}
+
+void addDiffuseTransmission(ShadingPoint& point, float share, const Vec3& tint) {
+    if (!(share > 0.0f)) {
+        return;
+    }
+
+    const Vec3 wanted = point.diffuse * tint * share;
+    const Vec3 room = Vec3{1.0f, 1.0f, 1.0f} - point.diffuse - point.specularAlbedo;
+
+    point.transmitted = Vec3{std::clamp(wanted.x, 0.0f, std::max(room.x, 0.0f)), std::clamp(wanted.y, 0.0f, std::max(room.y, 0.0f)),
+                             std::clamp(wanted.z, 0.0f, std::max(room.z, 0.0f))};
+}
+
+bool transmitsLight(const ShadingPoint& point) {
+    return point.transmitted.x > 0.0f || point.transmitted.y > 0.0f || point.transmitted.z > 0.0f;
+}
+
+bool throughSurface(const ShadingPoint& point, const Vec3& toLight) {
+    return transmitsLight(point) && point.normal.dot(toLight) <= 0.0f;
+}
+
+Vec3 shadowLiftNormal(const ShadingPoint& point, const Vec3& geometricNormal, const Vec3& toLight) {
+    return transmitsLight(point) && geometricNormal.dot(toLight) < 0.0f ? geometricNormal * -1.0f : geometricNormal;
 }
 
 bool reflectsCoat(const ShadingPoint& point) {
@@ -227,7 +252,8 @@ bool reflectsCoat(const ShadingPoint& point) {
 }
 
 bool facesLight(const ShadingPoint& point, const Vec3& toLight) {
-    return point.normal.dot(toLight) > 0.0f || (point.coat > 0.0f && point.coatNormal.dot(toLight) > 0.0f);
+    return point.normal.dot(toLight) > 0.0f || (point.coat > 0.0f && point.coatNormal.dot(toLight) > 0.0f) ||
+           (transmitsLight(point) && point.normal.dot(toLight) < 0.0f);
 }
 
 /*
@@ -251,6 +277,8 @@ LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const V
             );
             response.specular = brdf * point.energyCompensation * radiance * (pi * nDotL);
         }
+    } else if (nDotL < 0.0f && transmitsLight(point)) {
+        response.diffuse = point.transmitted * radiance * -nDotL;
     }
 
     const float coatNDotL = point.coatNormal.dot(toLight);
@@ -283,6 +311,10 @@ Vec3 shadeAmbient(const ShadingPoint& point, const Vec3& ambient) {
     }
 
     return reflected;
+}
+
+Vec3 shadeTransmittedAmbient(const ShadingPoint& point, const Vec3& behindLight) {
+    return behindLight * point.transmitted;
 }
 
 Vec3 shadeProbeAmbient(const ShadingPoint& point, const Vec3& diffuseLight, const Vec3& specularLight) {

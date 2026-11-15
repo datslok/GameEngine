@@ -29,6 +29,7 @@ struct MaterialData {
     vec4 groundFacing;      // x, y: the normal's upward part where the top layer starts and is full; z: one over the warp's tile; w: one over the tone variation's
     uvec4 groundSlots;      // x: the strata warp's texture slot; y: the streaks'; z: the tone variation's
     vec4 groundStreaks;     // x: the streaks' strength; y: one over their width; z: one over their length; w: the tone variation's strength
+    vec4 diffuseTransmission; // light through a leaf (brdf.glsl, addDiffuseTransmission): rgb its tint (linear), w its share (0 none)
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

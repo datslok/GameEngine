@@ -6,4 +6,5 @@ void visit(MaterialSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Parallax self-shadows", settings.parallaxSelfShadows);
     visitor.field("Parallax steps", settings.parallaxSteps,
                   {.min = PARALLAX_FEWEST_STEPS, .max = PARALLAX_MOST_STEPS, .sliderMin = PARALLAX_FEWEST_STEPS, .sliderMax = PARALLAX_MOST_STEPS});
+    visitor.field("Light through leaves", settings.lightThroughLeaves);
 }

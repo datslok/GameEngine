@@ -2137,6 +2137,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.materialOptions[0] = settings.materials.parallax ? 1.0f : 0.0f;
     frameData.materialOptions[1] = settings.materials.parallaxSelfShadows ? 1.0f : 0.0f;
     frameData.materialOptions[2] = static_cast<float>(std::clamp(settings.materials.parallaxSteps, parallaxFewestSteps, parallaxMostSteps));
+    frameData.materialOptions[3] = settings.materials.lightThroughLeaves ? 1.0f : 0.0f;
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
     // (kept small: the shaders turn it into a float offset of the noise).

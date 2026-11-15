@@ -217,3 +217,16 @@ Material forestMossMaterial(AssetManager& assets, const std::string& assetFolder
     material.texture = assets.addTexture(mossStrandImage(forestMossTextureWidth, forestMossTextureHeight, colour, 0x4d4f5353u), forestLeafCutoff);
     return material;
 }
+
+void visit(ForestLeafLightSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Share", settings.share, {.min = 0.0f, .max = 4.0f, .sliderMax = 2.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Tint red", settings.tintRed, {.min = 0.0f, .max = 4.0f, .sliderMax = 2.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Tint green", settings.tintGreen, {.min = 0.0f, .max = 4.0f, .sliderMax = 2.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Tint blue", settings.tintBlue, {.min = 0.0f, .max = 4.0f, .sliderMax = 2.0f, .applies = FieldApplies::AtStartup});
+}
+
+Material withLeafLight(Material leaf, const ForestLeafLightSettings& settings) {
+    leaf.diffuseTransmission = settings.share;
+    leaf.diffuseTransmissionTint = Vec3{settings.tintRed, settings.tintGreen, settings.tintBlue};
+    return leaf;
+}

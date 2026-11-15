@@ -142,6 +142,10 @@ struct ShadingPoint {
     float coatAlpha = 0.0f;
     float coatCompensation = 1.0f;
     float coatAlbedo = 0.0f;
+
+    // Light through a thin surface (addDiffuseTransmission): the diffuse colour its far side sends through, none until
+    // one is added.
+    Vec3 transmitted;
 };
 
 ShadingPoint prepareShading(const SurfaceProperties& surface, const Vec3& normal, const Vec3& toCamera, const BrdfTable& table);
@@ -170,6 +174,33 @@ struct ClearCoatProperties {
 void addClearCoat(ShadingPoint& point, const ClearCoatProperties& coat, const BrdfTable& table);
 
 /*
+* Light through a thin surface such as a leaf (diffuse transmission; docs/JUNGLE.md, Light through leaves): what its far
+* side receives comes through as diffuse light on the side seen, evenly in every direction, as a leaf's many scatterings
+* inside leave it. Its colour is the diffuse colour times tint (a leaf's comes through deeper and yellower) times share
+* (about 1 for a leaf, which lets through about as much as it reflects); the reflection is left as it was, so a material's
+* look from the lit side does not change. Cut so the surface never sends out more than it receives: reflected (diffuse
+* and specular) and let through add to at most 1 in each channel. glTF's KHR_materials_diffuse_transmission splits the
+* diffuse colour between the sides instead; its colours map onto these. A share of nothing (or below) leaves the point
+* exactly as it was. Before addClearCoat, which dims it as the rest of the base.
+*/
+void addDiffuseTransmission(ShadingPoint& point, float share, const Vec3& tint);
+
+// Whether the point lets light through (addDiffuseTransmission): then a light behind it reaches the side seen too.
+bool transmitsLight(const ShadingPoint& point);
+
+/*
+* Whether a light along toLight reaches the side seen through the surface, from behind it: its contact shadow, marched
+* through the screen's depths, would meet the surface itself, so it is skipped.
+*/
+bool throughSurface(const ShadingPoint& point, const Vec3& toLight);
+
+/*
+* The normal a shadow lookup lifts its point along: the geometric one, turned to the light's side for light coming
+* through, so a backlit leaf is not lifted into its own shadow.
+*/
+Vec3 shadowLiftNormal(const ShadingPoint& point, const Vec3& geometricNormal, const Vec3& toLight);
+
+/*
 * Whether the reflection pass, which follows one reflection a pixel, follows the coat's rather than the base's: the
 * smoother of the two, the coat on a tie, since its mirror image is the sharper; the other layer keeps its stand-in.
 * Never without a coat.
@@ -181,12 +212,13 @@ struct LightResponse {
     Vec3 specular;
 };
 
-// Whether a light along toLight reaches the side of the surface the eye sees (either layer's, with a clear coat): grazing (a cosine of exactly 0) or from behind
-// gives nothing. Asked before a light's shadow lookups, which a light giving nothing would waste.
+// Whether a light along toLight reaches the side of the surface the eye sees (either layer's, with a clear coat, or through
+// it, for a surface letting light through): grazing (a cosine of exactly 0) or from behind gives nothing. Asked before a light's shadow lookups, which a light giving nothing would waste.
 bool facesLight(const ShadingPoint& point, const Vec3& toLight);
 
 // One light's reflected light towards the eye, for a light of the given radiance (irradiance when facing it) along toLight;
-// a clear coat's highlight is in the specular part, each layer lit only from in front of it.
+// a clear coat's highlight is in the specular part, each layer lit only from in front of it; the light through a surface
+// from behind it in the diffuse part.
 LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const Vec3& radiance);
 
 // The reflected light under uniform light of the given radiance from every direction.
@@ -198,6 +230,10 @@ Vec3 shadeAmbient(const ShadingPoint& point, const Vec3& ambient);
 * from shadeAmbient, whose grouping pictures without probes keep, so they stay the same to the last bit.
 */
 Vec3 shadeProbeAmbient(const ShadingPoint& point, const Vec3& diffuseLight, const Vec3& specularLight);
+
+// The light from all around behind a surface letting light through (the irradiance facing away from its normal), come
+// through to the side seen. Nothing for a surface letting nothing through.
+Vec3 shadeTransmittedAmbient(const ShadingPoint& point, const Vec3& behindLight);
 
 // The table as the GPU stores it: two 16-bit numbers per texel (scale, bias) for 0..1, row by row (rows are roughness).
 std::vector<std::uint16_t> brdfTableTexels(const BrdfTable& table);

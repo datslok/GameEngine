@@ -49,9 +49,12 @@ struct GpuMaterial {
     float groundFacing[4];
     std::uint32_t groundSlots[4];
     float groundStreaks[4];
+    // Light through a leaf (render/gpu/brdf.h, addDiffuseTransmission): rgb its tint (linear), w its share (0 none, and
+    // always on transparent materials).
+    float diffuseTransmission[4];
 };
 
-static_assert(sizeof(GpuMaterial) == 256, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 272, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

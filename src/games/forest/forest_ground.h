@@ -2,6 +2,7 @@
 
 #include "assets/asset_manager.h"
 #include "core/pixel.h"
+#include "core/settings_visitor.h"
 #include "scene/material.h"
 
 #include <array>
@@ -112,6 +113,24 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
 * cluster as a share of the cell.
 */
 Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare);
+
+/*
+* Light through the leaves (docs/JUNGLE.md, Light through leaves; Material::diffuseTransmission): a leaf lets through
+* about as much as it reflects, so share is about 1, the light coming through deeper and yellower than the leaf's own
+* colour, so the tint (linear) keeps less blue. The scans have no translucency maps; these stand in for them. Read at
+* start-up, when the leaves' materials are made; engine.render.materials.lightThroughLeaves switches it live.
+*/
+struct ForestLeafLightSettings {
+    float share = 1.0f;
+    float tintRed = 0.8f;
+    float tintGreen = 1.0f;
+    float tintBlue = 0.4f;
+};
+
+void visit(ForestLeafLightSettings& settings, SettingsVisitor& visitor);
+
+// A leaf's material letting light through as the settings say.
+Material withLeafLight(Material leaf, const ForestLeafLightSettings& settings);
 
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";
