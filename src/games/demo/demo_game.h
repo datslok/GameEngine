@@ -57,6 +57,7 @@ public:
     Vec3 getLightFocus() override;
     void onDebugDraw(const World& world, DebugDraw& debug, float alpha) override;
     bool wantsDebugView() const override;
+    bool setDebugView(bool on) override;
     void visitSettings(SettingsVisitor& visitor) override;
     std::vector<GoldenView> goldenViews() const override;
     void prepareGoldenView(World& world, const GoldenView& view) override;

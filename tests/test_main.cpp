@@ -46,6 +46,7 @@ void testGpuScene();
 void testDeferredChanges();
 void testDeterminism();
 void testEngineSettings();
+void testCpuTiming();
 void testBrdf();
 void testParallax();
 void testHeightMap();
@@ -314,6 +315,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testDeferredChanges", testDeferredChanges);
     runTest("testDeterminism", testDeterminism);
     runTest("testEngineSettings", testEngineSettings);
+    runTest("testCpuTiming", testCpuTiming);
     runTest("testBrdf", testBrdf);
     runTest("testParallax", testParallax);
     runTest("testHeightMap", testHeightMap);

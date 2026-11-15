@@ -4,7 +4,10 @@
 #include "render/gpu/debug_line_vertices.h"
 #include "scene/debug_draw.h"
 #include "scene/debug_text.h"
+#include "scene/camera.h"
+#include "scene/culling.h"
 #include "scene/frame_description.h"
+#include "scene/level_of_detail.h"
 #include "scene/mesh.h"
 #include "scene/model.h"
 
@@ -125,7 +128,17 @@ namespace {
         assert(nearlyEqual(meshBounds(Mesh{}).size(), Vec3{0.0f, 0.0f, 0.0f}));
     }
 
-    // The bounding-box view draws a box around every draw in the frame, through the same matrix the mesh is drawn with.
+    // A camera at place looking at target, 16:9, seeing 0.1 to 100 m.
+    Camera cameraAt(const Vec3& place, const Vec3& target) {
+        return Camera{place, target, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 16.0f / 9.0f, 0.1f, 100.0f};
+    }
+
+    // The levels a 1080-line view of that camera chooses.
+    LevelView levelsFor(const Camera& camera) {
+        return levelView(camera.getPosition(), 1080.0f, camera.getVerticalFov(), LevelOfDetailSettings{});
+    }
+
+    // The bounding-box view draws a box around every draw the camera draws, through the same matrix the mesh is drawn with.
     void testBoundingBoxView() {
         std::vector<DrawItem> draws(2);
         draws[0].mesh = MeshHandle{0};
@@ -137,8 +150,9 @@ namespace {
             Aabb{Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 2.0f, 2.0f}}
         };
 
+        const Camera camera = cameraAt(Vec3{0.0f, 0.0f, 10.0f}, Vec3{0.0f, 0.0f, 0.0f});
         DebugDraw debug;
-        drawBoundingBoxes(draws, bounds, debug);
+        drawBoundingBoxes(draws, bounds, camera, levelsFor(camera), debug);
 
         assert(debug.getLines().size() == 24);
         assert(nearlyEqual(std::abs(debug.getLines()[0].from.x - 5.0f), 1.0f));
@@ -147,8 +161,35 @@ namespace {
         std::vector<DrawItem> unknown(1);
         unknown[0].mesh = MeshHandle{7};
         DebugDraw none;
-        drawBoundingBoxes(unknown, bounds, none);
+        drawBoundingBoxes(unknown, bounds, camera, levelsFor(camera), none);
         assert(none.getLines().empty());
+    }
+
+    /*
+    * Only what the camera draws gets a box (tens of thousands of boxes for things off screen or drawn as something else
+    * cost the readout most of a frame): not what is behind it, not a shadow's stand-in, not a hidden draw, not an
+    * impostor while its tree is drawn near.
+    */
+    void testBoundingBoxesOnlyForWhatIsDrawn() {
+        const std::vector<Aabb> bounds = {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}};
+        std::vector<DrawItem> draws(5);
+
+        for (DrawItem& draw : draws) {
+            draw.mesh = MeshHandle{0};
+            draw.model = Mat4::translation(0.0f, 0.0f, -10.0f);
+        }
+
+        draws[1].model = Mat4::translation(0.0f, 0.0f, 10.0f);
+        draws[2].shadowOnly = true;
+        draws[3].hidden = true;
+        draws[4].hiddenBelowError = 1.0f;
+        attachBoundingSpheres(draws, bounds);
+
+        const Camera camera = cameraAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f});
+        DebugDraw debug;
+        drawBoundingBoxes(draws, bounds, camera, levelsFor(camera), debug);
+        assert(debug.getLines().size() == 12);
+        assert(nearlyEqual(debug.getLines()[0].from.z + 10.0f, 1.0f) || nearlyEqual(debug.getLines()[0].from.z + 10.0f, -1.0f));
     }
 
     bool sameLines(const DebugDraw& actual, const DebugDraw& expected) {
@@ -322,6 +363,7 @@ void testDebugDraw() {
     testCapsuleOutlinesItsSurface();
     testMeshBounds();
     testBoundingBoxView();
+    testBoundingBoxesOnlyForWhatIsDrawn();
     testShapeMatchesDirectCalls();
     testColliderView();
     testReadoutLines();

@@ -865,6 +865,11 @@ bool LightLabGame::wantsDebugView() const {
     return debugViewEnabled;
 }
 
+bool LightLabGame::setDebugView(bool on) {
+    debugViewEnabled = on;
+    return true;
+}
+
 void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Sun", [&] {
         visit(sunSettings, visitor);

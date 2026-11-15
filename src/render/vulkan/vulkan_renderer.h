@@ -505,6 +505,9 @@ private:
 
     RenderStats stats;
 
+    // The frame's CPU time by stage (render/cpu_timing.h), into stats when the frame is submitted.
+    CpuStageClock cpuClock;
+
     // The last frame's GPU timings read back and not yet handed to stats (each frame's are reported once), and the
     // cloth ticks that frame ran.
     GpuTimings unreportedGpuTimings;

@@ -145,6 +145,8 @@ void Application::run() {
         profiler.update(workEnd);
         gpuProfiler.update(workEnd);
         clothProfiler.update(workEnd);
+        sceneProfiler.update(workEnd);
+        renderProfiler.update(workEnd);
 
         // 0 means unlimited.
         if (settings.targetFPS > 0) {
@@ -338,12 +340,16 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
     Camera& camera = game.getCamera();
     FrameDescription frame = describeFrame(alpha, frameSeconds);
+    const double debugStart = profilerSeconds();
 
     // Debug shapes are gathered fresh every frame, so anything not added again disappears.
     debugDraw.clear();
 
     if (game.wantsDebugView()) {
-        drawBoundingBoxes(frame.draws, boundsByMesh, debugDraw);
+        // The boxes of what the camera draws, its levels chosen for the height last frame was drawn at.
+        const LevelView boxLevels = levelView(camera.getPosition(), static_cast<float>(renderer.getLastFrameStats().renderHeight),
+                                              camera.getVerticalFov(), settings.render.levelOfDetail);
+        drawBoundingBoxes(frame.draws, boundsByMesh, camera, boxLevels, debugDraw);
         drawColliders(world, alpha, debugDraw);
 
         // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
@@ -354,6 +360,8 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
         // Also from the previous window: the profiler shows a finished half second at a time.
         drawProfile(profiler, 2, true, profileDebugColour, debugDraw);
+        drawProfile(sceneProfiler, 2, false, profileDebugColour, debugDraw, true);
+        drawProfile(renderProfiler, 2, false, profileDebugColour, debugDraw, true);
         drawGpuProfile(gpuProfiler, debugDraw);
 
         // The cloth's passes by kind, only while some cloth runs on the GPU and only those kinds that took time; or why
@@ -369,6 +377,8 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
     const double renderStart = profilerSeconds();
     profiler.record(sceneSection, renderStart - sceneStart);
+    sceneProfiler.record(0, renderStart - sceneStart);
+    sceneProfiler.record(sceneStageSection(SceneStage::Debug), renderStart - debugStart);
     handOverClothWork(alpha);
     renderer.setClothPassTiming(game.wantsDebugView());
     const bool rendered = renderer.render(frame, settings.render, ui);
@@ -384,6 +394,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     const RenderStats& stats = renderer.getLastFrameStats();
     recordGpuTimings(gpuProfiler, stats.gpu);
     recordClothTimings(clothProfiler, stats.cloth);
+    recordCpuStageTimings(renderProfiler, stats.cpu);
     gpuClothTickEstimate = gpuClothTickSeconds(gpuClothTickEstimate, stats.gpu, stats.clothTicks);
     clothPassesUnmeasured = stats.cloth.overflowed;
 
@@ -403,12 +414,21 @@ void Application::handOverClothWork(float alpha) {
 }
 
 FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
+    // Each part's time, for the readout's SCENE line.
+    double partStart = profilerSeconds();
+    const auto partDone = [&](SceneStage stage) {
+        const double now = profilerSeconds();
+        sceneProfiler.record(sceneStageSection(stage), now - partStart);
+        partStart = now;
+    };
+
     FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory, jobs);
     frame.lightFocus = game.getLightFocus();
 
     // Probe events last one frame: this one carries them.
     clearProbeEvents(world);
     frame.frameSeconds = frameSeconds;
+    partDone(SceneStage::Build);
 
     /*
     * Each deforming mesh's shape at alpha, one mesh a job: its vertices, and its bounds in place of its rest shape's. A
@@ -433,11 +453,13 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
         boundsByMesh.at(deformed.mesh.index) = deformed.bounds;
     }
     attachShapes(frame.draws, frame.deformedMeshes);
+    partDone(SceneStage::Deform);
 
     // Spheres around each draw let the renderer skip what a view cannot see.
     attachBoundingSpheres(frame.draws, boundsByMesh);
     attachFlatFaces(frame.draws, flatFacesByMesh);
     attachMeshLevels(frame.draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
+    partDone(SceneStage::Attach);
 
     // The terrain's patches round the camera (scene/terrain.h), after the other draws: their bounds are their own.
     validateTerrain(settings.render.terrain);
@@ -446,6 +468,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
         frame.terrainHeights = terrain.heights;
         frame.terrainHeightsVersion = terrain.heightsVersion;
     });
+    partDone(SceneStage::Terrain);
 
     // The sky visibility grid's level, while its settings want it (each frame's check is a hash of the static draws).
     if (settings.render.skyVisibility.enabled) {
@@ -454,6 +477,8 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
         frame.staticLevelVersion = staticGeometry.getVersion();
         frame.staticAlbedo = staticGeometry.getAlbedo();
     }
+
+    partDone(SceneStage::Static);
     return frame;
 }
 

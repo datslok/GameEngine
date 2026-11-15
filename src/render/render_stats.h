@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/cpu_timing.h"
 #include "render/gpu/cloth_timing.h"
 #include "render/gpu/eye_adaptation.h"
 #include "render/gpu/gpu_timing.h"
@@ -83,4 +84,11 @@ struct RenderStats {
     // The width of the image the frame was presented in, in the pixels screen lines are drawn in (the debug
     // readout wraps to it); 0 before a frame was drawn.
     std::uint32_t outputWidth = 0;
+
+    // The height the scene was drawn at (before upscaling), which the camera's levels of detail are chosen for; 0
+    // before a frame was drawn.
+    std::uint32_t renderHeight = 0;
+
+    // The renderer's CPU time by stage this frame (render/cpu_timing.h).
+    CpuStageTimings cpu;
 };

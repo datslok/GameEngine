@@ -42,6 +42,7 @@ void Application::registerCommands() {
         runTick();
     });
     addCameraCommands(commands, game, world);
+    addDebugViewCommand(commands, game);
     game.addCommands(commands, world);
 
     commands.add("screenshot", "screenshot <file.png> [width height]",
@@ -193,6 +194,8 @@ CommandReply Application::stats() {
     const Camera& camera = game.getCamera();
     lines.push_back(cameraText(camera.getPosition(), camera.getForward()));
     lines.push_back(profileText(profiler, 2, true));
+    lines.push_back(profileText(sceneProfiler, 2, false, true));
+    lines.push_back(profileText(renderProfiler, 2, false, true));
     for (const std::string& line : gpuProfileLines(gpuProfiler)) {
         lines.push_back(line);
     }

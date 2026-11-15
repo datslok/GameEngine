@@ -2,6 +2,7 @@
 #include "math/transform.h"
 #include "physics/collider.h"
 #include "scene/interpolation.h"
+#include "scene/culling.h"
 #include "scene/debug_text.h"
 
 #include <algorithm>
@@ -15,11 +16,17 @@ namespace {
 }
 
 /*
-* Each part is drawn as its own mesh, so each gets its own box: a model made of several meshes shows several boxes.
+* Each part is drawn as its own mesh, so each gets its own box: a model made of several meshes shows several boxes. The
+* camera's frustum is the game's camera's, in OpenGL clip depth as its projection gives it.
 */
-void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, DebugDraw& debug) {
-    for (const DrawItem& draw : draws) {
-        if (!draw.mesh.isValid() || draw.mesh.index >= meshBounds.size()) {
+void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, const Camera& camera, const LevelView& levels,
+                       DebugDraw& debug) {
+    const Frustum view = Frustum::fromClipMatrix(camera.getProjectionMatrix() * camera.getViewMatrix(), ClipDepth::NegativeOneToOne);
+
+    for (const std::size_t index : visibleDraws(draws, view)) {
+        const DrawItem& draw = draws[index];
+
+        if (!draw.mesh.isValid() || draw.mesh.index >= meshBounds.size() || !chosenMesh(draw, levels).isValid()) {
             continue;
         }
 
@@ -202,6 +209,63 @@ std::array<std::string, 3> gpuProfileLines(const Profiler& profiler) {
 void drawGpuProfile(const Profiler& profiler, DebugDraw& debug) {
     for (const std::string& line : gpuProfileLines(profiler)) {
         writeReadout(debug, line, profileDebugColour);
+    }
+}
+
+const char* sceneStageName(SceneStage stage) {
+    switch (stage) {
+    case SceneStage::Build:
+        return "BUILD";
+    case SceneStage::Deform:
+        return "DEFORM";
+    case SceneStage::Attach:
+        return "ATTACH";
+    case SceneStage::Terrain:
+        return "TERRAIN";
+    case SceneStage::Static:
+        return "STATIC";
+    case SceneStage::Debug:
+        return "DEBUG";
+    }
+
+    return "PART";
+}
+
+int sceneStageSection(SceneStage stage) {
+    return static_cast<int>(stage) + 1;
+}
+
+Profiler makeSceneProfiler() {
+    Profiler profiler;
+    profiler.addSection("SCENE");
+
+    for (std::size_t stage = 0; stage < sceneStageCount; ++stage) {
+        profiler.addSection(sceneStageName(static_cast<SceneStage>(stage)));
+    }
+
+    return profiler;
+}
+
+Profiler makeCpuStageProfiler() {
+    Profiler profiler;
+    profiler.addSection("RENDER");
+
+    for (std::size_t stage = 0; stage < cpuStageCount; ++stage) {
+        profiler.addSection(cpuStageName(static_cast<CpuStage>(stage)));
+    }
+
+    return profiler;
+}
+
+void recordCpuStageTimings(Profiler& profiler, const CpuStageTimings& timings) {
+    if (!timings.valid) {
+        return;
+    }
+
+    profiler.record(0, timings.totalSeconds);
+
+    for (std::size_t stage = 0; stage < cpuStageCount; ++stage) {
+        profiler.record(static_cast<int>(stage) + 1, timings.seconds[stage]);
     }
 }
 

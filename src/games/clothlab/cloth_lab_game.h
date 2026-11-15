@@ -78,6 +78,7 @@ public:
     bool wantsMouseLook() const override;
     Vec3 getLightFocus() override;
     bool wantsDebugView() const override;
+    bool setDebugView(bool on) override;
     void onDebugDraw(const World& world, DebugDraw& debug, float alpha) override;
     void visitSettings(SettingsVisitor& visitor) override;
     std::vector<GoldenView> goldenViews() const override;
