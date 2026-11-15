@@ -56,11 +56,14 @@ float levelDistance(const BoundingSphere& bounds, const Vec3& eye);
 // The level a draw is drawn at in this view (as chooseLevel counts); unknown bounds keep the mesh itself.
 std::size_t drawLevel(const DrawItem& draw, const LevelView& view);
 
-// The mesh a draw is drawn with in this view: its own, or one of its levels.
+// The mesh a draw is drawn with in this view: its own, or one of its levels; none (an invalid handle) where it draws
+// nothing: an impostor not yet far enough, or a tree past its last level.
 MeshHandle chosenMesh(const DrawItem& draw, const LevelView& view);
 
 // How many of the chosen draws draw each level in this view (the F4 readout's).
 std::array<std::size_t, meshLevelSlots> levelsChosen(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, const LevelView& view);
 
-// Give each draw its mesh's levels, from a table indexed like MeshHandle (AssetManager::getMeshLevels), which must outlive the frame.
-void attachMeshLevels(std::vector<DrawItem>& draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh);
+// Give each draw its mesh's levels and options, from tables indexed like MeshHandle (AssetManager::getMeshLevels and
+// getMeshLevelOptions; the levels must outlive the frame), the options' shared box placed by the draw's model matrix.
+void attachMeshLevels(std::vector<DrawItem>& draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
+                      const std::vector<MeshLevelOptions>& optionsByMesh = {});

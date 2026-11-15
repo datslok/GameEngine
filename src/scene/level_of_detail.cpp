@@ -1,4 +1,5 @@
 #include "scene/level_of_detail.h"
+#include "scene/culling.h"
 
 #include <algorithm>
 #include <cmath>
@@ -58,33 +59,72 @@ float levelDistance(const BoundingSphere& bounds, const Vec3& eye) {
     return std::max((bounds.centre - eye).length() - bounds.radius, 0.0f);
 }
 
+namespace {
+    // The sphere a draw's level is chosen by: its options' shared box when it has one, else its own bounds.
+    const BoundingSphere& choosingSphere(const DrawItem& draw) {
+        return draw.levelBounds.radius >= 0.0f ? draw.levelBounds : draw.bounds;
+    }
+}
+
 std::size_t drawLevel(const DrawItem& draw, const LevelView& view) {
-    if (draw.levels.empty() || draw.bounds.radius < 0.0f) {
+    const BoundingSphere& sphere = choosingSphere(draw);
+
+    if (draw.levels.empty() || sphere.radius < 0.0f) {
         return 0;
     }
 
-    return chooseLevel(draw.levels, levelDistance(draw.bounds, view.eye), view);
+    return chooseLevel(draw.levels, levelDistance(sphere, view.eye), view);
 }
 
+/*
+* An impostor (hiddenBelowError above 0) is drawn only where its error fits, which is where its tree's last level,
+* drawing nothing, is chosen: the same error from the same sphere. With levels off it is never drawn, and the tree is
+* drawn whole.
+*/
 MeshHandle chosenMesh(const DrawItem& draw, const LevelView& view) {
+    if (draw.hiddenBelowError > 0.0f) {
+        const BoundingSphere& sphere = choosingSphere(draw);
+
+        if (!view.enabled || sphere.radius < 0.0f || errorInPixels(draw.hiddenBelowError, levelDistance(sphere, view.eye), view) > view.pixelError) {
+            return MeshHandle{};
+        }
+    }
+
     const std::size_t level = drawLevel(draw, view);
     return level == 0 ? draw.mesh : draw.levels[level - 1].mesh;
 }
 
+// Draws drawing nothing in this view (an impostor near, a tree far) are not counted.
 std::array<std::size_t, meshLevelSlots> levelsChosen(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, const LevelView& view) {
     std::array<std::size_t, meshLevelSlots> counts{};
 
     for (const std::size_t index : chosen) {
-        ++counts[std::min(drawLevel(draws[index], view), meshLevelSlots - 1)];
+        if (chosenMesh(draws[index], view).isValid()) {
+            ++counts[std::min(drawLevel(draws[index], view), meshLevelSlots - 1)];
+        }
     }
 
     return counts;
 }
 
-void attachMeshLevels(std::vector<DrawItem>& draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh) {
+void attachMeshLevels(std::vector<DrawItem>& draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
+                      const std::vector<MeshLevelOptions>& optionsByMesh) {
     for (DrawItem& draw : draws) {
-        if (draw.mesh.isValid() && draw.mesh.index < levelsByMesh.size()) {
+        if (!draw.mesh.isValid()) {
+            continue;
+        }
+
+        if (draw.mesh.index < levelsByMesh.size()) {
             draw.levels = levelsByMesh[draw.mesh.index];
+        }
+
+        if (draw.mesh.index < optionsByMesh.size()) {
+            const MeshLevelOptions& options = optionsByMesh[draw.mesh.index];
+            draw.hiddenBelowError = options.hiddenBelowError;
+
+            if (options.chooseBounds) {
+                draw.levelBounds = boundingSphere(*options.chooseBounds, draw.model);
+            }
         }
     }
 }

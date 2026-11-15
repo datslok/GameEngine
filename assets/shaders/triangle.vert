@@ -7,6 +7,7 @@
 #include "planar_reflection.glsl"
 #include "render/gpu/reflection_probe_shared.h"
 #include "terrain_data.glsl"
+#include "impostor.glsl"
 
 // Whether this pipeline draws a capture (a reflection probe's cube face, or a flat mirror's picture): its
 // view-projection comes as push constants (render/gpu/reflection_probe.h, cubeFaceViewProjection;
@@ -80,6 +81,34 @@ void main() {
         framePosition = land.position;
         worldNormal = land.normal;
         worldTangent = land.tangent;
+        return;
+    }
+
+    /*
+    * An impostor's card (scene/impostor.h): its corners carry the tree's middle and radius (the normal's x); turned here
+    * to face the viewer (a capture's own eye), its axes the frame plane's for the way the viewer looks, so the bake's
+    * frames and the card agree. The fragment shader gets the card point (offset from the middle over the radius) and the
+    * view direction in the tree's frame, and the tree's axes to turn the baked normals into the world.
+    */
+    if (instance.material.w == 1u) {
+        vec3 treeScale = projectionScale(mat3(instance.model));
+        mat3 treeAxes = projectionAxes(mat3(instance.model), treeScale);
+        vec3 middle = (model * vec4(position - vec3(uv * normal.x, 0.0), 1.0)).xyz;
+        vec3 viewer = captureView ? captureEye.xyz : vec3(0.0);
+        vec3 toViewer = normalize(viewer - middle);
+        vec3 viewDirection = transpose(treeAxes) * toViewer;
+        vec3 right = impostorFrameRight(viewDirection);
+        vec3 up = impostorFrameUp(viewDirection, right);
+        vec3 cardPoint = right * uv.x + up * uv.y;
+        relativePosition = middle + treeAxes * (cardPoint * normal.x * treeScale);
+        gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
+        gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
+        viewerPosition = captureView ? captureEye.xyz : vec3(0.0);
+        textureUv = uv * 0.5 + 0.5;
+        frameAxes = treeAxes;
+        framePosition = cardPoint;
+        worldNormal = toViewer;
+        worldTangent = vec4(viewDirection, 1.0);
         return;
     }
 

@@ -21,6 +21,7 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     instance.material[0] = material;
     instance.material[1] = draw.mesh.index;
     instance.material[2] = draw.terrainPatch >= 0 ? static_cast<std::uint32_t>(draw.terrainPatch) + 1 : 0u;
+    instance.material[3] = draw.material.impostorFrames > 0 ? 1u : 0u;
     return instance;
 }
 
@@ -209,12 +210,18 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
         std::size_t index = 0;
     };
 
-    std::vector<Keyed> keyed(chosen.size());
+    std::vector<Keyed> keyed;
+    keyed.reserve(chosen.size());
 
     for (std::size_t position = 0; position < chosen.size(); ++position) {
         const std::size_t index = chosen[position];
         const MeshHandle mesh = levels != nullptr ? chosenMesh(draws[index], *levels) : draws[index].mesh;
-        keyed[position] = Keyed{style(index), mesh.index, index};
+
+        if (!mesh.isValid()) {
+            continue;
+        }
+
+        keyed.push_back(Keyed{style(index), mesh.index, index});
     }
 
     std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) {

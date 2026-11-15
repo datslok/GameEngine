@@ -28,7 +28,7 @@ struct GpuMaterial {
     // x: glass's transmission, 0..1 (render/gpu/transparency.h); y: thick glass's thickness (model units, 0 for thin
     // glass); z: 1 over its attenuation distance (0 absorbs nothing); w: its index of refraction
     float transmission[4];
-    float attenuation[4];    // rgb: the colour light keeps after the attenuation distance; w: 0
+    float attenuation[4];    // rgb: the colour light keeps after the attenuation distance; w: an impostor's frames a side (0 none)
     // A clear coat (render/gpu/brdf.h, addClearCoat): x how much, 0..1 (0 none, and always on transparent materials);
     // y its roughness, 0..1; z its normal map's scale (0 without one, so it lies on the geometry); and w the height map's
     // depth for parallax (render/gpu/parallax.h; texture units, 0 for none, and always on cut-outs and transparent materials)

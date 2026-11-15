@@ -38,7 +38,7 @@ struct GpuInstance {
     float model[16];        // places the vertex in the world
     float normalMatrix[16]; // inverse transpose of the model's 3x3 part (zero if squashed flat)
     float handedness[4];    // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale), for lengths in model units
-    std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none)
+    std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: 1 for an impostor's card
 };
 
 static_assert(sizeof(GpuInstance) == 160, "GpuInstance must match the shader's InstanceData struct");
@@ -176,7 +176,7 @@ struct BatchedDraws {
 * Group the chosen draws (indices into draws) by how they are drawn (plain, double-sided, cut-out, double-sided cut-out)
 * and then by mesh, meshes in handle order and each mesh's draws in the order they were chosen, so the same frame always gives the same instances. Instances are numbered from firstInstance, for views that
 * write theirs after another view's in the same buffer (shadow tiles). With a view, each draw is drawn with the mesh
-* its level of detail picks there (scene/level_of_detail.h), and grouped by it.
+* its level of detail picks there (scene/level_of_detail.h), and grouped by it; a draw drawing nothing there is left out.
 */
 BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance = 0,
                          const LevelView* levels = nullptr);

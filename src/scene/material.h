@@ -76,6 +76,10 @@ struct Material {
     // behind. One-sided surfaces skip their backs, as a closed mesh's are never seen.
     bool doubleSided = false;
 
+    // An impostor (scene/impostor.h): its colour and normal textures are atlases of frames x frames pictures of a tree from
+    // over the hemisphere, which the shaders blend on a card facing the viewer. 0 for every other material.
+    int impostorFrames = 0;
+
     // Thin glass (KHR_materials_transmission): the share of the light from behind that passes through the non-metal part
     // (0..1), tinted by the colour, less what its surface reflects; its texture's red channel (linear) multiplies it.
     // A transmitting material is drawn after the opaque scene, blended over it (render/gpu/transparency.h).

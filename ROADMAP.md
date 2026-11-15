@@ -358,7 +358,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] Levels chosen per view by their error in pixels: trees, plants and rock shapes (`tree-lod`)
   - [x] Shadows from the same levels, each tile choosing by its own texels (`shadow-lod`)
   - [x] The terrain's own level of detail, CDLOD (`terrain-lod`)
-- [ ] Impostors (moved from phase 14): far trees and plants as cards baked from their full meshes from several directions, so a valley's canopy of tens of thousands of trees costs little
+- [ ] Impostors (moved from phase 14): far trees and plants as cards baked from their full meshes from several directions, so a valley's canopy of tens of thousands of trees costs little (trees done in `tree-impostors`: hemi-octahedral cards baked on the CPU; plants not yet; a switch for the cards alone offered)
 - [ ] Occlusion culling (moved from phase 14): culling in compute against last frame's depth pyramid (Hi-Z), so what hides behind the Monolith or a pillar is not drawn
 - [ ] Texture compression (moved from phase 12's asset cooking): BC7 colour and BC5 normal maps, about a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB
 - [ ] Far terrain following the camera, only if needed: the rough valley's fixed rings reach 20 km round the walk

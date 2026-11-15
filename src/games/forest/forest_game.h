@@ -172,6 +172,7 @@ public:
     const std::vector<TreePlacement>& getMidPlacements() const;
     // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, the emergents, the mid layer.
     const std::vector<Entity>& getTrees() const;
+    const std::vector<Entity>& getTreeImpostors() const;
     // The understorey's settings and places, and each plant's leaves and then its shadow's stand-in, plant by plant.
     ForestUnderstoreySettings& getUnderstoreySettings();
     const std::vector<UnderstoreyPlacement>& getUnderstoreyPlacements() const;
@@ -235,6 +236,7 @@ private:
     std::vector<UnderstoreyPlacement> understoreyPlacements;
     std::vector<Entity> understorey;
     std::vector<Entity> trees;
+    std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;
     std::vector<Entity> monolith;
     Entity sun;
