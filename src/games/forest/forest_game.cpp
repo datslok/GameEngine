@@ -371,7 +371,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
 
     // The roots and vines in the islands' own frames, placed and turned as their rock (none when the settings give none).
     const Material bark = forestLayerMaterial(assets, assetFolder, forestBarkLayer);
-    const Material leaf = forestLeafMaterial(assets, assetFolder);
+    const Material leaf = withLeafLight(forestLeafMaterial(assets, assetFolder), leafLightSettings);
 
     const Material mossMaterial = forestMossMaterial(assets, assetFolder);
 
@@ -454,7 +454,8 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
 
     // Both species' leaves from one clusters' texture while their leaves and texels match (the defaults).
     const auto leafFor = [&](const ForestTreeSettings& settings) {
-        return forestLeafClusterMaterial(assets, assetFolder, forestTreeLeafTint, settings.clusterTexels, settings.leafLength / settings.clusterSize);
+        return withLeafLight(forestLeafClusterMaterial(assets, assetFolder, forestTreeLeafTint, settings.clusterTexels, settings.leafLength / settings.clusterSize),
+                             leafLightSettings);
     };
     const Material canopyLeaf = leafFor(treeSettings);
     const bool sameLeaves = emergentSettings.clusterTexels == treeSettings.clusterTexels &&
@@ -529,13 +530,13 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
         if (std::filesystem::exists(file)) {
             for (const ModelPart& part : assets.loadModel(file.string()).parts) {
                 plants.push_back(footedPlant(placedPart(part)));
-                materials.push_back(assets.makeMaterial(part.material));
+                materials.push_back(withLeafLight(assets.makeMaterial(part.material), leafLightSettings));
             }
         }
 
         if (plants.empty()) {
             plants.push_back(understoreyStandIn());
-            Material material = plainMaterial(understoreyStandInColour, 0.7f);
+            Material material = withLeafLight(plainMaterial(understoreyStandInColour, 0.7f), leafLightSettings);
             material.doubleSided = true;
             materials.push_back(material);
         }
@@ -585,6 +586,8 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
             Material cardMaterial = impostorMaterial(assets.addTexture(baked.colour, impostorCoverageCutoff), assets.addTexture(baked.normal),
                                                      understoreySettings.impostorFrames);
             cardMaterial.roughness = material.roughness;
+            cardMaterial.diffuseTransmission = material.diffuseTransmission;
+            cardMaterial.diffuseTransmissionTint = material.diffuseTransmissionTint;
             variants[static_cast<std::size_t>(kind)].push_back(PlantVariant{leaves, shadow, material, card, cardMaterial});
         }
     }
@@ -670,6 +673,8 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         cardMaterials.push_back(impostorMaterial(assets.addTexture(baked.colour, impostorCoverageCutoff), assets.addTexture(baked.normal),
                                                  settings.impostorFrames));
         cardMaterials.back().roughness = leaf.roughness;
+        cardMaterials.back().diffuseTransmission = leaf.diffuseTransmission;
+        cardMaterials.back().diffuseTransmissionTint = leaf.diffuseTransmissionTint;
 
         // The levels of detail (docs/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing.
         assets.setMeshLevels(barkMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
@@ -840,6 +845,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Mid trees", [&] {
         visit(midSettings, visitor);
+    });
+    visitor.group("Leaf light", [&] {
+        visit(leafLightSettings, visitor);
     });
     visitor.group("Understorey", [&] {
         visit(understoreySettings, visitor);

@@ -655,6 +655,130 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Light through a leaf (diffuse transmission, docs/JUNGLE.md, Light through leaves): none changes nothing, to the last
+    * bit, so every other material draws as before; a light behind it still gives nothing.
+    */
+    void testNoTransmissionChangesNothing() {
+        SurfaceProperties leaf;
+        leaf.baseColour = Vec3{0.05f, 0.12f, 0.02f};
+        leaf.roughness = 0.5f;
+        const ShadingPoint plain = prepareShading(leaf, up, viewAt(0.6f), table());
+        ShadingPoint none = plain;
+        addDiffuseTransmission(none, 0.0f, white);
+
+        assert(sameVec(none.transmitted, Vec3{}) && !transmitsLight(none));
+        const Vec3 behind{0.3f, -0.9f, 0.1f};
+        assert(!facesLight(none, behind.normalized()));
+        const LightResponse response = shadeLight(none, behind.normalized(), white);
+        assert(sameVec(response.diffuse, Vec3{}) && sameVec(response.specular, Vec3{}));
+        assert(sameVec(shadeTransmittedAmbient(none, white), Vec3{}));
+
+        // The shadow lookup's lift and the contact shadow follow the shading normal's side as before.
+        const Vec3 geometric{0.0f, 1.0f, 0.0f};
+        assert(sameVec(shadowLiftNormal(none, geometric, behind.normalized()), geometric));
+        assert(!throughSurface(none, behind.normalized()));
+    }
+
+    /*
+    * A leaf lit from behind: the light its far side receives comes through as diffuse light on the side seen, the leaf's
+    * diffuse colour times the tint times the share, by the cosine on the far side; no highlight (the leaf's gloss is
+    * only on the lit side). From in front it shades exactly as without.
+    */
+    void testLightComesThroughALeaf() {
+        SurfaceProperties leaf;
+        leaf.baseColour = Vec3{0.05f, 0.12f, 0.02f};
+        leaf.roughness = 0.5f;
+        const ShadingPoint plain = prepareShading(leaf, up, viewAt(0.7f), table());
+        ShadingPoint lit = plain;
+        const Vec3 tint{0.8f, 1.0f, 0.4f};
+        addDiffuseTransmission(lit, 0.9f, tint);
+
+        assert(transmitsLight(lit) && nearVec(lit.transmitted, plain.diffuse * tint * 0.9f, 1e-7f));
+        assert(sameVec(lit.diffuse, plain.diffuse) && sameVec(lit.specularAlbedo, plain.specularAlbedo));
+
+        const Vec3 behind = Vec3{0.6f, -0.8f, 0.0f};
+        assert(facesLight(lit, behind));
+        const LightResponse through = shadeLight(lit, behind, Vec3{2.0f, 2.0f, 2.0f});
+        assert(nearVec(through.diffuse, lit.transmitted * 2.0f * 0.8f, 1e-6f) && sameVec(through.specular, Vec3{}));
+
+        // Deeper and yellower than the leaf's own green: less blue for its green.
+        assert(through.diffuse.z / through.diffuse.y < plain.diffuse.z / plain.diffuse.y);
+
+        const Vec3 front = Vec3{-0.5f, 0.7f, 0.2f}.normalized();
+        const LightResponse before = shadeLight(plain, front, white);
+        const LightResponse after = shadeLight(lit, front, white);
+        assert(sameVec(before.diffuse, after.diffuse) && sameVec(before.specular, after.specular));
+
+        // Grazing along it gives nothing either way.
+        assert(sameVec(shadeLight(lit, Vec3{1.0f, 0.0f, 0.0f}, white).diffuse, Vec3{}));
+
+        // The light from all around behind it comes through the same way.
+        assert(nearVec(shadeTransmittedAmbient(lit, Vec3{0.5f, 0.5f, 0.5f}), lit.transmitted * 0.5f, 1e-7f));
+    }
+
+    /*
+    * A leaf never sends out more than it receives: what it reflects (diffuse and specular) and what it lets through add
+    * to at most all of it, so the share is cut where a bright leaf would break that. The furnace from both sides: the
+    * same light from every direction round it returns at most all of it, and all of it for a white leaf letting
+    * everything it can through.
+    */
+    void testTransmissionKeepsEnergy() {
+        SurfaceProperties pale;
+        pale.baseColour = Vec3{0.9f, 0.9f, 0.9f};
+        pale.roughness = 0.6f;
+        ShadingPoint point = prepareShading(pale, up, viewAt(0.5f), table());
+        addDiffuseTransmission(point, 1.0f, white);
+
+        for (int channel = 0; channel < 3; ++channel) {
+            assert(point.transmitted[channel] >= 0.0f);
+            assert(point.diffuse[channel] + point.specularAlbedo[channel] + point.transmitted[channel] <= 1.0f + 1e-6f);
+            assert(point.transmitted[channel] < point.diffuse[channel]);
+        }
+
+        // Even light from every direction round the leaf: the front hemisphere reflected, the back let through.
+        const Vec3 returned = shadeAmbient(point, white) + shadeTransmittedAmbient(point, white);
+        assert(returned.x <= 1.0f + 1e-5f && returned.x > 0.99f);
+
+        // A dark leaf is not cut.
+        SurfaceProperties dark;
+        dark.baseColour = Vec3{0.05f, 0.12f, 0.02f};
+        ShadingPoint leaf = prepareShading(dark, up, viewAt(0.5f), table());
+        addDiffuseTransmission(leaf, 1.0f, white);
+        assert(nearVec(leaf.transmitted, leaf.diffuse, 1e-7f));
+
+        // A negative share or tint lets nothing through.
+        ShadingPoint negative = prepareShading(dark, up, viewAt(0.5f), table());
+        addDiffuseTransmission(negative, -1.0f, white);
+        assert(!transmitsLight(negative));
+    }
+
+    /*
+    * The shadow of light coming through: the lookup's point is lifted off the leaf towards the light (the geometric normal
+    * turned to the light's side), or a backlit leaf would read its own shadow; the screen's contact shadow, which would
+    * meet the leaf itself on its march, is skipped for that light. A clear coat over it dims the light through as it dims
+    * the rest of the base.
+    */
+    void testShadowsOfLightThroughALeaf() {
+        SurfaceProperties leaf;
+        leaf.baseColour = Vec3{0.05f, 0.12f, 0.02f};
+        ShadingPoint point = prepareShading(leaf, up, viewAt(0.7f), table());
+        addDiffuseTransmission(point, 1.0f, white);
+
+        const Vec3 geometric{0.0f, 1.0f, 0.0f};
+        const Vec3 behind = Vec3{0.6f, -0.8f, 0.0f};
+        const Vec3 front = Vec3{0.6f, 0.8f, 0.0f};
+        assert(sameVec(shadowLiftNormal(point, geometric, behind), geometric * -1.0f));
+        assert(sameVec(shadowLiftNormal(point, geometric, front), geometric));
+        assert(throughSurface(point, behind) && !throughSurface(point, front));
+
+        const Vec3 before = point.transmitted;
+        addClearCoat(point, ClearCoatProperties{.amount = 1.0f, .roughness = 0.2f, .normal = up}, table());
+        assert(nearVec(point.transmitted, before * (1.0f - point.coatAlbedo), 1e-7f));
+    }
+}
+
 void testBrdf() {
     testGgxSamples();
     testRoughnessIsClampedAndSquared();
@@ -683,4 +807,8 @@ void testBrdf() {
     testCoatIgnoresTheNormalMap();
     testCoatFacesItsOwnLights();
     testReflectionFollowsTheSmootherLayer();
+    testNoTransmissionChangesNothing();
+    testLightComesThroughALeaf();
+    testTransmissionKeepsEnergy();
+    testShadowsOfLightThroughALeaf();
 }

@@ -218,6 +218,7 @@ private:
     ForestTreeSettings emergentSettings = emergentTreeSettings();
     ForestTreeSettings midSettings = midTreeSettings();
     ForestUnderstoreySettings understoreySettings;
+    ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.

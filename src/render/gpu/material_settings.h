@@ -21,6 +21,10 @@ struct MaterialSettings {
     // The most steps a pixel's search takes, at grazing views (looking straight down it takes PARALLAX_FEWEST_STEPS):
     // fewer is cheaper, with stair steps showing on steep bumps seen side-on.
     int parallaxSteps = 32;
+
+    // Light through leaves (render/gpu/brdf.h, addDiffuseTransmission): a leaf lit from behind glows with the light its
+    // far side receives.
+    bool lightThroughLeaves = true;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

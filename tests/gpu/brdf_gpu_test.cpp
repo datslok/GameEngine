@@ -310,6 +310,68 @@ namespace {
 
 namespace {
     /*
+    * Light through a leaf over the shading cases: a quarter letting nothing through (which must leave everything as it
+    * was), the rest a share up to 1.5 (so bright surfaces are cut) and a tint, half the lights turned behind the surface.
+    * Outputs per case: (transmitted, lets light through), (addLight's diffuse, faces the light), (its specular, light
+    * through the surface), shadeTransmittedAmbient, the shadow's lift normal.
+    */
+    void checkDiffuseTransmission(GpuFunctionRunner& runner, GpuCheckReport& report, std::vector<ShadingCase> cases, const BrdfTable& table) {
+        CaseRandom random{1217};
+        std::vector<float> shares;
+        std::vector<Vec3> tints;
+        std::vector<Vec3> geometricNormals;
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            if (i % 2 == 1) {
+                cases[i].toLight = cases[i].toLight * -1.0f;
+            }
+
+            shares.push_back(i % 4 == 0 ? 0.0f : random.between(0.0f, 1.5f));
+            tints.push_back(Vec3{random.between(0.2f, 1.0f), random.between(0.2f, 1.0f), random.between(0.2f, 1.0f)});
+            geometricNormals.push_back((cases[i].normal + random.direction() * 0.3f).normalized());
+        }
+
+        const std::vector<GpuVec4> inputs = shadingInputs(cases, table);
+        std::vector<GpuVec4> withTransmission;
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            withTransmission.insert(withTransmission.end(), inputs.begin() + static_cast<std::ptrdiff_t>(i * 6), inputs.begin() + static_cast<std::ptrdiff_t>(i * 6 + 6));
+            withTransmission.push_back(gpuVec4(tints[i], shares[i]));
+            withTransmission.push_back(gpuVec4(geometricNormals[i]));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_DIFFUSE_TRANSMISSION, withTransmission, 8, 5);
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            ShadingPoint point = prepareShading(cases[i].surface, cases[i].normal, cases[i].toCamera, table);
+            addDiffuseTransmission(point, shares[i], tints[i]);
+            const LightResponse expected = shadeLight(point, cases[i].toLight, cases[i].radiance);
+            const GpuVec4* actual = &outputs[i * 5];
+
+            report.check("addDiffuseTransmission", arithmeticTolerance, point.transmitted, vec3From(actual[0]));
+            report.check("diffuse transmission addLight diffuse", arithmeticTolerance, expected.diffuse, vec3From(actual[1]));
+            report.check("diffuse transmission addLight specular", specularTolerance(point, cases[i].toLight), expected.specular, vec3From(actual[2]));
+            report.check("shadeTransmittedAmbient", arithmeticTolerance, shadeTransmittedAmbient(point, cases[i].radiance), vec3From(actual[3]));
+
+            // Decisions match exactly, away from grazing lights (as in checkFacesLight) and transmission at the edge of zero.
+            const bool clearlyTransmits = !transmitsLight(point) || std::max({point.transmitted.x, point.transmitted.y, point.transmitted.z}) > 1e-6f;
+
+            if (clearlyTransmits) {
+                report.check("transmitsLight", exactTolerance, transmitsLight(point) ? 1.0f : 0.0f, actual[0][3]);
+
+                if (std::abs(point.normal.dot(cases[i].toLight)) > 1e-6f) {
+                    report.check("diffuse transmission facesLight", exactTolerance, facesLight(point, cases[i].toLight) ? 1.0f : 0.0f, actual[1][3]);
+                    report.check("throughSurface", exactTolerance, throughSurface(point, cases[i].toLight) ? 1.0f : 0.0f, actual[2][3]);
+                }
+
+                if (std::abs(geometricNormals[i].dot(cases[i].toLight)) > 1e-6f) {
+                    report.check("shadowLiftNormal", exactTolerance, shadowLiftNormal(point, geometricNormals[i], cases[i].toLight), vec3From(actual[4]));
+                }
+            }
+        }
+    }
+
+    /*
     * GGX's sampled facet normals over whole sample sets at every roughness, and directions turned round normals all
     * over the sphere, straight up and down included. Inputs per case: (sample, samples, alpha, 0), (normal, 0), (local
     * direction, 0).
@@ -355,4 +417,5 @@ void gpuTestBrdf(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkAddLight(runner, report, cases, table);
     checkFacesLight(runner, report, cases, table);
     checkClearCoat(runner, report, cases, table);
+    checkDiffuseTransmission(runner, report, cases, table);
 }

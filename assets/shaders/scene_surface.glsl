@@ -642,8 +642,9 @@ void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 d
     int firstTile = points[i].firstShadowTile;
 
     if (firstTile >= 0) {
-        radiance *= mix(vec3(1.0), pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius) * lightContactShadow(i),
-                        points[i].shadowStrength);
+        float contact = throughSurface(point, toLight) ? 1.0 : lightContactShadow(i);
+        radiance *= mix(vec3(1.0), pointLightShadow(firstTile, points[i].positionRange.xyz, shadowLiftNormal(point, geometricNormal, toLight), points[i].emitterRadius) *
+                                       contact, points[i].shadowStrength);
 #ifdef GLASS_SHADOW_RAYS
         // To the bulb's surface, not its centre, so glass round the bulb itself does not tint its own light.
         if (any(greaterThan(radiance, vec3(0.0)))) {
@@ -739,8 +740,8 @@ void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 di
     int tile = spots[i].shadowTile;
 
     if (tile >= 0) {
-        radiance *= mix(vec3(1.0), softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius) *
-                                       (image ? 1.0 : lightContactShadow(CONTACT_SPOT_SLOT_BASE + i)), spots[i].shadowStrength);
+        radiance *= mix(vec3(1.0), softShadowFromTile(tile, offsetForShadow(tile, shadowLiftNormal(point, geometricNormal, toLight), distance), spots[i].emitterRadius) *
+                                       (image || throughSurface(point, toLight) ? 1.0 : lightContactShadow(CONTACT_SPOT_SLOT_BASE + i)), spots[i].shadowStrength);
 #ifdef GLASS_SHADOW_RAYS
         if (any(greaterThan(radiance, vec3(0.0)))) {
             radiance *= mix(vec3(1.0), glassShadow(toLight, glassReach), spots[i].shadowStrength);
@@ -1173,6 +1174,11 @@ void main() {
     vec2 tableEntry = sampleBrdfTable(viewCosine(shadingNormal, toCamera), roughness);
     ShadingPoint point = prepareShading(albedo.rgb, metallic, roughness, shadingNormal, toCamera, tableEntry);
 
+    // Light through a leaf (brdf.glsl, addDiffuseTransmission): before the clear coat, which dims it with the rest.
+    if (materialOptions.w > 0.5 && material.diffuseTransmission.w > 0.0) {
+        addDiffuseTransmission(point, material.diffuseTransmission.w, material.diffuseTransmission.rgb);
+    }
+
 #ifndef TRANSPARENT
     // A clear coat (render/gpu/brdf.h, addClearCoat), unless switched off: its amount, roughness and normal from its
     // textures, read only on coated materials (where parallax moved the others), at the steps taken above. It lies on the
@@ -1215,13 +1221,15 @@ void main() {
             int tile = directional[i].shadowTile;
 
             if (tile >= 0) {
-                radiance *= sunShadow(tile, directional[i].cascadeCount, directional[i].mirrorShadowTile, directional[i].mirrorCascadeCount, geometricNormal,
-                                      directional[i].toLight.xyz, directional[i].tanAngularRadius, directional[i].farShadowTile,
-                                      directional[i].distantOccluderReach);
+                // Lifted towards the light for light coming through a leaf (shadowLiftNormal), not into its own shadow.
+                radiance *= sunShadow(tile, directional[i].cascadeCount, directional[i].mirrorShadowTile, directional[i].mirrorCascadeCount,
+                                      shadowLiftNormal(point, geometricNormal, directional[i].toLight.xyz), directional[i].toLight.xyz,
+                                      directional[i].tanAngularRadius, directional[i].farShadowTile, directional[i].distantOccluderReach);
 
                 // The brightest light's short shadows the shadow map misses, from the camera's own depths (none in
-                // captures, which have no depth image of their own, or for glass, which is not in it).
-                if (i == 0 && contactShadowOptions.x > 0.5 && !captureView && !transparentView) {
+                // captures, which have no depth image of their own, or for glass, which is not in it, or for light
+                // coming through a leaf, whose march would meet the leaf itself).
+                if (i == 0 && contactShadowOptions.x > 0.5 && !captureView && !transparentView && !throughSurface(point, directional[i].toLight.xyz)) {
                     radiance *= texelFetch(contactShadows, ivec2(gl_FragCoord.xy), 0).r;
                 }
 #ifdef GLASS_SHADOW_RAYS
@@ -1323,12 +1331,22 @@ void main() {
     vec3 mirrorLight = flatAmbient();
     vec3 diffuseLight = flatAmbient();
 
+    // For a leaf letting light through, the light from all around behind it (read along the reversed normals) comes
+    // through too (shadeTransmittedAmbient).
+    bool lightThrough = transmitsLight(point);
+    vec3 behindLight = flatAmbient();
+
     if (probesOn) {
         vec3 reflected = reflect(-toCamera, shadingNormal);
         ProbeLights probeLights = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, 0, true);
         mirrorLight = probeLights.still.specular + probeLights.fast.specular;
         diffuseLight = probeLights.still.diffuse + probeLights.fast.diffuse;
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
+
+        if (lightThrough) {
+            ProbeLights behind = probeAmbient(relativePosition, -geometricNormal, -shadingNormal, reflected, toCamera, 0, false);
+            behindLight = behind.still.diffuse + behind.fast.diffuse;
+        }
     }
 
     // Without probes, the flat ambient for the sky the point sees and the light the surfaces round it bounce back (the
@@ -1342,6 +1360,7 @@ void main() {
         diffuseLight = flatAmbient() * skyShare;
         mirrorLight = flatAmbient() * skyLightAlong(sky.visibility, sky.bounce, reflect(-toCamera, shadingNormal), skyVisibilityOptions.y);
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
+        behindLight = flatAmbient() * skyLightFacing(sky.visibility, sky.bounce, -shadingNormal, skyVisibilityOptions.y);
     }
 
 #ifdef TRANSPARENT
@@ -1369,6 +1388,11 @@ void main() {
         reflectionOcclusion = ambientOcclusionOptions.z != 0 ? specularOcclusion(point.nDotV, visibility, roughness) : 1.0;
         mirrorLight *= reflectionOcclusion;
         ambientReflected = shadeProbeAmbient(point, diffuseLight * diffuseOcclusion + screenLight.rgb, mirrorLight);
+        behindLight *= diffuseOcclusion;
+    }
+
+    if (lightThrough) {
+        ambientReflected += shadeTransmittedAmbient(point, behindLight);
     }
 
 #ifdef TRANSPARENT

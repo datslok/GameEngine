@@ -193,6 +193,10 @@ namespace {
             assert(cardOptions.chooseBounds && leafOptions.chooseBounds && cardOptions.chooseBounds->maximum.y == leafOptions.chooseBounds->maximum.y);
             assert(card.parts.front().material.impostorFrames == ForestUnderstoreySettings{}.impostorFrames && !card.castsShadows);
             assert(isCutOut(card.parts.front().material));
+
+            // Light comes through the plant's leaves and its card alike.
+            assert(leaves.parts.front().material.diffuseTransmission == ForestLeafLightSettings{}.share);
+            assert(card.parts.front().material.diffuseTransmission == leaves.parts.front().material.diffuseTransmission);
             const Transform& cardPose = world.get<Transform>(cardEntity);
             assert(cardPose.position.x == placed[plant].foot.x && cardPose.position.z == placed[plant].foot.z && cardPose.scale.y == placed[plant].scale);
             const Transform& pose = world.get<Transform>(plants[2 * plant]);

@@ -80,6 +80,13 @@ struct Material {
     // over the hemisphere, which the shaders blend on a card facing the viewer. 0 for every other material.
     int impostorFrames = 0;
 
+    // Light through a thin surface such as a leaf (render/gpu/brdf.h, addDiffuseTransmission): what its far side receives
+    // comes through to the side seen, its diffuse colour times diffuseTransmissionTint (linear; a leaf's light comes
+    // through deeper and yellower) times diffuseTransmission (about 1 for a leaf: as much through as reflected; 0 none).
+    // The reflection is unchanged. Glass lets light through its own way (transmission) and takes none of this.
+    float diffuseTransmission = 0.0f;
+    Vec3 diffuseTransmissionTint{1.0f, 1.0f, 1.0f};
+
     // Thin glass (KHR_materials_transmission): the share of the light from behind that passes through the non-metal part
     // (0..1), tinted by the colour, less what its surface reflects; its texture's red channel (linear) multiplies it.
     // A transmitting material is drawn after the opaque scene, blended over it (render/gpu/transparency.h).

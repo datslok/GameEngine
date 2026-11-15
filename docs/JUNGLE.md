@@ -86,6 +86,38 @@ Gathered on Nov 14, 2026, after the user's look at the mid layer: "it doesnt rea
 
 **Avatar: Frontiers of Pandora** (Snowdrop): "thousands of assets in one frame" through its scattering system; no technical talk on vegetation found ([GameSpot](https://Gamespot.com/articles/avatar-frontiers-of-pandora-looks-beautifully-alien-in-new-snowdrop-engine-tech-showcase/1100-6493242/)).
 
+## Light through leaves
+
+A leaf is a thin slab of cells that scatters light many times inside, so what comes out the far side has lost its direction: a sunlit leaf seen from below glows evenly, whichever way you look at it. That glow, against the shaded leaves round it, is most of what makes a canopy look alive from underneath.
+
+**What leaves do** (from memory, to check against Woolley 1971 or the LOPEX measurements before writing tests):
+
+- In the green, a leaf reflects about 10-15% and transmits about as much; the rest, 70-80%, is absorbed by chlorophyll. Red and blue are absorbed far more, so the light coming through is a deeper, more saturated yellow-green than the leaf's own colour.
+- Reflected and transmitted shares are close to equal in the visible, and the transmitted light leaves close to evenly in all directions (Lambertian), with a little forward scattering.
+- The physics is the PROSPECT model's plate model ([Jacquemoud and Baret 1990](https://www.ipgp.fr/~jacquemoud/publications/jacquemoud1990.pdf); [Jacquemoud and Ustin, leaf optics](https://sites.bu.edu/cliveg/files/2023/10/leaf-optics-jacquemoud-ustin.pdf)): chlorophyll's absorption sets the visible spectrum.
+
+**How games and standards do it:**
+
+| Approach | Used by | What it does | For us |
+| --- | --- | --- | --- |
+| Crysis's back term | Crysis ([GPU Gems 3, ch. 16](https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-16-vegetation-procedural-animation-and-shading-crysis)) | `saturate(dot(E, -L))^4` (looking into the light) blended with wrapped back lighting `saturate(dot(-N, L) * 0.6 + 0.4)`, times a painted thickness map and a back colour | A hand-tuned look; not energy-conserving, so it fights the rest of the physically based shading and needs re-tuning per scene |
+| Thickness map with a view-dependent back term | Frostbite 2, Battlefield 3 ([Barré-Brisebois and Bouchard, GDC 2011](https://ea.com/frostbite/news/approximating-translucency-for-a-fast-cheap-and-convincing-subsurface-scattering-look)) | A baked, inverted local thickness per material scales a back-lighting term with a little ambient | Made for thick objects (skin, marble); a leaf is all one thickness |
+| Two Sided Foliage | Unreal ([shading models](https://dev.epicgames.com/documentation/en-us/unreal-engine/shading-models-in-unreal-engine)) | The diffuse light on a leaf's other side becomes light on the side seen, filtered by a Subsurface Color (dark green by habit; it can hold vein detail) | Same idea as the next row, Epic's own tuning |
+| Diffuse transmission | glTF's `KHR_materials_diffuse_transmission` (release candidate; [spec](https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_materials_diffuse_transmission/README.md)), its sample [DiffuseTransmissionPlant](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/DiffuseTransmissionPlant/README.md) | The diffuse lobe split: `mix(diffuse_brdf(baseColor), diffuse_btdf(diffuseTransmissionColor), diffuseTransmission)`, both Lambertian (colour / pi), the transmitted one for a light on the far side; the specular layer and Fresnel untouched | Energy-conserving, view-independent, works the same for every light and the ambient; a standard our glTF loader can read (cgltf has it) |
+| Measured leaves | [Habel, Kusternig and Wimmer 2007](https://www.cg.tuwien.ac.at/research/publications/2007/Habel_2007_RTT/Habel_2007_RTT-Preprint.pdf) | A slab scattering model per texel, precomputed into a directional basis, from scanned leaf albedo, translucency and thickness maps | Veins and thickness show; needs per-leaf maps we do not have |
+
+The spec's parameters: `diffuseTransmissionFactor` (default 0; the share of the light not reflected specularly that goes through instead of back) with a texture's alpha, and `diffuseTransmissionColorFactor` (default white) with an sRGB texture. For a leaf whose reflected and transmitted shares are equal, the factor is about 0.5.
+
+**What it means here:**
+
+- **The model:** diffuse transmission, as glTF defines it: the leaf's diffuse light split between its two sides, so nothing is added out of thin air, and the glow comes from the contrast with the shaded leaves round it rather than from a tuned hotspot.
+- **No maps:** our leaf atlases and plant scans carry only colour, normal and roughness (no translucency or thickness), so the colour coming through is the leaf's own colour shifted deeper and yellower by a material tint, with the share a material number.
+- **Every light:** the sun (the main case), point and spot lights (the flashlight through a leaf), and the light from all around: the sky and bounce on the far side of the leaf (the flat ambient, sky visibility or probes read along the reversed normal), dimmed by the ambient occlusion like the rest.
+- **Shadows:** the main pass skips lights behind a surface today (`facesLight`), and its shadow lookup moves the point along the normal facing the viewer, which for a backlit leaf is away from the light, into its own shadow. A transmitting surface needs both turned towards the light.
+- **Mirrored on the CPU** as all shading is (`brdf`), with a GPU test case.
+- **The cards:** an impostor keeps its tree's leaves' share and tint, so far crowns glow as near ones do.
+- **Light through the whole canopy** (the green gloom of the floor, the sky seen through layers of leaves) is not this: that is the sky visibility bake and the probes taking cut-out leaves into account (`forest-floor`'s leaves in the bake), later.
+
 ## The plan for this engine
 
 In stages, each its own branch, the user judging each by eye:

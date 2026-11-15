@@ -67,6 +67,13 @@ GpuMaterial packMaterial(const Material& material) {
         data.coatAndHeight[2] = material.clearCoatNormalTexture.isValid() ? material.clearCoatNormalScale : 0.0f;
     }
 
+    if (!isTransparent(material) && material.diffuseTransmission > 0.0f) {
+        data.diffuseTransmission[0] = std::max(material.diffuseTransmissionTint.x, 0.0f);
+        data.diffuseTransmission[1] = std::max(material.diffuseTransmissionTint.y, 0.0f);
+        data.diffuseTransmission[2] = std::max(material.diffuseTransmissionTint.z, 0.0f);
+        data.diffuseTransmission[3] = material.diffuseTransmission;
+    }
+
     if (!isTransparent(material) && !isCutOut(material) && material.heightTexture.isValid()) {
         data.coatAndHeight[3] = std::max(material.heightScale, 0.0f);
     }
