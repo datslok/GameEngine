@@ -132,6 +132,20 @@ void visit(ForestLeafLightSettings& settings, SettingsVisitor& visitor);
 // A leaf's material letting light through as the settings say.
 Material withLeafLight(Material leaf, const ForestLeafLightSettings& settings);
 
+// The mean colour of a picture, each texel weighted by its alpha (so a leaf atlas's leaves count and the gaps between
+// them do not), in sRGB bytes as the picture holds them; fallback for a picture with nothing in it.
+Pixel meanColour(const ImageData& image, Pixel fallback);
+
+/*
+* The palms' leaflets' material (games/forest/palms.h): their picture drawn at start-up (palmLeafletImages, a normal map
+* from its height) in the trees' leaves' colour (LeafSet024's mean where it has leaves, or the stand-in leaf's), tinted
+* as the trees' leaves are; opaque, since the leaflets are cut to their outline, and double-sided; letting light through
+* is withLeafLight's.
+*/
+inline constexpr int forestPalmLeafletTexels = 256;
+inline constexpr float forestPalmLeafletDepth = 0.01f;
+Material forestPalmLeafMaterial(AssetManager& assets, const std::string& assetFolder);
+
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";
 inline constexpr Pixel forestMossStandIn{96, 104, 62};

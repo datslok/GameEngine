@@ -9,32 +9,33 @@
 #include <cstdint>
 
 namespace {
-    constexpr std::uint64_t understoreySeed = 0x554e4445ull;
-
-    // The random numbers each cell draws, by their place in its block.
+    // The random numbers each cell draws for its plant, after the ones placing it (plantingDrawsUsed).
     enum CellDraw : std::uint64_t {
-        JitterX,
-        JitterZ,
-        Keep,
         Kind,
         Scale,
         Turn,
-        Variant,
-        DrawsPerCell
+        Variant
+    };
+
+    // The draws placing a cell, by their place in its block.
+    enum PlacingDraw : std::uint64_t {
+        JitterX,
+        JitterZ,
+        Keep
     };
 
     // The share of cells planted at a distance from the path's centre.
-    float plantedShare(const ForestUnderstoreySettings& settings, float fromPath) {
-        if (fromPath <= settings.nearPathMetres) {
+    float plantedShare(const PlantingGrid& grid, float fromPath) {
+        if (fromPath <= grid.nearPathMetres) {
             return 1.0f;
         }
 
-        if (fromPath >= settings.farPathMetres || settings.farPathMetres <= settings.nearPathMetres) {
-            return settings.farShare;
+        if (fromPath >= grid.farPathMetres || grid.farPathMetres <= grid.nearPathMetres) {
+            return grid.farShare;
         }
 
-        const float t = (fromPath - settings.nearPathMetres) / (settings.farPathMetres - settings.nearPathMetres);
-        return 1.0f + (settings.farShare - 1.0f) * t;
+        const float t = (fromPath - grid.nearPathMetres) / (grid.farPathMetres - grid.nearPathMetres);
+        return 1.0f + (grid.farShare - 1.0f) * t;
     }
 }
 
@@ -95,53 +96,66 @@ float understoreyKindScale(const std::vector<IndexedMesh>& plants, float height)
     return tallest > 0.0f ? height / tallest : 1.0f;
 }
 
-std::vector<UnderstoreyPlacement> placeUnderstorey(const ForestUnderstoreySettings& settings, const std::vector<StandingCrown>& trunks,
-                                                   const std::vector<SightLine>& sightLines) {
-    std::vector<UnderstoreyPlacement> plants;
-    const float spacing = std::max(settings.spacing, 0.1f);
+std::vector<PlantedCell> plantedCells(const PlantingGrid& grid, const std::vector<StandingCrown>& trunks, std::uint64_t seed,
+                                      std::uint64_t drawsPerCell) {
+    std::vector<PlantedCell> cells;
+    const float spacing = std::max(grid.spacing, 0.1f);
     const int rows = static_cast<int>(std::ceil((treeSouthmost - treeNorthmost) / spacing));
     const int columns = static_cast<int>(std::ceil(2.0f * treeSpread / spacing));
 
     for (int row = 0; row < rows; ++row) {
         for (int column = 0; column < columns; ++column) {
-            const std::uint64_t base = (static_cast<std::uint64_t>(row) * static_cast<std::uint64_t>(columns) + static_cast<std::uint64_t>(column)) * DrawsPerCell;
-            const auto draw = [&](CellDraw which) {
-                return forestUnitRandom(understoreySeed, base + which);
+            const std::uint64_t base = (static_cast<std::uint64_t>(row) * static_cast<std::uint64_t>(columns) + static_cast<std::uint64_t>(column)) * drawsPerCell;
+            const auto draw = [&](PlacingDraw which) {
+                return forestUnitRandom(seed, base + which);
             };
 
             const float z = treeNorthmost + (static_cast<float>(row) + draw(JitterZ)) * spacing;
             const float x = valleyAxis(z) - treeSpread + (static_cast<float>(column) + draw(JitterX)) * spacing;
             const float fromPath = forestPathDistance(x, z);
 
-            if (z > treeSouthmost || std::fabs(x - valleyAxis(z)) > treeSpread || fromPath < settings.pathClearance ||
-                draw(Keep) >= plantedShare(settings, fromPath)) {
+            if (z > treeSouthmost || std::fabs(x - valleyAxis(z)) > treeSpread || fromPath < grid.pathClearance ||
+                draw(Keep) >= plantedShare(grid, fromPath)) {
                 continue;
             }
 
             const bool byTrunk = std::any_of(trunks.begin(), trunks.end(), [&](const StandingCrown& trunk) {
-                return (Vec2{x, z} - trunk.foot).length() < trunk.radius + settings.trunkClearance;
+                return (Vec2{x, z} - trunk.foot).length() < trunk.radius + grid.trunkClearance;
             });
 
-            if (byTrunk) {
-                continue;
+            if (!byTrunk) {
+                cells.push_back(PlantedCell{Vec2{x, z}, base + plantingDrawsUsed});
             }
+        }
+    }
 
-            const float kindDraw = draw(Kind);
-            const UnderstoreyKind kind = kindDraw < settings.fernShare ? UnderstoreyKind::Fern
-                                         : kindDraw < settings.fernShare + settings.calatheaShare ? UnderstoreyKind::Calathea
-                                                                                                  : UnderstoreyKind::Anthurium;
-            UnderstoreyPlacement plant{
-                .foot = Vec3{x, forestHeight(x, z) - understoreySinkMetres, z},
-                .scale = 1.0f + understoreyScaleSpread * (2.0f * draw(Scale) - 1.0f),
-                .turnRadians = fullTurnRadians * draw(Turn),
-                .kind = kind,
-                .variantPick = std::min(draw(Variant), 0.99999f)
-            };
+    return cells;
+}
 
-            if (blocksSight(understoreyCentre(settings, plant), understoreyRadius(settings, plant), sightLines)) {
-                continue;
-            }
+std::vector<UnderstoreyPlacement> placeUnderstorey(const ForestUnderstoreySettings& settings, const std::vector<StandingCrown>& trunks,
+                                                   const std::vector<SightLine>& sightLines) {
+    const PlantingGrid grid{settings.spacing, settings.nearPathMetres, settings.farPathMetres, settings.farShare, settings.pathClearance,
+                            settings.trunkClearance};
+    std::vector<UnderstoreyPlacement> plants;
 
+    for (const PlantedCell& cell : plantedCells(grid, trunks, understoreySeed, understoreyDrawsPerCell)) {
+        const auto draw = [&](CellDraw which) {
+            return forestUnitRandom(understoreySeed, cell.firstDraw + which);
+        };
+
+        const float kindDraw = draw(Kind);
+        const UnderstoreyKind kind = kindDraw < settings.fernShare ? UnderstoreyKind::Fern
+                                     : kindDraw < settings.fernShare + settings.calatheaShare ? UnderstoreyKind::Calathea
+                                                                                              : UnderstoreyKind::Anthurium;
+        UnderstoreyPlacement plant{
+            .foot = Vec3{cell.place.x, forestHeight(cell.place.x, cell.place.y) - understoreySinkMetres, cell.place.y},
+            .scale = 1.0f + understoreyScaleSpread * (2.0f * draw(Scale) - 1.0f),
+            .turnRadians = fullTurnRadians * draw(Turn),
+            .kind = kind,
+            .variantPick = std::min(draw(Variant), 0.99999f)
+        };
+
+        if (!blocksSight(understoreyCentre(settings, plant), understoreyRadius(settings, plant), sightLines)) {
             plants.push_back(plant);
         }
     }

@@ -8,6 +8,7 @@
 #include "games/forest/forest_trees.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
+#include "games/forest/palms.h"
 #include "games/forest/understorey.h"
 #include "games/forest/valley_shapes.h"
 #include "gameplay/control_mode.h"
@@ -179,6 +180,11 @@ public:
     const std::vector<Entity>& getUnderstorey() const;
     // Each plant's card (scene/impostor.h), plant by plant.
     const std::vector<Entity>& getUnderstoreyImpostors() const;
+    // The palms' settings and places, each palm's seen mesh and then its shadow's stand-in, palm by palm, and its card.
+    ForestPalmSettings& getPalmSettings();
+    const std::vector<PalmPlacement>& getPalmPlacements() const;
+    const std::vector<Entity>& getPalms() const;
+    const std::vector<Entity>& getPalmImpostors() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -202,6 +208,12 @@ private:
     // placed many times.
     void buildUnderstorey(World& world, AssetManager& assets);
 
+    // The understorey palms (docs/JUNGLE.md, Palms): a few variants grown on every core, placed many times.
+    void buildPalms(World& world, AssetManager& assets);
+
+    // Every tree's trunk as far round as the floor's plants keep from it: the big trees' buttresses, the mid layer's trunk.
+    std::vector<StandingCrown> floorTrunks() const;
+
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
 
@@ -218,6 +230,7 @@ private:
     ForestTreeSettings emergentSettings = emergentTreeSettings();
     ForestTreeSettings midSettings = midTreeSettings();
     ForestUnderstoreySettings understoreySettings;
+    ForestPalmSettings palmSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
 
@@ -239,6 +252,9 @@ private:
     std::vector<UnderstoreyPlacement> understoreyPlacements;
     std::vector<Entity> understorey;
     std::vector<Entity> understoreyImpostors; // a card each plant, in the placements' order (scene/impostor.h)
+    std::vector<PalmPlacement> palmPlacements;
+    std::vector<Entity> palms;
+    std::vector<Entity> palmImpostors; // a card each palm, in the placements' order
     std::vector<Entity> trees;
     std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;

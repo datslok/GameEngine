@@ -39,6 +39,7 @@ namespace {
     constexpr std::uint32_t treeVariantSeed = 0x4752'4f57u;
     constexpr std::uint32_t emergentVariantSeed = 0x454d'4752u;
     constexpr std::uint32_t midVariantSeed = 0x4d49'4447u;
+    constexpr std::uint32_t palmVariantSeed = 0x5041'4c4du;
 
     // The day's hours for the golden views: mid-morning (the sun low in the east, light across the valley), and dusk.
     constexpr float morningHours = 9.5f;
@@ -242,6 +243,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildShapes(world, assets);
     buildTrees(world, assets);
     buildUnderstorey(world, assets);
+    buildPalms(world, assets);
 
     // The planet beyond the land is forest too, so the ground seen past the edge, and its light scattered back up into
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
@@ -504,15 +506,69 @@ namespace {
         MeshHandle card;
         Material cardMaterial;
     };
+
+    /*
+    * A plant's variant made ready to draw (docs/LOD.md): its seen mesh, with its coarser level and then its shadow's
+    * stand-in as its levels, then nothing from impostorErrorMetres (or the stand-in's error, if larger) on, where its
+    * card begins (scene/impostor.h, baked from the seen mesh as the trees' are from theirs, the texture copied first:
+    * adding the atlases can move the asset manager's textures). All choose by the seen mesh's one box, so exactly one is
+    * drawn. The card lets light through as the plant does.
+    */
+    PlantVariant makePlantVariant(AssetManager& assets, JobSystem& jobs, IndexedMesh seen, IndexedMesh level, float levelError, IndexedMesh shadow,
+                                  float shadowError, const Material& material, float impostorErrorMetres, int impostorFrames, int impostorTexels) {
+        const ImageData colour = material.texture.isValid() ? assets.getTexture(material.texture) : ImageData{};
+        const ImpostorBake baked = bakeImpostor({ImpostorPart{.mesh = &seen,
+                                                              .colour = material.texture.isValid() ? &colour : nullptr,
+                                                              .tint = material.colour,
+                                                              .alphaCutoff = isCutOut(material) ? material.alphaCutoff : 0.0f}},
+                                                impostorFrames, impostorTexels, jobs);
+        const Aabb box = indexedMeshBounds(seen);
+        const float shadowLevelError = std::max(shadowError, levelError);
+        const float impostorError = std::max(impostorErrorMetres, shadowLevelError);
+
+        const MeshHandle leaves = assets.addDrawnMesh(std::move(seen));
+        const MeshHandle levelMesh = assets.addDrawnMesh(std::move(level));
+        const MeshHandle shadowMesh = assets.addDrawnMesh(std::move(shadow));
+        assets.setMeshLevels(leaves, {MeshLevel{levelMesh, levelError}, MeshLevel{shadowMesh, shadowLevelError}, MeshLevel{MeshHandle{}, impostorError}});
+        assets.setMeshLevelOptions(leaves, MeshLevelOptions{.hiddenBelowError = 0.0f, .chooseBounds = box});
+
+        const MeshHandle card = assets.addDrawnMesh(impostorCardMesh(baked.centre, baked.radius));
+        assets.setMeshLevelOptions(card, MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = box});
+        Material cardMaterial = impostorMaterial(assets.addTexture(baked.colour, impostorCoverageCutoff), assets.addTexture(baked.normal), impostorFrames);
+        cardMaterial.roughness = material.roughness;
+        cardMaterial.diffuseTransmission = material.diffuseTransmission;
+        cardMaterial.diffuseTransmissionTint = material.diffuseTransmissionTint;
+        return PlantVariant{leaves, shadowMesh, material, card, cardMaterial};
+    }
+
+    /*
+    * A plant placed: its seen mesh, casting no shadow; its shadow's stand-in, drawn into the nearest shadowCascades only;
+    * and its card, drawn only far away, casting none (the stand-in keeps its shadow). The first two go to plants, the
+    * card to cards.
+    */
+    void addPlant(World& world, const PlantVariant& variant, const Transform& pose, int shadowCascades, std::vector<Entity>& plants,
+                  std::vector<Entity>& cards) {
+        plants.push_back(addShape(world, variant.leaves, variant.material, pose));
+        world.get<ModelRenderer>(plants.back()).castsShadows = false;
+        plants.push_back(addShape(world, variant.shadow, variant.material, pose));
+        world.get<ModelRenderer>(plants.back()).shadowOnly = true;
+        world.get<ModelRenderer>(plants.back()).shadowCascades = shadowCascades;
+        cards.push_back(addShape(world, variant.card, variant.cardMaterial, pose));
+        world.get<ModelRenderer>(cards.back()).castsShadows = false;
+    }
 }
 
-void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
+std::vector<StandingCrown> ForestGame::floorTrunks() const {
     std::vector<StandingCrown> trunks = standingTrunks(treePlacements, bigTrunkReach);
     const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, bigTrunkReach);
     const std::vector<StandingCrown> midTrunks = standingTrunks(midPlacements, midTrunkReach);
     trunks.insert(trunks.end(), emergentTrunks.begin(), emergentTrunks.end());
     trunks.insert(trunks.end(), midTrunks.begin(), midTrunks.end());
-    understoreyPlacements = placeUnderstorey(understoreySettings, trunks, forestSightLines());
+    return trunks;
+}
+
+void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
+    understoreyPlacements = placeUnderstorey(understoreySettings, floorTrunks(), forestSightLines());
 
     if (understoreyPlacements.empty()) {
         return;
@@ -556,39 +612,12 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
             float levelError = 0.0f;
             float shadowError = 0.0f;
             IndexedMesh seen = simplifyMesh(plants[plant], understoreySettings.keepShare, understoreySimplifyError, true);
-            const Material& material = materials[plant];
-
-            /*
-            * The card (scene/impostor.h), baked from the leaves seen as the trees' are from theirs (the texture copied
-            * first: adding the atlases can move the asset manager's textures). The leaves end on a level drawing nothing
-            * at its error, where the card begins, both choosing by the plant's one box, so exactly one is drawn.
-            */
-            const ImageData colour = material.texture.isValid() ? assets.getTexture(material.texture) : ImageData{};
-            const ImpostorBake baked = bakeImpostor({ImpostorPart{.mesh = &seen,
-                                                                  .colour = material.texture.isValid() ? &colour : nullptr,
-                                                                  .tint = material.colour,
-                                                                  .alphaCutoff = isCutOut(material) ? material.alphaCutoff : 0.0f}},
-                                                    understoreySettings.impostorFrames, understoreySettings.impostorTexels, getJobs());
-            const Aabb plantBox = indexedMeshBounds(seen);
-
-            const MeshHandle leaves = assets.addDrawnMesh(std::move(seen));
-            const MeshHandle level =
-                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.levelKeepShare, understoreySimplifyError, false, &levelError));
-            const MeshHandle shadow =
-                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.shadowKeepShare, understoreySimplifyError, false, &shadowError));
-            const float shadowLevelError = std::max(shadowError, levelError);
-            const float impostorError = std::max(understoreySettings.impostorErrorMetres, shadowLevelError);
-            assets.setMeshLevels(leaves, {MeshLevel{level, levelError}, MeshLevel{shadow, shadowLevelError}, MeshLevel{MeshHandle{}, impostorError}});
-            assets.setMeshLevelOptions(leaves, MeshLevelOptions{.hiddenBelowError = 0.0f, .chooseBounds = plantBox});
-
-            const MeshHandle card = assets.addDrawnMesh(impostorCardMesh(baked.centre, baked.radius));
-            assets.setMeshLevelOptions(card, MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = plantBox});
-            Material cardMaterial = impostorMaterial(assets.addTexture(baked.colour, impostorCoverageCutoff), assets.addTexture(baked.normal),
-                                                     understoreySettings.impostorFrames);
-            cardMaterial.roughness = material.roughness;
-            cardMaterial.diffuseTransmission = material.diffuseTransmission;
-            cardMaterial.diffuseTransmissionTint = material.diffuseTransmissionTint;
-            variants[static_cast<std::size_t>(kind)].push_back(PlantVariant{leaves, shadow, material, card, cardMaterial});
+            IndexedMesh level = simplifyMesh(plants[plant], understoreySettings.levelKeepShare, understoreySimplifyError, false, &levelError);
+            IndexedMesh shadow = simplifyMesh(plants[plant], understoreySettings.shadowKeepShare, understoreySimplifyError, false, &shadowError);
+            variants[static_cast<std::size_t>(kind)].push_back(makePlantVariant(assets, getJobs(), std::move(seen), std::move(level), levelError,
+                                                                                std::move(shadow), shadowError, materials[plant],
+                                                                                understoreySettings.impostorErrorMetres, understoreySettings.impostorFrames,
+                                                                                understoreySettings.impostorTexels));
         }
     }
 
@@ -600,15 +629,42 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
         const PlantVariant& variant = kind[std::min(static_cast<std::size_t>(plant.variantPick * static_cast<float>(kind.size())), kind.size() - 1)];
         const Transform pose{.position = plant.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, plant.turnRadians),
                              .scale = Vec3{plant.scale, plant.scale, plant.scale}};
-        understorey.push_back(addShape(world, variant.leaves, variant.material, pose));
-        world.get<ModelRenderer>(understorey.back()).castsShadows = false;
-        understorey.push_back(addShape(world, variant.shadow, variant.material, pose));
-        world.get<ModelRenderer>(understorey.back()).shadowOnly = true;
-        world.get<ModelRenderer>(understorey.back()).shadowCascades = understoreySettings.shadowCascades;
+        addPlant(world, variant, pose, understoreySettings.shadowCascades, understorey, understoreyImpostors);
+    }
+}
 
-        // The card, drawn only far away; the shadow's stand-in above keeps its shadow.
-        understoreyImpostors.push_back(addShape(world, variant.card, variant.cardMaterial, pose));
-        world.get<ModelRenderer>(understoreyImpostors.back()).castsShadows = false;
+/*
+* The variants grown on every core, each into its own slot, then made drawable in order (their cards baked, their
+* meshes added) and placed; every palm of a variant shares its meshes, so each is one instanced draw.
+*/
+void ForestGame::buildPalms(World& world, AssetManager& assets) {
+    palmPlacements = placePalms(palmSettings, floorTrunks(), forestSightLines());
+
+    if (palmPlacements.empty()) {
+        return;
+    }
+
+    const Material leaf = withLeafLight(forestPalmLeafMaterial(assets, assetFolder), leafLightSettings);
+    std::vector<PalmMeshes> grown(static_cast<std::size_t>(std::max(palmSettings.variants, 1)));
+    getJobs().parallelFor(grown.size(), 1, [&](std::size_t variant) {
+        grown[variant] = growPalmMeshes(palmVariantShape(palmSettings, static_cast<int>(variant), palmVariantSeed));
+    });
+
+    std::vector<PlantVariant> variants;
+
+    for (PalmMeshes& meshes : grown) {
+        variants.push_back(makePlantVariant(assets, getJobs(), std::move(meshes.palm), std::move(meshes.level), meshes.levelError, std::move(meshes.shadow),
+                                            meshes.shadowError, leaf, palmSettings.impostorErrorMetres, palmSettings.impostorFrames,
+                                            palmSettings.impostorTexels));
+    }
+
+    palms.reserve(2 * palmPlacements.size());
+    palmImpostors.reserve(palmPlacements.size());
+
+    for (const PalmPlacement& palm : palmPlacements) {
+        const Transform pose{.position = palm.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, palm.turnRadians),
+                             .scale = Vec3{palm.scale, palm.scale, palm.scale}};
+        addPlant(world, variants[static_cast<std::size_t>(palm.variant)], pose, palmSettings.shadowCascades, palms, palmImpostors);
     }
 }
 
@@ -852,6 +908,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Understorey", [&] {
         visit(understoreySettings, visitor);
     });
+    visitor.group("Palms", [&] {
+        visit(palmSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -1036,4 +1095,20 @@ const std::vector<Entity>& ForestGame::getTrees() const {
 
 const std::vector<Entity>& ForestGame::getTreeImpostors() const {
     return treeImpostors;
+}
+
+ForestPalmSettings& ForestGame::getPalmSettings() {
+    return palmSettings;
+}
+
+const std::vector<PalmPlacement>& ForestGame::getPalmPlacements() const {
+    return palmPlacements;
+}
+
+const std::vector<Entity>& ForestGame::getPalms() const {
+    return palms;
+}
+
+const std::vector<Entity>& ForestGame::getPalmImpostors() const {
+    return palmImpostors;
 }

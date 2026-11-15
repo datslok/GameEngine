@@ -3,6 +3,8 @@
 #include "assets/image_loader.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/leaf_clusters.h"
+#include "games/forest/palms.h"
+#include "core/height_map.h"
 
 #include <algorithm>
 #include <array>
@@ -185,6 +187,43 @@ Material forestLeafClusterMaterial(AssetManager& assets, const std::string& asse
     return material;
 }
 
+Pixel meanColour(const ImageData& image, Pixel fallback) {
+    std::array<double, 3> sum{0.0, 0.0, 0.0};
+    double weight = 0.0;
+
+    for (std::size_t texel = 0; texel < image.pixels.size() / 4; ++texel) {
+        const double share = image.pixels[texel * 4 + 3] / 255.0;
+        weight += share;
+
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            sum[channel] += image.pixels[texel * 4 + channel] * share;
+        }
+    }
+
+    if (weight <= 0.0) {
+        return fallback;
+    }
+
+    return Pixel{static_cast<std::uint8_t>(sum[0] / weight + 0.5), static_cast<std::uint8_t>(sum[1] / weight + 0.5),
+                 static_cast<std::uint8_t>(sum[2] / weight + 0.5)};
+}
+
+Material forestPalmLeafMaterial(AssetManager& assets, const std::string& assetFolder) {
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestTreeLeafFolder).string());
+    const Pixel colour = !files.colour.empty() && !files.opacity.empty() ? meanColour(colourWithOpacity(files), forestLeafStandIn) : forestLeafStandIn;
+    PalmLeafletImages images = palmLeafletImages(forestPalmLeafletTexels, colour, 0x50414c4du);
+    const ImageLevel normal = normalMapFromHeight(images.height, forestPalmLeafletDepth);
+
+    Material material;
+    material.doubleSided = true;
+    material.colour = forestTreeLeafTint;
+    material.roughness = 0.6f;
+    material.metallic = 0.0f;
+    material.texture = assets.addTexture(std::move(images.colour));
+    material.normalTexture = assets.addTexture(ImageData{normal.width, normal.height, normal.pixels, TextureEncoding::Linear});
+    return material;
+}
+
 /*
 * The mean is taken in sRGB bytes, as the colour is given: close enough for a tint, which the strands then shade
 * lighter and darker.
@@ -194,18 +233,7 @@ Material forestMossMaterial(AssetManager& assets, const std::string& assetFolder
     Pixel colour = forestMossStandIn;
 
     if (!files.colour.empty()) {
-        const ImageData scan = loadImage(files.colour);
-        std::array<double, 3> sum{0.0, 0.0, 0.0};
-
-        for (std::size_t texel = 0; texel < scan.pixels.size() / 4; ++texel) {
-            for (std::size_t channel = 0; channel < 3; ++channel) {
-                sum[channel] += scan.pixels[texel * 4 + channel];
-            }
-        }
-
-        const double texels = static_cast<double>(std::max<std::size_t>(scan.pixels.size() / 4, 1));
-        colour = Pixel{static_cast<std::uint8_t>(sum[0] / texels + 0.5), static_cast<std::uint8_t>(sum[1] / texels + 0.5),
-                       static_cast<std::uint8_t>(sum[2] / texels + 0.5)};
+        colour = meanColour(loadImage(files.colour), forestMossStandIn);
     }
 
     Material material;
