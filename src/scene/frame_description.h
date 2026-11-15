@@ -13,6 +13,7 @@
 #include "scene/lighting.h"
 #include "scene/material.h"
 #include "scene/mesh_level.h"
+#include "scene/model_renderer.h"
 #include "scene/terrain_heights.h"
 #include "physics/static_level.h"
 
@@ -114,6 +115,14 @@ private:
     std::uint64_t frame = 2; // starts past the records' stamp of 0, so none counts as last frame's on the first
 };
 
+// Draws first to first + count of a frame's list.
+struct DrawRange {
+    std::size_t first = 0;
+    std::size_t count = 0;
+};
+
+class StillDraws;
+
 /*
 * Everything the renderer needs for one frame, as plain data with no GPU types: the camera, the lights and every mesh to draw.
 * Handing the renderer the whole frame at once lets it draw the scene more than once (a shadow map from the light, then the
@@ -122,7 +131,13 @@ private:
 struct FrameDescription {
     Camera camera;
     FrameLighting lighting;
-    std::vector<DrawItem> draws;
+    std::vector<DrawItem> draws{};
+
+    // The draws of still entities (ModelRenderer::still) come first, stillDraws of them, kept from last frame but for
+    // builtStillDraws, built this frame; every draw after them was built this frame (scene/still_draws.h). None without
+    // kept draws.
+    std::size_t stillDraws = 0;
+    std::vector<DrawRange> builtStillDraws{};
 
     // Where the action is: when there are more lights than the renderer can use, the brightest ones here win.
     // The camera's position unless the game names a better point (a MOBA camera floats far above the ground it shows).
@@ -132,34 +147,40 @@ struct FrameDescription {
     float frameSeconds = 0.0f;
 
     // Wireframe shapes drawn over the scene (see DebugDraw), and lines on the screen itself in window pixels (overlays, text).
-    std::vector<DebugLine> debugLines;
-    std::vector<DebugLine> debugScreenLines;
+    std::vector<DebugLine> debugLines{};
+    std::vector<DebugLine> debugScreenLines{};
 
     // This frame's shape of every deforming mesh (scene/deforming_mesh.h), for the renderer to upload before drawing.
-    std::vector<DeformedMesh> deformedMeshes;
+    std::vector<DeformedMesh> deformedMeshes{};
 
     // The level's parts that never move and stand in the sky's way, as triangles for rays on the CPU (the sky visibility
     // grid, render/gpu/sky_visibility_bake.h), built by the engine from the static draws (engine/static_geometry.h); none
     // when nothing blocks the sky. The version changes whenever the level does.
-    std::shared_ptr<const StaticLevel> staticLevel;
+    std::shared_ptr<const StaticLevel> staticLevel{};
     std::uint64_t staticLevelVersion = 0;
 
     // Each of its triangles' diffuse albedo, in linear light and in its triangle order, for the bounce light the grid
     // gathers; changing it changes the version too.
-    std::shared_ptr<const std::vector<Vec3>> staticAlbedo;
+    std::shared_ptr<const std::vector<Vec3>> staticAlbedo{};
 
     // The terrain's patches this frame (DrawItem::terrainPatch indexes them) and the heights they are lifted onto, which
     // the renderer uploads again only when terrainHeightsVersion changes (scene/terrain.h); none without a terrain.
-    std::vector<TerrainPatch> terrainPatches;
-    std::shared_ptr<const TerrainHeights> terrainHeights;
+    std::vector<TerrainPatch> terrainPatches{};
+    std::shared_ptr<const TerrainHeights> terrainHeights{};
     std::uint64_t terrainHeightsVersion = 0;
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.
-void attachShapes(std::vector<DrawItem>& draws, const std::vector<DeformedMesh>& deformedMeshes);
+void attachShapes(std::span<DrawItem> draws, const std::vector<DeformedMesh>& deformedMeshes);
 
 // Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks. With a history, each draw
 // gets its matrix from last frame, and this frame's are remembered for the next. The list keeps room for laterDraws
-// more (the terrain's), so appending them never moves it.
+// more (the terrain's), so appending them never moves it. With still, the still entities' draws come first from it,
+// kept from last frame (give the list back with StillDraws::giveBack once drawn), and the rest are built after them.
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history = nullptr,
-                            JobSystem& jobs = serialJobs(), std::size_t laterDraws = 0);
+                            JobSystem& jobs = serialJobs(), std::size_t laterDraws = 0, StillDraws* still = nullptr);
+
+// One entity's draws, a part each, into draws (as many as its parts), placed by its transform at alpha; with a
+// history, each part's last-frame matrix from it, and this frame's remembered.
+void buildEntityDraws(const World& world, Entity entity, const ModelRenderer& renderer, float alpha, MotionHistory* history,
+                      std::span<DrawItem> draws);

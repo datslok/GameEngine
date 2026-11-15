@@ -74,6 +74,10 @@ public:
     void setMeshLevelOptions(MeshHandle mesh, MeshLevelOptions options);
     const std::vector<MeshLevelOptions>& getMeshLevelOptions() const;
 
+    // Changes whenever a mesh's levels or options are named or named again, so draws kept from frame to frame, which
+    // hold spans of them (scene/still_draws.h), are built again.
+    std::uint64_t getLevelsVersion() const;
+
     // Whether a mesh was added as drawn only, and its render format (std::invalid_argument for one that was not).
     bool isDrawnOnly(MeshHandle handle) const;
     const IndexedMesh& getDrawnMesh(MeshHandle handle) const;
@@ -151,4 +155,5 @@ private:
     // Each mesh's coarser levels, by mesh number.
     std::vector<std::vector<MeshLevel>> meshLevels;
     std::vector<MeshLevelOptions> meshLevelOptions;
+    std::uint64_t levelsVersion = 0;
 };

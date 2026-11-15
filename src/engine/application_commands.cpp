@@ -182,8 +182,9 @@ CommandReply Application::screenshot(const CommandArguments& arguments) {
 
     prepareNewResources();
     const float alpha = simulation.paused ? 1.0f : timestep.getAlpha();
-    const FrameDescription frame = describeFrame(alpha, static_cast<float>(timestep.getFrameSeconds()));
+    FrameDescription frame = describeFrame(alpha, static_cast<float>(timestep.getFrameSeconds()));
     const CapturedFrame captured = renderer.capture(frame, settings.render, static_cast<Uint32>(width), static_cast<Uint32>(height), DisplayOutput{});
+    giveBackStillDraws(frame);
     saveRawImagePng(captured.final, path.string());
 
     return commandOk("Saved " + std::to_string(width) + " x " + std::to_string(height) + " to " + std::filesystem::absolute(path).generic_string());

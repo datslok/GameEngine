@@ -45,6 +45,15 @@ struct ModelRenderer {
     // Drawn by no view, casting no shadow and met by no ray, but part of the static level the sky visibility's rays see
     // (when isStatic): the forest's 2 m ground, walked on, while its terrain patches are what is drawn (scene/terrain.h).
     bool hidden = false;
+
+    /*
+    * Never moves and never changes (scene/still_draws.h): its draws are built once and kept from frame to frame, which
+    * with the forest's 35,000 objects saved most of the CPU's frame. A game that does change one (its Transform, parts or
+    * materials) calls markRenderChanged that frame; being hidden or shown, given more or fewer parts, or no longer still
+    * are noticed without it. Debug builds check that kept matrices still match. Separate from isStatic: a tree is still
+    * but not part of the level the probes and the sky bake treat as solid. No PreviousTransform needed.
+    */
+    bool still = false;
 };
 
 // Build a renderer with a single mesh.

@@ -72,5 +72,5 @@ std::array<std::size_t, meshLevelSlots> levelsChosen(const std::vector<DrawItem>
 
 // Give each draw its mesh's levels and options, from tables indexed like MeshHandle (AssetManager::getMeshLevels and
 // getMeshLevelOptions; the levels must outlive the frame), the options' shared box placed by the draw's model matrix.
-void attachMeshLevels(std::vector<DrawItem>& draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
+void attachMeshLevels(std::span<DrawItem> draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
                       const std::vector<MeshLevelOptions>& optionsByMesh = {});

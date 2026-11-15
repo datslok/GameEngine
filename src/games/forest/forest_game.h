@@ -17,6 +17,7 @@
 #include "scene/atmosphere.h"
 #include "scene/fog.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,8 @@ void visit(ForestMistSettings& settings, SettingsVisitor& visitor);
 struct ForestGroundSettings {
     float blendDepth = 0.2f;
     bool hexTiling = true;
+
+    bool operator==(const ForestGroundSettings&) const = default;
 };
 
 void visit(ForestGroundSettings& settings, SettingsVisitor& visitor);
@@ -74,6 +77,8 @@ struct ForestRockSettings {
     float streakStrength = 0.45f;
     bool hexTiling = true;
     float toneVariation = 0.25f;
+
+    bool operator==(const ForestRockSettings&) const = default;
 };
 
 void visit(ForestRockSettings& settings, SettingsVisitor& visitor);
@@ -224,6 +229,11 @@ private:
     ForestMistSettings mistSettings;
     ForestGroundSettings groundSettings;
     ForestRockSettings rockSettings;
+
+    // What the ground's and the still rocks' materials were last given (updateDaylight): they are written, and their
+    // still draws built again, only when the settings differ.
+    std::optional<ForestGroundSettings> appliedGroundSettings;
+    std::optional<ForestRockSettings> appliedRockSettings;
     ForestHangingSettings hangingSettings;
     ForestMossSettings mossSettings;
     ForestDriftSettings driftSettings;
