@@ -467,8 +467,13 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
     const Material canopyLeaf = leafFor(treeSettings);
     const bool sameLeaves = emergentSettings.clusterTexels == treeSettings.clusterTexels &&
                             emergentSettings.leafLength / emergentSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
-    plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf);
-    plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings));
+
+    // The big trees' climbers (docs/VINES.md, stage 2): their stems in the islands' brown bark, their leaves drawn.
+    const TreeClimbers climbers{.settings = &climberSettings,
+                                .stem = forestLayerMaterial(assets, assetFolder, forestBarkLayer),
+                                .leaf = withLeafLight(forestAroidLeafMaterial(assets, assetFolder), leafLightSettings)};
+    plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers);
+    plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers);
     const bool midSameLeaves = midSettings.clusterTexels == treeSettings.clusterTexels &&
                                midSettings.leafLength / midSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
     plantTrees(world, assets, midSettings, midPlacements, midVariantSeed, midSameLeaves ? canopyLeaf : leafFor(midSettings));
@@ -677,6 +682,9 @@ namespace {
     // The lianas' own seed, and the squares of ground their meshes are grouped by.
     constexpr std::uint64_t lianaSeed = 0x4c69616eull;
     constexpr float lianaChunkMetres = 40.0f;
+
+    // A tree variant's climbers' use of its seed (forestShapeSeed), apart from its growth's own uses.
+    constexpr std::uint32_t climberSeedUse = 17;
 }
 
 /*
@@ -718,7 +726,7 @@ void ForestGame::buildLianas(World& world, AssetManager& assets) {
 }
 
 void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                            std::uint32_t variantSeed, const Material& leaf) {
+                            std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers) {
     if (placements.empty()) {
         return;
     }
@@ -740,9 +748,14 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
 
     const std::size_t variants = static_cast<std::size_t>(std::max(settings.variants, 1));
     std::vector<TreeMeshes> grown(variants);
+    std::vector<ClimberMeshes> climbing(variants);
     getJobs().parallelFor(variants, 1, [&](std::size_t variant) {
-        grown[variant] = growTreeMeshes(settings, forestShapeSeed(variantSeed, static_cast<std::uint32_t>(variant) + 1), forestTreeBarkLayer.tileMetres,
-                                        &outlines);
+        const std::uint32_t seed = forestShapeSeed(variantSeed, static_cast<std::uint32_t>(variant) + 1);
+        grown[variant] = growTreeMeshes(settings, seed, forestTreeBarkLayer.tileMetres, &outlines);
+
+        if (climbers != nullptr) {
+            climbing[variant] = growClimbers(grown[variant].trunk, *climbers->settings, forestShapeSeed(seed, climberSeedUse));
+        }
     });
 
     std::vector<MeshHandle> barkMeshes;
@@ -755,19 +768,40 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
     // Copies, not references: adding each variant's atlases to the asset manager can move its textures.
     const ImageData barkTexture = bark.texture.isValid() ? assets.getTexture(bark.texture) : ImageData{};
     const ImageData leafTexture = leaf.texture.isValid() ? assets.getTexture(leaf.texture) : ImageData{};
+    const ImageData climberStemTexture = climbers != nullptr && climbers->stem.texture.isValid() ? assets.getTexture(climbers->stem.texture) : ImageData{};
+    const ImageData climberLeafTexture = climbers != nullptr && climbers->leaf.texture.isValid() ? assets.getTexture(climbers->leaf.texture) : ImageData{};
+    std::vector<MeshHandle> climberStemMeshes(grown.size());
+    std::vector<MeshHandle> climberLeafMeshes(grown.size());
+    std::vector<Vec3> climberFacing(grown.size());
 
-    for (TreeMeshes& variant : grown) {
+    for (std::size_t index = 0; index < grown.size(); ++index) {
+        TreeMeshes& variant = grown[index];
+        ClimberMeshes& climber = climbing[index];
+        const bool climbed = climbers != nullptr && !climber.stems.vertices.empty() && !climber.leaves.vertices.empty();
         /*
         * The impostor (scene/impostor.h), baked from the bark's first level and the leaves before they go to the asset
         * manager: its atlases, its card round the tree's sphere. The tree's parts end on a level drawing nothing at its
         * error, where the card begins, and all three choose by the tree's one box, so exactly one of them is drawn.
         */
-        const ImpostorBake baked =
-            bakeImpostor({ImpostorPart{.mesh = &variant.barkLevel, .colour = bark.texture.isValid() ? &barkTexture : nullptr, .tint = bark.colour, .alphaCutoff = 0.0f},
-                          ImpostorPart{.mesh = &variant.leaves, .colour = leaf.texture.isValid() ? &leafTexture : nullptr, .tint = leaf.colour, .alphaCutoff = leaf.alphaCutoff}},
-                         settings.impostorFrames, settings.impostorTexels, getJobs());
+        std::vector<ImpostorPart> parts{
+            ImpostorPart{.mesh = &variant.barkLevel, .colour = bark.texture.isValid() ? &barkTexture : nullptr, .tint = bark.colour, .alphaCutoff = 0.0f},
+            ImpostorPart{.mesh = &variant.leaves, .colour = leaf.texture.isValid() ? &leafTexture : nullptr, .tint = leaf.colour, .alphaCutoff = leaf.alphaCutoff}};
+
+        // The climbers are on the card too, so the tree does not lose them far off.
+        if (climbed) {
+            parts.push_back(ImpostorPart{.mesh = &climber.stems, .colour = climbers->stem.texture.isValid() ? &climberStemTexture : nullptr,
+                                         .tint = climbers->stem.colour, .alphaCutoff = 0.0f});
+            parts.push_back(ImpostorPart{.mesh = &climber.leaves, .colour = climbers->leaf.texture.isValid() ? &climberLeafTexture : nullptr,
+                                         .tint = climbers->leaf.colour, .alphaCutoff = 0.0f});
+        }
+
+        const ImpostorBake baked = bakeImpostor(parts, settings.impostorFrames, settings.impostorTexels, getJobs());
         const float impostorError = std::max({settings.impostorErrorMetres, variant.shadowLeafError, variant.shadowBarkError});
-        const Aabb treeBox = enclosing(indexedMeshBounds(variant.bark), indexedMeshBounds(variant.leaves));
+        Aabb treeBox = enclosing(indexedMeshBounds(variant.bark), indexedMeshBounds(variant.leaves));
+
+        if (climbed) {
+            treeBox = enclosing(treeBox, enclosing(indexedMeshBounds(climber.stems), indexedMeshBounds(climber.leaves)));
+        }
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
 
         barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
@@ -789,6 +823,18 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         assets.setMeshLevelOptions(barkMeshes.back(), sharedBox);
         assets.setMeshLevelOptions(leafMeshes.back(), sharedBox);
         assets.setMeshLevelOptions(cardMeshes.back(), MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = treeBox});
+
+        // The climbers drawn until the card takes over, chosen by the tree's box as its parts are.
+        if (climbed) {
+            climberFacing[index] = climber.facing;
+            climberStemMeshes[index] = assets.addDrawnMesh(std::move(climber.stems));
+            climberLeafMeshes[index] = assets.addDrawnMesh(std::move(climber.leaves));
+
+            for (const MeshHandle mesh : {climberStemMeshes[index], climberLeafMeshes[index]}) {
+                assets.setMeshLevels(mesh, {MeshLevel{MeshHandle{}, impostorError}});
+                assets.setMeshLevelOptions(mesh, sharedBox);
+            }
+        }
     }
 
     for (const TreePlacement& tree : placements) {
@@ -809,6 +855,16 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         // The card, drawn only far away; the stand-ins above keep its shadow.
         treeImpostors.push_back(addShape(world, cardMeshes[variant], cardMaterials[variant], pose));
         world.get<ModelRenderer>(treeImpostors.back()).castsShadows = false;
+
+        // Its variant's climbers, stems and leaves, their shadows in the nearest cascades.
+        if (climberStemMeshes[variant].isValid()) {
+            climbedTrees.push_back(tree);
+            climbedFacing.push_back(pose.rotation.rotate(climberFacing[variant]));
+            climberEntities.push_back(addShape(world, climberStemMeshes[variant], climbers->stem, pose));
+            world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
+            climberEntities.push_back(addShape(world, climberLeafMeshes[variant], climbers->leaf, pose));
+            world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
+        }
     }
 }
 
@@ -978,6 +1034,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Lianas", [&] {
         visit(lianaSettings, visitor);
     });
+    visitor.group("Climbers", [&] {
+        visit(climberSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -1003,6 +1062,42 @@ void ForestGame::addCommands(CommandRegistry& registry, World& world) {
                      }
 
                      return commandOk("Looking from " + arguments.front());
+                 });
+
+    // Beside a tree carrying climbers (games/forest/climbers.h), to judge them: 7 m off its foot on its first climber's
+    // side, eye high on the ground there, looking at its trunk 4 m up.
+    registry.add("forest-climber", "forest-climber [n]", "Places the camera beside the n-th tree carrying climbers (the first without n).",
+                 [this, &world](const CommandArguments& arguments) {
+                     if (arguments.size() > 1) {
+                         return commandError("Usage: forest-climber [n]");
+                     }
+
+                     std::size_t index = 0;
+
+                     if (!arguments.empty()) {
+                         try {
+                             std::size_t used = 0;
+                             index = std::stoul(arguments.front(), &used);
+
+                             if (used != arguments.front().size()) {
+                                 return commandError("Not a tree number: " + arguments.front());
+                             }
+                         } catch (const std::exception&) {
+                             return commandError("Not a tree number: " + arguments.front());
+                         }
+                     }
+
+                     if (index >= climbedTrees.size()) {
+                         return commandError(std::to_string(climbedTrees.size()) + " trees carry climbers, numbered from 0");
+                     }
+
+                     constexpr float distance = 7.0f;
+                     constexpr float eyeHeight = 1.7f;
+                     constexpr float lookHeight = 4.0f;
+                     const Vec3& foot = climbedTrees[index].foot;
+                     const Vec3 stand = foot + climbedFacing[index] * distance;
+                     controls.poseFreeCamera(world, Vec3{stand.x, onGround(stand.x, stand.z).y + eyeHeight, stand.z}, foot + Vec3{0.0f, lookHeight, 0.0f});
+                     return commandOk("Beside tree " + std::to_string(index) + " of " + std::to_string(climbedTrees.size()));
                  });
 }
 
@@ -1186,4 +1281,20 @@ ForestLianaSettings& ForestGame::getLianaSettings() {
 
 const std::vector<Entity>& ForestGame::getLianas() const {
     return lianaEntities;
+}
+
+ForestClimberSettings& ForestGame::getClimberSettings() {
+    return climberSettings;
+}
+
+const std::vector<Entity>& ForestGame::getClimbers() const {
+    return climberEntities;
+}
+
+const std::vector<TreePlacement>& ForestGame::getClimbedTrees() const {
+    return climbedTrees;
+}
+
+const std::vector<Vec3>& ForestGame::getClimbedFacing() const {
+    return climbedFacing;
 }

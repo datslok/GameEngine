@@ -132,6 +132,26 @@ float lobedRadius(float radius, float angle, float height, const TubeLobes& lobe
     return radius * (1.0f + lobes.amplitude * fade * standing);
 }
 
+// Each frame the last one's made square to the strand at its point, so the tube does not twist.
+std::vector<TubeFrame> tubeFrames(const HangingStrand& strand) {
+    std::vector<TubeFrame> frames;
+
+    if (strand.points.empty()) {
+        return frames;
+    }
+
+    Vec3 across = squareTo(strandDirection(strand, 0));
+
+    for (std::size_t i = 0; i < strand.points.size(); ++i) {
+        const Vec3 along = strandDirection(strand, i);
+        const Vec3 square = across - along * across.dot(along);
+        across = square.lengthSquared() > 1e-12f ? square.normalized() : squareTo(along);
+        frames.push_back(TubeFrame{across, along.cross(across)});
+    }
+
+    return frames;
+}
+
 void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float tileMetres, const TubeOptions& options) {
     if (strand.points.size() < 2 || sides < 3) {
         return;
@@ -141,20 +161,16 @@ void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float
     const std::uint32_t ringSize = static_cast<std::uint32_t>(sides) + 1;
     const bool lobed = options.lobes.count > 0 && options.lobes.amplitude != 0.0f;
     const float tilesRound = options.wholeTilesRound ? std::max(1.0f, std::round(fullTurnRadians * strand.radii.front() / tileMetres)) : 1.0f;
-    Vec3 across = squareTo(strandDirection(strand, 0));
+    const std::vector<TubeFrame> frames = tubeFrames(strand);
     float travelled = 0.0f;
 
     for (std::size_t i = 0; i < strand.points.size(); ++i) {
-        const Vec3 along = strandDirection(strand, i);
-
         if (i > 0) {
             travelled += (strand.points[i] - strand.points[i - 1]).length();
         }
 
-        // The last ring's frame made square to the strand here, so the tube does not twist.
-        const Vec3 square = across - along * across.dot(along);
-        across = square.lengthSquared() > 1e-12f ? square.normalized() : squareTo(along);
-        const Vec3 second = along.cross(across);
+        const Vec3& across = frames[i].across;
+        const Vec3& second = frames[i].second;
 
         for (int side = 0; side <= sides; ++side) {
             const float angle = fullTurnRadians * static_cast<float>(side) / static_cast<float>(sides);

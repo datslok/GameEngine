@@ -8,6 +8,7 @@
 #include "games/forest/forest_trees.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
+#include "games/forest/climbers.h"
 #include "games/forest/lianas.h"
 #include "games/forest/palms.h"
 #include "games/forest/understorey.h"
@@ -195,6 +196,12 @@ public:
     // The lianas' settings and their meshes' entities (bark and ivy, a chunk of ground each).
     ForestLianaSettings& getLianaSettings();
     const std::vector<Entity>& getLianas() const;
+    // The climbers' settings and their entities (stems and leaves, on each placed big tree whose variant carries any).
+    ForestClimberSettings& getClimberSettings();
+    const std::vector<Entity>& getClimbers() const;
+    // The placed trees carrying climbers, in the order forest-climber numbers them.
+    const std::vector<TreePlacement>& getClimbedTrees() const;
+    const std::vector<Vec3>& getClimbedFacing() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -210,9 +217,18 @@ private:
     // layer under and between them, each species a few variants grown, each placed many times.
     void buildTrees(World& world, AssetManager& assets);
 
-    // One species' variants grown and its placed trees added, bark then leaves, with its leaf material.
+    // What a species' variants grow climbers with (games/forest/climbers.h): the settings and the stems' and leaves'
+    // materials, made once for every species carrying them.
+    struct TreeClimbers {
+        const ForestClimberSettings* settings = nullptr;
+        Material stem;
+        Material leaf;
+    };
+
+    // One species' variants grown and its placed trees added, bark then leaves, with its leaf material; with climbers,
+    // each variant's grown too (none for the mid layer).
     void plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                    std::uint32_t variantSeed, const Material& leaf);
+                    std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers = nullptr);
 
     // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified,
     // placed many times.
@@ -250,6 +266,7 @@ private:
     ForestUnderstoreySettings understoreySettings;
     ForestPalmSettings palmSettings;
     ForestLianaSettings lianaSettings;
+    ForestClimberSettings climberSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
 
@@ -275,6 +292,9 @@ private:
     std::vector<Entity> palms;
     std::vector<Entity> palmImpostors; // a card each palm, in the placements' order
     std::vector<Entity> lianaEntities;
+    std::vector<Entity> climberEntities;
+    std::vector<TreePlacement> climbedTrees;
+    std::vector<Vec3> climbedFacing; // each one's first climber's way out of the trunk, in the world (forest-climber looks from it)
     std::vector<Entity> trees;
     std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;
