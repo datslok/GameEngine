@@ -71,6 +71,13 @@ public:
         return false;
     }
 
+    // Switch the debug view on or off (the debug-view command, engine/engine_commands.h), as the game's own key does.
+    // Optional: false means this game has no debug view, the default.
+    virtual bool setDebugView(bool on) {
+        (void)on;
+        return false;
+    }
+
     // Place the camera at position looking at target, for the camera command (engine/engine_commands.h), and keep it
     // there until the player moves it. Optional: false means this game's camera cannot be placed, the default.
     virtual bool poseCamera(World& world, const Vec3& position, const Vec3& target) {

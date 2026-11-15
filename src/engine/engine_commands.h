@@ -44,6 +44,9 @@ void addSimulationCommands(CommandRegistry& registry, SimulationControl& control
 // camera: shows the camera's place and direction, or places it (Game::poseCamera), looking at a point or as before.
 void addCameraCommands(CommandRegistry& registry, Game& game, World& world);
 
+// debug-view: says whether the game's debug view (F4: bounding boxes, the readout) shows, or switches it on or off.
+void addDebugViewCommand(CommandRegistry& registry, Game& game);
+
 /*
 * preset (render/gpu/quality_preset.h: the preset the settings match, or set one) and typical-gpu (render/gpu/typical_gpu.h:
 * the typical GPU setup on or off through the view, with the upscalers support says this PC can run).

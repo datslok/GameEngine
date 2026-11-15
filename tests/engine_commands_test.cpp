@@ -320,6 +320,68 @@ namespace {
     }
 }
 
+namespace {
+    // A game with the F4 debug view, which the debug-view command switches, and one without.
+    class ViewGame : public Game {
+    public:
+        explicit ViewGame(bool hasView) : hasView(hasView) {
+        }
+        const char* title() const override {
+            return "Viewed";
+        }
+        void onInit(World&, AssetManager&) override {
+        }
+        void onInput(World&, const Input&) override {
+        }
+        void onFixedUpdate(World&, float, double) override {
+        }
+        void onUpdate(World&, const Input&, float, float) override {
+        }
+        Camera& getCamera() override {
+            return camera;
+        }
+        bool wantsMouseLook() const override {
+            return false;
+        }
+        bool wantsDebugView() const override {
+            return view;
+        }
+        bool setDebugView(bool on) override {
+            if (!hasView) {
+                return false;
+            }
+
+            view = on;
+            return true;
+        }
+
+    private:
+        bool hasView = true;
+        bool view = false;
+        Camera camera{Vec3{0.0f, 2.0f, 5.0f}, Vec3{0.0f, 2.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 16.0f / 9.0f, 0.1f, 100.0f};
+    };
+
+    // debug-view says whether the F4 view shows, and switches it on or off; a game without one says so; anything else
+    // is a usage error.
+    void testDebugViewCommand() {
+        ViewGame game{true};
+        CommandRegistry registry;
+        addDebugViewCommand(registry, game);
+
+        assert(registry.execute("debug-view").ok && contains(registry.execute("debug-view").text, "off"));
+        assert(registry.execute("debug-view on").ok && game.wantsDebugView());
+        assert(contains(registry.execute("debug-view").text, "on"));
+        assert(registry.execute("debug-view off").ok && !game.wantsDebugView());
+        assert(!registry.execute("debug-view maybe").ok && !registry.execute("debug-view on off").ok);
+
+        ViewGame plain{false};
+        CommandRegistry other;
+        addDebugViewCommand(other, plain);
+        const CommandReply refused = other.execute("debug-view on");
+        assert(!refused.ok && contains(refused.text, "Viewed"));
+    }
+}
+
 void testEngineCommands() {
     testSetChangesSettings();
     testSetReportsProblems();
@@ -333,4 +395,5 @@ void testEngineCommands() {
     testSteppingIsDeterministic();
     testCameraCommands();
     testCameraOfAGameThatCannotBePlaced();
+    testDebugViewCommand();
 }

@@ -266,6 +266,25 @@ void addCameraCommands(CommandRegistry& registry, Game& game, World& world) {
                  });
 }
 
+void addDebugViewCommand(CommandRegistry& registry, Game& game) {
+    registry.add("debug-view", "debug-view [on|off]", "Shows whether the debug view (F4: bounding boxes and the readout) shows, or switches it on or off.",
+                 [&game](const CommandArguments& arguments) {
+                     if (arguments.empty()) {
+                         return commandOk(std::string{"Debug view "} + (game.wantsDebugView() ? "on" : "off"));
+                     }
+
+                     if (arguments.size() != 1 || (arguments[0] != "on" && arguments[0] != "off")) {
+                         return commandError("Usage: debug-view, debug-view on or debug-view off");
+                     }
+
+                     if (!game.setDebugView(arguments[0] == "on")) {
+                         return commandError(std::string{game.title()} + " has no debug view");
+                     }
+
+                     return commandOk(std::string{"Debug view "} + (game.wantsDebugView() ? "on" : "off"));
+                 });
+}
+
 /*
 * preset names the quality preset the settings match (Custom when one was changed by hand) or sets one, by name in any
 * case. typical-gpu turns the typical GPU setup on or off, or says which, naming the upscaler it chose.

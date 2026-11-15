@@ -213,6 +213,7 @@ Several games run on one engine, picked at start-up with `--game`.
 - Numbers the shaders share with C++ are written once.
 - **Profiling** in the F4 view:
   - frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second
+  - the CPU's frame by part: building the scene (gathering the draws, shaping, attaching bounds and levels, the terrain, the debug views) and the renderer's stages (the sky bake, waiting, culling the camera's, shadows' and captures' views, packing the scene, recording, submitting)
   - the GPU's own time for each render pass, measured with GPU timestamps: the cloth, the ray tracing scene's build, the light probes, cluster light lists, shadows, the fog's grid, depth prepass, ambient occlusion, mirrored lights, main, the ray tracing debug view, the velocity pass, the depth measurement for the sun's cascades, the reflection probe's capture, the planar mirror, the reflections, the fog over the picture, glass, the TAA resolve, eye adaptation, bloom, tone mapping, debug lines and the debug UI
   - the GPU cloth's time by kind of pass (prediction, the solvers' passes, the coarse levels' passes, the stitches, shaping its mesh), while cloth runs on the GPU
   - render passes and images carry names, so RenderDoc and Nsight show the frame as named passes
@@ -347,6 +348,7 @@ The reply is printed, and the exit code is 0 when the command worked and 1 when 
 | `save-settings` | Saves the changed settings to `settings.cfg`, as F5's Save does |
 | `pause`, `resume`, `step [ticks]` | Stops the clock, starts it, or runs exactly that many ticks |
 | `camera [x y z [tx ty tz]]` | Shows the camera, or places it looking at a point |
+| `debug-view [on or off]` | Shows whether the F4 debug view is on, or switches it |
 | `screenshot <file.png> [width height]` | Saves the picture, without the debug UI |
 | `stats` | The F4 readout as text: draws, lights, probes, video memory, CPU and GPU times |
 | `wait [frames]` | Lets frames draw before the next command, so lighting settles |

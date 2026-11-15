@@ -190,6 +190,11 @@ private:
     Profiler gpuProfiler = makeGpuProfiler();
     Profiler clothProfiler = makeClothProfiler();
 
+    // SCENE by part and RENDER's CPU time by stage (render/cpu_timing.h), averaged over the same window: where a slow
+    // frame's CPU time goes.
+    Profiler sceneProfiler = makeSceneProfiler();
+    Profiler renderProfiler = makeCpuStageProfiler();
+
     // Whether the latest cloth timings had more passes than their stamps (the readout says so instead of going blank).
     bool clothPassesUnmeasured = false;
 

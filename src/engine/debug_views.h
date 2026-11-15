@@ -7,6 +7,7 @@
 #include "scene/camera.h"
 #include "scene/debug_draw.h"
 #include "scene/frame_description.h"
+#include "scene/level_of_detail.h"
 #include "scene/model.h"
 
 #include <array>
@@ -19,9 +20,15 @@
 * the meshes and the renderer's counts, so it does the drawing.
 */
 
-// A box around every draw in the frame, using its mesh's bounds (indexed like MeshHandle) and the draw's model matrix.
-// Draws whose mesh has no known bounds are skipped.
-void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, DebugDraw& debug);
+/*
+* A box around every draw the camera draws, using its mesh's bounds (indexed like MeshHandle) and the draw's model
+* matrix: those in its view (scene/culling.h, visibleDraws: no shadow stand-ins, nothing hidden) whose level of detail at
+* levels draws a mesh (scene/level_of_detail.h, chosenMesh: an impostor only far away, its tree only near). Draws whose
+* mesh has no known bounds are skipped. A box for every draw in a big world (tens of thousands, most off screen) cost the
+* readout most of a frame.
+*/
+void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, const Camera& camera, const LevelView& levels,
+                       DebugDraw& debug);
 
 // The debug readout is lines of text down the top-left corner; this is where line `line` (0 first) starts.
 constexpr float debugReadoutTextHeight = 14.0f;
@@ -75,6 +82,30 @@ void drawCameraReadout(const Camera& camera, DebugDraw& debug);
 
 // A profiler for the GPU's timings: "GPU" (the whole frame) as section 0, then one section per pass in GpuPass order.
 Profiler makeGpuProfiler();
+
+/*
+* The parts of building a frame (Application::describeFrame and the debug views), the readout's SCENE line: section 0
+* the whole, then one section a part (sceneStageSection).
+*/
+enum class SceneStage {
+    Build,   // the game's draws gathered (scene/frame_description.h, buildFrame)
+    Deform,  // the deforming meshes shaped
+    Attach,  // bounding spheres, flat faces and levels of detail attached to the draws
+    Terrain, // the terrain's patches chosen
+    Static,  // the static level checked for changes (the sky visibility grid's rays)
+    Debug    // the debug views and the game's debug drawing
+};
+
+inline constexpr std::size_t sceneStageCount = static_cast<std::size_t>(SceneStage::Debug) + 1;
+
+const char* sceneStageName(SceneStage stage);
+int sceneStageSection(SceneStage stage);
+Profiler makeSceneProfiler();
+
+// The renderer's CPU time by stage (render/cpu_timing.h), the readout's RENDER line: section 0 the whole, then a
+// section a stage. recordCpuStageTimings leaves out a frame not measured.
+Profiler makeCpuStageProfiler();
+void recordCpuStageTimings(Profiler& profiler, const CpuStageTimings& timings);
 
 // One frame's GPU timings into a profiler from makeGpuProfiler. Timings that are not valid are left out, so a frame
 // not measured does not count as one that took no time.

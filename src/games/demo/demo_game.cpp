@@ -484,6 +484,11 @@ bool DemoGame::wantsDebugView() const {
     return debugViewEnabled;
 }
 
+bool DemoGame::setDebugView(bool on) {
+    debugViewEnabled = on;
+    return true;
+}
+
 // Read every frame (the cameras) or at each throw (the grenade), so changes show at once.
 std::vector<GoldenView> DemoGame::goldenViews() const {
     std::vector<GoldenView> views;

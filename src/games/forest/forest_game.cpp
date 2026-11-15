@@ -868,6 +868,11 @@ bool ForestGame::wantsDebugView() const {
     return debugViewEnabled;
 }
 
+bool ForestGame::setDebugView(bool on) {
+    debugViewEnabled = on;
+    return true;
+}
+
 void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Sun", [&] {
         visit(sunSettings, visitor);

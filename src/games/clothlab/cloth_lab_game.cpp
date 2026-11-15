@@ -379,6 +379,11 @@ bool ClothLabGame::wantsDebugView() const {
     return debugViewEnabled;
 }
 
+bool ClothLabGame::setDebugView(bool on) {
+    debugViewEnabled = on;
+    return true;
+}
+
 void ClothLabGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
     (void)alpha;
     if (sheetGrab) {

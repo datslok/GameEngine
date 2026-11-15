@@ -1,6 +1,7 @@
 #include "render/vulkan/vulkan_renderer.h"
 #include "math/angles.h"
 #include "core/blue_noise.h"
+#include "core/profiler.h"
 #include "scene/sky_object.h"
 #include "render/gpu/brdf.h"
 #include "render/gpu/camera_relative.h"
@@ -1247,11 +1248,14 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
         return false;
     }
 
+    cpuClock.start(profilerSeconds());
     bakeSkyVisibility(description, settings, false);
+    cpuClock.lap(CpuStage::SkyBake, profilerSeconds());
     FrameContext frame = beginFrame();
 
     try {
         acquiredImage = swapchain.acquire(frames[frameIndex].imageAcquired.get());
+        cpuClock.lap(CpuStage::Wait, profilerSeconds());
 
         if (!acquiredImage) {
             // Out of date (a resize mid-frame): nothing to draw into. Submit the empty buffer and rebuild next frame.
@@ -1294,7 +1298,10 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
 
         transitionImage(frame.commands, swapchain.getImage(image), VK_IMAGE_ASPECT_COLOR_BIT, imageState, ImageState::Present);
         finishGpuTimings(frame);
+        cpuClock.lap(CpuStage::Record, profilerSeconds());
         submitFrame(frame, true);
+        cpuClock.lap(CpuStage::Submit, profilerSeconds());
+        stats.cpu = cpuClock.finish();
     }
     catch (...) {
         // The shadow pass may have stopped part-way, so no cached tile can be trusted.
@@ -1382,10 +1389,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // What the camera sees, settled first: the mirror is chosen from it, and the shadows need the mirror.
     // Glass and blended surfaces are left out of every opaque view and drawn last, sorted (render/gpu/transparency.h).
+    cpuClock.lap(CpuStage::Setup, profilerSeconds());
     const std::vector<std::size_t> seen = visibleDraws(description.draws, cameraFrustum);
     const std::vector<std::size_t> visible = opaqueDraws(description.draws, seen);
     stats.drawn = seen.size();
     stats.culled = description.draws.size() - seen.size();
+    cpuClock.lap(CpuStage::Camera, profilerSeconds());
 
     // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
     // surfaces, so they need the anti-aliasing on. A flat mirror's picture (render/gpu/planar_reflection.h) goes with
@@ -1446,10 +1455,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Each view draws the levels of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass
     // redraws the camera's with the same levels, so its depths match the main pass's.
     validateLevelOfDetail(settings.levelOfDetail);
+    cpuClock.lap(CpuStage::Lights, profilerSeconds());
     const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(sceneSize.height), camera.getVerticalFov(), settings.levelOfDetail);
     stats.drawnByLevel = levelsChosen(description.draws, visible, cameraLevels);
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible, 0, &cameraLevels);
     std::tie(stats.drawnTriangles, stats.drawnCutOutTriangles) = batchTriangles(mainDraws.batches);
+    cpuClock.lap(CpuStage::Camera, profilerSeconds());
 
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows, settings.levelOfDetail);
 
@@ -1457,6 +1468,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     for (std::size_t tile = 0; tile < shadows.tileData.size(); ++tile) {
         markTileGlass(shadows.tileData[tile], shadowDraws.tileGlass[tile]);
     }
+
+    cpuClock.lap(CpuStage::Shadows, profilerSeconds());
 
     // The visible objects that moved since last frame, drawn again by the velocity pass: their entries follow the
     // shadow tiles' in the draw list.
@@ -1474,6 +1487,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()), &cameraLevels);
+    cpuClock.lap(CpuStage::Camera, profilerSeconds());
 
     // The probe round the camera is captured while reflections run, a few faces a frame (probeCaptureStep), each from the
     // place its cycle started. Each face drawn draws what its own view holds, those entries following the velocity
@@ -1531,6 +1545,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         const LevelView mirrorLevels = levelView(cameraOrigin, static_cast<float>(mirrorSize.height), camera.getVerticalFov(), settings.levelOfDetail);
         captureDraws[cubeFaceCount] = batchByMesh(description.draws, inView, firstCaptureEntry, &mirrorLevels);
     }
+
+    cpuClock.lap(CpuStage::Captures, profilerSeconds());
 
     // The transparent draws the camera sees, far to near, their entries last in the draw list.
     std::uint32_t transparentEntry = static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size() + motionDraws.order.size());
@@ -1652,10 +1668,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
+    cpuClock.lap(CpuStage::Setup, profilerSeconds());
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
+    cpuClock.lap(CpuStage::Lines, profilerSeconds());
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
                                                 hitLights, mirrorPairs, occlusion, occlusionBlurred, occlusionAccumulates, gathersLight, glassShadows, frameFog,
                                                 readsSkyVisibility, contact);
+    cpuClock.lap(CpuStage::Pack, profilerSeconds());
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1971,6 +1990,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.upscaler = frameUpscaler;
     stats.renderScale = appliedRenderScale(settings.upscaling);
     stats.outputWidth = frameWidth;
+    stats.renderHeight = sceneSize.height;
     shownScene = finishedScene;
 
     // Depth of field (render/gpu/depth_of_field.h) on the finished picture, into a copy the passes below read instead,
