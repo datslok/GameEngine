@@ -1700,3 +1700,4 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The user's look:** "looks good". Merged.
 - `shadow-lod` (Nov 15 2026): shadows from the same levels of detail. Each shadow tile chooses by its own texels (`tileLevelView`, from the tile's matrix), not the camera's distance: the sun's tiles are orthographic, so the choice holds while the camera walks and cached tiles (the 5 km far map above all) are not redrawn for it; the tiles' fingerprints hash the mesh each caster draws.
   - **Measured** turning 3 degrees a step among the trees (the RTX 4070 Laptop): the shadow pass 4.1-4.9 ms with levels and without, no gain. The trees and plants already cast through coarse shadow-only stand-ins; only the rock shapes cast through meshes with levels. Kept for the shadows matching the coarse rocks, and for the terrain to come.
+  - **The user:** merge it ("we can merge shadows").
