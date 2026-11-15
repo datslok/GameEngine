@@ -3,6 +3,7 @@
 #include <span>
 
 #include "scene/flat_faces.h"
+#include "core/job_system.h"
 #include "ecs/world.h"
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
@@ -70,21 +71,26 @@ public:
     // Ends a frame: what it remembered becomes last frame's, and parts it did not draw are forgotten.
     void endFrame();
 
+    // Room for every entity slot below count, made before entities remember from several threads at once (each entity
+    // writes only its own slot's record, so they never meet).
+    void reserveSlots(std::size_t count);
+
 private:
-    struct Key {
-        std::uint32_t index = 0;
+    /*
+    * One entity slot's matrices, a part each, and the frame they were remembered in and the generation of the entity
+    * that remembered them. Two sets of records take turns by the frame's parity: this frame's and last frame's. A
+    * record counts as last frame's only when its frame stamp says so, so nothing is cleared between frames, and once
+    * every slot's parts have been seen nothing is allocated either (with 20,000 objects, two hash maps rebuilt every
+    * frame cost 14 ms).
+    */
+    struct Record {
         std::uint32_t generation = 0;
-        std::uint64_t part = 0;
-
-        bool operator==(const Key& other) const = default;
+        std::uint64_t frame = 0;
+        std::vector<Mat4> parts;
     };
 
-    struct KeyHash {
-        std::size_t operator()(const Key& key) const;
-    };
-
-    std::unordered_map<Key, Mat4, KeyHash> last;
-    std::unordered_map<Key, Mat4, KeyHash> current;
+    std::vector<Record> records[2];
+    std::uint64_t frame = 2; // starts past the records' stamp of 0, so none counts as last frame's on the first
 };
 
 /*
@@ -127,4 +133,5 @@ void attachShapes(std::vector<DrawItem>& draws, const std::vector<DeformedMesh>&
 
 // Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks. With a history, each draw
 // gets its matrix from last frame, and this frame's are remembered for the next.
-FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history = nullptr);
+FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history = nullptr,
+                            JobSystem& jobs = serialJobs());

@@ -2077,16 +2077,13 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            bool readsSkyVisibility, const ContactShadowFrame& contact) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
-    std::vector<GpuInstance> instances;
-    std::vector<std::array<float, 16>> previousModels;
-    instances.reserve(description.draws.size());
-    previousModels.reserve(description.draws.size());
+    const std::vector<GpuInstance> instances = packInstances(description.draws, materials, jobs);
+    std::vector<std::array<float, 16>> previousModels(description.draws.size());
 
-    for (const DrawItem& draw : description.draws) {
-        checkTexturesUploaded(draw.material);
-        instances.push_back(packInstance(draw, materials.add(draw.material)));
-        writeColumnMajor(draw.previousModel.value_or(draw.model), previousModels.emplace_back().data());
-    }
+    jobs.parallelFor(description.draws.size(), 256, [&](std::size_t draw) {
+        checkTexturesUploaded(description.draws[draw].material);
+        writeColumnMajor(description.draws[draw].previousModel.value_or(description.draws[draw].model), previousModels[draw].data());
+    });
 
     std::vector<std::uint32_t> drawList;
     drawList.reserve(mainDraws.order.size() + shadowDraws.drawList.size());

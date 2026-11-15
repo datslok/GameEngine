@@ -9,6 +9,8 @@
 #include "scene/camera.h"
 #include "scene/frame_description.h"
 
+#include "test_jobs.h"
+
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -321,7 +323,50 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Packing on every core gives exactly the serial instances and material table: each draw's instance as packInstance
+    * makes it with the index MaterialTable::add gives its material, materials alternating as a forest's bark and leaves
+    * do, a blended ground among them.
+    */
+    void testPackingOnManyCoresIsTheSame() {
+        std::vector<DrawItem> draws;
+
+        for (int i = 0; i < 3000; ++i) {
+            DrawItem draw;
+            draw.mesh = MeshHandle{static_cast<std::uint32_t>(i % 7)};
+            draw.model = Mat4::translation(static_cast<float>(i), 1.0f, -2.0f) * Mat4::scaling(1.0f + 0.001f * static_cast<float>(i), 1.0f, 1.0f);
+            draw.material.roughness = 0.25f * static_cast<float>(i % 3);
+            draw.material.colour = Pixel{static_cast<std::uint8_t>(i % 2 == 0 ? 200 : 40), 120, 60};
+
+            if (i == 1500) {
+                Material layer;
+                layer.roughness = 0.9f;
+                draw.material.groundLayers = {layer, draw.material};
+                draw.material.groundWeights = TextureHandle{1};
+            }
+
+            draws.push_back(draw);
+        }
+
+        MaterialTable serialTable;
+        std::vector<GpuInstance> serial;
+
+        for (const DrawItem& draw : draws) {
+            serial.push_back(packInstance(draw, serialTable.add(draw.material)));
+        }
+
+        MaterialTable parallelTable;
+        const std::vector<GpuInstance> parallel = packInstances(draws, parallelTable, testJobs());
+        assert(parallel.size() == serial.size());
+        assert(std::memcmp(parallel.data(), serial.data(), serial.size() * sizeof(GpuInstance)) == 0);
+        assert(parallelTable.getEntries().size() == serialTable.getEntries().size() && serialTable.getEntries().size() < 20);
+        assert(std::memcmp(parallelTable.getEntries().data(), serialTable.getEntries().data(), serialTable.getEntries().size() * sizeof(GpuMaterial)) == 0);
+    }
+}
+
 void testGpuScene() {
+    testPackingOnManyCoresIsTheSame();
     testFrameDataCarriesTheCascadeTransition();
     testDrawsAreBatchedByMesh();
     testOnlyChosenDrawsAreBatchedInTheirOrder();

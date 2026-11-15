@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/job_system.h"
 #include "math/mat4.h"
 #include "math/vec3.h"
 #include "math/vec4.h"
@@ -11,6 +12,7 @@
 #include "scene/frame_description.h"
 #include "scene/material.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
@@ -121,6 +123,11 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
 class MaterialTable {
 public:
     std::uint32_t add(const Material& material);
+
+    // The same for a material already packed (packMaterial, not a blended ground) and the hash of its bytes
+    // (materialHash): the index of an equal entry, or a new one.
+    std::uint32_t addPacked(const GpuMaterial& packed, std::uint64_t hash);
+
     const std::vector<GpuMaterial>& getEntries() const;
 
 private:
@@ -128,7 +135,25 @@ private:
 
     // Entries by a hash of their bytes; equal hashes are compared in full, so a collision only costs a comparison.
     std::unordered_multimap<std::uint64_t, std::uint32_t> byHash;
+
+    // The last few entries found or made, checked first: a frame's draws use a few dozen materials in runs that
+    // alternate (a tree's bark, then its leaves), so most look-ups end here without touching the hash table.
+    static constexpr std::size_t recentCount = 8;
+    std::array<std::uint64_t, recentCount> recentHashes{};
+    std::array<std::uint32_t, recentCount> recentIndices{};
+    std::size_t recentFilled = 0;
+    std::size_t recentNext = 0;
 };
+
+// The hash of a packed material's bytes, as MaterialTable files it.
+std::uint64_t materialHash(const GpuMaterial& packed);
+
+/*
+* Every draw's instance (packInstance) with its material's index in materials, as adding them one by one in order would
+* give: the materials packed and hashed and the instances packed on every core, the indices handed out in draw order on
+* one (with 20,000 objects, packing on one thread took 11 ms).
+*/
+std::vector<GpuInstance> packInstances(const std::vector<DrawItem>& draws, MaterialTable& materials, JobSystem& jobs);
 
 // One instanced draw: mesh, drawn instanceCount times, as instances firstInstance onwards, and how its draws are drawn:
 // cut-outs by pipelines that throw away their holes, double-sided ones without culling back faces.
