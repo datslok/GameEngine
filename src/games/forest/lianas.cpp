@@ -115,12 +115,14 @@ void visit(ForestLianaSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Path share", settings.pathShare, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Path reach", settings.pathReach, {.min = 0.0f, .max = 200.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Most per tree", settings.mostPerTree, {.min = 1, .max = 20, .sliderMax = 10, .applies = FieldApplies::AtStartup});
+    visitor.field("Thickness", settings.thickness, {.min = 0.1f, .max = 10.0f, .sliderMax = 5.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Rope share", settings.ropeShare, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Neighbour span", settings.neighbourSpan, {.min = 1.0f, .max = 100.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Least sag", settings.leastSag, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Most sag", settings.mostSag, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Rope slack", settings.ropeSlack, {.min = 0.01f, .max = 0.5f, .applies = FieldApplies::AtStartup});
     visitor.field("Leaf spacing", settings.leafSpacing, {.min = 0.05f, .max = 5.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Sparse leaf spacing", settings.sparseLeafSpacing, {.min = 0.05f, .max = 20.0f, .sliderMax = 5.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leaf size", settings.leafSize, {.min = 0.02f, .max = 2.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
 }
 
@@ -167,7 +169,7 @@ std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const For
             const float out = next();
             const float down = next();
             hung.from = crownHold(crown, turn, out, down);
-            hung.radius = 0.5f * lianaDiameter(next());
+            hung.radius = 0.5f * lianaDiameter(next()) * settings.thickness;
             const bool rope = neighbours.empty() || next() < settings.ropeShare;
 
             if (rope) {
@@ -194,8 +196,9 @@ std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const For
 }
 
 namespace {
-    // The runs of a strand's points inside a crown, each as a strand of its own (two points at least).
-    std::vector<HangingStrand> runsInside(const HangingStrand& strand, const LianaCrown* first, const LianaCrown* second) {
+    // The runs of a strand's points inside a crown (or, with inside false, outside both), each as a strand of its own
+    // (two points at least).
+    std::vector<HangingStrand> crownRuns(const HangingStrand& strand, const LianaCrown* first, const LianaCrown* second, bool wantInside) {
         std::vector<HangingStrand> runs;
         HangingStrand run;
         const auto inside = [&](const Vec3& point) {
@@ -204,7 +207,7 @@ namespace {
         };
 
         for (std::size_t point = 0; point < strand.points.size(); ++point) {
-            if (inside(strand.points[point])) {
+            if (inside(strand.points[point]) == wantInside) {
                 run.points.push_back(strand.points[point]);
                 run.radii.push_back(strand.radii[point]);
                 continue;
@@ -257,9 +260,12 @@ std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std
             const LianaCrown* second = liana.otherCrown >= 0 ? &crowns[static_cast<std::size_t>(liana.otherCrown)] : nullptr;
             std::uint32_t run = 0;
 
-            for (const HangingStrand& leafy : runsInside(strand, first, second)) {
-                appendLeafCards(built.leaves, leafy, settings.leafSpacing, settings.leafSize,
-                                forestShapeSeed(lianaLeafSeed + static_cast<std::uint32_t>(index), ++run));
+            for (const bool inCrown : {true, false}) {
+                const float spacing = inCrown ? settings.leafSpacing : settings.sparseLeafSpacing;
+
+                for (const HangingStrand& leafy : crownRuns(strand, first, second, inCrown)) {
+                    appendLeafCards(built.leaves, leafy, spacing, settings.leafSize, forestShapeSeed(lianaLeafSeed + static_cast<std::uint32_t>(index), ++run));
+                }
             }
         }
     });

@@ -65,13 +65,17 @@ struct Liana {
 // How many lianas and how they hang (F5 Forest, Lianas; start-up: the meshes are built once).
 struct ForestLianaSettings {
     // The share of crowns carrying lianas (Barro Colorado: about half to three quarters of trees), and of those within
-    // pathReach metres of the path, since forest edges carry more.
-    float treeShare = 0.65f;
-    float pathShare = 0.9f;
+    // pathReach metres of the path, since forest edges carry more. Above the census's for a lush look (the user's).
+    float treeShare = 0.8f;
+    float pathShare = 0.95f;
     float pathReach = 15.0f;
 
     // Each carrying crown has 1 to this many.
-    int mostPerTree = 5;
+    int mostPerTree = 8;
+
+    // The census's thicknesses times this: at 1, half are 1-2 cm across, under a pixel 20 m off, so the patch hardly
+    // read as vine-laden (the user chose them a little thicker).
+    float thickness = 2.0f;
 
     // The share hanging to the ground; the rest loop to a crown whose centre is within neighbourSpan metres across
     // (ropes too when there is none).
@@ -83,8 +87,9 @@ struct ForestLianaSettings {
     float mostSag = 0.4f;
     float ropeSlack = 0.05f;
 
-    // The metres between ivy leaves where a liana runs through a crown, and a leaf's length.
+    // The metres between ivy leaves where a liana runs through a crown and along the rest of it, and a leaf's length.
     float leafSpacing = 0.35f;
+    float sparseLeafSpacing = 1.2f;
     float leafSize = 0.3f;
 };
 
@@ -94,7 +99,8 @@ void visit(ForestLianaSettings& settings, SettingsVisitor& visitor);
 * The lianas of a patch's crowns: each crown carries some with the settings' share (pathShare within pathReach of the
 * path, by pathDistance at its centre), 1 to mostPerTree of them, each a rope (ropeShare, or no neighbour) or a loop to
 * a random neighbour; holds at random in the lower part of the crowns, a rope's foot 1-6 m off across the ground
-* (groundHeight) and sunk lianaGroundSink into it; thickness by lianaDiameter. The same seed gives the same lianas.
+* (groundHeight) and sunk lianaGroundSink into it; thickness by lianaDiameter times the settings' thickness. The same
+* seed gives the same lianas.
 */
 std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings, std::uint64_t seed,
                                 const std::function<float(float, float)>& groundHeight, const std::function<float(float, float)>& pathDistance);
@@ -108,7 +114,8 @@ struct LianaMeshes {
 /*
 * The lianas' meshes, grouped by the chunkMetres square their first hold stands in, in a fixed order, a job a chunk:
 * each a catenary swept into a tube of 4 sides (6 from lianaThickDiameter across), its bark in tiles of barkTileMetres
-* along it, ivy cards (appendLeafCards) on the runs of its points inside a crown it hangs from.
+* along it, ivy cards (appendLeafCards) leafSpacing apart on the runs of its points inside a crown it hangs from and
+* sparseLeafSpacing apart along the rest.
 */
 std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings,
                                      float barkTileMetres, float chunkMetres, JobSystem& jobs);

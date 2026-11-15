@@ -119,7 +119,8 @@ namespace {
             assert((liana.from - again[index].from).length() == 0.0f && liana.length == again[index].length);
             const LianaCrown& crown = crowns[static_cast<std::size_t>(liana.crown)];
             assert((liana.from - crown.centre).length() < crown.radius && liana.from.y < crown.centre.y);
-            assert(liana.radius >= 0.005f && liana.radius <= 0.1f);
+            // The census's 1-20 cm across, times the settings' thickness.
+            assert(liana.radius >= 0.005f * settings.thickness && liana.radius <= 0.1f * settings.thickness);
             perCrown[static_cast<std::size_t>(liana.crown)] += 1;
             const float straight = (liana.to - liana.from).length();
 
@@ -151,10 +152,50 @@ namespace {
         assert(farCarrying > 0);
     }
 
+    // An ivy card's vertices (appendLeafCards draws whole squares).
+    constexpr std::size_t leafCardVertices = 4;
+
+    // Whether a point is inside any of the crowns.
+    bool insideACrown(const Vec3& point, const std::vector<LianaCrown>& crowns) {
+        return std::any_of(crowns.begin(), crowns.end(), [&](const LianaCrown& crown) {
+            return (point - crown.centre).length() < crown.radius;
+        });
+    }
+
     /*
-    * The meshes, a chunk of the ground each: bark tubes round every liana, and ivy only near the crowns (every leaf
-    * vertex within a crown's reach plus a leaf's length or two).
+    * Ivy all along a liana, sparse outside the crowns and dense inside them: a loop between two crowns carries leaves on
+    * both stretches, and more of them a metre inside.
     */
+    void testIvyIsDensestInTheCrowns() {
+        const std::vector<LianaCrown> crowns{LianaCrown{Vec3{0.0f, 25.0f, 0.0f}, 8.0f}, LianaCrown{Vec3{30.0f, 25.0f, 0.0f}, 8.0f}};
+        const Liana loop{.from = Vec3{2.0f, 20.0f, 0.0f}, .to = Vec3{28.0f, 20.0f, 0.0f}, .length = 32.0f, .radius = 0.03f, .crown = 0, .otherCrown = 1};
+        const ForestLianaSettings settings;
+        const std::vector<LianaMeshes> chunks = lianaMeshes({loop}, crowns, settings, 2.0f, 1000.0f, testJobs());
+        assert(chunks.size() == 1);
+
+        // Each stretch's length along the line, and the leaves whose stems sit on it (a card's first vertex).
+        const HangingStrand strand = catenaryStrand(loop.from, loop.to, loop.length, loop.radius);
+        float insideLength = 0.0f;
+        float outsideLength = 0.0f;
+
+        for (std::size_t point = 1; point < strand.points.size(); ++point) {
+            const float step = (strand.points[point] - strand.points[point - 1]).length();
+            (insideACrown(strand.points[point], crowns) ? insideLength : outsideLength) += step;
+        }
+
+        int insideCards = 0;
+        int outsideCards = 0;
+        const std::vector<MeshVertex>& leaves = chunks.front().leaves.vertices;
+
+        for (std::size_t vertex = 0; vertex < leaves.size(); vertex += leafCardVertices) {
+            (insideACrown(leaves[vertex].position, crowns) ? insideCards : outsideCards) += 1;
+        }
+
+        assert(insideLength > 0.0f && outsideLength > 0.0f && outsideCards > 0);
+        assert(static_cast<float>(insideCards) / insideLength > 2.0f * static_cast<float>(outsideCards) / outsideLength);
+    }
+
+    // The meshes, a chunk of the ground each: bark tubes round every liana, facing out, the same every run.
     void testLianaMeshes() {
         const std::vector<LianaCrown> crowns = testCrowns();
         const ForestLianaSettings settings;
@@ -166,13 +207,6 @@ namespace {
         for (const LianaMeshes& chunk : chunks) {
             assert(!chunk.bark.vertices.empty() && chunk.bark.indices.size() % 3 == 0 && trianglesFaceTheirNormals(chunk.bark));
             barkVertices += chunk.bark.vertices.size();
-
-            for (const MeshVertex& vertex : chunk.leaves.vertices) {
-                const bool inACrown = std::any_of(crowns.begin(), crowns.end(), [&](const LianaCrown& crown) {
-                    return (vertex.position - crown.centre).length() < crown.radius + 2.0f * settings.leafSize;
-                });
-                assert(inACrown);
-            }
         }
 
         assert(barkVertices > 0);
@@ -199,7 +233,7 @@ namespace {
 
         FieldCounter counter;
         visit(forest.game.getLianaSettings(), counter);
-        assert(counter.fields == 11 && counter.live == 0);
+        assert(counter.fields == 13 && counter.live == 0);
     }
 }
 
@@ -208,5 +242,6 @@ void testLianas() {
     testTheCatenary();
     testChoosingLianas();
     testLianaMeshes();
+    testIvyIsDensestInTheCrowns();
     testTheForestHangsThem();
 }
