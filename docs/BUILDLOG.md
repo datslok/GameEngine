@@ -1727,3 +1727,4 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The settings key** comes from the F5 label, so the switch is `engine.render.materials.lightThroughLeaves` (the first test run caught `leafLight`).
   - **Checked:** the tests (release, tests first); the debug, release and GPU test programs build without warnings. **Not run:** the game (the look is the user's), `make gputest` (the new `GPU_TEST_DIFFUSE_TRANSMISSION` case is built) and the golden views (the forest's views change; no other game has leaves letting light through, and nothing else changes to the bit, by the tests).
   - **Not yet:** the ray tracers' hit lighting and the impostor bake light leaves from in front only; the canopy's green gloom on the floor waits for the leaves in the sky visibility bake (`forest-floor`).
+  - **The user's look:** "looks great". Merged.
