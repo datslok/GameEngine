@@ -123,48 +123,9 @@ namespace {
         return MeshVertex{position, normal, uv, Vec4{tangent.x, tangent.y, tangent.z, handedness}};
     }
 
-    /*
-    * One leaflet appended to mesh: from base along direction, length long, its widest width across, its midrib's up
-    * lift (made square to it), segments along it; folded into a V opening down, drooping under its weight.
-    */
-    void appendLeaflet(IndexedMesh& mesh, const Vec3& base, const Vec3& direction, const Vec3& lift, float length, float width, int segments) {
-        const float fold = radiansFromDegrees(leafletFoldDegrees);
-        const float foldAcross = std::cos(fold);
-        const float foldDown = std::sin(fold);
-        const std::uint32_t first = static_cast<std::uint32_t>(mesh.vertices.size());
-
-        for (int segment = 0; segment <= segments; ++segment) {
-            const float t = static_cast<float>(segment) / static_cast<float>(segments);
-            const Vec3 midrib = base + direction * (t * length) - up * (leafletDroop * length * t * t);
-            const Vec3 along = (direction - up * (2.0f * leafletDroop * t)).normalized();
-            Vec3 normal = lift - along * lift.dot(along);
-            normal = normal.lengthSquared() > 1e-10f ? normal.normalized() : squareTo(along);
-            const Vec3 across = along.cross(normal);
-            const float halfWidth = 0.5f * width * palmLeafletWidth(t);
-
-            const Vec3 leftTangent = (across * foldAcross + normal * foldDown).normalized();
-            const Vec3 rightTangent = (across * foldAcross - normal * foldDown).normalized();
-            const Vec3 leftNormal = (normal * foldAcross - across * foldDown).normalized();
-            const Vec3 rightNormal = (normal * foldAcross + across * foldDown).normalized();
-            mesh.vertices.push_back(leafletVertex(midrib - leftTangent * halfWidth, leftNormal, leftTangent, along, Vec2{0.0f, t}));
-            mesh.vertices.push_back(leafletVertex(midrib, normal, across, along, Vec2{0.5f, t}));
-            mesh.vertices.push_back(leafletVertex(midrib + rightTangent * halfWidth, rightNormal, rightTangent, along, Vec2{1.0f, t}));
-        }
-
-        for (int segment = 0; segment < segments; ++segment) {
-            const std::uint32_t row = first + 3 * static_cast<std::uint32_t>(segment);
-            const std::uint32_t next = row + 3;
-            const bool pointed = segment + 1 == segments;
-
-            // Each half a quad, the last segment a triangle to the tip, where the width is gone.
-            appendFacingTriangle(mesh, row, row + 1, next + 1);
-            appendFacingTriangle(mesh, row + 1, row + 2, next + 1);
-
-            if (!pointed) {
-                appendFacingTriangle(mesh, row, next + 1, next);
-                appendFacingTriangle(mesh, row + 2, next + 2, next + 1);
-            }
-        }
+    // A palm's leaflets' fold and droop.
+    StrapFold leafletFold() {
+        return StrapFold{.foldRadians = radiansFromDegrees(leafletFoldDegrees), .droop = leafletDroop};
     }
 
     // A tube appended to mesh reading the texture's midrib column (u 0.5) all round.
@@ -269,6 +230,46 @@ PalmShape palmVariantShape(const ForestPalmSettings& settings, int variant, std:
     };
 }
 
+void appendStrapLeaf(IndexedMesh& mesh, const Vec3& base, const Vec3& direction, const Vec3& lift, float length, float width, int segments,
+                     const StrapFold& fold) {
+    const float foldAcross = std::cos(fold.foldRadians);
+    const float foldDown = std::sin(fold.foldRadians);
+    const std::uint32_t first = static_cast<std::uint32_t>(mesh.vertices.size());
+
+    for (int segment = 0; segment <= segments; ++segment) {
+        const float t = static_cast<float>(segment) / static_cast<float>(segments);
+        const Vec3 midrib = base + direction * (t * length) - up * (fold.droop * length * t * t);
+        const Vec3 along = (direction - up * (2.0f * fold.droop * t)).normalized();
+        Vec3 normal = lift - along * lift.dot(along);
+        normal = normal.lengthSquared() > 1e-10f ? normal.normalized() : squareTo(along);
+        const Vec3 across = along.cross(normal);
+        const float halfWidth = 0.5f * width * palmLeafletWidth(t);
+
+        const Vec3 leftTangent = (across * foldAcross + normal * foldDown).normalized();
+        const Vec3 rightTangent = (across * foldAcross - normal * foldDown).normalized();
+        const Vec3 leftNormal = (normal * foldAcross - across * foldDown).normalized();
+        const Vec3 rightNormal = (normal * foldAcross + across * foldDown).normalized();
+        mesh.vertices.push_back(leafletVertex(midrib - leftTangent * halfWidth, leftNormal, leftTangent, along, Vec2{0.0f, t}));
+        mesh.vertices.push_back(leafletVertex(midrib, normal, across, along, Vec2{0.5f, t}));
+        mesh.vertices.push_back(leafletVertex(midrib + rightTangent * halfWidth, rightNormal, rightTangent, along, Vec2{1.0f, t}));
+    }
+
+    for (int segment = 0; segment < segments; ++segment) {
+        const std::uint32_t row = first + 3 * static_cast<std::uint32_t>(segment);
+        const std::uint32_t next = row + 3;
+        const bool pointed = segment + 1 == segments;
+
+        // Each half a quad, the last segment a triangle to the tip, where the width is gone.
+        appendFacingTriangle(mesh, row, row + 1, next + 1);
+        appendFacingTriangle(mesh, row + 1, row + 2, next + 1);
+
+        if (!pointed) {
+            appendFacingTriangle(mesh, row, next + 1, next);
+            appendFacingTriangle(mesh, row + 2, next + 2, next + 1);
+        }
+    }
+}
+
 std::vector<Vec3> frondSpine(const Vec3& base, float azimuth, float elevation, float length, float droop, int count) {
     const Vec3 level{std::cos(azimuth), 0.0f, -std::sin(azimuth)};
     const float step = length / static_cast<float>(count);
@@ -345,7 +346,7 @@ IndexedMesh growPalm(const PalmShape& shape, const PalmDetail& detail) {
                 const Vec3 out = side * (hand * std::cos(lift)) + frondUp * std::sin(lift);
                 const Vec3 direction = (at.direction * std::cos(angle) + out * std::sin(angle)).normalized();
                 const float leafletLength = longest * palmLeafletLength(leafy) * (1.0f + spread(leafletLengthJitter));
-                appendLeaflet(mesh, at.point, direction, frondUp, leafletLength, widthShare * leafletLength, detail.leafletSegments);
+                appendStrapLeaf(mesh, at.point, direction, frondUp, leafletLength, widthShare * leafletLength, detail.leafletSegments, leafletFold());
             }
         }
     }

@@ -156,9 +156,22 @@ inline constexpr float forestAroidLeafDepth = 0.01f;
 inline constexpr float forestAroidLeafRoughness = 0.4f;
 Material forestAroidLeafMaterial(AssetManager& assets, const std::string& assetFolder);
 
+/*
+* The epiphytes' rosettes' material (games/forest/epiphytes.h): their atlas drawn at start-up (epiphyteLeafImages, a
+* normal map from its height) from the trees' leaves' colour, tinted as theirs; opaque and double-sided as the palms'
+* are, glossy as a bird's-nest fern's fronds are.
+*/
+inline constexpr int forestEpiphyteLeafTexels = 256;
+inline constexpr float forestEpiphyteLeafDepth = 0.01f;
+inline constexpr float forestEpiphyteLeafRoughness = 0.45f;
+Material forestEpiphyteLeafMaterial(AssetManager& assets, const std::string& assetFolder);
+
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";
 inline constexpr Pixel forestMossStandIn{96, 104, 62};
+
+// The moss over the trees' limbs (games/forest/epiphytes.h): the same scan as a surface, a tile half a metre across.
+inline constexpr ForestGroundLayer forestLimbMossLayer{forestMossFolder, 0.5f, forestMossStandIn, 0.95f};
 
 // The moss strands' texture's size: tall, as the clumps are.
 inline constexpr int forestMossTextureWidth = 512;

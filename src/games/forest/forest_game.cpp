@@ -472,11 +472,21 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
     const TreeClimbers climbers{.settings = &climberSettings,
                                 .stem = forestLayerMaterial(assets, assetFolder, forestBarkLayer),
                                 .leaf = withLeafLight(forestAroidLeafMaterial(assets, assetFolder), leafLightSettings)};
-    plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers);
-    plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers);
+
+    // Every tree's epiphytes (docs/VINES.md, stage 3): the rosettes' strap leaves in their own atlas, the
+    // limbs' moss from the moss scan; the mid layer's trees are small, carrying a few bromeliads.
+    const TreeEpiphytes bigEpiphytes{.settings = &epiphyteSettings,
+                                     .bigTree = true,
+                                     .leaf = withLeafLight(forestEpiphyteLeafMaterial(assets, assetFolder), leafLightSettings),
+                                     .moss = forestLayerMaterial(assets, assetFolder, forestLimbMossLayer)};
+    TreeEpiphytes smallEpiphytes = bigEpiphytes;
+    smallEpiphytes.bigTree = false;
+    plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers, bigEpiphytes);
+    plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers,
+               bigEpiphytes);
     const bool midSameLeaves = midSettings.clusterTexels == treeSettings.clusterTexels &&
                                midSettings.leafLength / midSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
-    plantTrees(world, assets, midSettings, midPlacements, midVariantSeed, midSameLeaves ? canopyLeaf : leafFor(midSettings));
+    plantTrees(world, assets, midSettings, midPlacements, midVariantSeed, midSameLeaves ? canopyLeaf : leafFor(midSettings), nullptr, smallEpiphytes);
 }
 
 namespace {
@@ -683,8 +693,9 @@ namespace {
     constexpr std::uint64_t lianaSeed = 0x4c69616eull;
     constexpr float lianaChunkMetres = 40.0f;
 
-    // A tree variant's climbers' use of its seed (forestShapeSeed), apart from its growth's own uses.
+    // A tree variant's climbers' and epiphytes' uses of its seed (forestShapeSeed), apart from its growth's own uses.
     constexpr std::uint32_t climberSeedUse = 17;
+    constexpr std::uint32_t epiphyteSeedUse = 18;
 }
 
 /*
@@ -726,7 +737,7 @@ void ForestGame::buildLianas(World& world, AssetManager& assets) {
 }
 
 void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                            std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers) {
+                            std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes) {
     if (placements.empty()) {
         return;
     }
@@ -749,6 +760,7 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
     const std::size_t variants = static_cast<std::size_t>(std::max(settings.variants, 1));
     std::vector<TreeMeshes> grown(variants);
     std::vector<ClimberMeshes> climbing(variants);
+    std::vector<EpiphyteMeshes> perching(variants);
     getJobs().parallelFor(variants, 1, [&](std::size_t variant) {
         const std::uint32_t seed = forestShapeSeed(variantSeed, static_cast<std::uint32_t>(variant) + 1);
         grown[variant] = growTreeMeshes(settings, seed, forestTreeBarkLayer.tileMetres, &outlines);
@@ -756,6 +768,8 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         if (climbers != nullptr) {
             climbing[variant] = growClimbers(grown[variant].trunk, *climbers->settings, forestShapeSeed(seed, climberSeedUse));
         }
+
+        perching[variant] = growEpiphytes(grown[variant].skeleton, *epiphytes.settings, epiphytes.bigTree, forestShapeSeed(seed, epiphyteSeedUse));
     });
 
     std::vector<MeshHandle> barkMeshes;
@@ -770,9 +784,14 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
     const ImageData leafTexture = leaf.texture.isValid() ? assets.getTexture(leaf.texture) : ImageData{};
     const ImageData climberStemTexture = climbers != nullptr && climbers->stem.texture.isValid() ? assets.getTexture(climbers->stem.texture) : ImageData{};
     const ImageData climberLeafTexture = climbers != nullptr && climbers->leaf.texture.isValid() ? assets.getTexture(climbers->leaf.texture) : ImageData{};
+    const ImageData epiphyteLeafTexture = epiphytes.leaf.texture.isValid() ? assets.getTexture(epiphytes.leaf.texture) : ImageData{};
+    const ImageData epiphyteMossTexture = epiphytes.moss.texture.isValid() ? assets.getTexture(epiphytes.moss.texture) : ImageData{};
     std::vector<MeshHandle> climberStemMeshes(grown.size());
     std::vector<MeshHandle> climberLeafMeshes(grown.size());
     std::vector<Vec3> climberFacing(grown.size());
+    std::vector<MeshHandle> epiphyteLeafMeshes(grown.size());
+    std::vector<MeshHandle> epiphyteMossMeshes(grown.size());
+    std::vector<Vec3> firstRosette(grown.size());
 
     for (std::size_t index = 0; index < grown.size(); ++index) {
         TreeMeshes& variant = grown[index];
@@ -795,12 +814,31 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
                                          .tint = climbers->leaf.colour, .alphaCutoff = 0.0f});
         }
 
+        // The epiphytes too, rosettes and moss.
+        EpiphyteMeshes& perched = perching[index];
+
+        if (!perched.leaves.vertices.empty()) {
+            parts.push_back(ImpostorPart{.mesh = &perched.leaves, .colour = epiphytes.leaf.texture.isValid() ? &epiphyteLeafTexture : nullptr,
+                                         .tint = epiphytes.leaf.colour, .alphaCutoff = 0.0f});
+        }
+
+        if (!perched.moss.vertices.empty()) {
+            parts.push_back(ImpostorPart{.mesh = &perched.moss, .colour = epiphytes.moss.texture.isValid() ? &epiphyteMossTexture : nullptr,
+                                         .tint = epiphytes.moss.colour, .alphaCutoff = 0.0f});
+        }
+
         const ImpostorBake baked = bakeImpostor(parts, settings.impostorFrames, settings.impostorTexels, getJobs());
         const float impostorError = std::max({settings.impostorErrorMetres, variant.shadowLeafError, variant.shadowBarkError});
         Aabb treeBox = enclosing(indexedMeshBounds(variant.bark), indexedMeshBounds(variant.leaves));
 
         if (climbed) {
             treeBox = enclosing(treeBox, enclosing(indexedMeshBounds(climber.stems), indexedMeshBounds(climber.leaves)));
+        }
+
+        for (const IndexedMesh* mesh : {&perched.leaves, &perched.moss}) {
+            if (!mesh->vertices.empty()) {
+                treeBox = enclosing(treeBox, indexedMeshBounds(*mesh));
+            }
         }
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
 
@@ -835,6 +873,19 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
                 assets.setMeshLevelOptions(mesh, sharedBox);
             }
         }
+
+        // The epiphytes likewise.
+        if (!perched.sites.empty()) {
+            firstRosette[index] = perched.sites.front().base;
+        }
+
+        for (auto [mesh, handle] : {std::pair{&perched.leaves, &epiphyteLeafMeshes[index]}, std::pair{&perched.moss, &epiphyteMossMeshes[index]}}) {
+            if (!mesh->vertices.empty()) {
+                *handle = assets.addDrawnMesh(std::move(*mesh));
+                assets.setMeshLevels(*handle, {MeshLevel{MeshHandle{}, impostorError}});
+                assets.setMeshLevelOptions(*handle, sharedBox);
+            }
+        }
     }
 
     for (const TreePlacement& tree : placements) {
@@ -864,6 +915,21 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
             world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
             climberEntities.push_back(addShape(world, climberLeafMeshes[variant], climbers->leaf, pose));
             world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
+        }
+
+        // Its variant's epiphytes, rosettes and moss, likewise.
+        if (epiphyteLeafMeshes[variant].isValid()) {
+            const Vec3 rosette = transformPoint(pose.getMatrix(), firstRosette[variant]);
+            const Vec3 out{rosette.x - tree.foot.x, 0.0f, rosette.z - tree.foot.z};
+            epiphyteViews.push_back(rosette);
+            epiphyteOutward.push_back(out.lengthSquared() > 1e-4f ? out.normalized() : pose.rotation.rotate(Vec3{1.0f, 0.0f, 0.0f}));
+        }
+
+        for (auto [mesh, material] : {std::pair{epiphyteLeafMeshes[variant], &epiphytes.leaf}, std::pair{epiphyteMossMeshes[variant], &epiphytes.moss}}) {
+            if (mesh.isValid()) {
+                epiphyteEntities.push_back(addShape(world, mesh, *material, pose));
+                world.get<ModelRenderer>(epiphyteEntities.back()).shadowCascades = epiphyteShadowCascades;
+            }
         }
     }
 }
@@ -1037,10 +1103,34 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Climbers", [&] {
         visit(climberSettings, visitor);
     });
+    visitor.group("Epiphytes", [&] {
+        visit(epiphyteSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
     controls.visitSettings(visitor);
+}
+
+namespace {
+    // A command's optional tree number: 0 without one, nothing when there are more words or it is not a whole number.
+    std::optional<std::size_t> treeNumber(const CommandArguments& arguments) {
+        if (arguments.empty()) {
+            return 0;
+        }
+
+        if (arguments.size() > 1) {
+            return std::nullopt;
+        }
+
+        try {
+            std::size_t used = 0;
+            const std::size_t index = std::stoul(arguments.front(), &used);
+            return used == arguments.front().size() ? std::optional<std::size_t>{index} : std::nullopt;
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
 }
 
 // forest-view: the concept art's places to look from, by name, through the free camera.
@@ -1068,24 +1158,13 @@ void ForestGame::addCommands(CommandRegistry& registry, World& world) {
     // side, eye high on the ground there, looking at its trunk 4 m up.
     registry.add("forest-climber", "forest-climber [n]", "Places the camera beside the n-th tree carrying climbers (the first without n).",
                  [this, &world](const CommandArguments& arguments) {
-                     if (arguments.size() > 1) {
-                         return commandError("Usage: forest-climber [n]");
+                     const std::optional<std::size_t> chosen = treeNumber(arguments);
+
+                     if (!chosen) {
+                         return commandError("Usage: forest-climber [n], n a tree number");
                      }
 
-                     std::size_t index = 0;
-
-                     if (!arguments.empty()) {
-                         try {
-                             std::size_t used = 0;
-                             index = std::stoul(arguments.front(), &used);
-
-                             if (used != arguments.front().size()) {
-                                 return commandError("Not a tree number: " + arguments.front());
-                             }
-                         } catch (const std::exception&) {
-                             return commandError("Not a tree number: " + arguments.front());
-                         }
-                     }
+                     const std::size_t index = *chosen;
 
                      if (index >= climbedTrees.size()) {
                          return commandError(std::to_string(climbedTrees.size()) + " trees carry climbers, numbered from 0");
@@ -1098,6 +1177,27 @@ void ForestGame::addCommands(CommandRegistry& registry, World& world) {
                      const Vec3 stand = foot + climbedFacing[index] * distance;
                      controls.poseFreeCamera(world, Vec3{stand.x, onGround(stand.x, stand.z).y + eyeHeight, stand.z}, foot + Vec3{0.0f, lookHeight, 0.0f});
                      return commandOk("Beside tree " + std::to_string(index) + " of " + std::to_string(climbedTrees.size()));
+                 });
+
+    // In the air beside a tree's first rosette (games/forest/epiphytes.h), to judge them: 8 m out from it, away from the
+    // trunk, and 3 m above, looking at it.
+    registry.add("forest-epiphyte", "forest-epiphyte [n]", "Places the camera in the air beside the n-th tree carrying epiphytes (the first without n).",
+                 [this, &world](const CommandArguments& arguments) {
+                     const std::optional<std::size_t> chosen = treeNumber(arguments);
+
+                     if (!chosen) {
+                         return commandError("Usage: forest-epiphyte [n], n a tree number");
+                     }
+
+                     if (*chosen >= epiphyteViews.size()) {
+                         return commandError(std::to_string(epiphyteViews.size()) + " trees carry epiphytes, numbered from 0");
+                     }
+
+                     constexpr float distance = 8.0f;
+                     constexpr float rise = 3.0f;
+                     const Vec3& rosette = epiphyteViews[*chosen];
+                     controls.poseFreeCamera(world, rosette + epiphyteOutward[*chosen] * distance + Vec3{0.0f, rise, 0.0f}, rosette);
+                     return commandOk("Beside tree " + std::to_string(*chosen) + " of " + std::to_string(epiphyteViews.size()));
                  });
 }
 
@@ -1297,4 +1397,16 @@ const std::vector<TreePlacement>& ForestGame::getClimbedTrees() const {
 
 const std::vector<Vec3>& ForestGame::getClimbedFacing() const {
     return climbedFacing;
+}
+
+ForestEpiphyteSettings& ForestGame::getEpiphyteSettings() {
+    return epiphyteSettings;
+}
+
+const std::vector<Entity>& ForestGame::getEpiphytes() const {
+    return epiphyteEntities;
+}
+
+const std::vector<Vec3>& ForestGame::getEpiphyteViews() const {
+    return epiphyteViews;
 }

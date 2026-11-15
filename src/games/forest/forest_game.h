@@ -9,6 +9,7 @@
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
 #include "games/forest/climbers.h"
+#include "games/forest/epiphytes.h"
 #include "games/forest/lianas.h"
 #include "games/forest/palms.h"
 #include "games/forest/understorey.h"
@@ -202,6 +203,11 @@ public:
     // The placed trees carrying climbers, in the order forest-climber numbers them.
     const std::vector<TreePlacement>& getClimbedTrees() const;
     const std::vector<Vec3>& getClimbedFacing() const;
+    // The epiphytes' settings and their entities (rosettes and moss, on each placed tree whose variant carries any).
+    ForestEpiphyteSettings& getEpiphyteSettings();
+    const std::vector<Entity>& getEpiphytes() const;
+    // Each tree carrying rosettes' first rosette in the world, in the order forest-epiphyte numbers them.
+    const std::vector<Vec3>& getEpiphyteViews() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -225,10 +231,19 @@ private:
         Material leaf;
     };
 
+    // What a species' variants grow epiphytes with (games/forest/epiphytes.h): the settings, whether its trees are big
+    // (ferns and many rosettes) and the rosettes' and moss's materials.
+    struct TreeEpiphytes {
+        const ForestEpiphyteSettings* settings = nullptr;
+        bool bigTree = true;
+        Material leaf;
+        Material moss;
+    };
+
     // One species' variants grown and its placed trees added, bark then leaves, with its leaf material; with climbers,
-    // each variant's grown too (none for the mid layer).
+    // each variant's grown too (none for the mid layer), and likewise with epiphytes.
     void plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                    std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers = nullptr);
+                    std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
 
     // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified,
     // placed many times.
@@ -267,6 +282,7 @@ private:
     ForestPalmSettings palmSettings;
     ForestLianaSettings lianaSettings;
     ForestClimberSettings climberSettings;
+    ForestEpiphyteSettings epiphyteSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
 
@@ -295,6 +311,9 @@ private:
     std::vector<Entity> climberEntities;
     std::vector<TreePlacement> climbedTrees;
     std::vector<Vec3> climbedFacing; // each one's first climber's way out of the trunk, in the world (forest-climber looks from it)
+    std::vector<Entity> epiphyteEntities;
+    std::vector<Vec3> epiphyteViews;   // each tree carrying rosettes' first rosette, in the world
+    std::vector<Vec3> epiphyteOutward; // the level way from its trunk to it (forest-epiphyte looks from there)
     std::vector<Entity> trees;
     std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;

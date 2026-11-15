@@ -2,6 +2,7 @@
 
 #include "assets/image_loader.h"
 #include "games/forest/climbers.h"
+#include "games/forest/epiphytes.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/leaf_clusters.h"
 #include "games/forest/palms.h"
@@ -235,6 +236,22 @@ Material forestAroidLeafMaterial(AssetManager& assets, const std::string& assetF
     material.doubleSided = true;
     material.colour = forestTreeLeafTint;
     material.roughness = forestAroidLeafRoughness;
+    material.metallic = 0.0f;
+    material.texture = assets.addTexture(std::move(images.colour));
+    material.normalTexture = assets.addTexture(ImageData{normal.width, normal.height, normal.pixels, TextureEncoding::Linear});
+    return material;
+}
+
+Material forestEpiphyteLeafMaterial(AssetManager& assets, const std::string& assetFolder) {
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestTreeLeafFolder).string());
+    const Pixel colour = !files.colour.empty() && !files.opacity.empty() ? meanColour(colourWithOpacity(files), forestLeafStandIn) : forestLeafStandIn;
+    EpiphyteLeafImages images = epiphyteLeafImages(forestEpiphyteLeafTexels, colour, 0x45504950u);
+    const ImageLevel normal = normalMapFromHeight(images.height, forestEpiphyteLeafDepth);
+
+    Material material;
+    material.doubleSided = true;
+    material.colour = forestTreeLeafTint;
+    material.roughness = forestEpiphyteLeafRoughness;
     material.metallic = 0.0f;
     material.texture = assets.addTexture(std::move(images.colour));
     material.normalTexture = assets.addTexture(ImageData{normal.width, normal.height, normal.pixels, TextureEncoding::Linear});
