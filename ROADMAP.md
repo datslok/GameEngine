@@ -357,7 +357,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer) (research in `docs/LOD.md`)
   - [x] Levels chosen per view by their error in pixels: trees, plants and rock shapes (`tree-lod`)
   - [x] Shadows from the same levels, each tile choosing by its own texels (`shadow-lod`)
-  - [ ] The terrain's own level of detail, CDLOD (`terrain-lod`): the nearest ring was 819 thousand triangles in one draw
+  - [x] The terrain's own level of detail, CDLOD (`terrain-lod`)
 - [ ] Impostors (moved from phase 14): far trees and plants as cards baked from their full meshes from several directions, so a valley's canopy of tens of thousands of trees costs little
 - [ ] Occlusion culling (moved from phase 14): culling in compute against last frame's depth pyramid (Hi-Z), so what hides behind the Monolith or a pillar is not drawn
 - [ ] Texture compression (moved from phase 12's asset cooking): BC7 colour and BC5 normal maps, about a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB
