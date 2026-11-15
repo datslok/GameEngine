@@ -118,6 +118,39 @@ The spec's parameters: `diffuseTransmissionFactor` (default 0; the share of the 
 - **The cards:** an impostor keeps its tree's leaves' share and tint, so far crowns glow as near ones do.
 - **Light through the whole canopy** (the green gloom of the floor, the sky seen through layers of leaves) is not this: that is the sky visibility bake and the probes taking cut-out leaves into account (`forest-floor`'s leaves in the bake), later.
 
+## Palms
+
+Gathered on Nov 15, 2026, before the jungle patch's palms. No CC0 library has palm scans (`docs/TREES.md`), so they are grown by the engine.
+
+**Real understorey palms:**
+
+| Palm | Height | Leaves | Source |
+|---|---|---|---|
+| *Astrocaryum alatum* | 2-6 m, understorey | | [La Selva palm key](https://rainforest.webspace.wheatoncollege.edu/rainforest/index.php%3Ftitle=Palm_Key.html) |
+| *Geonoma camana* | 1-4 m, lowland understorey | | [Tropical Plants Database](https://tropical.theferns.info/viewtropical.php?id=Geonoma+camana) |
+| *Geonoma undata* | mean 5.4 m (0.9-17 m) | | [earth.com](https://www.earth.com/plant-encyclopedia/Angiosperms/Arecaceae/geonoma-undata-undata/en/) |
+| *Chamaedorea* | to 3-4 m | blades over 1 m in some species | [Belize key](https://fm-digital-assets.fieldmuseum.org/1919/498/00000195.pdf) |
+| *Welfia* (subcanopy) | | rachis 2.8-5.7 m, 7-26 leaves a stem, mean 15 | [Principes revision](https://palms.org/wp-content/uploads/2016/05/v29n2p79-82.pdf) |
+
+- **Leaf size follows the plant:** in 23 *Geonoma* species, leaf size grew with crown height in 18 of 21, and the stem's diameter below the crown explained 74% of the variation in rachis length between species; solitary palms had bigger leaves than clumping ones at the same height (Chazdon 1991, [AGRIS](https://agris.fao.org/search/en/records/65e00ab67c7033e84befeb0b)).
+- **A pinnate leaf:** a stalk (petiole) running on as the rachis, with separate leaflets attached along it nearly at right angles ([UF/IFAS](https://gardeningsolutions.ifas.ufl.edu/plants/trees-and-shrubs/palms-and-cycads/palm-leaf-structure/)). Each leaflet is folded into a V along its midrib, opening upwards (induplicate, as *Phoenix*) or downwards (reduplicate, as most understorey palms) ([UF/IFAS EP473](https://edis.ifas.ufl.edu/publication/EP473/pdf)).
+- **The bend:** a rachis is a cantilever bending under its own weight. VPalm (CIRAD's oil palm model) computes it with Euler-Bernoulli beams from the leaf's mass and two moduli, elastic and shear, with torsion too ([PalmStudio biomech](https://palmstudio.github.io/biomech), [HAL](https://hal.inrae.fr/hal-03053584)). Crowding made oil palm leaves 15% longer and 15% more erect, with the same number of leaflets ([Perez et al. 2016](https://frontiersin.org/articles/10.3389/fpls.2016.01141/pdf)).
+
+**How games and tools build them:**
+
+- **Fronds as geometry:** Crysis modelled each palm frond's leaves (GPU Gems 3, ch. 16, above). SpeedTree's fan palm breakdown keeps the fronds as closed geometry rather than cards, since they are "a noticeable element of the palm" ([80.lv](https://80.lv/articles/breakdown-creating-realistic-fan-palm-using-speedtree-substance-3d-painter)).
+- **Fronds round the crown** by the golden angle, each varied ([PalmGenerator](https://github.com/edap/PalmGenerator), [SpeedTree](https://docs.unity3d.com/speedtree-modeler/manual/modeling-approach.html)).
+- **Detail where it is seen:** Ghost Recon's foliage keeps most detail near the player, with the far parts of a tree as simpler fronds ([ghostrecon.net](https://www.ghostrecon.net/html/trees/trees03.htm)); Candussi et al. 2005 draw palm fronds from a user-defined profile with alpha testing ([UCSB](https://sites.cs.ucsb.edu/~holl/pubs/Candussi-2005-EG.pdf)).
+- **Not found:** Far Cry's palms have no published breakdown beyond an artist's note that they were modelled high and reduced (an [ArtStation](https://billymatjiunis.artstation.com/projects/R3kqmm) portfolio).
+
+**What it means here:**
+
+- **Sizes:** understorey palms 2-6 m tall, a stem from none to 4 m, 6-15 fronds, each 1.5-3 m, longer on bigger palms.
+- **The frond's curve:** the rachis leaves the crown 40-70 degrees above level and bends down as a cantilever under its own weight does (Euler-Bernoulli: curvature = moment / stiffness). The moment grows as `(1 - s)^2` towards the base; a rachis tapering to 30% of its radius has a stiffness going as the radius^4, so the curvature goes as `(1 - s)^2 / (1 - 0.7 s)^4`, an arch bending most mid-frond (an untapered beam would bend most at its base). One droop number a frond, varied.
+- **Leaflets as geometry, cut to their outline:** 20-40 pairs a frond, nearly at right angles to the rachis, longest in the middle (a spindle outline), each a narrow strip folded into a V along its midrib and arching under its own weight. Opaque and double-sided, so no cut-out test and no overdraw from empty card area; light through leaves as the trees'.
+- **Texture:** our leaves (`Leaf001`, the leaf sets) are broad and net-veined, unlike a palm leaflet's parallel veins, so a strip of one would look wrong when stretched.
+- **Levels:** fewer leaflet pairs and segments for the far levels, then the impostor cards the trees and plants already use; shadows in the nearest cascades only, as the understorey's.
+
 ## The plan for this engine
 
 In stages, each its own branch, the user judging each by eye:
