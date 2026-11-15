@@ -47,6 +47,9 @@ struct DrawItem {
     // Drawn into shadow maps only (ModelRenderer::shadowOnly): no camera view picks it (visibleDraws), no ray meets it.
     bool shadowOnly = false;
 
+    // How many of the sun's cascades it casts into (ModelRenderer::shadowCascades; 0 all).
+    int shadowCascades = 0;
+
     // The mesh's flat faces (scene/flat_faces.h, attachFlatFaces), held by the engine, which planar reflections choose from.
     std::span<const FlatFace> flatFaces{};
 

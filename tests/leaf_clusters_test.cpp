@@ -136,7 +136,94 @@ namespace {
     }
 }
 
+namespace {
+    // An image of columns x rows cells of cellTexels, clear, with a disc of full alpha in the first cell.
+    ImageData discInFirstCell(std::uint32_t cellTexels, float centreX, float centreY, float radius) {
+        ImageData image;
+        image.width = cellTexels * 2;
+        image.height = cellTexels * 2;
+        image.pixels.assign(static_cast<std::size_t>(image.width) * image.height * 4, 0);
+
+        for (std::uint32_t y = 0; y < cellTexels; ++y) {
+            for (std::uint32_t x = 0; x < cellTexels; ++x) {
+                const float dx = static_cast<float>(x) + 0.5f - centreX;
+                const float dy = static_cast<float>(y) + 0.5f - centreY;
+
+                if (dx * dx + dy * dy <= radius * radius) {
+                    image.pixels[(static_cast<std::size_t>(y) * image.width + x) * 4 + 3] = 255;
+                }
+            }
+        }
+
+        return image;
+    }
+
+    // Twice the signed area of a polygon: positive when it turns counterclockwise.
+    float twiceArea(const std::vector<Vec2>& polygon) {
+        float sum = 0.0f;
+
+        for (std::size_t i = 0; i < polygon.size(); ++i) {
+            const Vec2& a = polygon[i];
+            const Vec2& b = polygon[(i + 1) % polygon.size()];
+            sum += a.x * b.y - b.x * a.y;
+        }
+
+        return sum;
+    }
+
+    bool insideConvex(const std::vector<Vec2>& polygon, const Vec2& point) {
+        for (std::size_t i = 0; i < polygon.size(); ++i) {
+            const Vec2& a = polygon[i];
+            const Vec2& b = polygon[(i + 1) % polygon.size()];
+
+            if ((b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x) < -1e-5f) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /*
+    * A cell's outline (clusterOutline): a convex polygon, counterclockwise, in the cell's own units (0..1 across and up),
+    * holding every texel at or over the cut-out threshold with the margin, within the cell, and much smaller than the
+    * cell for a small disc (the leaves cover 14-20% of the forest's cards: their empty part was most of the shadows'
+    * cost). A cell with nothing over the threshold has no outline; a full one is the whole square.
+    */
+    void testAClustersOutline() {
+        const std::uint32_t cell = 64;
+        const ImageData image = discInFirstCell(cell, 20.0f, 40.0f, 10.0f);
+        const std::vector<Vec2> outline = clusterOutline(image, 0, 0, cell, 128, 2.0f);
+        assert(outline.size() >= 4 && outline.size() <= 12);
+        assert(twiceArea(outline) > 0.0f && 0.5f * twiceArea(outline) < 0.15f);
+
+        for (const Vec2& corner : outline) {
+            assert(corner.x >= -1e-5f && corner.x <= 1.0f + 1e-5f && corner.y >= -1e-5f && corner.y <= 1.0f + 1e-5f);
+        }
+
+        for (std::uint32_t y = 0; y < cell; ++y) {
+            for (std::uint32_t x = 0; x < cell; ++x) {
+                if (texel(image, x, y)[3] >= 128) {
+                    for (const Vec2& offset : {Vec2{0.0f, 0.0f}, Vec2{1.0f, 0.0f}, Vec2{0.0f, 1.0f}, Vec2{1.0f, 1.0f}}) {
+                        const Vec2 corner{(static_cast<float>(x) + offset.x) / static_cast<float>(cell), (static_cast<float>(y) + offset.y) / static_cast<float>(cell)};
+                        assert(insideConvex(outline, corner));
+                    }
+                }
+            }
+        }
+
+        assert(clusterOutline(image, 1, 0, cell, 128, 2.0f).empty());
+
+        ImageData full = image;
+        for (std::size_t texel = 3; texel < full.pixels.size(); texel += 4) {
+            full.pixels[texel] = 255;
+        }
+        assert(near(0.5f * twiceArea(clusterOutline(full, 1, 1, cell, 128, 2.0f)), 1.0f, 1e-4f));
+    }
+}
+
 void testLeafClusters() {
+    testAClustersOutline();
     testTurningNormals();
     testTheStem();
     testATwigsLeaves();

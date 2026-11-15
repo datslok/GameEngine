@@ -270,7 +270,26 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A caster limited to the nearest cascades (DrawItem::shadowCascades: the forest's understorey, whose shadows the
+    * coarser cascades cannot show) is kept in a sun tile only when the tile's cascade is below its limit; 0, the
+    * default, is every cascade; tiles of other lights (cascade -1) keep every caster.
+    */
+    void testCastersCanStayInTheNearestCascades() {
+        std::vector<DrawItem> draws = {drawAt(0.0f, 0.0f, 0.0f, 0), drawAt(0.0f, 0.0f, 0.0f, 1), drawAt(0.0f, 0.0f, 0.0f, 2)};
+        draws[1].shadowCascades = 2;
+        draws[2].shadowCascades = 1;
+        const std::vector<std::size_t> all{0, 1, 2};
+        assert((castersForCascade(draws, all, 0) == std::vector<std::size_t>{0, 1, 2}));
+        assert((castersForCascade(draws, all, 1) == std::vector<std::size_t>{0, 1}));
+        assert((castersForCascade(draws, all, 3) == std::vector<std::size_t>{0}));
+        assert((castersForCascade(draws, all, -1) == std::vector<std::size_t>{0, 1, 2}));
+    }
+}
+
 void testCulling() {
+    testCastersCanStayInTheNearestCascades();
     testShadowOnlyDrawsAreSeenOnlyByLights();
     testSmallCastersCanBeLeftOut();
     testFrustumFromMatrix();

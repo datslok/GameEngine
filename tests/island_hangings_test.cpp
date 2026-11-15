@@ -233,7 +233,43 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A card drawn as an outline (appendOutlinedLeafCard): each corner placed and textured as the square card's point at
+    * the same share across and along would be, a fan of triangles facing the card's front; the square outline is the
+    * square card itself.
+    */
+    void testAnOutlinedLeafCard() {
+        const Vec3 stem{1.0f, 2.0f, 3.0f};
+        const Vec3 towardsTip{0.0f, 1.0f, 0.0f};
+        const Vec3 facing{0.0f, 0.0f, 1.0f};
+        const std::vector<Vec2> outline{{0.25f, 0.0f}, {0.75f, 0.0f}, {1.0f, 0.5f}, {0.5f, 1.0f}, {0.0f, 0.5f}};
+        IndexedMesh card;
+        appendOutlinedLeafCard(card, stem, towardsTip, facing, facing, 2.0f, 1.0f, Vec2{0.5f, 0.0f}, Vec2{1.0f, 0.5f}, outline);
+        assert(card.vertices.size() == outline.size() && card.indices.size() == 3 * (outline.size() - 2));
+        assert(trianglesFaceTheirNormals(card));
+
+        // side = towardsTip x facing = +x: across runs along +x from the stem's middle, along runs up.
+        for (std::size_t i = 0; i < outline.size(); ++i) {
+            const Vec3 expected = stem + Vec3{1.0f, 0.0f, 0.0f} * (outline[i].x - 0.5f) + towardsTip * (2.0f * outline[i].y);
+            assert((card.vertices[i].position - expected).length() < 1e-5f);
+            assert(near(card.vertices[i].uv.x, 0.5f + 0.5f * outline[i].x, 1e-6f) && near(card.vertices[i].uv.y, 0.5f * outline[i].y, 1e-6f));
+        }
+
+        IndexedMesh square;
+        IndexedMesh outlinedSquare;
+        appendLeafCard(square, stem, towardsTip, facing, facing, 2.0f, 1.0f, Vec2{0.5f, 0.0f}, Vec2{1.0f, 0.5f});
+        appendOutlinedLeafCard(outlinedSquare, stem, towardsTip, facing, facing, 2.0f, 1.0f, Vec2{0.5f, 0.0f}, Vec2{1.0f, 0.5f}, squareOutline());
+        assert(square.vertices.size() == 4 && square.indices == outlinedSquare.indices);
+
+        for (std::size_t i = 0; i < 4; ++i) {
+            assert((square.vertices[i].position - outlinedSquare.vertices[i].position).length() < 1e-6f);
+        }
+    }
+}
+
 void testIslandHangings() {
+    testAnOutlinedLeafCard();
     testAStrandHangsAndTapers();
     testATubeIsSweptRoundAStrand();
     testLeafCardsHangAlongAVine();

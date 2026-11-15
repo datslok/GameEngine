@@ -64,6 +64,7 @@ void visit(ForestUnderstoreySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Calathea height", settings.calatheaHeight, {.min = 0.1f, .max = 10.0f, .sliderMax = 4.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Anthurium height", settings.anthuriumHeight, {.min = 0.1f, .max = 10.0f, .sliderMax = 4.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Keep share", settings.keepShare, {.min = 0.01f, .max = 1.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Shadow cascades", settings.shadowCascades, {.min = 0, .max = 4, .applies = FieldApplies::AtStartup});
     visitor.field("Shadow keep share", settings.shadowKeepShare, {.min = 0.005f, .max = 1.0f, .applies = FieldApplies::AtStartup});
 }
 

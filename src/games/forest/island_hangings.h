@@ -76,6 +76,18 @@ void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float
 void appendLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip, const Vec3& facing, const Vec3& normal, float length,
                     float width, const Vec2& uvMin, const Vec2& uvMax);
 
+/*
+* The same card drawn as a convex outline instead of its square: each corner given in the card's own units (x across
+* from its left edge, 0 to 1; y from the stem to the tip, 0 to 1), counterclockwise, placed and textured exactly as the
+* square card's point there would be, as a fan of triangles. A cut-out card's empty part still runs the shader on every
+* pixel; an outline round its leaves leaves most of it out (docs/JUNGLE.md, The understorey: overdraw).
+*/
+void appendOutlinedLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip, const Vec3& facing, const Vec3& normal, float length,
+                            float width, const Vec2& uvMin, const Vec2& uvMax, const std::vector<Vec2>& outline);
+
+// The whole card, as an outline.
+std::vector<Vec2> squareOutline();
+
 // The texture rectangle of an atlas's cell (counted along rows from the bottom left), as {lower left, upper right}.
 struct AtlasCell {
     Vec2 uvMin;

@@ -220,18 +220,34 @@ AtlasCell atlasCell(int cell, int columns, int rows) {
 // counterclockwise seen from the front: side x towardsTip = facing.
 void appendLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip, const Vec3& facing, const Vec3& normal, float length,
                     float width, const Vec2& uvMin, const Vec2& uvMax) {
+    appendOutlinedLeafCard(mesh, stem, towardsTip, facing, normal, length, width, uvMin, uvMax, squareOutline());
+}
+
+std::vector<Vec2> squareOutline() {
+    return {Vec2{0.0f, 0.0f}, Vec2{1.0f, 0.0f}, Vec2{1.0f, 1.0f}, Vec2{0.0f, 1.0f}};
+}
+
+void appendOutlinedLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip, const Vec3& facing, const Vec3& normal, float length,
+                            float width, const Vec2& uvMin, const Vec2& uvMax, const std::vector<Vec2>& outline) {
+    if (outline.size() < 3) {
+        return;
+    }
+
     const Vec3 side = towardsTip.cross(facing);
     const Vec3 square = side - normal * side.dot(normal);
     const Vec3 across = square.lengthSquared() > 1e-12f ? square.normalized() : side;
-    const Vec3 halfSide = side * (0.5f * width);
-    const Vec3 tip = stem + towardsTip * length;
     const Vec4 tangent{across.x, across.y, across.z, 1.0f};
-    const std::uint32_t corner = static_cast<std::uint32_t>(mesh.vertices.size());
-    mesh.vertices.push_back(MeshVertex{stem - halfSide, normal, Vec2{uvMin.x, uvMin.y}, tangent});
-    mesh.vertices.push_back(MeshVertex{stem + halfSide, normal, Vec2{uvMax.x, uvMin.y}, tangent});
-    mesh.vertices.push_back(MeshVertex{tip + halfSide, normal, Vec2{uvMax.x, uvMax.y}, tangent});
-    mesh.vertices.push_back(MeshVertex{tip - halfSide, normal, Vec2{uvMin.x, uvMax.y}, tangent});
-    mesh.indices.insert(mesh.indices.end(), {corner, corner + 1, corner + 2, corner, corner + 2, corner + 3});
+    const std::uint32_t first = static_cast<std::uint32_t>(mesh.vertices.size());
+
+    for (const Vec2& corner : outline) {
+        const Vec3 position = stem + side * (width * (corner.x - 0.5f)) + towardsTip * (length * corner.y);
+        const Vec2 uv{uvMin.x + (uvMax.x - uvMin.x) * corner.x, uvMin.y + (uvMax.y - uvMin.y) * corner.y};
+        mesh.vertices.push_back(MeshVertex{position, normal, uv, tangent});
+    }
+
+    for (std::uint32_t corner = 1; corner + 1 < static_cast<std::uint32_t>(outline.size()); ++corner) {
+        mesh.indices.insert(mesh.indices.end(), {first, first + corner, first + corner + 1});
+    }
 }
 
 void appendLeafCards(IndexedMesh& mesh, const HangingStrand& vine, float spacing, float size, std::uint32_t seed) {

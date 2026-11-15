@@ -6,6 +6,7 @@
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -199,6 +200,11 @@ struct ForestTreeSettings {
     int shadowCardsPerNode = 1;
     int shadowFillCards = 8;
     float shadowCardScale = 2.0f;
+
+    // The shadow bark: the bark simplified to this share of its triangles (scene/simplify_mesh), drawn into shadows only
+    // while the bark seen casts none. Bark was nine tenths of the triangles the sun's cascades redrew as the camera
+    // turned (1,300 trees: 19 ms of shadows on the RTX 4070 Laptop, Nov 15 2026).
+    float shadowBarkShare = 0.1f;
 };
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
@@ -241,8 +247,12 @@ Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOu
 * one of the clusters' four cells; then fillCards cards half as big again inside each clump, near its middle, facing
 * every way, shading with the crown's way out. Normals by foliageNormal. Returns the cards made.
 */
+// Each leaf-cluster cell's outline (clusterOutline), in cell order; a card is drawn as its cell's outline.
+using ClusterOutlines = std::array<std::vector<Vec2>, 4>;
+
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
-                       const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed);
+                       const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
+                       const ClusterOutlines* outlines = nullptr);
 
 // The fixed parts of a tree's shape. Leonardo's n of 2.5 keeps the limbs thick against the twigs (measured trees: 2-3).
 inline constexpr float leonardoExponent = 2.5f;
@@ -260,6 +270,7 @@ struct TreeMeshes {
     IndexedMesh bark;
     IndexedMesh leaves;
     IndexedMesh shadowLeaves; // the shadow passes' stand-in for the leaves (ForestTreeSettings::shadowCardsPerNode)
+    IndexedMesh shadowBark;   // and for the bark (ForestTreeSettings::shadowBarkShare)
     int tipCount = 0;
     int leafyCount = 0;
     int cardCount = 0;
@@ -285,7 +296,7 @@ TreeVariantShape treeVariantShape(const ForestTreeSettings& settings, std::uint3
 * lobed into buttresses and tapering from the foot to the fork, every tube whole bark tiles of barkTileMetres round),
 * its leaves and its shadow leaves. The same seed grows the same tree.
 */
-TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed, float barkTileMetres);
+TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed, float barkTileMetres, const ClusterOutlines* outlines = nullptr);
 
 // Where a tree stands: its foot (on the lowest ground round its trunk), its size against the variant's, its turn about
 // up, and which variant it is.

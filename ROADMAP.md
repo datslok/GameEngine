@@ -345,6 +345,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] Staggered far cascades: the far two take turns redrawing while the camera turns (`cascade-stagger`)
 - [x] Building the frame on every core: the motion history flat, the draws and instances built in parallel (`frame-build-speed`)
 - [ ] A persistent scene: static objects' instances uploaded once, only moving ones each frame (Unreal's GPU Scene, Unity's BatchRendererGroup)
+- [x] Cheaper forest shadows: the understorey in the nearest two cascades, shadow bark, leaf cards cut to their twigs' outline (`understorey-shadow-cascades`)
 - [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance

@@ -230,6 +230,7 @@ namespace {
             const BoundingSphere sphere = cascadeSphere(view, splits[index], splits[index + 1]);
             const CascadeBox box = cascadeBox(light.direction, sphere, settings.directionalCasterReach, request.size);
             addSunBox(plan, atlas, request.tiles[index], light, box, sphere.radius, settings, origin);
+            plan.tiles.back().sunCascade = cascade;
         }
     }
 
@@ -429,6 +430,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             addSunBox(plan, atlas, request.tiles.front(), light, box, sphere.radius, settings, origin);
             plan.tiles.back().smallestCaster = farShadowSmallestCaster(box.texelSize);
             plan.tiles.back().separateMovers = true;
+            plan.tiles.back().sunCascade = plan.directional[request.slot].cascades;
             plan.directional[request.slot].cascades += 1;
 
             if (settings.distantOccluders) {

@@ -242,6 +242,10 @@ struct ShadowTile {
     Vec4 lightPlace{0.0f, 1.0f, 0.0f, 0.0f};
     float smallestCaster = 0.0f;
     bool separateMovers = false;
+
+    // A sun tile's cascade, nearest 0 (a mirror's row its own), the far shadow map one past the last; -1 for other
+    // lights' tiles. Casters limited to the nearest cascades (DrawItem::shadowCascades) stay out of the others.
+    int sunCascade = -1;
 };
 
 // A tile's square in the coloured shadow map: its place and size in the atlas, halved.

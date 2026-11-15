@@ -382,3 +382,80 @@ LeafAtlas composeLeafClusters(const LeafAtlas& source, int cellTexels, float lea
 
     return clusters;
 }
+
+namespace {
+    // The part of a convex polygon on the side of a line where along . point <= limit (Sutherland-Hodgman, one edge).
+    std::vector<Vec2> clipBelow(const std::vector<Vec2>& polygon, const Vec2& along, float limit) {
+        std::vector<Vec2> kept;
+
+        for (std::size_t i = 0; i < polygon.size(); ++i) {
+            const Vec2& a = polygon[i];
+            const Vec2& b = polygon[(i + 1) % polygon.size()];
+            const float da = along.x * a.x + along.y * a.y - limit;
+            const float db = along.x * b.x + along.y * b.y - limit;
+
+            if (da <= 0.0f) {
+                kept.push_back(a);
+            }
+
+            if ((da < 0.0f && db > 0.0f) || (da > 0.0f && db < 0.0f)) {
+                const float t = da / (da - db);
+                kept.push_back(Vec2{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t});
+            }
+        }
+
+        return kept;
+    }
+}
+
+std::vector<Vec2> clusterOutline(const ImageData& image, std::uint32_t column, std::uint32_t row, std::uint32_t cellTexels,
+                                 std::uint8_t alphaCutoff, float marginTexels) {
+    // The four directions' lowest and highest reach over the covered texels' corners, in texels from the cell's corner.
+    const float diagonal = 0.70710678f;
+    const std::array<Vec2, 4> directions{Vec2{1.0f, 0.0f}, Vec2{0.0f, 1.0f}, Vec2{diagonal, diagonal}, Vec2{diagonal, -diagonal}};
+    std::array<float, 4> lowest;
+    std::array<float, 4> highest;
+    lowest.fill(1e30f);
+    highest.fill(-1e30f);
+    bool any = false;
+
+    for (std::uint32_t y = 0; y < cellTexels; ++y) {
+        for (std::uint32_t x = 0; x < cellTexels; ++x) {
+            const std::size_t texel = (static_cast<std::size_t>(row * cellTexels + y) * image.width + column * cellTexels + x) * 4 + 3;
+
+            if (image.pixels[texel] < alphaCutoff) {
+                continue;
+            }
+
+            any = true;
+
+            for (const Vec2 corner : {Vec2{0.0f, 0.0f}, Vec2{1.0f, 0.0f}, Vec2{0.0f, 1.0f}, Vec2{1.0f, 1.0f}}) {
+                const Vec2 point{static_cast<float>(x) + corner.x, static_cast<float>(y) + corner.y};
+
+                for (std::size_t d = 0; d < directions.size(); ++d) {
+                    const float reach = directions[d].x * point.x + directions[d].y * point.y;
+                    lowest[d] = std::min(lowest[d], reach);
+                    highest[d] = std::max(highest[d], reach);
+                }
+            }
+        }
+    }
+
+    if (!any) {
+        return {};
+    }
+
+    const float size = static_cast<float>(cellTexels);
+    std::vector<Vec2> polygon{Vec2{0.0f, 0.0f}, Vec2{size, 0.0f}, Vec2{size, size}, Vec2{0.0f, size}};
+
+    for (std::size_t d = 0; d < directions.size(); ++d) {
+        polygon = clipBelow(polygon, directions[d], highest[d] + marginTexels);
+        polygon = clipBelow(polygon, Vec2{-directions[d].x, -directions[d].y}, -(lowest[d] - marginTexels));
+    }
+
+    for (Vec2& corner : polygon) {
+        corner = Vec2{corner.x / size, corner.y / size};
+    }
+
+    return polygon;
+}
