@@ -609,6 +609,7 @@ LevelView tileLevelView(const ShadowTile& tile, const LevelOfDetailSettings& set
                      .pixelsPerMetre = 0.5f * static_cast<float>(tile.size) * clipYPerMetre.length(),
                      .pixelError = settings.pixelError,
                      .enabled = settings.enabled,
+                     .impostors = settings.impostors,
                      .orthographic = tile.lightPlace.w == 0.0f};
 }
 

@@ -289,9 +289,20 @@ namespace {
         far[0].mesh = MeshHandle{3};
         far[1].mesh = MeshHandle{9};
         far[0].bounds = far[1].bounds = BoundingSphere{Vec3{0.0f, 1.0f, -500.0f}, 1.0f};
+        far[0].model = far[1].model = Mat4::translation(0.0f, 0.0f, -500.0f);
         attachMeshLevels(far, table, options);
         const LevelView offView = levelView(Vec3{}, 1000.0f, 1.5707963f, off);
         assert(chosenMesh(far[0], offView) == MeshHandle{3} && !chosenMesh(far[1], offView).isValid());
+
+        // With the cards alone off, the tree keeps its last level with a mesh however far, and its impostor is never
+        // drawn; the other levels still count.
+        LevelOfDetailSettings noCards;
+        noCards.impostors = false;
+        const LevelView noCardsView = levelView(Vec3{}, 1000.0f, 1.5707963f, noCards);
+        assert(!noCardsView.impostors);
+        assert(chosenMesh(far[0], noCardsView) == MeshHandle{7} && !chosenMesh(far[1], noCardsView).isValid());
+        assert(drawLevel(far[0], noCardsView) == 1);
+        assert(chooseLevel(treeLevels, 1e6f, noCardsView) == 1);
     }
 
     // The settings: on, a budget of pixels, both live; a budget not above 0 is refused.
@@ -312,6 +323,8 @@ namespace {
         };
         assert(setSetting(walk, "levelOfDetail.pixelError", "6").outcome == SettingOutcome::Set);
         assert(setSetting(walk, "levelOfDetail.enabled", "false").outcome == SettingOutcome::Set);
+        assert(setSetting(walk, "levelOfDetail.impostors", "false").outcome == SettingOutcome::Set);
+        assert(!settings.levelOfDetail.impostors && LevelOfDetailSettings{}.impostors);
         assert(!settings.levelOfDetail.enabled);
         assert(settings.levelOfDetail.pixelError == 6.0f);
     }

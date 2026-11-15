@@ -9,6 +9,7 @@
 void visit(LevelOfDetailSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
     visitor.field("Pixel error", settings.pixelError, {.min = 0.01f, .max = 1000.0f, .sliderMin = 0.25f, .sliderMax = 16.0f, .unit = "px"});
+    visitor.field("Impostors", settings.impostors);
 }
 
 void validateLevelOfDetail(const LevelOfDetailSettings& settings) {
@@ -21,7 +22,8 @@ LevelView levelView(const Vec3& eye, float viewHeightPixels, float verticalFovRa
     return LevelView{.eye = eye,
                      .pixelsPerMetre = viewHeightPixels / (2.0f * std::tan(0.5f * verticalFovRadians)),
                      .pixelError = settings.pixelError,
-                     .enabled = settings.enabled};
+                     .enabled = settings.enabled,
+                     .impostors = settings.impostors};
 }
 
 float errorInPixels(float errorMetres, float distance, const LevelView& view) {
@@ -36,7 +38,8 @@ float errorInPixels(float errorMetres, float distance, const LevelView& view) {
     return errorMetres * view.pixelsPerMetre / distance;
 }
 
-// The levels go coarsest last, each straying further, so the first that does not fit ends the search.
+// The levels go coarsest last, each straying further, so the first that does not fit ends the search; so does one
+// without a mesh while impostors are off, keeping the last level that draws something.
 std::size_t chooseLevel(std::span<const MeshLevel> levels, float distance, const LevelView& view) {
     if (!view.enabled) {
         return 0;
@@ -45,7 +48,7 @@ std::size_t chooseLevel(std::span<const MeshLevel> levels, float distance, const
     std::size_t chosen = 0;
 
     for (std::size_t level = 0; level < levels.size(); ++level) {
-        if (errorInPixels(levels[level].errorMetres, distance, view) > view.pixelError) {
+        if (errorInPixels(levels[level].errorMetres, distance, view) > view.pixelError || (!view.impostors && !levels[level].mesh.isValid())) {
             break;
         }
 
@@ -79,13 +82,13 @@ std::size_t drawLevel(const DrawItem& draw, const LevelView& view) {
 /*
 * An impostor (hiddenBelowError above 0) is drawn only where its error fits, which is where its tree's last level,
 * drawing nothing, is chosen: the same error from the same sphere. With levels off it is never drawn, and the tree is
-* drawn whole.
+* drawn whole; with impostors off neither, and the tree keeps its last level with a mesh.
 */
 MeshHandle chosenMesh(const DrawItem& draw, const LevelView& view) {
     if (draw.hiddenBelowError > 0.0f) {
         const BoundingSphere& sphere = choosingSphere(draw);
 
-        if (!view.enabled || sphere.radius < 0.0f || errorInPixels(draw.hiddenBelowError, levelDistance(sphere, view.eye), view) > view.pixelError) {
+        if (!view.enabled || !view.impostors || sphere.radius < 0.0f || errorInPixels(draw.hiddenBelowError, levelDistance(sphere, view.eye), view) > view.pixelError) {
             return MeshHandle{};
         }
     }

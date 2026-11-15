@@ -20,6 +20,10 @@ struct LevelOfDetailSettings {
 
     // How many pixels a level's error may cover before the view draws a finer one: more is cheaper and coarser.
     float pixelError = 2.0f;
+
+    // Far trees as impostor cards (scene/impostor.h); off, each tree keeps its last level with a mesh however far, for
+    // comparing the cards with the trees they stand in for.
+    bool impostors = true;
 };
 
 void visit(LevelOfDetailSettings& settings, SettingsVisitor& visitor);
@@ -36,6 +40,9 @@ struct LevelView {
     float pixelsPerMetre = 0.0f;
     float pixelError = 1.0f;
     bool enabled = false;
+
+    // Off, levels without a mesh are never chosen and impostors never drawn (LevelOfDetailSettings::impostors).
+    bool impostors = true;
 
     // A view without perspective (the sun's shadow tiles): pixelsPerMetre holds everywhere in it, whatever the distance.
     bool orthographic = false;
