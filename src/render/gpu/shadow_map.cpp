@@ -603,6 +603,15 @@ ShadowAtlasSize glassShadowMapSize(const ShadowAtlasSize& atlas) {
     return ShadowAtlasSize{atlas.width / glassShadowMapDivisor, atlas.height / glassShadowMapDivisor, atlas.largestSquare / glassShadowMapDivisor};
 }
 
+LevelView tileLevelView(const ShadowTile& tile, const LevelOfDetailSettings& settings) {
+    const Vec3 clipYPerMetre{tile.matrix.values[1][0], tile.matrix.values[1][1], tile.matrix.values[1][2]};
+    return LevelView{.eye = Vec3{tile.lightPlace.x, tile.lightPlace.y, tile.lightPlace.z},
+                     .pixelsPerMetre = 0.5f * static_cast<float>(tile.size) * clipYPerMetre.length(),
+                     .pixelError = settings.pixelError,
+                     .enabled = settings.enabled,
+                     .orthographic = tile.lightPlace.w == 0.0f};
+}
+
 ShadowTile glassMapSquare(const ShadowTile& tile) {
     ShadowTile square = tile;
     square.x = tile.x / glassShadowMapDivisor;

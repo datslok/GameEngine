@@ -20,13 +20,13 @@ namespace {
 * The shadow pass draws only positions, so only the mesh and where it is matter, not its material. The count goes in
 * too, so a list cannot match a longer one that starts the same way.
 */
-std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters) {
+std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const LevelView* levels) {
     Fnv1aHash hash;
     hash.add(static_cast<std::uint64_t>(casters.size()));
 
     for (std::size_t index : casters) {
         const DrawItem& draw = draws[index];
-        hash.add(draw.mesh.index);
+        hash.add((levels != nullptr ? chosenMesh(draw, *levels) : draw.mesh).index);
         hash.addBytes(draw.model.values, sizeof(draw.model.values));
         hash.add(draw.shape);
     }
@@ -34,8 +34,9 @@ std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const st
     return hash.value;
 }
 
-std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass) {
-    const std::uint64_t solid = shadowCasterSignature(draws, casters);
+std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass,
+                                    const LevelView* levels) {
+    const std::uint64_t solid = shadowCasterSignature(draws, casters, levels);
 
     if (glass.empty()) {
         return solid;

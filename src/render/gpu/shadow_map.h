@@ -10,6 +10,7 @@
 #include "render/gpu/shadow_atlas.h"
 #include "scene/camera.h"
 #include "scene/frame_description.h"
+#include "scene/level_of_detail.h"
 #include "scene/lighting.h"
 
 #include <cstdint>
@@ -250,6 +251,14 @@ struct ShadowTile {
 
 // A tile's square in the coloured shadow map: its place and size in the atlas, halved.
 ShadowTile glassMapSquare(const ShadowTile& tile);
+
+/*
+* How a tile chooses levels of detail (scene/level_of_detail.h): by its own pixels, not the camera's distance, so its
+* choice holds while the camera walks and its cached picture stays right. Its matrix's second row is the clip y per metre
+* (2 / the box's height for the sun's orthographic tiles, 1 / tan(fov / 2) at a metre for a lamp's perspective), so
+* size times half its length is the pixels a metre; a light place with w 0 (the sun) is orthographic.
+*/
+LevelView tileLevelView(const ShadowTile& tile, const LevelOfDetailSettings& settings);
 
 // What the shadow pass draws (one tile per view, in tile order) and what the shader reads: each light's shadow, one record
 // per light the shader gets in slot order (as packLighting gives them), and tileData for the storage buffer, in the same

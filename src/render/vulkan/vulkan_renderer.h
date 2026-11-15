@@ -589,7 +589,7 @@ private:
     void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
     // colouredShadows: the frame draws the coloured shadow maps, so each tile's glass is found and drawn too.
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry,
-                                   bool colouredShadows);
+                                   bool colouredShadows, const LevelOfDetailSettings& levelSettings);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawGlassShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
 

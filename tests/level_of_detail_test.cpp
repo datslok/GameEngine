@@ -54,6 +54,11 @@ namespace {
 
         // Standing on it, any error covers everything.
         assert(errorInPixels(0.01f, 0.0f, view) == std::numeric_limits<float>::infinity());
+
+        // An orthographic view (the sun's shadow tiles) has the same pixels a metre everywhere: distance does not count.
+        const LevelView flat{.eye = Vec3{}, .pixelsPerMetre = 8.0f, .pixelError = 2.0f, .enabled = true, .orthographic = true};
+        assert(errorInPixels(0.5f, 1.0f, flat) == 4.0f && errorInPixels(0.5f, 1000.0f, flat) == 4.0f && errorInPixels(0.5f, 0.0f, flat) == 4.0f);
+        assert(chooseLevel(twoLevels, 0.0f, flat) == 2);
     }
 
     /*
