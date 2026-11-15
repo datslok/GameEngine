@@ -28,6 +28,7 @@ void main() {
     vec4 world = terrainPatchNumber > 0u
                      ? vec4(terrainVertex(terrainPatches[terrainPatchNumber - 1u], position.xz, cameraOrigin.xyz).position, 1.0)
                      : instance.model * vec4(position, 1.0);
+    world.y += groundLift(instance.material.w, world.xyz);
     gl_Position = tileMatrix * world;
     gl_ClipDistance[0] = planarClipDistance(tileClipPlane, world.xyz);
 }

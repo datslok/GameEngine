@@ -54,6 +54,13 @@ struct ModelRenderer {
     * but not part of the level the probes and the sky bake treat as solid. No PreviousTransform needed.
     */
     bool still = false;
+
+    /*
+    * Follows the ground (scene/ground_follow.h): its meshes stand on y = 0 of their own frame, and the vertex shaders
+    * lift each vertex by the terrain's height at its place, so one flat patch of grass serves every spot of lumpy land.
+    * Its bounds are lifted to match; no ray meets it.
+    */
+    bool followsGround = false;
 };
 
 // Build a renderer with a single mesh.

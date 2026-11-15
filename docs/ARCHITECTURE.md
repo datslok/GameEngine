@@ -493,6 +493,14 @@ The land drawn as a quadtree of patches round the camera (CDLOD, Strugar 2010; `
 - **Settings:** `RenderSettings::terrain` (F5 Terrain, `engine.render.terrain.firstRange` and `.morphShare`).
 - **The forest's terrain:** the rings' squares as regions with their materials (`onUpdate` keeps their blend settings); heights at the finest spacing over the near 1.3 km, four times coarser over the next ring's 5 km, sixteen times over the root (32 km); 64 m leaves (32 quads of 2 m) in 10 levels.
 
+**Meshes following the ground** (`scene/ground_follow`, `ground-cover-patches`; `docs/GROUNDCOVER.md`): grass and ground cover built flat, lifted onto the land by the vertex shaders, so a few shared patches serve every lumpy spot instead of a mesh each.
+
+- **The flag.** `ModelRenderer::followsGround`, copied to `DrawItem::followsGround`; the mesh stands on y = 0 of its own frame. `packInstance` writes the instance's kind (`GpuInstance::material[3]`, `render/gpu/instance_shared.h`: `INSTANCE_KIND_PLAIN`, `INSTANCE_KIND_IMPOSTOR`, `INSTANCE_KIND_FOLLOWS_GROUND`; an impostor's card stays a card).
+- **The shaders.** Every vertex shader reading instances (`triangle.vert`, so the prepass, main pass, captures and mirrors; `shadow.vert`, `shadow_cut_out.vert`, `glass_shadow.vert`; `motion.vert`, this frame's and last frame's place each) adds `groundLift` (`terrain_data.glsl`): the land's height (`terrainHeight`, the finest grid, not the morphed patches) at the vertex's own place in the world. Over a blade's lean that is its root's height. Normals stay the mesh's own. Without a terrain the heights' stand-in has no grids, so nothing is lifted.
+- **The CPU's spheres.** The engine's attach step lifts each such draw's bounds and level sphere (`liftGroundDraws` with the last terrain's heights; kept still draws keep theirs, lifted once when built): `liftedSphere` reads the land under the sphere's square at its edges and at every line of the finest grid holding its centre (bilinear land's extremes lie there; at most 129 lines each way), moves the sphere up by the middle of the lowest and highest and grows it by half their range. `liftedOntoGround` is the shaders' lift on the CPU.
+- **No rays** meet them (`rayMaskFor`): a ray would meet the mesh unlifted.
+- Tests: `ground_follow_test`.
+
 ### Render stats
 
 `getLastFrameStats()` returns `RenderStats`, shown on the debug readout's lines (`renderStatsLines` gives their text, which `drawRenderStats` draws and the `stats` command replies with):

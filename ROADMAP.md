@@ -353,7 +353,10 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] Cheaper forest shadows: the understorey in the nearest two cascades, shadow bark, leaf cards cut to their twigs' outline (`understorey-shadow-cascades`)
 - [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
-- [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
+- [ ] Grass and ground cover (research in `docs/GROUNDCOVER.md`, the user's go Nov 15 2026): a few shared flat patches lifted onto the land by the vertex shaders, each 8 x 8 m cell choosing its density, thinning with distance; no shadows cast
+  - [x] Ground-following meshes: the vertex shaders lift them onto the land, their spheres lifted on the CPU (`ground-cover-patches`)
+  - [ ] Grass in the open: clumped curved blades in the meadow, the clearing and the path's verges, levels of detail to about 60 m, the ground's grass matched where they end (`meadow-grass`)
+  - [ ] The forest floor: fallen leaves, tree seedlings, small ferns and spikemoss under the canopy (`forest-floor-cover`)
 - [ ] The structures, half reclaimed
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
   - Big searchlights sweeping the land (the user, Nov 14 2026): spot lights with shadows near the camera, and for beams kilometres long, more than the fog's 100 m grid can light, a beam of their own through the height fog (its closed form along the cone).

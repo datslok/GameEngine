@@ -21,7 +21,7 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     instance.material[0] = material;
     instance.material[1] = draw.mesh.index;
     instance.material[2] = draw.terrainPatch >= 0 ? static_cast<std::uint32_t>(draw.terrainPatch) + 1 : 0u;
-    instance.material[3] = draw.material.impostorFrames > 0 ? 1u : 0u;
+    instance.material[3] = draw.material.impostorFrames > 0 ? instanceKindImpostor : draw.followsGround ? instanceKindFollowsGround : instanceKindPlain;
     return instance;
 }
 
