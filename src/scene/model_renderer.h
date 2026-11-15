@@ -41,6 +41,10 @@ struct ModelRenderer {
     // only things not marked static wake sleeping probes. Unmarked things count as moving, which costs only some probe
     // work, while a mover marked static would leave probes asleep beside it.
     bool isStatic = false;
+
+    // Drawn by no view, casting no shadow and met by no ray, but part of the static level the sky visibility's rays see
+    // (when isStatic): the forest's 2 m ground, walked on, while its terrain patches are what is drawn (scene/terrain.h).
+    bool hidden = false;
 };
 
 // Build a renderer with a single mesh.

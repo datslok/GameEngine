@@ -788,6 +788,7 @@ void VulkanRenderer::createFixedTextures() {
         std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(noiseTexels.data()), noiseTexels.size() * sizeof(float)}, noise);
     noProbeStates = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noProbeCascades = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeCascade), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    noTerrainHeights = VulkanBuffer{device.getAllocator(), sizeof(GpuTerrainHeightsHeader), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
 
 /*
@@ -2170,6 +2171,12 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.drawList.write(drawList);
     buffers.previousModels.write(previousModels);
 
+    // The terrain's patches (at least one record, so the buffer is never empty).
+    std::vector<GpuTerrainPatch> patches(std::max<std::size_t>(description.terrainPatches.size(), 1));
+    std::transform(description.terrainPatches.begin(), description.terrainPatches.end(), patches.begin(), packTerrainPatch);
+    buffers.terrainPatches.write(patches);
+    updateTerrainHeights(description);
+
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         SampledImage{shadowAtlas.getView(), shadowDepthSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -2195,7 +2202,39 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.probeStates = !probes.empty() ? ddgi->describeProbeStates(frame.frameIndex) : VkDescriptorBufferInfo{noProbeStates.get(), 0, VK_WHOLE_SIZE};
     views.probeCascades = !probes.empty() ? ddgi->describeProbeCascades(frame.frameIndex) : VkDescriptorBufferInfo{noProbeCascades.get(), 0, VK_WHOLE_SIZE};
     views.skyLight = description.lighting.atmosphere ? atmosphere->describeSkyLight() : buffers.skyLight.describe();
+    views.terrainHeights = VkDescriptorBufferInfo{uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get(), 0, VK_WHOLE_SIZE};
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
+}
+
+/*
+* The heights change rarely (a game builds its land once), so they live in GPU memory, copied there through a staging
+* buffer when the frame brings other heights or a new version; the frames in flight may still read the old buffer, so
+* the GPU is waited for first. Without a terrain the stand-in is bound and the old buffer kept until another comes.
+*/
+void VulkanRenderer::updateTerrainHeights(const FrameDescription& description) {
+    const TerrainHeights* source = description.terrainHeights.get();
+
+    if (source == nullptr || (source == uploadedTerrain && description.terrainHeightsVersion == uploadedTerrainVersion)) {
+        if (source == nullptr) {
+            uploadedTerrain = nullptr;
+        }
+
+        return;
+    }
+
+    const std::vector<std::uint32_t> words = packTerrainHeights(*source);
+    const VkDeviceSize bytes = words.size() * sizeof(std::uint32_t);
+    device.waitIdle();
+    terrainHeights = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
+    VulkanBuffer staging{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
+    std::memcpy(staging.getMapped(), words.data(), bytes);
+    staging.flush();
+    uploads.run([&](VkCommandBuffer commands) {
+        const VkBufferCopy copy{0, 0, bytes};
+        vkCmdCopyBuffer(commands, staging.get(), terrainHeights.get(), 1, &copy);
+    });
+    uploadedTerrain = source;
+    uploadedTerrainVersion = description.terrainHeightsVersion;
 }
 
 /*

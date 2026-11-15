@@ -216,4 +216,9 @@
 // depth_of_field_test.comp
 #define GPU_TEST_DEPTH_OF_FIELD 0
 
+// terrain_test.comp
+#define GPU_TEST_TERRAIN_MORPH 0
+#define GPU_TEST_TERRAIN_MORPH_GRID 1
+#define GPU_TEST_TERRAIN_BILINEAR 2
+
 #endif

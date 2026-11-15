@@ -133,6 +133,7 @@ void gpuTestAlphaMask(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestSkyVisibility(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestTransparency(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDither(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestTerrain(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCameraFinish(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestMotionBlur(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDepthOfField(GpuFunctionRunner& runner, GpuCheckReport& report);

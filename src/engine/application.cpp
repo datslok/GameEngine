@@ -7,6 +7,7 @@
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
 #include "scene/level_of_detail.h"
+#include "scene/terrain.h"
 
 #include <SDL3/SDL.h>
 #include <cstdint>
@@ -437,6 +438,14 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     attachBoundingSpheres(frame.draws, boundsByMesh);
     attachFlatFaces(frame.draws, flatFacesByMesh);
     attachMeshLevels(frame.draws, assets.getMeshLevels());
+
+    // The terrain's patches round the camera (scene/terrain.h), after the other draws: their bounds are their own.
+    validateTerrain(settings.render.terrain);
+    world.each<Terrain>([&](Entity, const Terrain& terrain) {
+        appendTerrainDraws(terrain, game.getCamera().getPosition(), settings.render.terrain, frame.draws, frame.terrainPatches);
+        frame.terrainHeights = terrain.heights;
+        frame.terrainHeightsVersion = terrain.heightsVersion;
+    });
 
     // The sky visibility grid's level, while its settings want it (each frame's check is a hash of the static draws).
     if (settings.render.skyVisibility.enabled) {

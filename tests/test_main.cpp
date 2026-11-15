@@ -59,6 +59,7 @@ void testForestTrees();
 void testUnderstorey();
 void testSimplifyMesh();
 void testLevelOfDetail();
+void testTerrain();
 void testLeafClusters();
 void testDepthPrepass();
 void testTextureEncoding();
@@ -347,6 +348,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testUnderstorey", testUnderstorey);
     runTest("testSimplifyMesh", testSimplifyMesh);
     runTest("testLevelOfDetail", testLevelOfDetail);
+    runTest("testTerrain", testTerrain);
     runTest("testLeafClusters", testLeafClusters);
     runTest("testFlashlight", testFlashlight);
     runTest("testRawImagePng", testRawImagePng);

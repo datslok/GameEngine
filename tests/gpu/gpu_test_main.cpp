@@ -37,6 +37,7 @@ int main() {
             gpuTestSkyVisibility(runner, report);
             gpuTestTransparency(runner, report);
             gpuTestDither(runner, report);
+            gpuTestTerrain(runner, report);
             gpuTestCameraFinish(runner, report);
             gpuTestMotionBlur(runner, report);
             gpuTestDepthOfField(runner, report);

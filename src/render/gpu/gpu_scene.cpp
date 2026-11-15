@@ -20,6 +20,7 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     instance.handedness[1] = uniformScale(draw.model);
     instance.material[0] = material;
     instance.material[1] = draw.mesh.index;
+    instance.material[2] = draw.terrainPatch >= 0 ? static_cast<std::uint32_t>(draw.terrainPatch) + 1 : 0u;
     return instance;
 }
 

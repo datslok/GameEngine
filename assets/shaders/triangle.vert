@@ -6,6 +6,7 @@
 #include "instances.glsl"
 #include "planar_reflection.glsl"
 #include "render/gpu/reflection_probe_shared.h"
+#include "terrain_data.glsl"
 
 // Whether this pipeline draws a capture (a reflection probe's cube face, or a flat mirror's picture): its
 // view-projection comes as push constants (render/gpu/reflection_probe.h, cubeFaceViewProjection;
@@ -62,6 +63,26 @@ void main() {
     // need to know where each fragment is, relative to the camera like the lights themselves.
     mat4 model = instance.model;
     model[3].xyz -= cameraOrigin.xyz;
+
+    // A terrain patch (scene/terrain.h): its mesh is a flat grid, lifted onto the land here, slid into the next level's
+    // grid as it nears its level's reach (seen from the camera in every view, so all views draw one surface), its normal,
+    // tangent and texture coordinates from the land.
+    uint terrainPatchNumber = instance.material.z;
+
+    if (terrainPatchNumber > 0u) {
+        TerrainVertex land = terrainVertex(terrainPatches[terrainPatchNumber - 1u], position.xz, cameraOrigin.xyz);
+        relativePosition = land.position - cameraOrigin.xyz;
+        gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
+        gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
+        viewerPosition = captureView ? captureEye.xyz : vec3(0.0);
+        textureUv = land.uv;
+        frameAxes = mat3(1.0);
+        framePosition = land.position;
+        worldNormal = land.normal;
+        worldTangent = land.tangent;
+        return;
+    }
+
     relativePosition = (model * vec4(position, 1.0)).xyz;
     gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
     gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;

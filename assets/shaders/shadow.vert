@@ -1,8 +1,10 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
+#include "frame_data.glsl"
 #include "instances.glsl"
 #include "planar_reflection.glsl"
+#include "terrain_data.glsl"
 
 // The shadow pass only needs where each vertex is, as seen from one face of the light's cube.
 layout(location = 0) in vec3 position;
@@ -18,7 +20,14 @@ layout(push_constant) uniform ShadowView {
 out float gl_ClipDistance[1];
 
 void main() {
-    vec4 world = instances[drawList[gl_InstanceIndex]].model * vec4(position, 1.0);
+    InstanceData instance = instances[drawList[gl_InstanceIndex]];
+
+    // A terrain patch is lifted onto the land as the camera's views lift it (morphed from the camera), so the shadow
+    // falls from the surface that is seen.
+    uint terrainPatchNumber = instance.material.z;
+    vec4 world = terrainPatchNumber > 0u
+                     ? vec4(terrainVertex(terrainPatches[terrainPatchNumber - 1u], position.xz, cameraOrigin.xyz).position, 1.0)
+                     : instance.model * vec4(position, 1.0);
     gl_Position = tileMatrix * world;
     gl_ClipDistance[0] = planarClipDistance(tileClipPlane, world.xyz);
 }

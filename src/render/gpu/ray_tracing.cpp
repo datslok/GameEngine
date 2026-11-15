@@ -4,8 +4,9 @@
 #include <stdexcept>
 
 std::uint32_t rayMaskFor(const DrawItem& draw) {
-    // A shadow map's stand-in is no surface: kept in the list (instances are numbered by draw), met by no ray.
-    if (draw.shadowOnly) {
+    // A shadow map's stand-in is no surface: kept in the list (instances are numbered by draw), met by no ray; nor is a
+    // hidden draw, nor a terrain patch, whose mesh is a flat grid only the vertex shaders lift onto the land.
+    if (draw.shadowOnly || draw.hidden || draw.terrainPatch >= 0) {
         return 0u;
     }
 

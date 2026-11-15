@@ -49,7 +49,7 @@ std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const 
     std::vector<std::size_t> visible;
 
     for (std::size_t i = 0; i < draws.size(); ++i) {
-        if (!draws[i].shadowOnly && mightBeSeen(draws[i], cameraFrustum)) {
+        if (!draws[i].shadowOnly && !draws[i].hidden && mightBeSeen(draws[i], cameraFrustum)) {
             visible.push_back(i);
         }
     }
@@ -73,7 +73,7 @@ namespace {
         for (std::size_t i = 0; i < draws.size(); ++i) {
             const DrawItem& draw = draws[i];
 
-            if (isTransparent(draw.material) != glass || (!glass && !draw.castsShadows)) {
+            if (isTransparent(draw.material) != glass || (!glass && !draw.castsShadows) || draw.hidden) {
                 continue;
             }
 

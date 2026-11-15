@@ -14,6 +14,7 @@
 #include "scene/model_renderer.h"
 #include "scene/probe_volume.h"
 #include "scene/sun.h"
+#include "scene/terrain.h"
 
 #include <array>
 #include <filesystem>
@@ -271,21 +272,52 @@ void ForestGame::buildGround(World& world, AssetManager& assets) {
     const int coarseness = std::clamp(valleySettings.groundCoarseness, 0, 2);
     const std::vector<TerrainRing> rings = forestTerrainRings(static_cast<float>(2 << coarseness));
 
+    Terrain land;
+
     for (std::size_t index = 0; index < rings.size(); ++index) {
         const GroundExtent extent{forestTerrainCentre, rings[index].outerHalfSize};
         const int weightsSize = (index == 0 ? nearWeightsSize : farWeightsSize) >> coarseness;
         const float texelMetres = 2.0f * extent.halfSize / static_cast<float>(weightsSize);
         const Material material = groundMaterial(assets, assetFolder, extent, weightsSize, forestBlendDepth(groundSettings.blendDepth, texelMetres), getJobs());
-        const Entity entity = addShape(world, assets.addMesh(forestTerrainRingMesh(rings[index], extent, getJobs())), material, Transform{}, index == 0);
+        land.regions.push_back(TerrainRegion{.centre = extent.centre, .halfSize = extent.halfSize, .material = material});
         groundTexels.push_back(texelMetres);
 
+        // The finest ring stays the ground walked on and the sky visibility's static ground, but hidden: the terrain draws it.
         if (index == 0) {
-            ground = entity;
-            staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(ground)));
-        } else {
-            farGround.push_back(entity);
+            ground = addShape(world, assets.addMesh(forestTerrainRingMesh(rings[index], extent, getJobs())), material, Transform{}, true);
+            ModelRenderer& hidden = world.get<ModelRenderer>(ground);
+            hidden.hidden = true;
+            hidden.castsShadows = false;
+            staticLevel.add(assets.makeCollisionMesh(hidden));
         }
     }
+
+    /*
+    * The land drawn (scene/terrain.h): heights at the finest ring's spacing over its square, four times coarser over the
+    * next ring's, sixteen times over everything, read from forestHeight as the rings were; leaves of 32 of the finest
+    * squares, as many levels as reach past the land's edge from the centre.
+    */
+    const float nearSpacing = rings.front().spacing;
+    auto heights = std::make_shared<TerrainHeights>();
+    heights->grids.push_back(makeTerrainHeightGrid(forestTerrainCentre, rings[0].outerHalfSize, nearSpacing, forestHeight, getJobs()));
+    heights->grids.push_back(makeTerrainHeightGrid(forestTerrainCentre, rings[1].outerHalfSize, 4.0f * nearSpacing, forestHeight, getJobs()));
+    land.landHalfSize = rings.back().outerHalfSize;
+    land.heights = heights;
+    land.centre = forestTerrainCentre;
+    land.leafSize = nearSpacing * static_cast<float>(TERRAIN_GRID_QUADS);
+    land.levels = 1;
+
+    while (land.leafSize * static_cast<float>(1 << (land.levels - 1)) < 2.0f * land.landHalfSize) {
+        ++land.levels;
+    }
+
+    const float rootHalf = 0.5f * land.leafSize * static_cast<float>(1 << (land.levels - 1));
+    heights->grids.push_back(makeTerrainHeightGrid(forestTerrainCentre, rootHalf, 16.0f * nearSpacing, forestHeight, getJobs()));
+    land.bounds = std::make_shared<const TerrainBounds>(makeTerrainBounds(land, getJobs()));
+    land.grid = assets.addMesh(terrainGridMesh(TERRAIN_GRID_QUADS));
+    land.halfGrid = assets.addMesh(terrainGridMesh(TERRAIN_HALF_GRID_QUADS));
+    terrain = world.create();
+    world.add(terrain, std::move(land));
 }
 
 /*
@@ -663,10 +695,13 @@ void ForestGame::updateDaylight(World& world) {
     nearGround.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels.front());
     nearGround.groundHexTiling = groundSettings.hexTiling;
 
-    for (std::size_t far = 0; far < farGround.size(); ++far) {
-        Material& farMaterial = world.get<ModelRenderer>(farGround[far]).parts.front().material;
-        farMaterial.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels[far + 1]);
-        farMaterial.groundHexTiling = groundSettings.hexTiling;
+    // The terrain's regions are the rings' materials, the finest the ground's own.
+    std::vector<TerrainRegion>& regions = world.get<Terrain>(terrain).regions;
+
+    for (std::size_t region = 0; region < regions.size(); ++region) {
+        Material& regionMaterial = regions[region].material;
+        regionMaterial.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels[region]);
+        regionMaterial.groundHexTiling = groundSettings.hexTiling;
     }
 
     for (const Entity shape : rockShapes) {
@@ -806,8 +841,8 @@ Entity ForestGame::getGround() const {
     return ground;
 }
 
-const std::vector<Entity>& ForestGame::getFarGround() const {
-    return farGround;
+Entity ForestGame::getTerrain() const {
+    return terrain;
 }
 
 const std::vector<PillarPlacement>& ForestGame::getPillars() const {
