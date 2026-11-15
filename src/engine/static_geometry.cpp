@@ -16,7 +16,7 @@ namespace {
 }
 
 bool blocksSky(const DrawItem& draw) {
-    return draw.isStatic && draw.castsShadows && !isTransparent(draw.material);
+    return draw.isStatic && (draw.castsShadows || draw.hidden) && !isTransparent(draw.material);
 }
 
 std::uint64_t skyBlockersFingerprint(std::span<const DrawItem> draws) {

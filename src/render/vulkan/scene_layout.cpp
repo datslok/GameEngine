@@ -54,6 +54,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the local lights' contact shadows
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the coloured shadow maps' tint (compute for the fog)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // their nearest glass depths
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the terrain's heights
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the terrain's patches
     }};
 }
 
@@ -145,7 +147,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     mirrorPairs(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     glassBounds(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     fog(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    skyVisibilityCascades(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    skyVisibilityCascades(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    terrainPatches(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -189,6 +192,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
+        views.terrainHeights,
+        buffers.terrainPatches.describe(),
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

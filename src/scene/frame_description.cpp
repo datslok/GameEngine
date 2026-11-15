@@ -63,7 +63,7 @@ void MotionHistory::reserveSlots(std::size_t count) {
 * list is the same whatever order the threads finish in (with 20,000 objects, one thread took 12 ms).
 */
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history, JobSystem& jobs) {
-    FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}, {}, {}, 0, {}};
+    FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}, {}, {}, 0, {}, {}, {}, 0};
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();
 
     if (renderers != nullptr) {
@@ -103,6 +103,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
                                 history != nullptr ? history->previous(entity, part) : std::nullopt};
                 draw.shadowOnly = modelRenderer.shadowOnly;
                 draw.shadowCascades = modelRenderer.shadowCascades;
+                draw.hidden = modelRenderer.hidden;
 
                 if (history != nullptr) {
                     history->remember(entity, part, model);

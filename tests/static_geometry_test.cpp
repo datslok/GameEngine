@@ -43,6 +43,13 @@ namespace {
         DrawItem leaves = wall;
         leaves.material.alphaMode = AlphaMode::Mask;
         assert(blocksSky(leaves));
+
+        // A hidden draw is drawn by no view and casts no shadow, but still blocks the sky: the forest's 2 m ground, drawn as
+        // terrain patches (scene/terrain.h).
+        DrawItem ground = wall;
+        ground.castsShadows = false;
+        ground.hidden = true;
+        assert(blocksSky(ground));
     }
 
     /*

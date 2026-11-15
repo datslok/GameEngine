@@ -13,6 +13,7 @@
 #include "scene/lighting.h"
 #include "scene/material.h"
 #include "scene/mesh_level.h"
+#include "scene/terrain_heights.h"
 #include "physics/static_level.h"
 
 #include <cstddef>
@@ -57,6 +58,13 @@ struct DrawItem {
     // The mesh's coarser levels (scene/mesh_level.h, attachMeshLevels), held by the engine: each view draws the one its
     // distance allows (scene/level_of_detail.h). The other uses of mesh (bounds, rays, flat faces) keep the mesh itself.
     std::span<const MeshLevel> levels{};
+
+    // Drawn by no view and met by no ray, but part of the static level (ModelRenderer::hidden).
+    bool hidden = false;
+
+    // A terrain patch's index in FrameDescription::terrainPatches (scene/terrain.h), -1 for every other draw: its mesh is a
+    // flat grid the vertex shaders lift onto the land.
+    int terrainPatch = -1;
 
     // A deforming mesh's shape this frame (DeformedMesh::shape, set by attachShapes), 0 for every other mesh: the shadow
     // cache's fingerprint of the casters includes it, so a caster that changes shape where it stands is drawn again.
@@ -134,6 +142,12 @@ struct FrameDescription {
     // Each of its triangles' diffuse albedo, in linear light and in its triangle order, for the bounce light the grid
     // gathers; changing it changes the version too.
     std::shared_ptr<const std::vector<Vec3>> staticAlbedo;
+
+    // The terrain's patches this frame (DrawItem::terrainPatch indexes them) and the heights they are lifted onto, which
+    // the renderer uploads again only when terrainHeightsVersion changes (scene/terrain.h); none without a terrain.
+    std::vector<TerrainPatch> terrainPatches;
+    std::shared_ptr<const TerrainHeights> terrainHeights;
+    std::uint64_t terrainHeightsVersion = 0;
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.

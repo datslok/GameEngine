@@ -19,7 +19,8 @@
 */
 
 // Whether a draw stands in the sky's way: static, solid (it casts shadows; the glowing stand-ins for lights do not, as
-// ray tracing's RAY_MASK_SOLID leaves them out too) and not seen through (glass and blended surfaces let light past).
+// ray tracing's RAY_MASK_SOLID leaves them out too) and not seen through (glass and blended surfaces let light past), or
+// hidden (drawn by no view, but still there: the forest's ground walked on, drawn as terrain patches).
 bool blocksSky(const DrawItem& draw);
 
 // A number for the frame's sky-blocking draws, their meshes, matrices and what colours their bounce light (colour,

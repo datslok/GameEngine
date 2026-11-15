@@ -139,7 +139,7 @@ public:
     // For tests.
     const StaticLevel& getLevel() const;
     Entity getGround() const;
-    const std::vector<Entity>& getFarGround() const;
+    Entity getTerrain() const;
     const std::vector<PillarPlacement>& getPillars() const;
     const std::vector<IslandPlacement>& getIslands() const;
     Entity getRing() const;
@@ -220,8 +220,8 @@ private:
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
     Atmosphere atmosphereSettings;
 
-    Entity ground;
-    std::vector<Entity> farGround;
+    Entity ground;   // the finest ring, walked on and hidden
+    Entity terrain;  // the land drawn (scene/terrain.h), a region a ring
     std::vector<float> groundTexels; // each ring's paint texels in metres, the finest first
     std::vector<PillarPlacement> pillars;
     std::vector<IslandPlacement> islands;

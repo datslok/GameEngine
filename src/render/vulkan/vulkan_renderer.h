@@ -7,6 +7,7 @@
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/terrain_gpu.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/shadow_atlas.h"
@@ -485,6 +486,14 @@ private:
     // Bound in place of the light probes' states while there are none (one probe's worth of zeros, never read then).
     VulkanBuffer noProbeStates;
     VulkanBuffer noProbeCascades;
+
+    // The terrain's heights (render/gpu/terrain_gpu.h), uploaded when the frame's heights or their version change, and
+    // a stand-in bound without a terrain (never read then: no instance names a patch).
+    VulkanBuffer terrainHeights;
+    VulkanBuffer noTerrainHeights;
+    const TerrainHeights* uploadedTerrain = nullptr;
+    std::uint64_t uploadedTerrainVersion = 0;
+    void updateTerrainHeights(const FrameDescription& description);
 
     // This frame's camera in the atmosphere's frame: its distance from the planet's centre, km (0 without an atmosphere).
     float cameraAtmosphereRadius = 0.0f;

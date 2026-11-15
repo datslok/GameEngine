@@ -21,6 +21,7 @@
 #include "render/gpu/upscaling.h"
 #include "render/gpu/volumetric_fog.h"
 #include "scene/level_of_detail.h"
+#include "scene/terrain.h"
 
 /*
 * Everything about drawing that a game, the debug UI or a player may tune, in one place. The renderer reads it every
@@ -71,6 +72,9 @@ struct RenderSettings {
 
     // Coarser meshes far away (scene/level_of_detail.h): each view picks the coarsest level whose error fits its pixels.
     LevelOfDetailSettings levelOfDetail;
+
+    // How far each level of the terrain reaches (scene/terrain.h).
+    TerrainSettings terrain;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

@@ -12,6 +12,8 @@
 #include "scene/light.h"
 #include "math/transform.h"
 #include "scene/model_renderer.h"
+#include "scene/indexed_mesh.h"
+#include "scene/terrain.h"
 
 #include "forest_helpers.h"
 
@@ -687,21 +689,39 @@ namespace {
         assert(material.groundLayers.size() == 4 && material.groundWeights.isValid());
         assert(near(material.groundRepeats[0], 2.0f * forestNearHalfSize / forestGroundLayers[0].tileMetres, 1e-2f));
 
-        assert(forest.game.getFarGround().size() == 3);
+        /*
+        * The ground walked on is hidden (drawn by no view, casting no shadow, but still in the static level the sky
+        * visibility's rays see); the land is drawn as terrain patches (scene/terrain.h): a region a ring, the finest the
+        * ground's own material, each coarser one its own weights texture, blended softer; heights in three grids, the
+        * finest at the ground's spacing, reading the land's heights at their points.
+        */
+        assert(renderer.hidden && !renderer.castsShadows);
+        const Terrain& terrain = forest.world.get<Terrain>(forest.game.getTerrain());
+        assert(terrain.regions.size() == 4 && terrain.regions.front().material.groundWeights == material.groundWeights);
+        assert(terrain.grid.isValid() && terrain.halfGrid.isValid() && terrain.heights && terrain.heights->grids.size() == 3 && terrain.bounds);
+        assert(terrain.landHalfSize == forestTerrainRings(8.0f).back().outerHalfSize);
+        assert(terrain.leafSize == 8.0f * TERRAIN_GRID_QUADS && terrain.leafSize * static_cast<float>(1 << (terrain.levels - 1)) >= 2.0f * terrain.landHalfSize);
+        const TerrainHeightGrid& finest = terrain.heights->grids.front();
+        assert(finest.spacing == 8.0f && near(finest.heights[5 * finest.size + 7], forestHeight(finest.corner.x + 56.0f, finest.corner.y + 40.0f), 1e-4f));
         TextureHandle lastWeights = material.groundWeights;
         float lastDepth = material.groundBlendDepth;
 
-        for (const Entity far : forest.game.getFarGround()) {
-            const ModelRenderer& farRenderer = forest.world.get<ModelRenderer>(far);
-            const Material& farMaterial = farRenderer.parts.front().material;
-            assert(!farRenderer.isStatic);
+        for (std::size_t region = 1; region < terrain.regions.size(); ++region) {
+            const Material& farMaterial = terrain.regions[region].material;
             assert(farMaterial.groundWeights.isValid() && farMaterial.groundWeights != lastWeights);
             assert(farMaterial.groundBlendDepth >= lastDepth);
+            assert(terrain.regions[region].halfSize > terrain.regions[region - 1].halfSize);
             lastWeights = farMaterial.groundWeights;
             lastDepth = farMaterial.groundBlendDepth;
         }
 
         assert(lastDepth > material.groundBlendDepth);
+
+        // The patches' tangents run the way the rings' MikkTSpace tangents did (u east, the bitangent's side -1).
+        const TerrainRing ring = forestTerrainRings(8.0f).front();
+        const IndexedMesh ringMesh = buildIndexedMesh(forestTerrainRingMesh(ring, GroundExtent{forestTerrainCentre, ring.outerHalfSize}));
+        const MeshVertex& sample = ringMesh.vertices[ringMesh.vertices.size() / 2];
+        assert(sample.tangent.w == -1.0f && sample.tangent.x > 0.5f);
 
         assert(forest.game.getPillars().size() == 41 && forest.game.getIslands().size() == 8);
         assert(near(forest.world.get<Transform>(forest.game.getRing()).scale.x, forestRingRadius, 1e-3f));
@@ -944,10 +964,12 @@ namespace {
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(!forest.world.has<Fog>(forest.game.getAir()));
         assert(!forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundHexTiling);
-        assert(!forest.world.get<ModelRenderer>(forest.game.getFarGround().back()).parts.front().material.groundHexTiling);
+        const Terrain& terrain = forest.world.get<Terrain>(forest.game.getTerrain());
+        assert(!terrain.regions.back().material.groundHexTiling && !terrain.regions.front().material.groundHexTiling);
         const float nearDepth = forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundBlendDepth;
         assert(near(nearDepth, forestBlendDepth(0.45f, 4.0f * forestFinestPaintTexel), 1e-6f)); // the tests' coarsest ground
-        const float farDepth = forest.world.get<ModelRenderer>(forest.game.getFarGround().front()).parts.front().material.groundBlendDepth;
+        assert(terrain.regions.front().material.groundBlendDepth == nearDepth);
+        const float farDepth = terrain.regions[1].material.groundBlendDepth;
         assert(farDepth > 0.45f && farDepth <= 1.0f);
 
         forest.game.getRockSettings() = ForestRockSettings{.blendDepth = 0.6f, .mossStart = 0.4f, .mossFull = 0.9f, .warpMetres = 6.0f, .streakStrength = 0.2f,

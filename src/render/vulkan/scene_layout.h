@@ -62,7 +62,9 @@ enum SceneBinding : std::uint32_t {
     LightContactShadowsBinding = 32,
     GlassTintBinding = 33,
     GlassDepthsBinding = 34,
-    SceneBindingCount = 35
+    TerrainHeightsBinding = 35,
+    TerrainPatchesBinding = 36,
+    SceneBindingCount = 37
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -146,6 +148,9 @@ struct SceneBuffers {
 
     // The sky visibility grid's cascades (GpuProbeCascade, render/gpu/sky_visibility.h; none while it is not read).
     UploadArray skyVisibilityCascades;
+
+    // The terrain's patches this frame (GpuTerrainPatch, render/gpu/terrain_gpu.h; one unused without a terrain).
+    UploadArray terrainPatches;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light
@@ -175,6 +180,7 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo probeStates{};
     VkDescriptorBufferInfo skyLight{};
     VkDescriptorBufferInfo probeCascades{};
+    VkDescriptorBufferInfo terrainHeights{}; // the terrain's heights (a stand-in without a terrain)
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).
