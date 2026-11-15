@@ -67,6 +67,9 @@ void visit(ForestUnderstoreySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Level keep share", settings.levelKeepShare, {.min = 0.005f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Shadow cascades", settings.shadowCascades, {.min = 0, .max = 4, .applies = FieldApplies::AtStartup});
     visitor.field("Shadow keep share", settings.shadowKeepShare, {.min = 0.005f, .max = 1.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Impostor error", settings.impostorErrorMetres, {.min = 0.001f, .max = 10.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Impostor frames", settings.impostorFrames, {.min = 2, .max = 32, .sliderMax = 16, .applies = FieldApplies::AtStartup});
+    visitor.field("Impostor texels", settings.impostorTexels, {.min = 8, .max = 512, .sliderMax = 256, .applies = FieldApplies::AtStartup});
 }
 
 float understoreyHeight(const ForestUnderstoreySettings& settings, UnderstoreyKind kind) {

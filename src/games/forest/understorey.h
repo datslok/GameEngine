@@ -59,6 +59,14 @@ struct ForestUnderstoreySettings {
     // How many of the sun's cascades its shadows are drawn into, nearest first (ModelRenderer::shadowCascades): a plant's
     // shadow is a few metres long; the 10,000 plants in every cascade cost most of 22 ms of shadows while turning.
     int shadowCascades = 2;
+
+    // The card past the levels (scene/impostor.h, docs/LOD.md), as the trees': the error, in metres, from which a plant is
+    // drawn as its card (a plant a twentieth of a tree's height, so about that share of the trees' 1.5 m: a 1.5 m plant
+    // turns into its card some 20 m away at 2 pixels on a 1080-line screen), its frames a side and each frame's texels
+    // (fewer than the trees': a plant's card is never big on screen).
+    float impostorErrorMetres = 0.06f;
+    int impostorFrames = 8;
+    int impostorTexels = 64;
 };
 
 void visit(ForestUnderstoreySettings& settings, SettingsVisitor& visitor);

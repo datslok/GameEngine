@@ -177,6 +177,8 @@ public:
     ForestUnderstoreySettings& getUnderstoreySettings();
     const std::vector<UnderstoreyPlacement>& getUnderstoreyPlacements() const;
     const std::vector<Entity>& getUnderstorey() const;
+    // Each plant's card (scene/impostor.h), plant by plant.
+    const std::vector<Entity>& getUnderstoreyImpostors() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -235,6 +237,7 @@ private:
     std::vector<TreePlacement> midPlacements;
     std::vector<UnderstoreyPlacement> understoreyPlacements;
     std::vector<Entity> understorey;
+    std::vector<Entity> understoreyImpostors; // a card each plant, in the placements' order (scene/impostor.h)
     std::vector<Entity> trees;
     std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;
