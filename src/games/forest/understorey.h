@@ -53,6 +53,10 @@ struct ForestUnderstoreySettings {
     // The share of each scan's triangles drawn (its border kept), and the share its shadow's stand-in keeps.
     float keepShare = 0.3f;
     float shadowKeepShare = 0.05f;
+
+    // How many of the sun's cascades its shadows are drawn into, nearest first (ModelRenderer::shadowCascades): a plant's
+    // shadow is a few metres long; the 10,000 plants in every cascade cost most of 22 ms of shadows while turning.
+    int shadowCascades = 2;
 };
 
 void visit(ForestUnderstoreySettings& settings, SettingsVisitor& visitor);

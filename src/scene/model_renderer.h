@@ -32,6 +32,11 @@ struct ModelRenderer {
     // was redrawn each frame the camera turned). Rays never meet it either.
     bool shadowOnly = false;
 
+    // How many of the sun's cascades it casts into, counted from the nearest (0: all of them, and the far shadow map). A
+    // small thing's shadow is only metres long, which the coarser cascades' texels cannot show, so the forest's
+    // understorey casts into the first two only: 10,000 plants redrawn into every cascade as the camera turned.
+    int shadowCascades = 0;
+
     // Part of the level that never moves (floors, walls): global illumination's probes move out of it at start-up, and
     // only things not marked static wake sleeping probes. Unmarked things count as moving, which costs only some probe
     // work, while a mover marked static would leave probes asleep beside it.

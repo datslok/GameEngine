@@ -78,3 +78,13 @@ std::vector<ClusterLeaf> clusterLeaves(int sourceCells, float leafShare, std::ui
 * grid is clusterColumns x clusterRows.
 */
 LeafAtlas composeLeafClusters(const LeafAtlas& source, int cellTexels, float leafShare, std::uint32_t seed);
+
+/*
+* One cell's outline (for appendOutlinedLeafCard): the cell's square clipped by four pairs of parallel cuts (across, up
+* and the two diagonals) that just hold every texel whose alpha is at least alphaCutoff, each pushed marginTexels further
+* out (the mips' blur reaches past a leaf's edge), in the cell's own units (0..1 across and up, row 0 at v 0),
+* counterclockwise: at most twelve corners, usually eight. The forest's twigs cover 14-20% of their cells, their
+* outlines 28-30%, so about a third of each card's pixels are drawn. Empty for a cell with nothing over the cutoff.
+*/
+std::vector<Vec2> clusterOutline(const ImageData& image, std::uint32_t column, std::uint32_t row, std::uint32_t cellTexels,
+                                 std::uint8_t alphaCutoff, float marginTexels);

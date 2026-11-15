@@ -145,7 +145,10 @@ namespace {
 
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 13 && counter.live == 0);
+        assert(counter.fields == 14 && counter.live == 0);
+
+        // Its shadows only in the nearest cascades: a knee-high plant's shadow is a few metres long.
+        assert(settings.shadowCascades >= 1 && settings.shadowCascades <= 2);
     }
 
     /*
@@ -165,6 +168,7 @@ namespace {
             const ModelRenderer& leaves = world.get<ModelRenderer>(plants[2 * plant]);
             const ModelRenderer& shadow = world.get<ModelRenderer>(plants[2 * plant + 1]);
             assert(!leaves.castsShadows && !leaves.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
+            assert(shadow.shadowCascades == ForestUnderstoreySettings{}.shadowCascades);
             const Transform& pose = world.get<Transform>(plants[2 * plant]);
             assert(pose.position.x == placed[plant].foot.x && pose.scale.y == placed[plant].scale);
             assert(world.get<Transform>(plants[2 * plant + 1]).position.z == placed[plant].foot.z);

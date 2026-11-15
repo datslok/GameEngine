@@ -273,6 +273,7 @@ namespace {
         world.add(proxy, Transform{});
         ModelRenderer proxyRenderer = makeMeshRenderer(MeshHandle{2});
         proxyRenderer.shadowOnly = true;
+        proxyRenderer.shadowCascades = 2;
         world.add(proxy, proxyRenderer);
 
         const FrameDescription withProxy = buildFrame(world, makeTestCamera(), 0.0f);
@@ -280,6 +281,7 @@ namespace {
 
         for (const DrawItem& draw : withProxy.draws) {
             assert(draw.shadowOnly == (draw.mesh == MeshHandle{2}));
+            assert(draw.shadowCascades == (draw.mesh == MeshHandle{2} ? 2 : 0));
         }
     }
 }

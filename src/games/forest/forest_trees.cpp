@@ -1,4 +1,5 @@
 #include "games/forest/forest_trees.h"
+#include "scene/simplify_mesh.h"
 
 #include "games/forest/forest_terrain.h"
 #include "games/forest/island_hangings.h"
@@ -562,7 +563,8 @@ Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOu
 * direction, never past square), the twig reaching out of the clump and a little up within the card's plane.
 */
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
-                       const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed) {
+                       const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
+                       const ClusterOutlines* outlines) {
     if (clumps.empty()) {
         return 0;
     }
@@ -576,7 +578,11 @@ int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, co
         const Vec3 towardsTip = inPlane.lengthSquared() > 1e-8f ? inPlane.normalized() : squareTo(facing);
         const int cell = std::min(static_cast<int>(forestUnitRandom(seed, base) * static_cast<float>(cells)), cells - 1);
         const AtlasCell picture = atlasCell(cell, clusterColumns, clusterRows);
-        appendLeafCard(mesh, stem, towardsTip, facing, normal, size, size, picture.uvMin, picture.uvMax);
+        const std::vector<Vec2> square = squareOutline();
+        const std::vector<Vec2>& outline = outlines != nullptr && (*outlines)[static_cast<std::size_t>(cell)].size() >= 3
+                                               ? (*outlines)[static_cast<std::size_t>(cell)]
+                                               : square;
+        appendOutlinedLeafCard(mesh, stem, towardsTip, facing, normal, size, size, picture.uvMin, picture.uvMax, outline);
         ++made;
     };
 
@@ -646,6 +652,7 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Shadow cards per node", settings.shadowCardsPerNode, {.min = 0, .max = 20, .sliderMax = 6, .applies = FieldApplies::AtStartup});
     visitor.field("Shadow filler cards", settings.shadowFillCards, {.min = 0, .max = 100, .sliderMax = 32, .applies = FieldApplies::AtStartup});
     visitor.field("Shadow card scale", settings.shadowCardScale, {.min = 0.5f, .max = 8.0f, .sliderMax = 4.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Shadow bark share", settings.shadowBarkShare, {.min = 0.01f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Cluster texels", settings.clusterTexels, {.min = 16, .max = 4096, .sliderMax = 2048, .applies = FieldApplies::AtStartup});
 }
 
@@ -706,7 +713,7 @@ TreeVariantShape treeVariantShape(const ForestTreeSettings& settings, std::uint3
 * enough for their thin fins, every other as many sides as its thickest (first) radius asks for. A side chain's first
 * point is its parent's node at the chain's own radius, so the branch starts inside the limb it leaves.
 */
-TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed, float barkTileMetres) {
+TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed, float barkTileMetres, const ClusterOutlines* outlines) {
     const TreeVariantShape shape = treeVariantShape(settings, seed);
     const CrownEnvelope& crown = shape.crown;
     const Vec3 base{0.0f, -treeSinkMetres, 0.0f};
@@ -790,14 +797,18 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
 
     const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
     meshes.leafyCount = static_cast<int>(std::count(leafy.begin(), leafy.end(), true));
-    meshes.cardCount = appendClusterCards(meshes.leaves, nodes, radii, crown, clumps, settings, forestShapeSeed(seed, 3));
+    meshes.cardCount = appendClusterCards(meshes.leaves, nodes, radii, crown, clumps, settings, forestShapeSeed(seed, 3), outlines);
 
     // The shadow leaves: the same nodes and clumps, fewer and bigger cards.
     ForestTreeSettings shadowCards = settings;
     shadowCards.cardsPerNode = settings.shadowCardsPerNode;
     shadowCards.fillCards = settings.shadowFillCards;
     shadowCards.clusterSize = settings.clusterSize * settings.shadowCardScale;
-    meshes.shadowCardCount = appendClusterCards(meshes.shadowLeaves, nodes, radii, crown, clumps, shadowCards, forestShapeSeed(seed, 4));
+    meshes.shadowCardCount = appendClusterCards(meshes.shadowLeaves, nodes, radii, crown, clumps, shadowCards, forestShapeSeed(seed, 4), outlines);
+
+    // The shadow bark: the tubes simplified, their open ends free to move (a shadow cannot show them).
+    constexpr float shadowBarkError = 0.005f; // about 19 cm on a canopy tree, 7 cm on a mid tree; still 10-12% of the triangles
+    meshes.shadowBark = simplifyMesh(meshes.bark, settings.shadowBarkShare, shadowBarkError, false);
     return meshes;
 }
 

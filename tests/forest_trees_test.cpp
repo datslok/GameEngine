@@ -589,6 +589,14 @@ namespace {
             }
         }
 
+        // Outlined cells: each card that cell's outline, a fan of its corners.
+        const std::vector<Vec2> diamond{{0.5f, 0.0f}, {1.0f, 0.5f}, {0.5f, 1.0f}, {0.0f, 0.5f}, {0.25f, 0.1f}};
+        const ClusterOutlines outlines{diamond, diamond, diamond, diamond};
+        IndexedMesh outlinedCards;
+        const int outlinedMade = appendClusterCards(outlinedCards, nodes, radii, crown, clumps, settings, 9u, &outlines);
+        assert(outlinedMade == made && outlinedCards.vertices.size() == static_cast<std::size_t>(made) * diamond.size());
+        assert(outlinedCards.indices.size() == static_cast<std::size_t>(made) * 3 * (diamond.size() - 2));
+
         IndexedMesh again;
         appendClusterCards(again, nodes, radii, crown, clumps, settings, 9u);
         assert((again.vertices[5].position - cards.vertices[5].position).lengthSquared() == 0.0f);
@@ -640,6 +648,10 @@ namespace {
         };
         const float coverShare = cardArea(tree.shadowLeaves) / cardArea(tree.leaves);
         assert(coverShare > 0.4f && coverShare < 1.0f);
+
+        // The shadow bark: the bark simplified to about shadowBarkShare of its triangles (bark was nine tenths of what the
+        // sun's cascades redrew as the camera turned).
+        assert(!tree.shadowBark.indices.empty() && tree.shadowBark.indices.size() <= tree.bark.indices.size() / 4);
 
         float lowest = 1e9f;
         float widestAtGround = 0.0f;
@@ -808,7 +820,8 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 23 && counter.live == 0);
+        assert(counter.fields == 24 && counter.live == 0);
+        assert(settings.shadowBarkShare > 0.0f && settings.shadowBarkShare <= 0.2f);
 
         // Four times the first patch's crown cover (the user, Nov 14 2026): more trees, their crowns interlocking.
         assert(settings.count >= 80 && settings.spacingShare < 0.6f);
@@ -953,10 +966,13 @@ namespace {
             const Entity leaves = trees[3 * tree + 1];
             const Entity shadowLeaves = trees[3 * tree + 2];
 
-            // The leaves seen cast no shadow; their stand-in casts it and is never seen, placed as they are.
+            // The leaves and bark seen cast no shadow; their stand-ins cast it and are never seen, placed as they are: the
+            // shadow leaves and the shadow bark, two parts of one shadows-only model.
             assert(!world.get<ModelRenderer>(leaves).castsShadows && !world.get<ModelRenderer>(leaves).shadowOnly);
             assert(world.get<ModelRenderer>(shadowLeaves).castsShadows && world.get<ModelRenderer>(shadowLeaves).shadowOnly);
-            assert(world.get<ModelRenderer>(bark).castsShadows && !world.get<ModelRenderer>(bark).shadowOnly);
+            assert(!world.get<ModelRenderer>(bark).castsShadows && !world.get<ModelRenderer>(bark).shadowOnly);
+            const ModelRenderer& shadows = world.get<ModelRenderer>(shadowLeaves);
+            assert(shadows.parts.size() == 2 && !isCutOut(shadows.parts[1].material));
             assert(world.get<Transform>(shadowLeaves).position.x == placed[tree].foot.x && world.get<Transform>(shadowLeaves).scale.z == placed[tree].scale);
             assert(isCutOut(world.get<ModelRenderer>(shadowLeaves).parts.front().material));
             const Transform& pose = world.get<Transform>(bark);

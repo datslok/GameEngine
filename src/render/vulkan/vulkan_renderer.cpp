@@ -2295,7 +2295,8 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         }
 
         const Frustum view = Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero);
-        const std::vector<std::size_t> found = castersAtLeast(description.draws, shadowCasters(description.draws, inReach, view), tile.smallestCaster);
+        const std::vector<std::size_t> found = castersForCascade(
+            description.draws, castersAtLeast(description.draws, shadowCasters(description.draws, inReach, view), tile.smallestCaster), tile.sunCascade);
         const std::vector<std::size_t> glass = castersAtLeast(description.draws, shadowCasters(description.draws, glassReached, view), tile.smallestCaster);
         prepared.tileGlass[tileIndex] = !glass.empty();
 

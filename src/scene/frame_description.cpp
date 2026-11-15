@@ -102,6 +102,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
                 draw = DrawItem{piece.mesh, model, piece.material, modelRenderer.castsShadows, modelRenderer.isStatic, BoundingSphere{},
                                 history != nullptr ? history->previous(entity, part) : std::nullopt};
                 draw.shadowOnly = modelRenderer.shadowOnly;
+                draw.shadowCascades = modelRenderer.shadowCascades;
 
                 if (history != nullptr) {
                     history->remember(entity, part, model);

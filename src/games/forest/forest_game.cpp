@@ -4,6 +4,7 @@
 
 #include "core/srgb.h"
 #include "games/forest/forest_terrain.h"
+#include "games/forest/leaf_clusters.h"
 #include "games/forest/valley_strata.h"
 #include "scene/indexed_mesh.h"
 #include "scene/simplify_mesh.h"
@@ -449,6 +450,10 @@ namespace {
     constexpr float bigTrunkReach = 2.0f;
     constexpr float midTrunkReach = 0.4f;
 
+    // How far a leaf card's outline stands out from its twig's texels, as a share of the cell: 4 texels of a 1024 cell
+    // (the mips' blur reaches past a leaf's edge).
+    constexpr float clusterOutlineMargin = 4.0f / 1024.0f;
+
     // The stand-in plant's green.
     constexpr Pixel understoreyStandInColour{58, 92, 40};
 
@@ -521,6 +526,7 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
         world.get<ModelRenderer>(understorey.back()).castsShadows = false;
         understorey.push_back(addShape(world, variant.shadow, variant.material, pose));
         world.get<ModelRenderer>(understorey.back()).shadowOnly = true;
+        world.get<ModelRenderer>(understorey.back()).shadowCascades = understoreySettings.shadowCascades;
     }
 }
 
@@ -530,20 +536,38 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         return;
     }
 
+    // Each cell of the leaf texture's outline, so the cards are drawn round their twigs, not as whole squares.
+    ClusterOutlines outlines;
+
+    if (leaf.texture.isValid()) {
+        const ImageData& clusters = assets.getTexture(leaf.texture);
+        const std::uint32_t cellTexels = clusters.width / static_cast<std::uint32_t>(clusterColumns);
+        const std::uint8_t cutoff = static_cast<std::uint8_t>(std::clamp(leaf.alphaCutoff, 0.0f, 1.0f) * 255.0f);
+
+        for (int cell = 0; cell < clusterColumns * clusterRows; ++cell) {
+            outlines[static_cast<std::size_t>(cell)] = clusterOutline(clusters, static_cast<std::uint32_t>(cell % clusterColumns),
+                                                                     static_cast<std::uint32_t>(cell / clusterColumns), cellTexels, cutoff,
+                                                                     clusterOutlineMargin * static_cast<float>(cellTexels));
+        }
+    }
+
     const std::size_t variants = static_cast<std::size_t>(std::max(settings.variants, 1));
     std::vector<TreeMeshes> grown(variants);
     getJobs().parallelFor(variants, 1, [&](std::size_t variant) {
-        grown[variant] = growTreeMeshes(settings, forestShapeSeed(variantSeed, static_cast<std::uint32_t>(variant) + 1), forestTreeBarkLayer.tileMetres);
+        grown[variant] = growTreeMeshes(settings, forestShapeSeed(variantSeed, static_cast<std::uint32_t>(variant) + 1), forestTreeBarkLayer.tileMetres,
+                                        &outlines);
     });
 
     std::vector<MeshHandle> barkMeshes;
     std::vector<MeshHandle> leafMeshes;
     std::vector<MeshHandle> shadowLeafMeshes;
+    std::vector<MeshHandle> shadowBarkMeshes;
 
     for (TreeMeshes& variant : grown) {
         barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
         shadowLeafMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowLeaves)));
+        shadowBarkMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowBark)));
     }
 
     const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
@@ -553,10 +577,15 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
                              .scale = Vec3{tree.scale, tree.scale, tree.scale}};
         const std::size_t variant = static_cast<std::size_t>(tree.variant);
         trees.push_back(addShape(world, barkMeshes[variant], bark, pose));
+        world.get<ModelRenderer>(trees.back()).castsShadows = false;
         trees.push_back(addShape(world, leafMeshes[variant], leaf, pose));
         world.get<ModelRenderer>(trees.back()).castsShadows = false;
+
+        // The shadow's stand-ins, one shadows-only model: the shadow leaves and the shadow bark.
         trees.push_back(addShape(world, shadowLeafMeshes[variant], leaf, pose));
-        world.get<ModelRenderer>(trees.back()).shadowOnly = true;
+        ModelRenderer& shadows = world.get<ModelRenderer>(trees.back());
+        shadows.shadowOnly = true;
+        shadows.parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
     }
 }
 

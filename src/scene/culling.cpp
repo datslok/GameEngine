@@ -93,6 +93,23 @@ namespace {
 }
 
 // Glass and blended surfaces block no light in the atlas: they tint it, through the coloured shadow maps (glassInReach).
+std::vector<std::size_t> castersForCascade(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, int cascade) {
+    if (cascade < 0) {
+        return casters;
+    }
+
+    std::vector<std::size_t> kept;
+    kept.reserve(casters.size());
+
+    for (std::size_t index : casters) {
+        if (draws[index].shadowCascades <= 0 || cascade < draws[index].shadowCascades) {
+            kept.push_back(index);
+        }
+    }
+
+    return kept;
+}
+
 std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach) {
     return shadowDrawsInReach(draws, reach, false);
 }
