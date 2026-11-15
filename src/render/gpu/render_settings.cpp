@@ -53,6 +53,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Materials", [&] {
         visit(settings.materials, visitor);
     });
+    visitor.group("Level of detail", [&] {
+        visit(settings.levelOfDetail, visitor);
+    });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);
         visitor.field("Clustered shading", settings.clusteredShading);

@@ -8,6 +8,8 @@
 #include "scene/material.h"
 #include "scene/deforming_mesh.h"
 #include "scene/mesh.h"
+#include "scene/mesh_level.h"
+#include "scene/simplify_mesh.h"
 #include "scene/model.h"
 #include "scene/model_renderer.h"
 
@@ -53,6 +55,19 @@ public:
     * refused too.
     */
     MeshHandle addDrawnMesh(IndexedMesh mesh);
+
+    /*
+    * Name a mesh's coarser levels (scene/mesh_level.h), coarsest last: each view draws the coarsest whose error fits
+    * (scene/level_of_detail.h). At most meshLevelSlots - 1, each a mesh already added other than the base, their errors
+    * not below 0 and rising; anything else throws std::invalid_argument. Naming them again replaces them.
+    */
+    void setMeshLevels(MeshHandle base, std::vector<MeshLevel> levels);
+
+    // Add a drawn-only mesh and its levels (simplifiedLevels) together, the levels named on it.
+    MeshHandle addDrawnMeshWithLevels(IndexedMesh mesh, std::vector<SimplifiedLevel> levels);
+
+    // Every mesh's levels, indexed like MeshHandle (shorter than the meshes when the last have none).
+    const std::vector<std::vector<MeshLevel>>& getMeshLevels() const;
 
     // Whether a mesh was added as drawn only, and its render format (std::invalid_argument for one that was not).
     bool isDrawnOnly(MeshHandle handle) const;
@@ -127,4 +142,7 @@ private:
     // Keyed by the buffer's address. The buffers are kept alive here, so an address cannot be reused by a different image.
     std::map<std::tuple<const std::vector<std::uint8_t>*, TextureEncoding, std::optional<float>>, TextureHandle> texturesByBuffer;
     std::vector<std::shared_ptr<const std::vector<std::uint8_t>>> keptBuffers;
+
+    // Each mesh's coarser levels, by mesh number.
+    std::vector<std::vector<MeshLevel>> meshLevels;
 };

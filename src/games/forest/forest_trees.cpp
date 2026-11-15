@@ -564,7 +564,7 @@ Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOu
 */
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
                        const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
-                       const ClusterOutlines* outlines) {
+                       const ClusterOutlines* outlines, int nodeCardStride) {
     if (clumps.empty()) {
         return 0;
     }
@@ -604,7 +604,7 @@ int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, co
         const Vec3 crownOut = crownOutward(crown, nodes[node].position);
 
         for (int card = 0; card < settings.cardsPerNode; ++card) {
-            const std::uint64_t base = (static_cast<std::uint64_t>(node) * static_cast<std::uint64_t>(std::max(settings.cardsPerNode, 1)) +
+            const std::uint64_t base = (static_cast<std::uint64_t>(node) * static_cast<std::uint64_t>(std::max(nodeCardStride > 0 ? nodeCardStride : settings.cardsPerNode, 1)) +
                                         static_cast<std::uint64_t>(card)) * 8;
             const Vec3 facing = (clumpOut + randomDirection(seed, base) * cardFacingStray).normalized();
             const Vec3 reach = clumpOut + up * cardReachUp + randomDirection(seed, base + 2) * cardReachStray;
@@ -653,6 +653,8 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Shadow filler cards", settings.shadowFillCards, {.min = 0, .max = 100, .sliderMax = 32, .applies = FieldApplies::AtStartup});
     visitor.field("Shadow card scale", settings.shadowCardScale, {.min = 0.5f, .max = 8.0f, .sliderMax = 4.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Shadow bark share", settings.shadowBarkShare, {.min = 0.01f, .max = 1.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Level card share", settings.levelCardShare, {.min = 0.01f, .max = 1.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Level bark share", settings.levelBarkShare, {.min = 0.01f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Cluster texels", settings.clusterTexels, {.min = 16, .max = 4096, .sliderMax = 2048, .applies = FieldApplies::AtStartup});
 }
 
@@ -808,7 +810,25 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
 
     // The shadow bark: the tubes simplified, their open ends free to move (a shadow cannot show them).
     constexpr float shadowBarkError = 0.005f; // about 19 cm on a canopy tree, 7 cm on a mid tree; still 10-12% of the triangles
-    meshes.shadowBark = simplifyMesh(meshes.bark, settings.shadowBarkShare, shadowBarkError, false);
+    meshes.shadowBark = simplifyMesh(meshes.bark, settings.shadowBarkShare, shadowBarkError, false, &meshes.shadowBarkError);
+
+    /*
+    * The levels of detail between (docs/LOD.md). The leaves: the first levelCardShare of each node's and each clump's
+    * cards, the same seed numbering them as the leaves' own, so the survivors stand where they stood, grown by
+    * 1 / sqrt(share) to keep the cover. The bark: simplified within the shadow bark's error, so its own is no larger.
+    * The shadow leaves and bark are the second levels; the cards' error is how much longer their sides grew.
+    */
+    ForestTreeSettings levelCards = settings;
+    const float keptShare = std::clamp(settings.levelCardShare, 0.01f, 1.0f);
+    levelCards.cardsPerNode = std::max(static_cast<int>(std::lround(static_cast<float>(settings.cardsPerNode) * keptShare)), 1);
+    levelCards.fillCards = std::max(static_cast<int>(std::lround(static_cast<float>(settings.fillCards) * keptShare)), 1);
+    levelCards.clusterSize = settings.clusterSize / std::sqrt(keptShare);
+    meshes.leafLevelCardCount = appendClusterCards(meshes.leafLevel, nodes, radii, crown, clumps, levelCards, forestShapeSeed(seed, 3), outlines,
+                                                   settings.cardsPerNode);
+    meshes.leafLevelError = levelCards.clusterSize - settings.clusterSize;
+    meshes.shadowLeafError = std::max(shadowCards.clusterSize - settings.clusterSize, meshes.leafLevelError);
+    meshes.barkLevel = simplifyMesh(meshes.bark, settings.levelBarkShare, shadowBarkError, false, &meshes.barkLevelError);
+    meshes.shadowBarkError = std::max(meshes.shadowBarkError, meshes.barkLevelError);
     return meshes;
 }
 

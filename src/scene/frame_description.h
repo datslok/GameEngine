@@ -12,6 +12,7 @@
 #include "scene/deforming_mesh.h"
 #include "scene/lighting.h"
 #include "scene/material.h"
+#include "scene/mesh_level.h"
 #include "physics/static_level.h"
 
 #include <cstddef>
@@ -52,6 +53,10 @@ struct DrawItem {
 
     // The mesh's flat faces (scene/flat_faces.h, attachFlatFaces), held by the engine, which planar reflections choose from.
     std::span<const FlatFace> flatFaces{};
+
+    // The mesh's coarser levels (scene/mesh_level.h, attachMeshLevels), held by the engine: each view draws the one its
+    // distance allows (scene/level_of_detail.h). The other uses of mesh (bounds, rays, flat faces) keep the mesh itself.
+    std::span<const MeshLevel> levels{};
 
     // A deforming mesh's shape this frame (DeformedMesh::shape, set by attachShapes), 0 for every other mesh: the shadow
     // cache's fingerprint of the casters includes it, so a caster that changes shape where it stands is drawn again.

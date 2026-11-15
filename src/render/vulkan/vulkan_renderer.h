@@ -638,6 +638,9 @@ private:
     // its probe events, which happen once).
     void drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings, int frames);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches, const BatchPipelines& pipelines) const;
+
+    // The triangles batches draw (each mesh's times its instances), and those of cut-outs among them: the F4 readout's.
+    std::pair<std::size_t, std::size_t> batchTriangles(const std::vector<DrawBatch>& batches) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const RenderSettings& settings, const Camera& camera, const BloomComposite& bloomMix);
 
     // Each deforming mesh shows the frame's shape for it, or holds its last; after the frame's fence, before anything is

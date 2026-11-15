@@ -653,6 +653,21 @@ namespace {
         // sun's cascades redrew as the camera turned).
         assert(!tree.shadowBark.indices.empty() && tree.shadowBark.indices.size() <= tree.bark.indices.size() / 4);
 
+        /*
+        * The levels of detail (docs/LOD.md): the leaves thinned to levelCardShare of the cards, each grown to keep their
+        * area (SpeedTree's fewer, bigger cards; a simplifier cannot reduce separate cards), then the shadow leaves; the
+        * bark simplified to levelBarkShare, then the shadow bark. Each level's error rises: the cards' by how much they
+        * grew, the bark's by how far the simplifier moved it.
+        */
+        assert(tree.leafLevel.vertices.size() == static_cast<std::size_t>(tree.leafLevelCardCount) * 4);
+        assert(2 * tree.leafLevelCardCount <= tree.cardCount + 2 * (settings.clumps + 1) && tree.leafLevelCardCount > tree.shadowCardCount);
+        const float levelCover = cardArea(tree.leafLevel) / cardArea(tree.leaves);
+        assert(levelCover > 0.8f && levelCover < 1.25f);
+        assert(tree.leafLevelError > 0.0f && tree.shadowLeafError > tree.leafLevelError);
+        assert(near(tree.shadowLeafError, settings.clusterSize * (settings.shadowCardScale - 1.0f), 1e-5f));
+        assert(tree.barkLevel.indices.size() < tree.bark.indices.size() && tree.barkLevel.indices.size() > tree.shadowBark.indices.size());
+        assert(tree.barkLevelError > 0.0f && tree.shadowBarkError >= tree.barkLevelError);
+
         float lowest = 1e9f;
         float widestAtGround = 0.0f;
 
@@ -820,7 +835,7 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 24 && counter.live == 0);
+        assert(counter.fields == 26 && counter.live == 0);
         assert(settings.shadowBarkShare > 0.0f && settings.shadowBarkShare <= 0.2f);
 
         // Four times the first patch's crown cover (the user, Nov 14 2026): more trees, their crowns interlocking.
@@ -982,6 +997,13 @@ namespace {
             const ModelRenderer& barkRenderer = world.get<ModelRenderer>(bark);
             assert(assets.isDrawnOnly(barkRenderer.parts.front().mesh) && !isCutOut(barkRenderer.parts.front().material));
             barkMeshes.insert(barkRenderer.parts.front().mesh.index);
+
+            // The bark and leaves seen have two coarser levels each, the second the shadow's own stand-in (one mesh kept
+            // for both).
+            const std::vector<MeshLevel>& barkLevels = assets.getMeshLevels().at(barkRenderer.parts.front().mesh.index);
+            const std::vector<MeshLevel>& leafLevels = assets.getMeshLevels().at(world.get<ModelRenderer>(leaves).parts.front().mesh.index);
+            assert(barkLevels.size() == 2 && barkLevels[1].mesh == shadows.parts[1].mesh);
+            assert(leafLevels.size() == 2 && leafLevels[1].mesh == shadows.parts[0].mesh);
 
             const Material& leaf = world.get<ModelRenderer>(leaves).parts.front().material;
             assert(isCutOut(leaf) && leaf.doubleSided);

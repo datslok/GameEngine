@@ -456,11 +456,24 @@ Debug drawing: `DebugDraw` (`scene/debug_draw`) collects `DebugLine`s (`line`, `
 - The renderer draws only `visibleDraws(draws, cameraFrustum)` in the main pass and only `shadowCasters(draws, tileFrustum)` in each shadow tile.
 - Shadow passes must never use the camera's frustum (off-screen casters still throw shadows into view).
 
+### Level of detail
+
+Coarser meshes far away, chosen per view by how many pixels their error would cover (`scene/level_of_detail`, `scene/mesh_level.h`; research and measurements in `docs/LOD.md`).
+
+- **Naming levels.** A game names a mesh's coarser stand-ins on the asset manager: `setMeshLevels(base, {MeshLevel{mesh, errorMetres}, ...})`, at most three (`meshLevelSlots` is 4 with the mesh itself), coarsest last, errors rising; anything else throws. `addDrawnMeshWithLevels(mesh, simplifiedLevels(mesh, shares, maxError))` adds a generated shape with levels meshoptimizer simplified from it, each error the distance it moved the surface (`simplifyMesh`'s `errorMetres`: meshoptimizer's relative error times `meshopt_simplifyScale`).
+- **Reaching the renderer.** `Application` attaches each draw's levels from `getMeshLevels()` (`attachMeshLevels`, a span like the flat faces). `DrawItem::mesh` stays the mesh itself, which bounds, rays, flat faces, the sky visibility bake and the shadows keep using.
+- **Choosing.** A `LevelView` is a view's eye and its pixels a metre at a metre, height / (2 tan(fov / 2)); an error e at distance d covers e times that over d pixels (`errorInPixels`). `chooseLevel` takes the coarsest level within `LevelOfDetailSettings::pixelError` (2 by default), measured from the nearest point of the draw's sphere (`levelDistance`), so a big tree's near side is never coarse; unknown bounds keep the mesh.
+- **Views.** `batchByMesh(draws, chosen, first, &view)` groups the draws by the mesh each picks (`chosenMesh`): the camera (its render height, so DLSS and TAAU's smaller render picks coarser), the velocity pass with the camera's own levels (its depths must match the main pass's), each reflection probe face (256 pixels a quarter turn: much coarser) and the flat mirror's picture. Shadow tiles still draw the meshes themselves.
+- **Switching** is instant (no fade); TAA softens it. A dithered fade is the research's answer if pops show.
+- **Settings:** `RenderSettings::levelOfDetail` (F5 Level of detail, `engine.render.levelOfDetail.enabled` and `.pixelError`), live.
+- **The forest's levels:** each tree's leaves thinned to `levelCardShare` (0.5) of the cards, the survivors the same cards grown by 1 / sqrt(share) (`appendClusterCards`' `nodeCardStride` keeps the numbering), then the shadow leaves; its bark simplified to `levelBarkShare` (0.3), then the shadow bark; the cards' errors are how much longer their sides grew. Each plant's scan simplified to `levelKeepShare` (0.12), then its shadow stand-in. Each pillar, island and drifting rock to a quarter and a sixteenth within 2% of its size (`rockLevelShare`, `rockFarLevelShare`, `rockLevelError`).
+
 ### Render stats
 
 `getLastFrameStats()` returns `RenderStats`, shown on the debug readout's lines (`renderStatsLines` gives their text, which `drawRenderStats` draws and the `stats` command replies with):
 
 - drawn, culled, shadowDrawn, shadowCulled, and point lights total, in view, lit and shadowed, shown as a third line of the debug readout;
+- a second line, `drawnByLevel` (LEVELS: how many of the camera's draws drew each level of detail, the meshes themselves first) and the thousands of triangles drawn (TRIS: `drawnTriangles`; CUT, the cut-outs' `drawnCutOutTriangles`; PROBE, the reflection probe's faces this frame, `probeTriangles`);
 - then shadowTilesDrawn, shadowTilesCached and shadowTilesSkipped, a fourth line, ending with `sunShadowDistance` (SUN TO, where the sun's cascades end) when a sun is shadowed;
 - then `gpu`, the GPU timings per pass, see VulkanRenderer;
 - then `videoMemory`, on its own readout line. `videoMemoryText` writes "VRAM used / budget MB  ENGINE n MB" in megabytes of 2^20 bytes, or "VRAM ENGINE n MB  NO DRIVER BUDGET" without the driver's figures.

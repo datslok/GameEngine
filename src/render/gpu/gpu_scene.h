@@ -10,6 +10,7 @@
 #include "render/gpu/shadow_map.h"
 #include "scene/asset_handles.h"
 #include "scene/frame_description.h"
+#include "scene/level_of_detail.h"
 #include "scene/material.h"
 
 #include <array>
@@ -174,6 +175,8 @@ struct BatchedDraws {
 /*
 * Group the chosen draws (indices into draws) by how they are drawn (plain, double-sided, cut-out, double-sided cut-out)
 * and then by mesh, meshes in handle order and each mesh's draws in the order they were chosen, so the same frame always gives the same instances. Instances are numbered from firstInstance, for views that
-* write theirs after another view's in the same buffer (shadow tiles).
+* write theirs after another view's in the same buffer (shadow tiles). With a view, each draw is drawn with the mesh
+* its level of detail picks there (scene/level_of_detail.h), and grouped by it.
 */
-BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance = 0);
+BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance = 0,
+                         const LevelView* levels = nullptr);

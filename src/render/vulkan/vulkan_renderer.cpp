@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_renderer.h"
+#include "math/angles.h"
 #include "core/blue_noise.h"
 #include "scene/sky_object.h"
 #include "render/gpu/brdf.h"
@@ -33,6 +34,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace {
@@ -1440,7 +1442,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // What every view draws is settled before anything is recorded: the camera's visible draws and each changed shadow
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
-    const BatchedDraws mainDraws = batchByMesh(description.draws, visible);
+    // Each view draws the levels of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass
+    // redraws the camera's with the same levels, so its depths match the main pass's.
+    validateLevelOfDetail(settings.levelOfDetail);
+    const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(sceneSize.height), camera.getVerticalFov(), settings.levelOfDetail);
+    stats.drawnByLevel = levelsChosen(description.draws, visible, cameraLevels);
+    const BatchedDraws mainDraws = batchByMesh(description.draws, visible, 0, &cameraLevels);
+    std::tie(stats.drawnTriangles, stats.drawnCutOutTriangles) = batchTriangles(mainDraws.batches);
 
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows);
 
@@ -1464,7 +1472,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         }
     }
 
-    const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()));
+    const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()), &cameraLevels);
 
     // The probe round the camera is captured while reflections run, a few faces a frame (probeCaptureStep), each from the
     // place its cycle started. Each face drawn draws what its own view holds, those entries following the velocity
@@ -1497,7 +1505,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             const Mat4 worldView = cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), probeFar) *
                                    Mat4::translation(-probeCycleOrigin.x, -probeCycleOrigin.y, -probeCycleOrigin.z);
             const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero)));
-            captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstCaptureEntry);
+            // A face is probeSize pixels across a quarter turn, so it draws coarser levels than the camera.
+            const LevelView faceLevels = levelView(probeCycleOrigin, static_cast<float>(reflectionProbe->getSize()), 0.25f * fullTurnRadians, settings.levelOfDetail);
+            captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstCaptureEntry, &faceLevels);
+            stats.probeTriangles += batchTriangles(captureDraws[static_cast<std::size_t>(face)].batches).first;
             firstCaptureEntry += static_cast<std::uint32_t>(inView.size());
         }
     }
@@ -1516,7 +1527,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (mirror) {
         const Mat4 worldView = mirrorViewProjection * Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
         const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, planarFrustum(worldView, *mirror)));
-        captureDraws[cubeFaceCount] = batchByMesh(description.draws, inView, firstCaptureEntry);
+        const LevelView mirrorLevels = levelView(cameraOrigin, static_cast<float>(mirrorSize.height), camera.getVerticalFov(), settings.levelOfDetail);
+        captureDraws[cubeFaceCount] = batchByMesh(description.draws, inView, firstCaptureEntry, &mirrorLevels);
     }
 
     // The transparent draws the camera sees, far to near, their entries last in the draw list.
@@ -2851,6 +2863,18 @@ void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraw
 * when it changes: none for double-sided batches. The scene's sets and push constants stay bound across the pipelines,
 * which share their layout. Returns how many draw calls that took.
 */
+std::pair<std::size_t, std::size_t> VulkanRenderer::batchTriangles(const std::vector<DrawBatch>& batches) const {
+    std::pair<std::size_t, std::size_t> triangles{0, 0};
+
+    for (const DrawBatch& batch : batches) {
+        const std::size_t drawn = static_cast<std::size_t>(meshes.at(batch.mesh.index)->getIndexCount() / 3) * batch.instanceCount;
+        triangles.first += drawn;
+        triangles.second += batch.cutOut ? drawn : 0;
+    }
+
+    return triangles;
+}
+
 std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches, const BatchPipelines& pipelines) const {
     VkPipeline bound = VK_NULL_HANDLE;
     VkCullModeFlags cull = VK_CULL_MODE_FLAG_BITS_MAX_ENUM;

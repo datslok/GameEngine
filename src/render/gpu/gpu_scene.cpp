@@ -191,27 +191,48 @@ const std::vector<GpuMaterial>& MaterialTable::getEntries() const {
 * A stable sort by style, then mesh, keeps each mesh's draws in the order they came, then each run of one mesh drawn one
 * way becomes a batch. Cut-outs come last, so a pass switches pipeline at most once for them.
 */
-BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance) {
-    BatchedDraws batched;
-    batched.order = chosen;
-
+/*
+* Each chosen draw's mesh in this view is worked out once (a distance each), sorted with its draw, so the sort compares
+* plain numbers.
+*/
+BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance,
+                         const LevelView* levels) {
     const auto style = [&draws](std::size_t index) {
         const Material& material = draws[index].material;
         return (isCutOut(material) ? 2 : 0) + (material.doubleSided ? 1 : 0);
     };
 
-    std::stable_sort(batched.order.begin(), batched.order.end(), [&](std::size_t a, std::size_t b) {
-        return std::make_pair(style(a), draws[a].mesh.index) < std::make_pair(style(b), draws[b].mesh.index);
+    struct Keyed {
+        int style = 0;
+        std::uint32_t mesh = 0;
+        std::size_t index = 0;
+    };
+
+    std::vector<Keyed> keyed(chosen.size());
+
+    for (std::size_t position = 0; position < chosen.size(); ++position) {
+        const std::size_t index = chosen[position];
+        const MeshHandle mesh = levels != nullptr ? chosenMesh(draws[index], *levels) : draws[index].mesh;
+        keyed[position] = Keyed{style(index), mesh.index, index};
+    }
+
+    std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) {
+        return std::make_pair(a.style, a.mesh) < std::make_pair(b.style, b.mesh);
     });
 
-    for (std::size_t position = 0; position < batched.order.size(); ++position) {
-        const DrawItem& draw = draws[batched.order[position]];
+    BatchedDraws batched;
+    batched.order.reserve(keyed.size());
+
+    for (std::size_t position = 0; position < keyed.size(); ++position) {
+        const DrawItem& draw = draws[keyed[position].index];
+        const MeshHandle mesh{keyed[position].mesh};
         const bool cutOut = isCutOut(draw.material);
         const bool doubleSided = draw.material.doubleSided;
         const DrawBatch* last = batched.batches.empty() ? nullptr : &batched.batches.back();
+        batched.order.push_back(keyed[position].index);
 
-        if (last == nullptr || last->mesh != draw.mesh || last->cutOut != cutOut || last->doubleSided != doubleSided) {
-            batched.batches.push_back(DrawBatch{draw.mesh, firstInstance + static_cast<std::uint32_t>(position), 0, cutOut, doubleSided});
+        if (last == nullptr || last->mesh != mesh || last->cutOut != cutOut || last->doubleSided != doubleSided) {
+            batched.batches.push_back(DrawBatch{mesh, firstInstance + static_cast<std::uint32_t>(position), 0, cutOut, doubleSided});
         }
 
         ++batched.batches.back().instanceCount;
