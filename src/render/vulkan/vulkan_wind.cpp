@@ -65,6 +65,9 @@ GpuWindField VulkanWind::prepare(const Wind* wind, const WindSettings& settings,
         return packWindField(wind, settings, windows, windows, false, seconds, 0.0f);
     }
 
+    // This frame's springs go into the other image, turned now: the scene set, written before the pass runs, binds
+    // them as this frame's and the one written last frame as last frame's.
+    current = 1 - current;
     seconds += frameSeconds;
     const GpuWindField field = packWindField(wind, settings, windows, previousWindows, previousKnown, seconds, frameSeconds);
     previousWindows = windows;
@@ -82,7 +85,6 @@ bool VulkanWind::runs() const {
 * the compute stage). After the pass, this frame's is readable by the vertex shaders and the next frame's pass.
 */
 void VulkanWind::step(VkCommandBuffer commands, FrameDescriptors& descriptors, VkBuffer record) {
-    current = 1 - current;
     VulkanImage& written = springs[static_cast<std::size_t>(current)];
     const VulkanImage& history = springs[static_cast<std::size_t>(1 - current)];
 

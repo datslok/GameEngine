@@ -1463,7 +1463,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     std::tie(stats.drawnTriangles, stats.drawnCutOutTriangles) = batchTriangles(mainDraws.batches);
     cpuClock.lap(CpuStage::Camera, profilerSeconds());
 
-    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows, settings.levelOfDetail);
+    // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway and the velocity pass.
+    validateWind(settings.wind);
+    const WindSettings* sway = description.wind && settings.wind.enabled && settings.wind.sway ? &settings.wind : nullptr;
+    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows, settings.levelOfDetail, sway);
 
     // The shaders read a tile's coloured shadow map only where it holds glass.
     for (std::size_t tile = 0; tile < shadows.tileData.size(); ++tile) {
@@ -1481,7 +1484,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             const DrawItem& draw = description.draws[index];
 
             const bool moved = draw.previousModel && *draw.previousModel != draw.model;
-            if (moved || meshes.at(draw.mesh.index)->changedShape()) {
+            // Something swaying moves every frame, though its matrix does not.
+            const bool swaying = sway != nullptr && drawSways(draw.sway, draw.bounds.centre, draw.bounds.radius, cameraOrigin, *sway);
+
+            if (moved || swaying || meshes.at(draw.mesh.index)->changedShape()) {
                 moving.push_back(index);
             }
         }
@@ -2356,7 +2362,7 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
 * listed one tile after another, from entry firstEntry of the draw list.
 */
 VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles,
-                                                               std::uint32_t firstEntry, bool colouredShadows, const LevelOfDetailSettings& levelSettings) {
+                                                               std::uint32_t firstEntry, bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway) {
     ShadowDraws prepared;
     prepared.tileGlass.assign(tiles.size(), false);
     std::vector<std::size_t> inReach;
@@ -2403,7 +2409,13 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         // A tile keeping its movers apart is fingerprinted by its still casters alone.
         const ShadowCasterSplit split = tile.separateMovers ? splitMovingCasters(description.draws, found)
                                                             : ShadowCasterSplit{found, {}};
-        const std::uint64_t signature = tintedShadowSignature(description.draws, split.still, glass, &tileLevels);
+        // A tile that sways redraws every frame something in it sways (its fingerprint the frame's).
+        const bool sways = sway != nullptr && tileSways(tile.sunCascade, *sway);
+        const bool somethingSways = sways && std::any_of(found.begin(), found.end(), [&](std::size_t index) {
+            const DrawItem& draw = description.draws[index];
+            return drawSways(draw.sway, draw.bounds.centre, draw.bounds.radius, cameraOrigin, *sway);
+        });
+        const std::uint64_t signature = swayingShadowSignature(tintedShadowSignature(description.draws, split.still, glass, &tileLevels), somethingSways, shadowFrame);
         const bool still = !shadowMemory.isCurrent(tile, signature);
 
         if (tile.separateMovers) {
@@ -2423,6 +2435,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
 
         ShadowTileDraw drawing{&tile, still ? listed(split.still, &tileLevels) : BatchedDraws{}, still ? listed(glass, nullptr) : BatchedDraws{}, signature,
                                still, listed(split.moving, &tileLevels), {}};
+        drawing.sways = sways;
 
         // What to copy back from the still copy: all of it after a redraw, else where movers were and are.
         if (tile.separateMovers) {
@@ -2500,7 +2513,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
             beginRendering(commands, {tile.size, tile.size}, nullptr, &target);
             renderingOpen = true;
             bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
-            const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace);
+            const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace, drawing.sways);
             vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
             stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
             vkCmdEndRendering(commands);
@@ -2552,7 +2565,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
         }
 
         // The tile's view goes to the shadow pipelines too: they share the scene's layout, so the push constants carry over.
-        const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace);
+        const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace, drawing.sways);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
 
         const BatchPipelines casting{shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE};

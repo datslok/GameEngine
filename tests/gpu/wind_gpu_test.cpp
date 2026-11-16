@@ -112,10 +112,94 @@ namespace {
     }
 }
 
+namespace {
+    // Leans from a breeze's to a storm's, either way along both axes.
+    void checkSoftLean(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{79};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            inputs.push_back(gpuVec4(random.between(-3.0f, 3.0f), random.between(-3.0f, 3.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_SOFT_LEAN, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const Vec2 expected = windSoftLean(Vec2{inputs[i][0], inputs[i][1]});
+            report.check("windSoftLean", arithmeticTolerance, expected.x, outputs[i][0]);
+            report.check("windSoftLean", arithmeticTolerance, expected.y, outputs[i][1]);
+        }
+    }
+
+    // Places in, near the edges of and outside windows anywhere. Inputs: the place and the window's first cell; the cell.
+    void checkWindowShare(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{83};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            const float cell = random.between(0.5f, 20.0f);
+            const float originX = std::floor(random.between(-500.0f, 500.0f));
+            const float originZ = std::floor(random.between(-500.0f, 500.0f));
+            const float across = cell * static_cast<float>(WIND_CELLS);
+            inputs.push_back(gpuVec4(originX * cell + random.between(-0.2f, 1.2f) * across, originZ * cell + random.between(-0.2f, 1.2f) * across, originX,
+                                     originZ));
+            inputs.push_back(gpuVec4(cell));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_WINDOW_SHARE, inputs, 2, 1);
+        const FloatTolerance tolerance{.absolute = 1e-4f, .relative = 1e-4f};
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4& place = inputs[2 * i];
+            const float expected = windWindowShare(Vec2{place[0], place[1]}, WindWindow{static_cast<int>(place[2]), static_cast<int>(place[3])},
+                                                   inputs[2 * i + 1][0]);
+            report.check("windWindowShare", tolerance, expected, outputs[i][0]);
+        }
+    }
+
+    /*
+    * Vertices of trees, plants and grass of every size, in any wind, faded or not, at times into a session. Inputs: the
+    * vertex from its foot and its height in the mesh; its place and the model's scale; the sway; the spring, fade and
+    * time. The flutter's and branches' sines of large phases are the GPU's own, so the tolerance is a few millimetres.
+    */
+    void checkSway(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{89};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            const float height = random.between(0.2f, 50.0f);
+            const float scale = random.between(0.5f, 2.0f);
+            const float modelHeight = random.between(0.0f, 1.2f) * height;
+            inputs.push_back(gpuVec4(random.between(-8.0f, 8.0f) * scale, modelHeight * scale, random.between(-8.0f, 8.0f) * scale, modelHeight));
+            inputs.push_back(gpuVec4(random.between(-2000.0f, 2000.0f), random.between(-50.0f, 300.0f), random.between(-2000.0f, 2000.0f), scale));
+            inputs.push_back(gpuVec4(std::floor(random.between(-1.0f, 4.0f)), height, random.between(0.0f, 1.0f), random.between(0.0f, 0.5f)));
+            inputs.push_back(gpuVec4(random.between(-0.3f, 0.3f), random.between(-0.3f, 0.3f), random.between(0.0f, 1.0f), random.between(0.0f, 600.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_SWAY, inputs, 4, 1);
+        const FloatTolerance tolerance{.absolute = 3e-3f, .relative = 1e-3f};
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4& vertex = inputs[4 * i];
+            const GpuVec4& place = inputs[4 * i + 1];
+            const GpuVec4& sway = inputs[4 * i + 2];
+            const GpuVec4& spring = inputs[4 * i + 3];
+            const Vec3 expected = windSwayOffset(Vec3{vertex[0], vertex[1], vertex[2]}, vertex[3], Vec3{place[0], place[1], place[2]},
+                                                 Vec4{sway[0], sway[1], sway[2], sway[3]}, place[3], Vec2{spring[0], spring[1]}, spring[2], spring[3]);
+            report.check("windSwayOffset", tolerance, expected.x, outputs[i][0]);
+            report.check("windSwayOffset", tolerance, expected.y, outputs[i][1]);
+            report.check("windSwayOffset", tolerance, expected.z, outputs[i][2]);
+        }
+    }
+}
+
 void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("wind.glsl");
     checkNoise(runner, report);
     checkVelocity(runner, report);
     checkSpring(runner, report);
     checkCell(runner, report);
+    checkSoftLean(runner, report);
+    checkWindowShare(runner, report);
+    checkSway(runner, report);
 }

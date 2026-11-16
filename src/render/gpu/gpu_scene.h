@@ -45,21 +45,23 @@ struct GpuInstance {
     float normalMatrix[16]; // inverse transpose of the model's 3x3 part (zero if squashed flat)
     float handedness[4];    // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale), for lengths in model units
     std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: its kind (instance_shared.h)
+    float sway[4];          // how it sways in the wind (render/gpu/wind.h, packSway): category (-1 still), height, bend, flutter
 };
 
-static_assert(sizeof(GpuInstance) == 160, "GpuInstance must match the shader's InstanceData struct");
+static_assert(sizeof(GpuInstance) == 176, "GpuInstance must match the shader's InstanceData struct");
 
 // A shadow tile's view, pushed before its draws: the view-projection (column-major, world space), the plane its draws
 // are clipped at (ShadowTile::clipPlane, world space; noClipPlane for all but an image light's), and where its light is
 // (ShadowTile::lightPlace: a position with w 1, the direction towards the sun with w 0), which the coloured shadow map's
-// glass (glass_shadow.vert) needs.
+// glass (glass_shadow.vert) needs, and its options: x 1 when its casters sway in the wind (render/gpu/wind.h, tileSways).
 struct GpuShadowView {
     float matrix[16];
     float clipPlane[4];
     float lightPlace[4];
+    float options[4];
 };
 
-static_assert(sizeof(GpuShadowView) == 96, "GpuShadowView must match shadow.vert's push constants");
+static_assert(sizeof(GpuShadowView) == 112, "GpuShadowView must match shadow.vert's push constants");
 
 /*
 * A capture's view (a reflection probe cube face's, or a flat mirror's), pushed before its draws: the view-projection
@@ -116,7 +118,7 @@ static_assert(sizeof(GpuFrameData) == 416, "GpuFrameData must match the shader's
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 
-GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane, const Vec4& lightPlace);
+GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane, const Vec4& lightPlace, bool sways = false);
 
 GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye = Vec3{});
 

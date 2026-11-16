@@ -568,6 +568,7 @@ private:
         bool still = true;
         BatchedDraws moving;
         std::vector<ShadowPatch> restore;
+        bool sways = false; // its casters drawn swaying in the wind (tileSways)
     };
 
     // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches).
@@ -609,9 +610,10 @@ private:
     // on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
     void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
-    // colouredShadows: the frame draws the coloured shadow maps, so each tile's glass is found and drawn too.
+    // colouredShadows: the frame draws the coloured shadow maps, so each tile's glass is found and drawn too. sway: the
+    // wind's settings while things sway this frame (render/gpu/wind.h), else null: tiles that sway redraw while their casters do.
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry,
-                                   bool colouredShadows, const LevelOfDetailSettings& levelSettings);
+                                   bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawGlassShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
 

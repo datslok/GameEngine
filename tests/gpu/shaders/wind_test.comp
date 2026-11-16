@@ -23,5 +23,14 @@ void main() {
         testOutput(0, windSpringStep(a, spring.xy, spring.z, spring.w, testInput(2).x));
     } else if (function == GPU_TEST_WIND_CELL) {
         testOutput(0, vec4(vec2(windCellOfTexel(ivec2(a.xy), ivec2(a.zw))), 0.0, 0.0));
+    } else if (function == GPU_TEST_WIND_SOFT_LEAN) {
+        testOutput(0, vec4(windSoftLean(a.xy), 0.0, 0.0));
+    } else if (function == GPU_TEST_WIND_WINDOW_SHARE) {
+        testOutput(0, vec4(windWindowShare(a.xy, ivec2(a.zw), testInput(1).x)));
+    } else if (function == GPU_TEST_WIND_SWAY) {
+        vec4 place = testInput(1);
+        vec4 sway = testInput(2);
+        vec4 spring = testInput(3);
+        testOutput(0, vec4(windSwayOffset(a.xyz, a.w, place.xyz, sway, place.w, spring.xy, spring.z, spring.w), 0.0));
     }
 }

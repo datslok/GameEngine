@@ -527,6 +527,7 @@ namespace {
         Material material;
         MeshHandle card;
         Material cardMaterial;
+        float height = 1.0f; // its seen mesh's top, which its sway bends against
     };
 
     /*
@@ -560,19 +561,21 @@ namespace {
         cardMaterial.roughness = material.roughness;
         cardMaterial.diffuseTransmission = material.diffuseTransmission;
         cardMaterial.diffuseTransmissionTint = material.diffuseTransmissionTint;
-        return PlantVariant{leaves, shadowMesh, material, card, cardMaterial};
+        return PlantVariant{leaves, shadowMesh, material, card, cardMaterial, std::max(box.maximum.y, 1e-3f)};
     }
 
     /*
     * A plant placed: its seen mesh, casting no shadow; its shadow's stand-in, drawn into the nearest shadowCascades only;
     * and its card, drawn only far away, casting none (the stand-in keeps its shadow). The first two go to plants, the
-    * card to cards.
+    * card to cards. The first two sway as plants (swayers); the card, far off, does not.
     */
     void addPlant(World& world, const PlantVariant& variant, const Transform& pose, int shadowCascades, std::vector<Entity>& plants,
-                  std::vector<Entity>& cards) {
+                  std::vector<Entity>& cards, std::vector<ForestSwayer>& swayers) {
         plants.push_back(addShape(world, variant.leaves, variant.material, pose));
         world.get<ModelRenderer>(plants.back()).castsShadows = false;
+        swayers.push_back(ForestSwayer{plants.back(), ForestSwayPart::Plants, variant.height, true});
         plants.push_back(addShape(world, variant.shadow, variant.material, pose));
+        swayers.push_back(ForestSwayer{plants.back(), ForestSwayPart::Plants, variant.height, true});
         world.get<ModelRenderer>(plants.back()).shadowOnly = true;
         world.get<ModelRenderer>(plants.back()).shadowCascades = shadowCascades;
         cards.push_back(addShape(world, variant.card, variant.cardMaterial, pose));
@@ -651,7 +654,7 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
         const PlantVariant& variant = kind[std::min(static_cast<std::size_t>(plant.variantPick * static_cast<float>(kind.size())), kind.size() - 1)];
         const Transform pose{.position = plant.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, plant.turnRadians),
                              .scale = Vec3{plant.scale, plant.scale, plant.scale}};
-        addPlant(world, variant, pose, understoreySettings.shadowCascades, understorey, understoreyImpostors);
+        addPlant(world, variant, pose, understoreySettings.shadowCascades, understorey, understoreyImpostors, swayers);
     }
 }
 
@@ -686,7 +689,7 @@ void ForestGame::buildPalms(World& world, AssetManager& assets) {
     for (const PalmPlacement& palm : palmPlacements) {
         const Transform pose{.position = palm.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, palm.turnRadians),
                              .scale = Vec3{palm.scale, palm.scale, palm.scale}};
-        addPlant(world, variants[static_cast<std::size_t>(palm.variant)], pose, palmSettings.shadowCascades, palms, palmImpostors);
+        addPlant(world, variants[static_cast<std::size_t>(palm.variant)], pose, palmSettings.shadowCascades, palms, palmImpostors, swayers);
     }
 }
 
@@ -703,12 +706,17 @@ namespace {
     * (grow(variant seed, density); a sparser step the first of the same pieces), then made drawable, each with its half
     * and quarter levels and nothing past the farthest. Each cell then draws its patch, turned its quarter turns about
     * its middle, lifted onto the land by the vertex shaders; casting no shadow (contact shadows and ambient occlusion
-    * ground it), still. The patch type has mesh, level and farLevel.
+    * ground it), still. The patch type has mesh, level and farLevel. Each swaying as part (swayers), bending against its
+    * patch's tallest plant.
     */
+    // The least height ground cover bends against (m): a patch of fallen leaves alone, a centimetre high, would otherwise
+    // bend and flutter as a whole plant does.
+    constexpr float groundCoverLeastSwayHeight = 0.3f;
+
     template <typename Patch, typename Grow>
     void placeGroundCover(World& world, AssetManager& assets, JobSystem& jobs, const std::vector<GroundCell>& cells, int variantCount,
                           int stepCount, std::uint32_t seed, Grow grow, const Material& material, const CoverDistances& distances,
-                          std::vector<Entity>& entities) {
+                          std::vector<Entity>& entities, std::vector<ForestSwayer>& swayers, ForestSwayPart part) {
         if (cells.empty()) {
             return;
         }
@@ -726,8 +734,11 @@ namespace {
         const float quarterError = std::max(groundCoverLevelError(distances.quarter), halfError);
         const float farError = std::max(groundCoverLevelError(distances.farthest), quarterError);
         std::vector<MeshHandle> meshes;
+        std::vector<float> heights;
 
         for (Patch& patch : patches) {
+            heights.push_back(patch.mesh.vertices.empty() ? 1.0f : std::max(indexedMeshBounds(patch.mesh).maximum.y, groundCoverLeastSwayHeight));
+
             if (patch.mesh.vertices.empty()) {
                 meshes.push_back(MeshHandle{});
                 continue;
@@ -742,7 +753,8 @@ namespace {
         entities.reserve(entities.size() + cells.size());
 
         for (const GroundCell& cell : cells) {
-            const MeshHandle mesh = meshes[static_cast<std::size_t>(cell.variant * steps + cell.step - 1)];
+            const std::size_t patch = static_cast<std::size_t>(cell.variant * steps + cell.step - 1);
+            const MeshHandle mesh = meshes[patch];
 
             if (!mesh.isValid()) {
                 continue;
@@ -754,6 +766,7 @@ namespace {
             ModelRenderer& renderer = world.get<ModelRenderer>(entities.back());
             renderer.castsShadows = false;
             renderer.followsGround = true;
+            swayers.push_back(ForestSwayer{entities.back(), part, heights[patch], true});
         }
     }
 }
@@ -767,7 +780,7 @@ void ForestGame::buildGrass(World& world, AssetManager& assets) {
             return growGrassPatch(grassSettings, density, seed);
         },
         withLeafLight(forestGrassMaterial(assets, assetFolder), leafLightSettings),
-        CoverDistances{grassSettings.halfDistance, grassSettings.quarterDistance, grassSettings.farthest}, grassEntities);
+        CoverDistances{grassSettings.halfDistance, grassSettings.quarterDistance, grassSettings.farthest}, grassEntities, swayers, ForestSwayPart::Grass);
 }
 
 void ForestGame::buildFloorCover(World& world, AssetManager& assets) {
@@ -779,7 +792,7 @@ void ForestGame::buildFloorCover(World& world, AssetManager& assets) {
             return growFloorPatch(floorSettings, density, seed);
         },
         withLeafLight(forestFloorCoverMaterial(assets, assetFolder), leafLightSettings),
-        CoverDistances{floorSettings.halfDistance, floorSettings.quarterDistance, floorSettings.farthest}, floorEntities);
+        CoverDistances{floorSettings.halfDistance, floorSettings.quarterDistance, floorSettings.farthest}, floorEntities, swayers, ForestSwayPart::Floor);
 }
 
 namespace {
@@ -885,6 +898,7 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
     std::vector<Vec3> climberFacing(grown.size());
     std::vector<MeshHandle> epiphyteLeafMeshes(grown.size());
     std::vector<MeshHandle> epiphyteMossMeshes(grown.size());
+    std::vector<float> treeHeights(grown.size());
     std::vector<Vec3> firstRosette(grown.size());
 
     for (std::size_t index = 0; index < grown.size(); ++index) {
@@ -935,6 +949,7 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
             }
         }
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
+        treeHeights[index] = std::max(treeBox.maximum.y, 1e-3f);
 
         barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
@@ -986,16 +1001,23 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
         const Transform pose{.position = tree.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, tree.turnRadians),
                              .scale = Vec3{tree.scale, tree.scale, tree.scale}};
         const std::size_t variant = static_cast<std::size_t>(tree.variant);
+        const float height = treeHeights[variant];
+        const auto sways = [&](bool leafy) {
+            swayers.push_back(ForestSwayer{trees.back(), ForestSwayPart::Trees, height, leafy});
+        };
         trees.push_back(addShape(world, barkMeshes[variant], bark, pose));
         world.get<ModelRenderer>(trees.back()).castsShadows = false;
+        sways(false);
         trees.push_back(addShape(world, leafMeshes[variant], leaf, pose));
         world.get<ModelRenderer>(trees.back()).castsShadows = false;
+        sways(true);
 
         // The shadow's stand-ins, one shadows-only model: the shadow leaves and the shadow bark.
         trees.push_back(addShape(world, shadowLeafMeshes[variant], leaf, pose));
         ModelRenderer& shadows = world.get<ModelRenderer>(trees.back());
         shadows.shadowOnly = true;
         shadows.parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
+        sways(true);
 
         // The card, drawn only far away; the stand-ins above keep its shadow.
         treeImpostors.push_back(addShape(world, cardMeshes[variant], cardMaterials[variant], pose));
@@ -1007,8 +1029,10 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
             climbedFacing.push_back(pose.rotation.rotate(climberFacing[variant]));
             climberEntities.push_back(addShape(world, climberStemMeshes[variant], climbers->stem, pose));
             world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
+            swayers.push_back(ForestSwayer{climberEntities.back(), ForestSwayPart::Trees, height, false});
             climberEntities.push_back(addShape(world, climberLeafMeshes[variant], climbers->leaf, pose));
             world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
+            swayers.push_back(ForestSwayer{climberEntities.back(), ForestSwayPart::Trees, height, true});
         }
 
         // Its variant's epiphytes, rosettes and moss, likewise.
@@ -1023,6 +1047,7 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
             if (mesh.isValid()) {
                 epiphyteEntities.push_back(addShape(world, mesh, *material, pose));
                 world.get<ModelRenderer>(epiphyteEntities.back()).shadowCascades = epiphyteShadowCascades;
+                swayers.push_back(ForestSwayer{epiphyteEntities.back(), ForestSwayPart::Trees, height, material == &epiphytes.leaf});
             }
         }
     }
@@ -1115,6 +1140,22 @@ void ForestGame::updateDaylight(World& world) {
     for (const Entity rock : driftingRocks) {
         applyRockSettings(world.get<ModelRenderer>(rock).parts.front().material, rockSettings);
     }
+
+    applySway(world);
+}
+
+// Everything swaying is still (ModelRenderer::still): given its sway, and announced, only when the settings changed.
+void ForestGame::applySway(World& world) {
+    if (appliedSwaySettings == swaySettings) {
+        return;
+    }
+
+    for (const ForestSwayer& swayer : swayers) {
+        world.get<ModelRenderer>(swayer.entity).sway = forestSway(swaySettings, swayer);
+        markRenderChanged(world, swayer.entity);
+    }
+
+    appliedSwaySettings = swaySettings;
 }
 
 bool ForestGame::showView(World& world, const std::string& name) {
@@ -1164,6 +1205,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Wind", [&] {
         visit(windSettings, visitor);
+    });
+    visitor.group("Sway", [&] {
+        visit(swaySettings, visitor);
     });
     visitor.group("Mist", [&] {
         visit(mistSettings, visitor);
@@ -1539,6 +1583,10 @@ ForestFloorSettings& ForestGame::getFloorSettings() {
 
 Wind& ForestGame::getWindSettings() {
     return windSettings;
+}
+
+ForestSwaySettings& ForestGame::getSwaySettings() {
+    return swaySettings;
 }
 
 const std::vector<GroundCell>& ForestGame::getFloorCells() const {

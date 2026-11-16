@@ -2,6 +2,7 @@
 #include "core/hash.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/shadow_map.h"
+#include "render/gpu/wind.h"
 
 #include <algorithm>
 #include <cstring>
@@ -22,11 +23,16 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     instance.material[1] = draw.mesh.index;
     instance.material[2] = draw.terrainPatch >= 0 ? static_cast<std::uint32_t>(draw.terrainPatch) + 1 : 0u;
     instance.material[3] = draw.material.impostorFrames > 0 ? instanceKindImpostor : draw.followsGround ? instanceKindFollowsGround : instanceKindPlain;
+    const Vec4 sway = packSway(draw.sway);
+    instance.sway[0] = sway.x;
+    instance.sway[1] = sway.y;
+    instance.sway[2] = sway.z;
+    instance.sway[3] = sway.w;
     return instance;
 }
 
 // Column-major like every matrix the shaders read, for vkCmdPushConstants.
-GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane, const Vec4& lightPlace) {
+GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane, const Vec4& lightPlace, bool sways) {
     GpuShadowView view{};
     writeColumnMajor(tileMatrix, view.matrix);
     view.clipPlane[0] = clipPlane.x;
@@ -37,6 +43,7 @@ GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane, cons
     view.lightPlace[1] = lightPlace.y;
     view.lightPlace[2] = lightPlace.z;
     view.lightPlace[3] = lightPlace.w;
+    view.options[0] = sways ? 1.0f : 0.0f;
     return view;
 }
 
