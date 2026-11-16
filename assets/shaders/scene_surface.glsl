@@ -821,7 +821,9 @@ void main() {
 
     // The back of a double-sided surface is shaded as the front's mirror image: its normal and tangent frame turned round.
     // The capture's cube faces are mirror images, which swaps which side the GPU calls the front.
-    float side = facingSign(gl_FrontFacing != captureView, (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u);
+    // Grass keeps its up-tilted normal on its back (MATERIAL_BACK_KEEPS_NORMAL).
+    float side = (material.extra.y & MATERIAL_BACK_KEEPS_NORMAL) != 0u ? 1.0
+                                                                        : facingSign(gl_FrontFacing != captureView, (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u);
     vec3 surfaceNormal = worldNormal * side;
     vec4 surfaceTangent = worldTangent * side;
 

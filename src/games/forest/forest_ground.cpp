@@ -3,6 +3,8 @@
 #include "assets/image_loader.h"
 #include "games/forest/climbers.h"
 #include "games/forest/epiphytes.h"
+#include "games/forest/forest_terrain.h"
+#include "games/forest/grass.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/leaf_clusters.h"
 #include "games/forest/palms.h"
@@ -239,6 +241,20 @@ Material forestAroidLeafMaterial(AssetManager& assets, const std::string& assetF
     material.metallic = 0.0f;
     material.texture = assets.addTexture(std::move(images.colour));
     material.normalTexture = assets.addTexture(ImageData{normal.width, normal.height, normal.pixels, TextureEncoding::Linear});
+    return material;
+}
+
+Material forestGrassMaterial(AssetManager& assets, const std::string& assetFolder) {
+    const ForestGroundLayer& grass = forestGroundLayers[forestGrassLayer];
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / grass.folder).string());
+    const Pixel colour = files.colour.empty() ? grass.standIn : meanColour(loadImage(files.colour), grass.standIn);
+
+    Material material;
+    material.doubleSided = true;
+    material.backKeepsNormal = true;
+    material.roughness = forestGrassRoughness;
+    material.metallic = 0.0f;
+    material.texture = assets.addTexture(grassBladeImage(forestGrassBladeTexels, colour));
     return material;
 }
 

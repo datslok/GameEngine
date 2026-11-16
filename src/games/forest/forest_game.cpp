@@ -248,6 +248,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildLianas(world, assets);
     buildUnderstorey(world, assets);
     buildPalms(world, assets);
+    buildGrass(world, assets);
 
     // The planet beyond the land is forest too, so the ground seen past the edge, and its light scattered back up into
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
@@ -688,6 +689,65 @@ void ForestGame::buildPalms(World& world, AssetManager& assets) {
     }
 }
 
+/*
+* Every variant at every density step grown on every core (a sparser step the first of the same blades), then made
+* drawable: each with its half and quarter levels and nothing past the farthest. Each cell then draws its patch, turned
+* its quarter turns about its middle, lifted onto the land by the vertex shaders; casting no shadow (contact shadows
+* and ambient occlusion ground it), still.
+*/
+void ForestGame::buildGrass(World& world, AssetManager& assets) {
+    grassCells = forestGrassCells(grassSettings, getJobs());
+
+    if (grassCells.empty()) {
+        return;
+    }
+
+    constexpr std::uint32_t grassPatchSeed = 0x50415443u;
+    const int variants = std::max(grassSettings.variants, 1);
+    const int steps = std::max(grassSettings.densitySteps, 1);
+    std::vector<GrassPatch> patches(static_cast<std::size_t>(variants * steps));
+    getJobs().parallelFor(patches.size(), 1, [&](std::size_t index) {
+        const int variant = static_cast<int>(index) / steps;
+        const int step = static_cast<int>(index) % steps + 1;
+        patches[index] = growGrassPatch(grassSettings, static_cast<float>(step) / static_cast<float>(steps),
+                                        forestShapeSeed(grassPatchSeed, static_cast<std::uint32_t>(variant) + 1));
+    });
+
+    const Material material = withLeafLight(forestGrassMaterial(assets, assetFolder), leafLightSettings);
+    const float halfError = grassLevelError(grassSettings.halfDistance);
+    const float quarterError = std::max(grassLevelError(grassSettings.quarterDistance), halfError);
+    const float farError = std::max(grassLevelError(grassSettings.farthest), quarterError);
+    std::vector<MeshHandle> meshes;
+
+    for (GrassPatch& patch : patches) {
+        if (patch.mesh.vertices.empty()) {
+            meshes.push_back(MeshHandle{});
+            continue;
+        }
+
+        meshes.push_back(assets.addDrawnMesh(std::move(patch.mesh)));
+        assets.setMeshLevels(meshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(patch.level)), halfError},
+                                             MeshLevel{assets.addDrawnMesh(std::move(patch.farLevel)), quarterError}, MeshLevel{MeshHandle{}, farError}});
+    }
+
+    grassEntities.reserve(grassCells.size());
+
+    for (const GrassCell& cell : grassCells) {
+        const MeshHandle mesh = meshes[static_cast<std::size_t>(cell.variant * steps + cell.step - 1)];
+
+        if (!mesh.isValid()) {
+            continue;
+        }
+
+        const Transform pose{.position = Vec3{cell.centre.x, 0.0f, cell.centre.y},
+                             .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.25f * fullTurnRadians * static_cast<float>(cell.quarterTurns))};
+        grassEntities.push_back(addShape(world, mesh, material, pose));
+        ModelRenderer& renderer = world.get<ModelRenderer>(grassEntities.back());
+        renderer.castsShadows = false;
+        renderer.followsGround = true;
+    }
+}
+
 namespace {
     // The lianas' own seed, and the squares of ground their meshes are grouped by.
     constexpr std::uint64_t lianaSeed = 0x4c69616eull;
@@ -1106,6 +1166,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Epiphytes", [&] {
         visit(epiphyteSettings, visitor);
     });
+    visitor.group("Grass", [&] {
+        visit(grassSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -1409,4 +1472,16 @@ const std::vector<Entity>& ForestGame::getEpiphytes() const {
 
 const std::vector<Vec3>& ForestGame::getEpiphyteViews() const {
     return epiphyteViews;
+}
+
+ForestGrassSettings& ForestGame::getGrassSettings() {
+    return grassSettings;
+}
+
+const std::vector<GrassCell>& ForestGame::getGrassCells() const {
+    return grassCells;
+}
+
+const std::vector<Entity>& ForestGame::getGrass() const {
+    return grassEntities;
 }
