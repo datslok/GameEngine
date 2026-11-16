@@ -365,6 +365,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] The wind force field: springs per category round the camera, stepped each frame in a compute pass (`wind-field`)
   - [x] Swaying plants: trees, plants, climbers, epiphytes, grass and floor cover in every vertex shader, the nearest cascade swaying (`wind-sway`)
   - [x] Hanging things: lianas, roots, vines and moss swinging on the fourth category (`wind-hanging`)
+  - [ ] Wind follow-ups (the user, Nov 16 2026, for the next session): longer hanging things swinging slower, as chains do (5.22 sqrt(L / g)); the lower layers' flutter slower and in step across a frond or tuft
 - [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer) (research in `docs/LOD.md`)
   - [x] Levels chosen per view by their error in pixels: trees, plants and rock shapes (`tree-lod`)
   - [x] Shadows from the same levels, each tile choosing by its own texels (`shadow-lod`)
