@@ -59,6 +59,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the wind field's record
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the wind's springs
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // and last frame's (the velocity pass)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the hanging vertices' anchors and arms
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the anchors they hang from
     }};
 }
 
@@ -165,7 +167,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     fog(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     skyVisibilityCascades(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     terrainPatches(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    wind(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    wind(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    windAnchors(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -214,6 +217,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         buffers.wind.describe(),
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
+        views.hangingVertices,
+        buffers.windAnchors.describe(),
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

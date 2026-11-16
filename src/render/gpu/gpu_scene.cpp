@@ -5,6 +5,7 @@
 #include "render/gpu/wind.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -28,6 +29,8 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     instance.sway[1] = sway.y;
     instance.sway[2] = sway.z;
     instance.sway[3] = sway.w;
+    instance.hanging[0] = draw.hangingEntry;
+    instance.hanging[1] = std::bit_cast<std::uint32_t>(draw.sway.swing);
     return instance;
 }
 

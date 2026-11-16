@@ -278,6 +278,13 @@ namespace {
             }
 
             root.radii.assign(root.points.size(), rootRadius);
+
+            // A root ending in mid air swings below where it leaves the stem (on top of the tree's own sway there); one
+            // rooted in the ground does not.
+            if (midAir) {
+                hangFrom(root, windAnchorOwn);
+            }
+
             appendTube(meshes.stems, root, 3, 0.5f);
             meshes.rootStrands.push_back(root);
             ++meshes.roots;

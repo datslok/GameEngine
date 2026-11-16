@@ -183,3 +183,38 @@ bool tileSways(int sunCascade, const WindSettings& settings);
 // A swaying tile's fingerprint changes every frame (frame, a count) while something sways in it, so it is redrawn;
 // otherwise it stays the casters' own.
 std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSways, std::uint64_t frame);
+
+/*
+* Hanging things (docs/WIND.md, stage 3). A hanging vertex as the shaders read it (scene set 1, binding 40, from the
+* hanging mesh's first entry on): x its anchors (first in the low 16 bits), y its share along and its arm as half floats
+* (GLSL's packHalf2x16).
+*/
+std::array<std::uint32_t, 2> packHangingVertex(const HangingVertex& vertex);
+
+// An anchor as the shaders read it (binding 41): foot (xyz, w its tree's height in its mesh's units), point (xyz, w the
+// tree's scale) and the tree's bend (x).
+struct GpuWindAnchor {
+    float foot[4];
+    float point[4];
+    float bend[4];
+};
+
+static_assert(sizeof(GpuWindAnchor) == 48, "GpuWindAnchor must match wind_data.glsl's WindAnchorRecord");
+
+GpuWindAnchor packWindAnchor(const WindAnchor& anchor);
+
+/*
+* How an anchor moves: as its tree's own vertex at its point would (windSwayOffset, the trees' category, no flutter),
+* spring the tree's spring at its foot, fade windSwayFade's at its foot.
+*/
+Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fade, float seconds);
+
+/*
+* A hanging vertex's own swing (an offset, metres): the hanging spring times swing, softened and faded, is a lean
+* (radians) the vertex swings out by over its arm, rising to keep its distance from where it hangs (a pendulum's arc);
+* and its leaves' flutter (flutter times the lean, as windSwayOffset's). Nothing with no arm and no flutter.
+*/
+Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, float seconds);
+
+// A hanging vertex's whole motion: its anchors' motions blended by its share along, plus its swing.
+Vec3 windHangingOffset(const Vec3& first, const Vec3& second, float along, const Vec3& swing);

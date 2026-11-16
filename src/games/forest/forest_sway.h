@@ -30,6 +30,11 @@ struct ForestSwaySettings {
     ForestSwayGroup grass{.bend = 0.5f, .flutter = 0.02f};
     ForestSwayGroup floor{.bend = 0.3f, .flutter = 0.01f};
 
+    // Hanging things (lianas, the islands' roots, vines and moss, the climbers' roots in mid air): how far they swing
+    // per radian of the hanging spring's lean and metre they hang, and their leaves' flutter.
+    float hangingSwing = 0.3f;
+    float hangingFlutter = 0.05f;
+
     bool operator==(const ForestSwaySettings&) const = default;
 };
 
@@ -41,6 +46,7 @@ enum class ForestSwayPart {
     Plants,
     Grass,
     Floor,
+    Hanging,
 };
 
 // A swaying entity: its group, the height its bend is measured against (its mesh's units; a tree's for everything on
@@ -53,5 +59,6 @@ struct ForestSwayer {
 };
 
 // Its sway for the settings: the trees' kind for trees, plants' for plants, grass's for the grass and the floor's cover
-// (bending from the ground below each vertex, since a patch is many plants).
+// (bending from the ground below each vertex, since a patch is many plants), hanging things' for what hangs; every
+// one's swing the hanging swing, for whatever of it hangs (a tree's climbers' roots).
 WindSway forestSway(const ForestSwaySettings& settings, const ForestSwayer& swayer);

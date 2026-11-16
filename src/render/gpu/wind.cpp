@@ -1,4 +1,5 @@
 #include "render/gpu/wind.h"
+#include "core/half_float.h"
 #include "core/hash.h"
 #include "math/angles.h"
 #include "math/smooth_step.h"
@@ -177,6 +178,8 @@ GpuWindField packWindField(const Wind* wind, const WindSettings& settings, const
     return field;
 }
 
+static_assert(windAnchorFixed == WIND_ANCHOR_FIXED && windAnchorOwn == WIND_ANCHOR_OWN, "scene/wind.h's anchor codes must be the shaders'");
+
 static_assert(static_cast<int>(SwayKind::Tree) - 1 == WIND_CATEGORY_TREES && static_cast<int>(SwayKind::Plant) - 1 == WIND_CATEGORY_PLANTS &&
                   static_cast<int>(SwayKind::Grass) - 1 == WIND_CATEGORY_GRASS && static_cast<int>(SwayKind::Hanging) - 1 == WIND_CATEGORY_HANGING,
               "SwayKind must follow the field's categories after Still");
@@ -249,4 +252,39 @@ bool tileSways(int sunCascade, const WindSettings& settings) {
 
 std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSways, std::uint64_t frame) {
     return somethingSways ? mixBits(signature ^ mixBits(frame + 0x9e3779b97f4a7c15ull)) : signature;
+}
+
+std::array<std::uint32_t, 2> packHangingVertex(const HangingVertex& vertex) {
+    return {static_cast<std::uint32_t>(vertex.first) | (static_cast<std::uint32_t>(vertex.second) << 16u),
+            static_cast<std::uint32_t>(floatToHalf(vertex.along)) | (static_cast<std::uint32_t>(floatToHalf(vertex.arm)) << 16u)};
+}
+
+GpuWindAnchor packWindAnchor(const WindAnchor& anchor) {
+    return GpuWindAnchor{{anchor.foot.x, anchor.foot.y, anchor.foot.z, anchor.height},
+                         {anchor.point.x, anchor.point.y, anchor.point.z, anchor.scale},
+                         {anchor.bend, 0.0f, 0.0f, 0.0f}};
+}
+
+Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fade, float seconds) {
+    const Vec3 foot{anchor.foot[0], anchor.foot[1], anchor.foot[2]};
+    const Vec3 point{anchor.point[0], anchor.point[1], anchor.point[2]};
+    const float scale = anchor.point[3];
+    const Vec4 sway{static_cast<float>(WIND_CATEGORY_TREES), anchor.foot[3], anchor.bend[0], 0.0f};
+    return windSwayOffset(point - foot, (point.y - foot.y) / std::max(scale, 1e-4f), point, sway, scale, spring, fade, seconds);
+}
+
+Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, float seconds) {
+    const Vec2 lean = windSoftLean(spring * swing) * fade;
+    const float reach = std::max(arm, 0.0f);
+    const Vec2 out = lean * reach;
+    const float rise = reach - std::sqrt(std::max(reach * reach - out.lengthSquared(), 0.0f));
+    const float shiver = flutter * lean.length();
+    const float turn = fullTurnRadians * static_cast<float>(WIND_FLUTTER_HERTZ) * seconds;
+    const float phase = windPhase(place, static_cast<float>(WIND_FLUTTER_METRES));
+    const Vec3 flutterOffset = Vec3{std::sin(turn + phase), std::sin(1.3f * turn + 0.7f * phase + 2.0f), std::sin(0.9f * turn + 1.3f * phase + 4.0f)} * shiver;
+    return Vec3{out.x, rise, out.y} + flutterOffset;
+}
+
+Vec3 windHangingOffset(const Vec3& first, const Vec3& second, float along, const Vec3& swing) {
+    return first + (second - first) * along + swing;
 }

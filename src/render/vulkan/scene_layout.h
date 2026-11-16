@@ -68,7 +68,9 @@ enum SceneBinding : std::uint32_t {
     WindFieldBinding = 37,
     WindSpringsBinding = 38,
     WindPreviousSpringsBinding = 39,
-    SceneBindingCount = 40
+    HangingVerticesBinding = 40,
+    WindAnchorsBinding = 41,
+    SceneBindingCount = 42
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -167,6 +169,9 @@ struct SceneBuffers {
 
     // The wind force field's record (GpuWindField, render/gpu/wind.h; off without wind).
     UploadArray wind;
+
+    // What hanging things hang from (GpuWindAnchor, render/gpu/wind.h; one unused without).
+    UploadArray windAnchors;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light
@@ -199,6 +204,7 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo skyLight{};
     VkDescriptorBufferInfo probeCascades{};
     VkDescriptorBufferInfo terrainHeights{}; // the terrain's heights (a stand-in without a terrain)
+    VkDescriptorBufferInfo hangingVertices{}; // every hanging mesh's vertices' anchors and arms (a stand-in without)
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

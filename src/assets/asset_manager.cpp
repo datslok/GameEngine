@@ -44,6 +44,9 @@ MeshHandle AssetManager::addDrawnMesh(IndexedMesh mesh) {
         throw std::invalid_argument("A drawn mesh needs vertices and triangles");
     }
 
+    // A hanging mesh's last vertices may have been added without entries (a stem among roots): they get the default.
+    appendHanging(mesh, mesh.vertices.size(), nullptr);
+
     const MeshHandle handle{static_cast<std::uint32_t>(meshes.size())};
     meshes.push_back(nullptr);
     drawnMeshes.emplace(handle.index, std::move(mesh));

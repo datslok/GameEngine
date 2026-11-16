@@ -172,6 +172,8 @@ void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float
         const Vec3& across = frames[i].across;
         const Vec3& second = frames[i].second;
 
+        const std::size_t ringStart = mesh.vertices.size();
+
         for (int side = 0; side <= sides; ++side) {
             const float angle = fullTurnRadians * static_cast<float>(side) / static_cast<float>(sides);
             const Vec3 normal = across * std::cos(angle) + second * std::sin(angle);
@@ -181,6 +183,9 @@ void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float
                                                Vec2{tilesRound * static_cast<float>(side) / static_cast<float>(sides), travelled / tileMetres},
                                                Vec4{round.x, round.y, round.z, 1.0f}});
         }
+
+        // Each ring hangs as its point does.
+        appendHanging(mesh, ringStart, strand.hanging.empty() ? nullptr : &strand.hanging[i]);
     }
 
     // A lobed surface is no longer round: its normals and tangents come from its own differences round and along it,
@@ -309,8 +314,64 @@ void appendLeafCards(IndexedMesh& mesh, const HangingStrand& vine, float spacing
 
         const int cell = std::min(static_cast<int>(forestUnitRandom(seed, 4 * card + 2) * static_cast<float>(leafColumns * leafRows)), leafColumns * leafRows - 1);
         const AtlasCell picture = atlasCell(cell, leafColumns, leafRows);
+        const std::size_t cardStart = mesh.vertices.size();
         appendLeafCard(mesh, point + radial * radius, out, normal, normal, size, width, picture.uvMin, picture.uvMax);
+
+        // Each card hangs as the vine where its stem is.
+        HangingVertex blended;
+        appendHanging(mesh, cardStart, strandHangingAt(vine, segment, share, blended));
     }
+}
+
+void hangFrom(HangingStrand& strand, std::uint16_t anchor) {
+    strand.hanging.clear();
+    float travelled = 0.0f;
+
+    for (std::size_t point = 0; point < strand.points.size(); ++point) {
+        if (point > 0) {
+            travelled += (strand.points[point] - strand.points[point - 1]).length();
+        }
+
+        strand.hanging.push_back(HangingVertex{anchor, anchor, 0.0f, travelled});
+    }
+}
+
+void hangBetween(HangingStrand& strand, std::uint16_t first, std::uint16_t second) {
+    strand.hanging.clear();
+
+    if (strand.points.empty()) {
+        return;
+    }
+
+    std::vector<float> travelled{0.0f};
+
+    for (std::size_t point = 1; point < strand.points.size(); ++point) {
+        travelled.push_back(travelled.back() + (strand.points[point] - strand.points[point - 1]).length());
+    }
+
+    const Vec3 start = strand.points.front();
+    const Vec3 chord = strand.points.back() - start;
+    const float chordSquared = chord.lengthSquared();
+
+    for (std::size_t point = 0; point < strand.points.size(); ++point) {
+        const Vec3 offset = strand.points[point] - start;
+        const float onChord = chordSquared > 0.0f ? std::clamp(offset.dot(chord) / chordSquared, 0.0f, 1.0f) : 0.0f;
+        const float sag = (offset - chord * onChord).length();
+        strand.hanging.push_back(HangingVertex{first, second, travelled.back() > 0.0f ? travelled[point] / travelled.back() : 0.0f, sag});
+    }
+}
+
+const HangingVertex* strandHangingAt(const HangingStrand& strand, std::size_t segment, float share, HangingVertex& blended) {
+    if (strand.hanging.empty()) {
+        return nullptr;
+    }
+
+    const HangingVertex& from = strand.hanging[std::min(segment, strand.hanging.size() - 1)];
+    const HangingVertex& to = strand.hanging[std::min(segment + 1, strand.hanging.size() - 1)];
+    blended = from;
+    blended.along = from.along + (to.along - from.along) * share;
+    blended.arm = from.arm + (to.arm - from.arm) * share;
+    return &blended;
 }
 
 void visit(ForestHangingSettings& settings, SettingsVisitor& visitor) {
@@ -352,15 +413,19 @@ IslandHangings islandHangings(const IslandPlacement& island, const SurfaceGrid& 
 
         if (root) {
             const float length = share * settings.longestRoot;
-            const HangingStrand hanging = hangingStrand(anchor, outward, length, thinnestRootStart + thickestRootExtra * share, rootTipRadius, strandSeed);
+            HangingStrand hanging = hangingStrand(anchor, outward, length, thinnestRootStart + thickestRootExtra * share, rootTipRadius, strandSeed);
+            hangFrom(hanging, windAnchorFixed);
             appendTube(hangings.bark, hanging, rootSides, barkTileMetres);
             hangings.tips.push_back(hanging.points.back());
+            hangings.tipArms.push_back(hanging.hanging.back().arm);
         } else {
             const float length = share * settings.longestVine;
-            const HangingStrand hanging = hangingStrand(anchor, outward, length, vineRadius, vineTipRadius, strandSeed);
+            HangingStrand hanging = hangingStrand(anchor, outward, length, vineRadius, vineTipRadius, strandSeed);
+            hangFrom(hanging, windAnchorFixed);
             appendTube(hangings.bark, hanging, vineSides, barkTileMetres);
             appendLeafCards(hangings.leaves, hanging, settings.leafSpacing, settings.leafSize, forestShapeSeed(strandSeed, 3));
             hangings.tips.push_back(hanging.points.back());
+            hangings.tipArms.push_back(hanging.hanging.back().arm);
         }
     }
 

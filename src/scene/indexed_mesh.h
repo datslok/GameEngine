@@ -5,6 +5,7 @@
 #include "math/vec3.h"
 #include "math/vec4.h"
 #include "scene/mesh.h"
+#include "scene/wind.h"
 
 #include <cstdint>
 #include <type_traits>
@@ -35,7 +36,18 @@ static_assert(sizeof(MeshVertex) == 12 * sizeof(float), "MeshVertex must have no
 struct IndexedMesh {
     std::vector<MeshVertex> vertices;
     std::vector<std::uint32_t> indices;
+
+    // Something hanging (scene/wind.h, HangingVertex): each vertex's anchors, share and arm, one a vertex, or none at all
+    // for everything else. Whatever appends vertices to a hanging mesh appends their entries too (appendHanging).
+    std::vector<HangingVertex> hanging{};
 };
+
+/*
+* The hanging entries for the vertices from firstVertex on, each entry: a mesh that had none yet gets the default (its
+* own sway, no arm) for its earlier vertices first, so the list stays one a vertex. Nothing for a mesh with no entries
+* when none are asked for (hanging null).
+*/
+void appendHanging(IndexedMesh& mesh, std::size_t firstVertex, const HangingVertex* hanging);
 
 /*
 * Every triangle corner with everything resolved, three per triangle in order, not yet shared: the normal (from the file,

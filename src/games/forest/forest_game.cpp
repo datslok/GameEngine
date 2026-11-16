@@ -364,7 +364,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         shapeLevels[index] = simplifiedLevels(shapes[index], {rockLevelShare, rockFarLevelShare}, rockLevelError);
         IslandHangings& hung = hangings[index - pillars.size()];
         hung = islandHangings(island, surface, hangingSettings);
-        moss[index] = islandMoss(island, surface, hung.tips, mossSettings);
+        moss[index] = islandMoss(island, surface, hung.tips, mossSettings, hung.tipArms);
     });
 
     const Material rock = rockMaterial(assets, assetFolder, rockSettings);
@@ -386,6 +386,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     for (std::size_t index = 0; index < shapes.size(); ++index) {
         if (!moss[index].vertices.empty()) {
             mossEntities.push_back(addShape(world, assets.addDrawnMesh(std::move(moss[index])), mossMaterial, world.get<Transform>(rockShapes[index])));
+            swayers.push_back(ForestSwayer{mossEntities.back(), ForestSwayPart::Hanging, 1.0f, false});
         }
     }
 
@@ -394,10 +395,12 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
 
         if (!hangings[island].bark.vertices.empty()) {
             hangingEntities.push_back(addShape(world, assets.addDrawnMesh(std::move(hangings[island].bark)), bark, placed));
+            swayers.push_back(ForestSwayer{hangingEntities.back(), ForestSwayPart::Hanging, 1.0f, false});
         }
 
         if (!hangings[island].leaves.vertices.empty()) {
             hangingEntities.push_back(addShape(world, assets.addDrawnMesh(std::move(hangings[island].leaves)), leaf, placed));
+            swayers.push_back(ForestSwayer{hangingEntities.back(), ForestSwayPart::Hanging, 1.0f, true});
         }
     }
 
@@ -483,8 +486,8 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
                                      .moss = forestLayerMaterial(assets, assetFolder, forestLimbMossLayer)};
     TreeEpiphytes smallEpiphytes = bigEpiphytes;
     smallEpiphytes.bigTree = false;
-    plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers, bigEpiphytes);
-    plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers,
+    canopyHeights = plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers, bigEpiphytes);
+    emergentHeights = plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers,
                bigEpiphytes);
     const bool midSameLeaves = midSettings.clusterTexels == treeSettings.clusterTexels &&
                                midSettings.leafLength / midSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
@@ -827,26 +830,56 @@ void ForestGame::buildLianas(World& world, AssetManager& assets) {
         return;
     }
 
-    std::vector<LianaMeshes> chunks = lianaMeshes(lianas, crowns, lianaSettings, forestTreeBarkLayer.tileMetres, lianaChunkMetres, getJobs());
+    /*
+    * Each liana hangs in the wind between two anchors (scene/wind.h): its hold in its crown, moving as that tree's crown
+    * does there, and its far end, in another crown or fixed on the ground. The crowns are the canopy trees' then the
+    * emergents', as above.
+    */
+    const auto treeOfCrown = [&](int crown) {
+        const bool canopy = static_cast<std::size_t>(crown) < treePlacements.size();
+        const TreePlacement& tree = canopy ? treePlacements[static_cast<std::size_t>(crown)] : emergentPlacements[static_cast<std::size_t>(crown) - treePlacements.size()];
+        const std::vector<float>& heights = canopy ? canopyHeights : emergentHeights;
+        const float height = static_cast<std::size_t>(tree.variant) < heights.size() ? heights[static_cast<std::size_t>(tree.variant)] : 1.0f;
+        return std::pair{&tree, height};
+    };
+    const auto anchorAt = [&](int crown, const Vec3& point) {
+        if (lianaAnchors.size() >= static_cast<std::size_t>(windAnchorOwn)) {
+            return windAnchorFixed;
+        }
+
+        const auto [tree, height] = treeOfCrown(crown);
+        lianaAnchors.push_back(WindAnchor{.foot = tree->foot, .height = height, .scale = tree->scale, .bend = swaySettings.trees.bend, .point = point});
+        return static_cast<std::uint16_t>(lianaAnchors.size() - 1);
+    };
+    std::vector<std::array<std::uint16_t, 2>> anchors;
+    lianaAnchors.clear();
+
+    for (const Liana& liana : lianas) {
+        const std::uint16_t first = anchorAt(liana.crown, liana.from);
+        anchors.push_back({first, liana.otherCrown >= 0 ? anchorAt(liana.otherCrown, liana.to) : windAnchorFixed});
+    }
+
+    std::vector<LianaMeshes> chunks = lianaMeshes(lianas, crowns, lianaSettings, forestTreeBarkLayer.tileMetres, lianaChunkMetres, getJobs(), anchors);
     const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
     const Material leaf = withLeafLight(forestLeafMaterial(assets, assetFolder), leafLightSettings);
-    const auto add = [&](IndexedMesh mesh, const Material& material) {
+    const auto add = [&](IndexedMesh mesh, const Material& material, bool leafy) {
         if (!mesh.vertices.empty()) {
             lianaEntities.push_back(addShape(world, assets.addDrawnMesh(std::move(mesh)), material, Transform{}));
             world.get<ModelRenderer>(lianaEntities.back()).shadowCascades = lianaShadowCascades;
+            swayers.push_back(ForestSwayer{lianaEntities.back(), ForestSwayPart::Hanging, 1.0f, leafy});
         }
     };
 
     for (LianaMeshes& chunk : chunks) {
-        add(std::move(chunk.bark), bark);
-        add(std::move(chunk.leaves), leaf);
+        add(std::move(chunk.bark), bark, false);
+        add(std::move(chunk.leaves), leaf, true);
     }
 }
 
-void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                            std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes) {
+std::vector<float> ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
+                                          std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes) {
     if (placements.empty()) {
-        return;
+        return {};
     }
 
     // Each cell of the leaf texture's outline, so the cards are drawn round their twigs, not as whole squares.
@@ -1051,6 +1084,8 @@ void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTree
             }
         }
     }
+
+    return treeHeights;
 }
 
 void ForestGame::onInput(World& world, const Input& input) {
@@ -1153,6 +1188,19 @@ void ForestGame::applySway(World& world) {
     for (const ForestSwayer& swayer : swayers) {
         world.get<ModelRenderer>(swayer.entity).sway = forestSway(swaySettings, swayer);
         markRenderChanged(world, swayer.entity);
+    }
+
+    // The lianas' anchors bend as their trees do, on the air entity.
+    for (WindAnchor& anchor : lianaAnchors) {
+        anchor.bend = swaySettings.trees.bend;
+    }
+
+    const WindAnchors anchors{std::make_shared<const std::vector<WindAnchor>>(lianaAnchors)};
+
+    if (world.has<WindAnchors>(air)) {
+        world.get<WindAnchors>(air) = anchors;
+    } else {
+        world.add(air, anchors);
     }
 
     appliedSwaySettings = swaySettings;

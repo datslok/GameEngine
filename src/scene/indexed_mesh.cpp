@@ -147,6 +147,15 @@ IndexedMesh buildIndexedMesh(const Mesh& mesh) {
     return result;
 }
 
+void appendHanging(IndexedMesh& mesh, std::size_t firstVertex, const HangingVertex* hanging) {
+    if (hanging == nullptr && mesh.hanging.empty()) {
+        return;
+    }
+
+    mesh.hanging.resize(firstVertex, HangingVertex{});
+    mesh.hanging.resize(mesh.vertices.size(), hanging != nullptr ? *hanging : HangingVertex{});
+}
+
 Aabb indexedMeshBounds(const IndexedMesh& mesh) {
     if (mesh.vertices.empty()) {
         return Aabb{};

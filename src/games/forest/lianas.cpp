@@ -210,6 +210,11 @@ namespace {
             if (inside(strand.points[point]) == wantInside) {
                 run.points.push_back(strand.points[point]);
                 run.radii.push_back(strand.radii[point]);
+
+                if (!strand.hanging.empty()) {
+                    run.hanging.push_back(strand.hanging[point]);
+                }
+
                 continue;
             }
 
@@ -232,7 +237,8 @@ namespace {
 }
 
 std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings,
-                                     float barkTileMetres, float chunkMetres, JobSystem& jobs) {
+                                     float barkTileMetres, float chunkMetres, JobSystem& jobs,
+                                     const std::vector<std::array<std::uint16_t, 2>>& anchors) {
     // Chunks in the order of their squares, each listing its lianas in their own order.
     std::map<std::pair<int, int>, std::vector<std::size_t>> squares;
 
@@ -253,7 +259,12 @@ std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std
 
         for (const std::size_t index : chunks[chunk]) {
             const Liana& liana = lianas[index];
-            const HangingStrand strand = catenaryStrand(liana.from, liana.to, liana.length, liana.radius);
+            HangingStrand strand = catenaryStrand(liana.from, liana.to, liana.length, liana.radius);
+
+            if (index < anchors.size()) {
+                hangBetween(strand, anchors[index][0], anchors[index][1]);
+            }
+
             appendTube(built.bark, strand, 2.0f * liana.radius >= lianaThickDiameter ? 6 : 4, barkTileMetres);
 
             const LianaCrown* first = &crowns[static_cast<std::size_t>(liana.crown)];

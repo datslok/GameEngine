@@ -6,6 +6,7 @@
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -115,7 +116,9 @@ struct LianaMeshes {
 * The lianas' meshes, grouped by the chunkMetres square their first hold stands in, in a fixed order, a job a chunk:
 * each a catenary swept into a tube of 4 sides (6 from lianaThickDiameter across), its bark in tiles of barkTileMetres
 * along it, ivy cards (appendLeafCards) leafSpacing apart on the runs of its points inside a crown it hangs from and
-* sparseLeafSpacing apart along the rest.
+* sparseLeafSpacing apart along the rest. With anchors (each liana's two: its hold's and its far end's, scene/wind.h),
+* each hangs between them in the wind (hangBetween), its ivy with it.
 */
 std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings,
-                                     float barkTileMetres, float chunkMetres, JobSystem& jobs);
+                                     float barkTileMetres, float chunkMetres, JobSystem& jobs,
+                                     const std::vector<std::array<std::uint16_t, 2>>& anchors = {});

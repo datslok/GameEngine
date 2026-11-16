@@ -116,7 +116,7 @@ void main() {
     relativePosition = (model * vec4(position, 1.0)).xyz;
     relativePosition.y += groundLift(instance.material.w, relativePosition + cameraOrigin.xyz);
     // The wind (render/gpu/wind.h): the same sway in every view, so the prepass and the main pass agree to the bit.
-    relativePosition += windSwayOfVertex(instance.model, instance.sway, handedness.y, position, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    relativePosition += windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, gl_VertexIndex, position, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
     gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
     viewerPosition = captureView ? captureEye.xyz : vec3(0.0);

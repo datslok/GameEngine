@@ -84,6 +84,10 @@ struct DrawItem {
     // How it sways in the wind (ModelRenderer::sway): the vertex shaders bend it, the velocity pass redraws it every
     // frame and the shadow tiles that sway redraw while it is in them (render/gpu/wind.h).
     WindSway sway{};
+
+    // One past its mesh's first entry in the renderer's hanging vertices (IndexedMesh::hanging, attachHangingEntries;
+    // 0 for a mesh with none), so the vertex shaders find each vertex's anchors and arm.
+    std::uint32_t hangingEntry = 0;
 };
 
 /*
@@ -139,7 +143,7 @@ class StillDraws;
 */
 struct FrameDescription {
     Camera camera;
-    FrameLighting lighting;
+    FrameLighting lighting{};
     std::vector<DrawItem> draws{};
 
     // The draws of still entities (ModelRenderer::still) come first, stillDraws of them, kept from last frame but for
@@ -186,6 +190,9 @@ struct FrameDescription {
     // The wind over the land (scene/wind.h, the first Wind placed), which the renderer's wind field turns into sway;
     // none without one.
     std::optional<Wind> wind{};
+
+    // What hanging things hang from (scene/wind.h, the first WindAnchors placed), none without.
+    std::shared_ptr<const std::vector<WindAnchor>> windAnchors{};
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.
