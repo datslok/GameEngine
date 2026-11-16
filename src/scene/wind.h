@@ -19,3 +19,32 @@ struct Wind {
 };
 
 void visit(Wind& wind, SettingsVisitor& visitor);
+
+/*
+* Which of the wind force field's springs a drawn thing follows (render/gpu/wind.h), in the field's own order after
+* Still, which does not sway. Trees and plants (and hanging things) read their spring once, at their foot (the model's
+* origin), so everything placed with the same pose (a tree's bark, leaves, climbers and epiphytes) bends as one; grass
+* reads it at each vertex, so gusts roll across a meadow, each vertex bending from the ground below it.
+*/
+enum class SwayKind {
+    Still,
+    Tree,
+    Plant,
+    Grass,
+    Hanging,
+};
+
+/*
+* How a drawn thing sways (ModelRenderer::sway, docs/WIND.md). Its mesh stands with its foot at its frame's origin and up
+* along y; height (in the mesh's own units, so it scales with the object) is what its bend is measured against: a
+* vertex at height h leans by bend times its spring's lean (radians) times h^2 / height, keeping its distance from the
+* foot (a cantilever's shape), and its branches bob more the further from the trunk. A tree's climbers and epiphytes
+* take the tree's height, so they stay on it. flutter is how many metres its leaves shiver per radian of lean, more
+* towards the top.
+*/
+struct WindSway {
+    SwayKind kind = SwayKind::Still;
+    float height = 1.0f;
+    float bend = 1.0f;
+    float flutter = 0.0f;
+};

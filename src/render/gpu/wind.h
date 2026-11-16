@@ -47,11 +47,23 @@ struct WindSettings {
 
     // Arrows of the wind round the camera, as the debug lines draw them.
     bool showField = false;
+
+    /*
+    * Swaying (docs/WIND.md, stage 2): what the vertex shaders do with the springs. Off, everything stands still while the
+    * field still runs. The sway fades out between fadeStart and fadeEnd metres from the camera (an impostor card does
+    * not sway, so a tree turning into one, at about 1 km in the forest, does not jump; 400 m chosen by eye from far off); shadowCascades of the sun's nearest cascades sway with it,
+    * redrawn every frame they hold something swaying, and the rest keep still shadows, as Horizon Zero Dawn's do.
+    */
+    bool sway = true;
+    float swayFadeStart = 80.0f;
+    float swayFadeEnd = 400.0f;
+    int swayShadowCascades = 1;
 };
 
 void visit(WindSettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a cell not above 0, a frequency not above 0 or a damping or response below 0.
+// Throws std::invalid_argument for a cell not above 0, a frequency not above 0 or a damping or response below 0, a sway
+// fade starting below 0 or ending no later than it starts, or negative swaying shadow cascades.
 void validateWind(const WindSettings& settings);
 
 /*
@@ -104,7 +116,8 @@ bool windCellInWindow(const WindCell& cell, const WindWindow& window);
 * The field's record, std430 as wind_data.glsl reads it (scene set 1, binding 37): wind the direction (x, z), speed and
 * time; gusts the gusts' strength and size and the turbulence's; step the frame's step and whether the field is on (1)
 * and its spring images are filled; each category's spring (frequency, damping, response); each cascade's window and
-* last frame's; each cascade's cell (metres, and 1 / its window's width); flags whether last frame's windows hold.
+* last frame's; each cascade's cell (metres, and 1 / its window's width); flags whether last frame's windows hold; sway
+* whether things sway (1, with the field on), where the sway's fade starts and ends (metres) and last frame's time.
 */
 struct GpuWindField {
     float wind[4];
@@ -114,9 +127,59 @@ struct GpuWindField {
     std::int32_t windows[WIND_CASCADES][4];
     float cells[WIND_CASCADES][4];
     std::int32_t flags[4];
+    float sway[4];
 };
+
+static_assert(sizeof(GpuWindField) == 208, "GpuWindField must match wind.glsl's WindField");
 
 // The record for a frame: off without wind or with the setting off. previousKnown: last frame's windows are the ones
 // its spring images hold.
 GpuWindField packWindField(const Wind* wind, const WindSettings& settings, const std::array<WindWindow, WIND_CASCADES>& windows,
                            const std::array<WindWindow, WIND_CASCADES>& previous, bool previousKnown, float seconds, float stepSeconds);
+
+/*
+* Swaying (docs/WIND.md, stage 2). A sway as the shaders read it (GpuInstance::sway): x the spring's category
+* (WIND_CATEGORY_*, -1 still), y the height its bend is measured against (the mesh's units), z its bend, w its flutter.
+*/
+Vec4 packSway(const WindSway& sway);
+
+// How much of the sway is left at a distance from the camera: all of it to start, none past end, smoothly between.
+float windSwayFade(float distance, float start, float end);
+
+// A lean softly held under WIND_MOST_LEAN (radians): lean / (1 + |lean| / most), so a storm bends things far over but
+// never flat, while a breeze's lean is nearly unchanged.
+Vec2 windSoftLean(const Vec2& lean);
+
+/*
+* How much a place reads a cascade's window rather than the next coarser one: 1 inside, falling to 0 over the
+* WIND_BLEND_CELLS cells before its last cell from its edge (the cells beside the edge blend with the far side's under
+* the wrapping sampler), so a tree crossing the near window's edge as the camera walks never jumps.
+*/
+float windWindowShare(const Vec2& place, const WindWindow& window, float cellMetres);
+
+// A smooth phase (radians) that changes once every metres along the world: neighbouring vertices of a leaf or branch
+// share it, things metres apart do not.
+float windPhase(const Vec3& place, float metres);
+
+/*
+* Where the wind moves a vertex (an offset in the world, metres). fromFoot: the vertex from its foot, in the world (the
+* model's rotation and scale applied); modelHeight: its height in the mesh's own frame; place: where it is in the
+* world; sway: packSway's; scale: the model's scale; spring: its spring's displacement (a lean, radians, along the
+* world's x and z); fade: windSwayFade's; seconds: the field's time. The main bend leans it by the spring times the
+* bend, softened (windSoftLean) and faded, by h^2 / height and kept at its distance from the foot; its branches bob up and down by WIND_BRANCH_SHARE
+* of the lean times their distance from the trunk at WIND_BRANCH_HERTZ; its leaves flutter in three directions at
+* about WIND_FLUTTER_HERTZ by flutter times the lean. Both grow with height share to its full height, so a foot never
+* moves. Nothing for a still sway.
+*/
+Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, const Vec4& sway, float scale, const Vec2& spring, float fade,
+                    float seconds);
+
+// Whether a draw sways this frame: it has a sway, and part of it is nearer the camera than the fade's end.
+bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadius, const Vec3& camera, const WindSettings& settings);
+
+// Whether a shadow tile sways: one of the sun's nearest swayShadowCascades (sunCascade counted from 0, -1 other lights).
+bool tileSways(int sunCascade, const WindSettings& settings);
+
+// A swaying tile's fingerprint changes every frame (frame, a count) while something sways in it, so it is redrawn;
+// otherwise it stays the casters' own.
+std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSways, std::uint64_t frame);

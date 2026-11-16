@@ -80,6 +80,10 @@ struct DrawItem {
     // A deforming mesh's shape this frame (DeformedMesh::shape, set by attachShapes), 0 for every other mesh: the shadow
     // cache's fingerprint of the casters includes it, so a caster that changes shape where it stands is drawn again.
     std::uint64_t shape = 0;
+
+    // How it sways in the wind (ModelRenderer::sway): the vertex shaders bend it, the velocity pass redraws it every
+    // frame and the shadow tiles that sway redraw while it is in them (render/gpu/wind.h).
+    WindSway sway{};
 };
 
 /*

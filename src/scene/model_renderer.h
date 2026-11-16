@@ -3,6 +3,7 @@
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
+#include "scene/wind.h"
 
 #include <vector>
 
@@ -61,6 +62,9 @@ struct ModelRenderer {
     * Its bounds are lifted to match; no ray meets it.
     */
     bool followsGround = false;
+
+    // How it sways in the wind (scene/wind.h; Still by default): every vertex shader bends it by its spring.
+    WindSway sway{};
 };
 
 // Build a renderer with a single mesh.

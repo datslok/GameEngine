@@ -22,6 +22,7 @@
 #include "scene/atmosphere.h"
 #include "scene/fog.h"
 #include "scene/wind.h"
+#include "games/forest/forest_sway.h"
 
 #include <optional>
 #include <string>
@@ -219,12 +220,17 @@ public:
     ForestFloorSettings& getFloorSettings();
     // The wind over the valley, on the air entity (scene/wind.h).
     Wind& getWindSettings();
+    // How the forest sways in it (games/forest/forest_sway.h), applied live to everything swaying.
+    ForestSwaySettings& getSwaySettings();
     const std::vector<GroundCell>& getFloorCells() const;
     const std::vector<Entity>& getFloorCover() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
     void updateDaylight(World& world);
+
+    // Give every swaying thing its sway when the sway's settings changed, announcing the still draws changed.
+    void applySway(World& world);
 
     // The land's rings, each a static ground entity only where it is walked on (the finest).
     void buildGround(World& world, AssetManager& assets);
@@ -308,6 +314,11 @@ private:
     // The wind over the valley (docs/WIND.md): down it, along the path from the rim towards the Monolith (-z), a few m/s
     // above the canopy as measured over rainforests; under the canopy the plants' springs answer it less.
     Wind windSettings{.towardsDegrees = 270.0f, .speed = 3.0f};
+
+    // How each kind of growth sways in it, what its swaying things were last given (applySway), and those things.
+    ForestSwaySettings swaySettings;
+    std::optional<ForestSwaySettings> appliedSwaySettings;
+    std::vector<ForestSwayer> swayers;
     ForestFloorSettings floorSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;

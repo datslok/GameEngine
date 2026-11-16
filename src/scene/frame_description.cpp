@@ -77,6 +77,7 @@ void buildEntityDraws(const World& world, Entity entity, const ModelRenderer& re
         draw.shadowCascades = renderer.shadowCascades;
         draw.hidden = renderer.hidden;
         draw.followsGround = renderer.followsGround;
+        draw.sway = renderer.sway;
 
         if (history != nullptr) {
             history->remember(entity, part, model);

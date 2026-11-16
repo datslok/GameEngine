@@ -107,3 +107,5 @@ Following Horizon Zero Dawn.
 3. **Hanging things** (`wind-hanging`): lianas, roots, vines and moss on the fourth category, swinging by their length below their anchor.
 
 Each stage measured (the field's compute pass, the motion pass, the shadow cache) before the next.
+
+**Stage 2 as built** (`wind-sway`): the sway's data is on each object (`ModelRenderer::sway`), not its material, since every tree is scaled differently and its climbers need the tree's height; the spring is read as a lean in radians, softly limited; the sway fades out between 80 and 400 m (the trees' impostors start at about 1 km); the floor's cover sways as grass does (a patch is many plants); leaves flutter more up the plant, not by their place along each card, which would need a coordinate the meshes do not keep. How it works: `docs/ARCHITECTURE.md`, Swaying.

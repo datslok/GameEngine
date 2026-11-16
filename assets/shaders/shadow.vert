@@ -5,6 +5,7 @@
 #include "instances.glsl"
 #include "planar_reflection.glsl"
 #include "terrain_data.glsl"
+#include "wind_data.glsl"
 
 // The shadow pass only needs where each vertex is, as seen from one face of the light's cube.
 layout(location = 0) in vec3 position;
@@ -15,6 +16,8 @@ layout(location = 0) in vec3 position;
 layout(push_constant) uniform ShadowView {
     mat4 tileMatrix;
     vec4 tileClipPlane;
+    vec4 tileLightPlace; // the coloured shadow map's (glass_shadow.vert)
+    vec4 tileOptions;    // x 1 when the tile sways (render/gpu/wind.h, tileSways)
 };
 
 out float gl_ClipDistance[1];
@@ -29,6 +32,12 @@ void main() {
                      ? vec4(terrainVertex(terrainPatches[terrainPatchNumber - 1u], position.xz, cameraOrigin.xyz).position, 1.0)
                      : instance.model * vec4(position, 1.0);
     world.y += groundLift(instance.material.w, world.xyz);
+
+    // In the sun's nearest cascades, the wind's sway as the camera's views draw it; the rest keep still shadows.
+    if (tileOptions.x != 0.0) {
+        world.xyz += windSwayOfVertex(instance.model, instance.sway, instance.handedness.y, position, world.xyz, cameraOrigin.xyz, false);
+    }
+
     gl_Position = tileMatrix * world;
     gl_ClipDistance[0] = planarClipDistance(tileClipPlane, world.xyz);
 }

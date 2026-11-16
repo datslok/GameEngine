@@ -30,4 +30,21 @@
 #define WIND_GUST_EVOLUTION 0.25
 #define WIND_TURBULENCE_OFFSET 37.0
 
+// Swaying (render/gpu/wind.h, windSwayOffset). A sway's category for things that stand still.
+#define WIND_CATEGORY_STILL -1
+
+// The most lean (radians) a soft limit lets a spring give, however hard it blows.
+#define WIND_MOST_LEAN 0.5
+
+// The cells over which a place passes from one cascade's window to the next coarser one's, before its edge's cell.
+#define WIND_BLEND_CELLS 8.0
+
+// Branches bob by this share of the lean times their distance from the trunk, this often (Hz), their phase changing
+// every so many metres; leaves flutter this often (Hz), their phase changing every so many metres.
+#define WIND_BRANCH_SHARE 0.2
+#define WIND_BRANCH_HERTZ 0.9
+#define WIND_BRANCH_METRES 4.0
+#define WIND_FLUTTER_HERTZ 3.0
+#define WIND_FLUTTER_METRES 0.5
+
 #endif

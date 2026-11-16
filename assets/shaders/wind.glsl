@@ -15,6 +15,7 @@ struct WindField {
     ivec4 windows[WIND_CASCADES];  // this frame's first cell (x, z), last frame's
     vec4 cells[WIND_CASCADES];     // a cell (m), 1 / the window's width (m)
     ivec4 flags;  // x 1 when last frame's windows are the ones the springs hold
+    vec4 sway;    // x 1 while things sway, y and z the fade's start and end (m), w last frame's time
 };
 
 // A lattice point's value: its hash's top 24 bits over 2^24 (windNoise's).
@@ -86,6 +87,60 @@ ivec2 windCellOfTexel(ivec2 texel, ivec2 origin) {
 
 bool windCellInWindow(ivec2 cell, ivec2 origin) {
     return all(greaterThanEqual(cell, origin)) && all(lessThan(cell, origin + WIND_CELLS));
+}
+
+// How much of the sway is left at a distance from the camera (windSwayFade).
+float windSwayFade(float distance, float start, float end) {
+    return 1.0 - smoothstep(start, end, distance);
+}
+
+// A lean softly held under WIND_MOST_LEAN (windSoftLean).
+vec2 windSoftLean(vec2 lean) {
+    return lean * (1.0 / (1.0 + length(lean) / float(WIND_MOST_LEAN)));
+}
+
+// How much a place reads a window (its first cell origin) rather than the next coarser one (windWindowShare).
+float windWindowShare(vec2 place, ivec2 origin, float cellMetres) {
+    vec2 cell = place / cellMetres;
+    vec2 fromEdge = min(cell - vec2(origin), vec2(origin + WIND_CELLS) - cell);
+    return clamp((min(fromEdge.x, fromEdge.y) - 1.0) / float(WIND_BLEND_CELLS), 0.0, 1.0);
+}
+
+// A smooth phase changing once every metres along the world (windPhase).
+float windPhase(vec3 place, float metres) {
+    return (place.x * 0.71 + place.y * 0.37 + place.z * 0.59) * (6.28318530718 / metres);
+}
+
+/*
+* Where the wind moves a vertex (windSwayOffset): fromFoot the vertex from its foot in the world, modelHeight its
+* height in the mesh's frame, place where it is, sway the instance's (category, height, bend, flutter), scale the
+* model's, spring its spring's lean, fade windSwayFade's, seconds the field's time.
+*/
+vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, float scale, vec2 spring, float fade, float seconds) {
+    if (sway.x < 0.0) {
+        return vec3(0.0);
+    }
+
+    float share = max(modelHeight, 0.0) / max(sway.y, 1e-4);
+    float heightMetres = sway.y * scale;
+    vec2 lean = windSoftLean(spring * sway.z) * fade;
+    vec2 sideways = lean * (heightMetres * share * share);
+    vec3 bent = vec3(fromFoot.x + sideways.x, fromFoot.y, fromFoot.z + sideways.y);
+    float bentLength = length(bent);
+    vec3 kept = bentLength > 0.0 ? bent * (length(fromFoot) / bentLength) : bent;
+    vec3 offset = kept - fromFoot;
+
+    float amount = length(lean);
+    float grow = min(share, 1.0);
+    float trunkDistance = sqrt(fromFoot.x * fromFoot.x + fromFoot.z * fromFoot.z);
+    float branchTurn = 6.28318530718 * float(WIND_BRANCH_HERTZ) * seconds + windPhase(place, float(WIND_BRANCH_METRES));
+    offset.y += float(WIND_BRANCH_SHARE) * amount * trunkDistance * grow * sin(branchTurn);
+
+    float flutter = sway.w * amount * grow;
+    float turn = 6.28318530718 * float(WIND_FLUTTER_HERTZ) * seconds;
+    float phase = windPhase(place, float(WIND_FLUTTER_METRES));
+    offset += vec3(sin(turn + phase), sin(1.3 * turn + 0.7 * phase + 2.0), sin(0.9 * turn + 1.3 * phase + 4.0)) * flutter;
+    return offset;
 }
 
 #endif
