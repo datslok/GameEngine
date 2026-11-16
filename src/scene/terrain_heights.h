@@ -41,6 +41,17 @@ Vec3 terrainNormal(const TerrainHeights& heights, float x, float z, float step);
 // Bilinear between four heights: the near row (left, right), the far row, across and down in 0..1.
 float terrainBilinear(float nearLeft, float nearRight, float farLeft, float farRight, float across, float down);
 
+// The height on a drawn grid square (the same four heights, across and down in 0..1): the plane through the triangle
+// holding the place, the square split as terrainGridMesh splits it, from its near right corner to its far left.
+float terrainTriangleHeight(float nearLeft, float nearRight, float farLeft, float farRight, float across, float down);
+
+/*
+* The drawn land's height at a place: as the finest patches draw it near the camera (their grid on the finest grid's
+* points, each square two flat triangles), in the finest grid holding it; past every grid, the coarsest's nearest edge.
+* What meshes following the ground stand on (scene/ground_follow.h).
+*/
+float terrainSurfaceHeight(const TerrainHeights& heights, float x, float z);
+
 // How far a point is through its patch's morph: 0 before start, 1 from end, linear between.
 float terrainMorph(float distance, float start, float end);
 

@@ -176,6 +176,16 @@ inline constexpr int forestGrassBladeTexels = 128;
 inline constexpr float forestGrassRoughness = 0.85f;
 Material forestGrassMaterial(AssetManager& assets, const std::string& assetFolder);
 
+/*
+* The forest floor's cover's material (games/forest/floor_cover.h): its picture drawn at start-up (floorCoverImage)
+* from the leaf litter scan's mean colour and the trees' leaves' (LeafSet024's mean, tinted as theirs), so fallen
+* leaves match the litter they lie on and the seedlings the leaves above; opaque, double-sided, its back keeping its
+* normal (the fallen leaves face up either way), rough.
+*/
+inline constexpr int forestFloorCoverTexels = 128;
+inline constexpr float forestFloorCoverRoughness = 0.8f;
+Material forestFloorCoverMaterial(AssetManager& assets, const std::string& assetFolder);
+
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";
 inline constexpr Pixel forestMossStandIn{96, 104, 62};

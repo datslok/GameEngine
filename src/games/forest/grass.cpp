@@ -1,7 +1,6 @@
 #include "games/forest/grass.h"
 #include "games/forest/forest_terrain.h"
 #include "math/angles.h"
-#include "scene/level_of_detail.h"
 
 #include <algorithm>
 #include <cmath>
@@ -30,8 +29,8 @@ namespace {
     constexpr float mostClumpLean = 0.45f;
     constexpr float bladeLeanJitter = 0.6f;
 
-    // The forest's grass seeds: the cells' variants and turns.
-    constexpr std::uint64_t cellSeed = 0x47524153ull;
+    // The forest's grass cells' seed: their variants and turns.
+    constexpr std::uint64_t grassCellSeed = 0x47524153ull;
 
     // Each blade's random draws (root across, root along, height, lean share, lean turn, facing, width).
     constexpr std::uint64_t drawsPerBlade = 8;
@@ -244,12 +243,7 @@ GrassPatch growGrassPatch(const ForestGrassSettings& settings, float density, st
 }
 
 int grassDensityStep(const ForestGrassSettings& settings, float paint) {
-    if (paint < settings.leastPaint || paint <= 0.0f) {
-        return 0;
-    }
-
-    const int steps = std::max(settings.densitySteps, 1);
-    return std::clamp(static_cast<int>(std::lround(paint * static_cast<float>(steps))), 1, steps);
+    return groundDensityStep(settings.densitySteps, settings.leastPaint, paint);
 }
 
 /*
@@ -290,73 +284,12 @@ ImageData grassBladeImage(int texels, Pixel colour) {
 }
 
 std::vector<GrassCell> forestGrassCells(const ForestGrassSettings& settings, JobSystem& jobs) {
-    const float cell = std::max(settings.cellMetres, 0.5f);
-    const std::vector<Vec2>& path = forestPathPoints();
-    Vec2 lowest = path.front();
-    Vec2 highest = path.front();
-
-    for (const Vec2& point : path) {
-        lowest = Vec2{std::min(lowest.x, point.x), std::min(lowest.y, point.y)};
-        highest = Vec2{std::max(highest.x, point.x), std::max(highest.y, point.y)};
-    }
-
-    const int firstColumn = static_cast<int>(std::floor((lowest.x - settings.reachMetres) / cell));
-    const int lastColumn = static_cast<int>(std::ceil((highest.x + settings.reachMetres) / cell));
-    const int firstRow = static_cast<int>(std::floor((lowest.y - settings.reachMetres) / cell));
-    const int lastRow = static_cast<int>(std::ceil((highest.y + settings.reachMetres) / cell));
-    const std::size_t rows = static_cast<std::size_t>(std::max(lastRow - firstRow, 0));
-    std::vector<std::vector<GrassCell>> byRow(rows);
-
-    jobs.parallelFor(rows, 1, [&](std::size_t rowIndex) {
-        const int row = firstRow + static_cast<int>(rowIndex);
-
-        for (int column = firstColumn; column < lastColumn; ++column) {
-            const Vec2 centre{(static_cast<float>(column) + 0.5f) * cell, (static_cast<float>(row) + 0.5f) * cell};
-
-            if (forestPathDistance(centre.x, centre.y) > settings.reachMetres) {
-                continue;
-            }
-
-            constexpr int samples = 4;
-            float paint = 0.0f;
-
-            for (int i = 0; i < samples; ++i) {
-                for (int j = 0; j < samples; ++j) {
-                    const float x = centre.x + ((static_cast<float>(i) + 0.5f) / samples - 0.5f) * cell;
-                    const float z = centre.y + ((static_cast<float>(j) + 0.5f) / samples - 0.5f) * cell;
-                    paint += forestGroundPaint(x, z)[forestGrassLayer];
-                }
-            }
-
-            const int step = grassDensityStep(settings, paint / static_cast<float>(samples * samples));
-
-            if (step == 0) {
-                continue;
-            }
-
-            const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(row)) << 32) | static_cast<std::uint32_t>(column);
-            const int variants = std::max(settings.variants, 1);
-            GrassCell grass;
-            grass.centre = centre;
-            grass.step = step;
-            grass.variant = std::min(variants - 1, static_cast<int>(forestUnitRandom(cellSeed, 2 * key) * static_cast<float>(variants)));
-            grass.quarterTurns = std::min(3, static_cast<int>(forestUnitRandom(cellSeed, 2 * key + 1) * 4.0f));
-            byRow[rowIndex].push_back(grass);
-        }
-    });
-
-    std::vector<GrassCell> cells;
-
-    for (const std::vector<GrassCell>& row : byRow) {
-        cells.insert(cells.end(), row.begin(), row.end());
-    }
-
-    return cells;
-}
-
-float grassLevelError(float distance) {
-    constexpr float referenceHeightPixels = 1080.0f;
-    constexpr float referenceFovDegrees = 70.0f;
-    const LevelView view = levelView(Vec3{0.0f, 0.0f, 0.0f}, referenceHeightPixels, radiansFromDegrees(referenceFovDegrees), LevelOfDetailSettings{});
-    return distance * view.pixelError / view.pixelsPerMetre;
+    return forestGroundCells(GroundCellOptions{.cellMetres = settings.cellMetres,
+                                               .reachMetres = settings.reachMetres,
+                                               .leastPaint = settings.leastPaint,
+                                               .densitySteps = settings.densitySteps,
+                                               .variants = settings.variants,
+                                               .layer = forestGrassLayer,
+                                               .seed = grassCellSeed},
+                             jobs);
 }
