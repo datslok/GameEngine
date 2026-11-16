@@ -19,5 +19,8 @@ void main() {
     } else if (function == GPU_TEST_TERRAIN_BILINEAR) {
         vec4 b = testInput(1);
         testOutput(0, vec4(terrainBilinear(a.x, a.y, a.z, a.w, b.x, b.y)));
+    } else if (function == GPU_TEST_TERRAIN_TRIANGLE) {
+        vec4 b = testInput(1);
+        testOutput(0, vec4(terrainTriangleHeight(a.x, a.y, a.z, a.w, b.x, b.y)));
     }
 }

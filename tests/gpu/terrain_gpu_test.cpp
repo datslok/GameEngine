@@ -69,9 +69,33 @@ namespace {
     }
 }
 
+namespace {
+    // The same cases for the drawn square's triangles, places on both sides of the diagonal.
+    void checkTriangle(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{53};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            inputs.push_back(gpuVec4(random.between(-50.0f, 300.0f), random.between(-50.0f, 300.0f), random.between(-50.0f, 300.0f),
+                                     random.between(-50.0f, 300.0f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TERRAIN_TRIANGLE, inputs, 2, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4& heights = inputs[2 * i];
+            const GpuVec4& place = inputs[2 * i + 1];
+            report.check("terrainTriangleHeight", arithmeticTolerance,
+                         terrainTriangleHeight(heights[0], heights[1], heights[2], heights[3], place[0], place[1]), outputs[i][0]);
+        }
+    }
+}
+
 void gpuTestTerrain(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("terrain.glsl");
     checkMorph(runner, report);
     checkMorphGrid(runner, report);
     checkBilinear(runner, report);
+    checkTriangle(runner, report);
 }

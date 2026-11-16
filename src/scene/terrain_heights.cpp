@@ -38,8 +38,11 @@ namespace {
         return x >= grid.corner.x && x <= grid.corner.x + extent && z >= grid.corner.y && z <= grid.corner.y + extent;
     }
 
-    // Bilinear between the four points round a place, clamped onto the grid.
-    float sampleGrid(const TerrainHeightGrid& grid, float x, float z) {
+    // The four points round a place, clamped onto the grid, interpolated by between (terrainBilinear or
+    // terrainTriangleHeight).
+    using Between = float (*)(float, float, float, float, float, float);
+
+    float sampleGrid(const TerrainHeightGrid& grid, float x, float z, Between between) {
         const float last = static_cast<float>(grid.size - 1);
         const float column = std::clamp((x - grid.corner.x) / grid.spacing, 0.0f, last);
         const float row = std::clamp((z - grid.corner.y) / grid.spacing, 0.0f, last);
@@ -48,22 +51,39 @@ namespace {
         const float across = column - static_cast<float>(left);
         const float down = row - static_cast<float>(top);
         const std::size_t first = static_cast<std::size_t>(top) * grid.size + left;
-        return terrainBilinear(grid.heights[first], grid.heights[first + 1], grid.heights[first + grid.size], grid.heights[first + grid.size + 1], across, down);
+        return between(grid.heights[first], grid.heights[first + 1], grid.heights[first + grid.size], grid.heights[first + grid.size + 1], across, down);
+    }
+
+    // The finest grid holding a place read by between there; past every grid, the coarsest's nearest edge.
+    float sampleHeights(const TerrainHeights& heights, float x, float z, Between between) {
+        if (heights.grids.empty()) {
+            return 0.0f;
+        }
+
+        for (const TerrainHeightGrid& grid : heights.grids) {
+            if (holds(grid, x, z)) {
+                return sampleGrid(grid, x, z, between);
+            }
+        }
+
+        return sampleGrid(heights.grids.back(), x, z, between);
     }
 }
 
 float terrainHeight(const TerrainHeights& heights, float x, float z) {
-    if (heights.grids.empty()) {
-        return 0.0f;
+    return sampleHeights(heights, x, z, terrainBilinear);
+}
+
+float terrainTriangleHeight(float nearLeft, float nearRight, float farLeft, float farRight, float across, float down) {
+    if (across + down <= 1.0f) {
+        return nearLeft + (nearRight - nearLeft) * across + (farLeft - nearLeft) * down;
     }
 
-    for (const TerrainHeightGrid& grid : heights.grids) {
-        if (holds(grid, x, z)) {
-            return sampleGrid(grid, x, z);
-        }
-    }
+    return farRight + (farLeft - farRight) * (1.0f - across) + (nearRight - farRight) * (1.0f - down);
+}
 
-    return sampleGrid(heights.grids.back(), x, z);
+float terrainSurfaceHeight(const TerrainHeights& heights, float x, float z) {
+    return sampleHeights(heights, x, z, terrainTriangleHeight);
 }
 
 Vec3 terrainNormal(const TerrainHeights& heights, float x, float z, float step) {

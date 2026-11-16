@@ -249,6 +249,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildUnderstorey(world, assets);
     buildPalms(world, assets);
     buildGrass(world, assets);
+    buildFloorCover(world, assets);
 
     // The planet beyond the land is forest too, so the ground seen past the edge, and its light scattered back up into
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
@@ -689,63 +690,96 @@ void ForestGame::buildPalms(World& world, AssetManager& assets) {
     }
 }
 
-/*
-* Every variant at every density step grown on every core (a sparser step the first of the same blades), then made
-* drawable: each with its half and quarter levels and nothing past the farthest. Each cell then draws its patch, turned
-* its quarter turns about its middle, lifted onto the land by the vertex shaders; casting no shadow (contact shadows
-* and ambient occlusion ground it), still.
-*/
+namespace {
+    // How far a kind of ground cover's levels reach (metres): half, quarter, nothing.
+    struct CoverDistances {
+        float half = 0.0f;
+        float quarter = 0.0f;
+        float farthest = 0.0f;
+    };
+
+    /*
+    * A kind of ground cover placed (docs/GROUNDCOVER.md): every variant at every density step grown on every core
+    * (grow(variant seed, density); a sparser step the first of the same pieces), then made drawable, each with its half
+    * and quarter levels and nothing past the farthest. Each cell then draws its patch, turned its quarter turns about
+    * its middle, lifted onto the land by the vertex shaders; casting no shadow (contact shadows and ambient occlusion
+    * ground it), still. The patch type has mesh, level and farLevel.
+    */
+    template <typename Patch, typename Grow>
+    void placeGroundCover(World& world, AssetManager& assets, JobSystem& jobs, const std::vector<GroundCell>& cells, int variantCount,
+                          int stepCount, std::uint32_t seed, Grow grow, const Material& material, const CoverDistances& distances,
+                          std::vector<Entity>& entities) {
+        if (cells.empty()) {
+            return;
+        }
+
+        const int variants = std::max(variantCount, 1);
+        const int steps = std::max(stepCount, 1);
+        std::vector<Patch> patches(static_cast<std::size_t>(variants * steps));
+        jobs.parallelFor(patches.size(), 1, [&](std::size_t index) {
+            const int variant = static_cast<int>(index) / steps;
+            const int step = static_cast<int>(index) % steps + 1;
+            patches[index] = grow(forestShapeSeed(seed, static_cast<std::uint32_t>(variant) + 1), static_cast<float>(step) / static_cast<float>(steps));
+        });
+
+        const float halfError = groundCoverLevelError(distances.half);
+        const float quarterError = std::max(groundCoverLevelError(distances.quarter), halfError);
+        const float farError = std::max(groundCoverLevelError(distances.farthest), quarterError);
+        std::vector<MeshHandle> meshes;
+
+        for (Patch& patch : patches) {
+            if (patch.mesh.vertices.empty()) {
+                meshes.push_back(MeshHandle{});
+                continue;
+            }
+
+            meshes.push_back(assets.addDrawnMesh(std::move(patch.mesh)));
+            const MeshHandle level = patch.level.vertices.empty() ? MeshHandle{} : assets.addDrawnMesh(std::move(patch.level));
+            const MeshHandle farLevel = patch.farLevel.vertices.empty() ? MeshHandle{} : assets.addDrawnMesh(std::move(patch.farLevel));
+            assets.setMeshLevels(meshes.back(), {MeshLevel{level, halfError}, MeshLevel{farLevel, quarterError}, MeshLevel{MeshHandle{}, farError}});
+        }
+
+        entities.reserve(entities.size() + cells.size());
+
+        for (const GroundCell& cell : cells) {
+            const MeshHandle mesh = meshes[static_cast<std::size_t>(cell.variant * steps + cell.step - 1)];
+
+            if (!mesh.isValid()) {
+                continue;
+            }
+
+            const Transform pose{.position = Vec3{cell.centre.x, 0.0f, cell.centre.y},
+                                 .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.25f * fullTurnRadians * static_cast<float>(cell.quarterTurns))};
+            entities.push_back(addShape(world, mesh, material, pose));
+            ModelRenderer& renderer = world.get<ModelRenderer>(entities.back());
+            renderer.castsShadows = false;
+            renderer.followsGround = true;
+        }
+    }
+}
+
 void ForestGame::buildGrass(World& world, AssetManager& assets) {
-    grassCells = forestGrassCells(grassSettings, getJobs());
-
-    if (grassCells.empty()) {
-        return;
-    }
-
     constexpr std::uint32_t grassPatchSeed = 0x50415443u;
-    const int variants = std::max(grassSettings.variants, 1);
-    const int steps = std::max(grassSettings.densitySteps, 1);
-    std::vector<GrassPatch> patches(static_cast<std::size_t>(variants * steps));
-    getJobs().parallelFor(patches.size(), 1, [&](std::size_t index) {
-        const int variant = static_cast<int>(index) / steps;
-        const int step = static_cast<int>(index) % steps + 1;
-        patches[index] = growGrassPatch(grassSettings, static_cast<float>(step) / static_cast<float>(steps),
-                                        forestShapeSeed(grassPatchSeed, static_cast<std::uint32_t>(variant) + 1));
-    });
+    grassCells = forestGrassCells(grassSettings, getJobs());
+    placeGroundCover<GrassPatch>(
+        world, assets, getJobs(), grassCells, grassSettings.variants, grassSettings.densitySteps, grassPatchSeed,
+        [&](std::uint32_t seed, float density) {
+            return growGrassPatch(grassSettings, density, seed);
+        },
+        withLeafLight(forestGrassMaterial(assets, assetFolder), leafLightSettings),
+        CoverDistances{grassSettings.halfDistance, grassSettings.quarterDistance, grassSettings.farthest}, grassEntities);
+}
 
-    const Material material = withLeafLight(forestGrassMaterial(assets, assetFolder), leafLightSettings);
-    const float halfError = grassLevelError(grassSettings.halfDistance);
-    const float quarterError = std::max(grassLevelError(grassSettings.quarterDistance), halfError);
-    const float farError = std::max(grassLevelError(grassSettings.farthest), quarterError);
-    std::vector<MeshHandle> meshes;
-
-    for (GrassPatch& patch : patches) {
-        if (patch.mesh.vertices.empty()) {
-            meshes.push_back(MeshHandle{});
-            continue;
-        }
-
-        meshes.push_back(assets.addDrawnMesh(std::move(patch.mesh)));
-        assets.setMeshLevels(meshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(patch.level)), halfError},
-                                             MeshLevel{assets.addDrawnMesh(std::move(patch.farLevel)), quarterError}, MeshLevel{MeshHandle{}, farError}});
-    }
-
-    grassEntities.reserve(grassCells.size());
-
-    for (const GrassCell& cell : grassCells) {
-        const MeshHandle mesh = meshes[static_cast<std::size_t>(cell.variant * steps + cell.step - 1)];
-
-        if (!mesh.isValid()) {
-            continue;
-        }
-
-        const Transform pose{.position = Vec3{cell.centre.x, 0.0f, cell.centre.y},
-                             .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.25f * fullTurnRadians * static_cast<float>(cell.quarterTurns))};
-        grassEntities.push_back(addShape(world, mesh, material, pose));
-        ModelRenderer& renderer = world.get<ModelRenderer>(grassEntities.back());
-        renderer.castsShadows = false;
-        renderer.followsGround = true;
-    }
+void ForestGame::buildFloorCover(World& world, AssetManager& assets) {
+    constexpr std::uint32_t floorPatchSeed = 0x464c5054u;
+    floorCells = forestFloorCells(floorSettings, getJobs());
+    placeGroundCover<FloorPatch>(
+        world, assets, getJobs(), floorCells, floorSettings.variants, floorSettings.densitySteps, floorPatchSeed,
+        [&](std::uint32_t seed, float density) {
+            return growFloorPatch(floorSettings, density, seed);
+        },
+        withLeafLight(forestFloorCoverMaterial(assets, assetFolder), leafLightSettings),
+        CoverDistances{floorSettings.halfDistance, floorSettings.quarterDistance, floorSettings.farthest}, floorEntities);
 }
 
 namespace {
@@ -1169,6 +1203,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Grass", [&] {
         visit(grassSettings, visitor);
     });
+    visitor.group("Forest floor", [&] {
+        visit(floorSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -1484,4 +1521,16 @@ const std::vector<GrassCell>& ForestGame::getGrassCells() const {
 
 const std::vector<Entity>& ForestGame::getGrass() const {
     return grassEntities;
+}
+
+ForestFloorSettings& ForestGame::getFloorSettings() {
+    return floorSettings;
+}
+
+const std::vector<GroundCell>& ForestGame::getFloorCells() const {
+    return floorCells;
+}
+
+const std::vector<Entity>& ForestGame::getFloorCover() const {
+    return floorEntities;
 }

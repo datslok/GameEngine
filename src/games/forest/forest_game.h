@@ -10,6 +10,7 @@
 #include "games/forest/island_hangings.h"
 #include "games/forest/climbers.h"
 #include "games/forest/epiphytes.h"
+#include "games/forest/floor_cover.h"
 #include "games/forest/grass.h"
 #include "games/forest/lianas.h"
 #include "games/forest/palms.h"
@@ -213,6 +214,10 @@ public:
     ForestGrassSettings& getGrassSettings();
     const std::vector<GrassCell>& getGrassCells() const;
     const std::vector<Entity>& getGrass() const;
+    // The forest floor's cover's settings, its cells and their entities (a patch each, following the ground).
+    ForestFloorSettings& getFloorSettings();
+    const std::vector<GroundCell>& getFloorCells() const;
+    const std::vector<Entity>& getFloorCover() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -260,6 +265,10 @@ private:
     // The grass in the open (docs/GROUNDCOVER.md): a few patches grown on every core, a cell of land each.
     void buildGrass(World& world, AssetManager& assets);
 
+    // The forest floor's cover under the canopy (docs/GROUNDCOVER.md): fallen leaves, seedlings and small ferns, as the
+    // grass is, a cell of the leaf litter's land each.
+    void buildFloorCover(World& world, AssetManager& assets);
+
     // The lianas hanging from the canopy and emergent trees' crowns (docs/VINES.md, stage 1), a chunk of ground a mesh.
     void buildLianas(World& world, AssetManager& assets);
 
@@ -292,6 +301,7 @@ private:
     ForestClimberSettings climberSettings;
     ForestEpiphyteSettings epiphyteSettings;
     ForestGrassSettings grassSettings;
+    ForestFloorSettings floorSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
 
@@ -323,6 +333,8 @@ private:
     std::vector<Entity> epiphyteEntities;
     std::vector<GrassCell> grassCells;
     std::vector<Entity> grassEntities;
+    std::vector<GroundCell> floorCells;
+    std::vector<Entity> floorEntities;
     std::vector<Vec3> epiphyteViews;   // each tree carrying rosettes' first rosette, in the world
     std::vector<Vec3> epiphyteOutward; // the level way from its trunk to it (forest-epiphyte looks from there)
     std::vector<Entity> trees;

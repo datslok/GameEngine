@@ -9,6 +9,7 @@
 #include "scene/indexed_mesh.h"
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 /*
@@ -145,6 +146,28 @@ void appendStrapLeaf(IndexedMesh& mesh, const Vec3& base, const Vec3& direction,
 * upright plane of its azimuth.
 */
 std::vector<Vec3> frondSpine(const Vec3& base, float azimuth, float elevation, float length, float droop, int count);
+
+/*
+* A feather-shaped frond (a palm's, a fern's): its rachis from base at azimuth and elevation, length long, turning down
+* by droop (frondSpine), a tapering tube of rachisSides; its leaflets in pairs along its leafy part (past
+* palmPetioleShare), each a folded strap leaf (appendStrapLeaf) of leafletSegments, palmLeafletShare of the frond at
+* their longest (palmLeafletLength along it), leafletWidthShare of their length across, angled forward and lifted out
+* of the frond's plane, each pair's angle and length jittered by random's draws (two a leaflet, in order). The tube
+* reads the texture's midrib column (u 0.5).
+*/
+struct PinnateFrond {
+    Vec3 base;
+    float azimuth = 0.0f;
+    float elevation = 0.0f;
+    float length = 1.0f;
+    float droop = 0.0f;
+    int pairs = 30;
+    float leafletWidthShare = 0.12f;
+    int rachisSides = 4;
+    int leafletSegments = 4;
+};
+
+void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std::function<float()>& random);
 
 /*
 * One palm in its own frame, footed at the origin and up +y, at the shape's size before it is fitted to its height: its

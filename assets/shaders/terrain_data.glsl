@@ -56,6 +56,29 @@ float terrainSampleGrid(TerrainGrid grid, vec2 place) {
                            fraction.x, fraction.y);
 }
 
+// The drawn land's height in a grid at a place: its square's triangle there, clamped onto the grid.
+float terrainSampleGridSurface(TerrainGrid grid, vec2 place) {
+    float last = float(grid.size - 1u);
+    vec2 cell = clamp((place - grid.corner) / grid.spacing, vec2(0.0), vec2(last));
+    uvec2 first = min(uvec2(cell), uvec2(grid.size - 2u));
+    vec2 fraction = cell - vec2(first);
+    uint index = grid.offset + first.y * grid.size + first.x;
+    return terrainTriangleHeight(terrainHeights[index], terrainHeights[index + 1u], terrainHeights[index + grid.size],
+                                 terrainHeights[index + grid.size + 1u], fraction.x, fraction.y);
+}
+
+// The drawn land's height at a place (terrainSurfaceHeight): as the finest patches draw it, their grid on the finest
+// grid's points, each square two flat triangles; the finest grid holding it, else the coarsest's nearest edge.
+float terrainSurfaceHeight(vec2 place) {
+    for (uint grid = 0u; grid < terrainGridCount; ++grid) {
+        if (terrainGridHolds(terrainGrids[grid], place)) {
+            return terrainSampleGridSurface(terrainGrids[grid], place);
+        }
+    }
+
+    return terrainGridCount > 0u ? terrainSampleGridSurface(terrainGrids[terrainGridCount - 1u], place) : 0.0;
+}
+
 // The land's height at a place: the finest grid holding it, else the coarsest's nearest edge.
 float terrainHeight(vec2 place) {
     for (uint grid = 0u; grid < terrainGridCount; ++grid) {
@@ -67,10 +90,11 @@ float terrainHeight(vec2 place) {
     return terrainGridCount > 0u ? terrainSampleGrid(terrainGrids[terrainGridCount - 1u], place) : 0.0;
 }
 
-// How far a vertex of an instance of a kind is lifted at a place in the world: the land's height there for a mesh
+// How far a vertex of an instance of a kind is lifted at a place in the world: the drawn land's height there for a mesh
 // following the ground (INSTANCE_KIND_FOLLOWS_GROUND, scene/ground_follow.h, liftedOntoGround), nothing for any other.
+// The drawn height, not the smooth one, which lies centimetres off the triangles and buried fallen leaves.
 float groundLift(uint kind, vec3 world) {
-    return kind == uint(INSTANCE_KIND_FOLLOWS_GROUND) ? terrainHeight(world.xz) : 0.0;
+    return kind == uint(INSTANCE_KIND_FOLLOWS_GROUND) ? terrainSurfaceHeight(world.xz) : 0.0;
 }
 
 // The land's unit normal from its slope over step metres either way.

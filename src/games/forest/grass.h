@@ -4,6 +4,7 @@
 #include "core/job_system.h"
 #include "core/pixel.h"
 #include "core/settings_visitor.h"
+#include "games/forest/ground_cells.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
@@ -108,22 +109,7 @@ int grassDensityStep(const ForestGrassSettings& settings, float paint);
 */
 ImageData grassBladeImage(int texels, Pixel colour);
 
-// Where the forest's grass grows: each cell's middle on the ground's plane, its density step and its patch variant and
-// turn (a quarter turn each).
-struct GrassCell {
-    Vec2 centre;
-    int step = 0;
-    int variant = 0;
-    int quarterTurns = 0;
-};
-
-/*
-* The forest's cells: a grid of cellMetres squares aligned on the origin, those within reachMetres of the path, each
-* with its mean grass paint (forestGroundPaint at 4 x 4 points over it) stepped (grassDensityStep); cells stepping to 0
-* left out. Its variant and turn from the cell's own place. A row of cells a job; the same every run.
-*/
+// Where the forest's grass grows: the cells (forestGroundCells) of the grass paint, with the settings' cell, reach,
+// least paint, steps and variants.
+using GrassCell = GroundCell;
 std::vector<GrassCell> forestGrassCells(const ForestGrassSettings& settings, JobSystem& jobs);
-
-// A level's error for the distance it should start at (metres): what covers the levels' default pixel error there at a
-// 1080-pixel, 70 degree view.
-float grassLevelError(float distance);

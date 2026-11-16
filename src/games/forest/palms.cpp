@@ -319,39 +319,50 @@ IndexedMesh growPalm(const PalmShape& shape, const PalmDetail& detail) {
         const float length = shape.frondLength * (1.0f + spread(frondLengthJitter));
         const Vec3 level{std::cos(azimuth), 0.0f, -std::sin(azimuth)};
         const Vec3 base = Vec3{0.0f, shape.stemHeight - oldestFrondDrop * length * age, 0.0f} + level * (0.5f * shape.stemRadius);
-
-        HangingStrand rachis;
-        rachis.points = frondSpine(base, azimuth, elevation, length, droop, frondPoints);
-
-        for (int point = 0; point <= frondPoints; ++point) {
-            const float along = static_cast<float>(point) / static_cast<float>(frondPoints);
-            rachis.radii.push_back(rachisRadiusShare * length * (1.0f - palmRachisTaper * along));
-        }
-
-        appendStalk(mesh, rachis, detail.rachisSides);
-
-        // The leaflets in pairs along the leafy part, each side's leaning forward and lifted out of the frond's plane.
-        const float longest = palmLeafletShare * length;
-
-        for (int pair = 0; pair < pairs; ++pair) {
-            const float leafy = (static_cast<float>(pair) + 0.5f) / static_cast<float>(pairs);
-            const SpinePoint at = spineAt(rachis.points, palmPetioleShare + (1.0f - palmPetioleShare) * leafy);
-            Vec3 side = at.direction.cross(up);
-            side = side.lengthSquared() > 1e-8f ? side.normalized() : level.cross(up).normalized();
-            const Vec3 frondUp = side.cross(at.direction).normalized();
-
-            for (const float hand : {-1.0f, 1.0f}) {
-                const float angle = radiansFromDegrees(leafletAngleDegrees + spread(leafletAngleJitterDegrees));
-                const float lift = radiansFromDegrees(leafletLiftDegrees);
-                const Vec3 out = side * (hand * std::cos(lift)) + frondUp * std::sin(lift);
-                const Vec3 direction = (at.direction * std::cos(angle) + out * std::sin(angle)).normalized();
-                const float leafletLength = longest * palmLeafletLength(leafy) * (1.0f + spread(leafletLengthJitter));
-                appendStrapLeaf(mesh, at.point, direction, frondUp, leafletLength, widthShare * leafletLength, detail.leafletSegments, leafletFold());
-            }
-        }
+        appendPinnateFrond(mesh,
+                           PinnateFrond{.base = base, .azimuth = azimuth, .elevation = elevation, .length = length, .droop = droop, .pairs = pairs,
+                                        .leafletWidthShare = widthShare, .rachisSides = detail.rachisSides, .leafletSegments = detail.leafletSegments},
+                           random);
     }
 
     return mesh;
+}
+
+void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std::function<float()>& random) {
+    const auto spread = [&](float range) {
+        return range * (2.0f * random() - 1.0f);
+    };
+    const Vec3 level{std::cos(frond.azimuth), 0.0f, -std::sin(frond.azimuth)};
+    HangingStrand rachis;
+    rachis.points = frondSpine(frond.base, frond.azimuth, frond.elevation, frond.length, frond.droop, frondPoints);
+
+    for (int point = 0; point <= frondPoints; ++point) {
+        const float along = static_cast<float>(point) / static_cast<float>(frondPoints);
+        rachis.radii.push_back(rachisRadiusShare * frond.length * (1.0f - palmRachisTaper * along));
+    }
+
+    appendStalk(mesh, rachis, frond.rachisSides);
+
+    // The leaflets in pairs along the leafy part, each side's leaning forward and lifted out of the frond's plane.
+    const float longest = palmLeafletShare * frond.length;
+
+    for (int pair = 0; pair < frond.pairs; ++pair) {
+        const float leafy = (static_cast<float>(pair) + 0.5f) / static_cast<float>(frond.pairs);
+        const SpinePoint at = spineAt(rachis.points, palmPetioleShare + (1.0f - palmPetioleShare) * leafy);
+        Vec3 side = at.direction.cross(up);
+        side = side.lengthSquared() > 1e-8f ? side.normalized() : level.cross(up).normalized();
+        const Vec3 frondUp = side.cross(at.direction).normalized();
+
+        for (const float hand : {-1.0f, 1.0f}) {
+            const float angle = radiansFromDegrees(leafletAngleDegrees + spread(leafletAngleJitterDegrees));
+            const float lift = radiansFromDegrees(leafletLiftDegrees);
+            const Vec3 out = side * (hand * std::cos(lift)) + frondUp * std::sin(lift);
+            const Vec3 direction = (at.direction * std::cos(angle) + out * std::sin(angle)).normalized();
+            const float leafletLength = longest * palmLeafletLength(leafy) * (1.0f + spread(leafletLengthJitter));
+            appendStrapLeaf(mesh, at.point, direction, frondUp, leafletLength, frond.leafletWidthShare * leafletLength, frond.leafletSegments,
+                            leafletFold());
+        }
+    }
 }
 
 PalmMeshes growPalmMeshes(const PalmShape& shape) {

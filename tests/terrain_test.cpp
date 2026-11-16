@@ -61,6 +61,43 @@ namespace {
     }
 
     /*
+    * The drawn surface: each grid square split into two flat triangles as the grid mesh splits it (the diagonal from
+    * its near right corner to its far left), so a height on it is the plane through that triangle's corners, not the
+    * bilinear one; on a grid point both are the grid's height, and the two triangles agree along their diagonal.
+    */
+    void testTheDrawnSurfaceIsTheGridsTriangles() {
+        const Mesh quad = terrainGridMesh(1);
+        assert(quad.triangles.size() == 2);
+        const float heights[2][2] = {{1.0f, 4.0f}, {2.0f, -3.0f}}; // [row][column]: near left, near right; far left, far right
+
+        for (const Triangle& triangle : quad.triangles) {
+            const std::size_t corners[3] = {triangle.first, triangle.second, triangle.third};
+            Vec3 points[3];
+
+            for (int corner = 0; corner < 3; ++corner) {
+                const Vec4& vertex = quad.vertices[corners[corner]];
+                points[corner] = Vec3{vertex.x, heights[static_cast<int>(vertex.z)][static_cast<int>(vertex.x)], vertex.z};
+            }
+
+            // The triangle's middle: its plane's height there is the corners' mean.
+            const float across = (points[0].x + points[1].x + points[2].x) / 3.0f;
+            const float down = (points[0].z + points[1].z + points[2].z) / 3.0f;
+            const float expected = (points[0].y + points[1].y + points[2].y) / 3.0f;
+            assert(near(terrainTriangleHeight(heights[0][0], heights[0][1], heights[1][0], heights[1][1], across, down), expected, 1e-5f));
+        }
+
+        // Along the diagonal both triangles agree; at the corners, the corners' heights.
+        assert(near(terrainTriangleHeight(1.0f, 4.0f, 2.0f, -3.0f, 0.3f, 0.7f), 1.0f + 0.3f * 3.0f + 0.7f * 1.0f, 1e-5f));
+        assert(terrainTriangleHeight(1.0f, 4.0f, 2.0f, -3.0f, 1.0f, 1.0f) == -3.0f);
+
+        // In a grid, the drawn surface reads the finest grid's triangles: on a plane it is the plane, at a point the grid's.
+        const std::shared_ptr<const TerrainHeights> tilted = twoGrids(plane);
+        assert(near(terrainSurfaceHeight(*tilted, 3.3f, -7.9f), plane(3.3f, -7.9f), 1e-4f));
+        const std::shared_ptr<const TerrainHeights> wavy = twoGrids(waves);
+        assert(terrainSurfaceHeight(*wavy, 5.0f, -3.0f) == terrainHeight(*wavy, 5.0f, -3.0f));
+    }
+
+    /*
     * CDLOD's morph (Strugar 2010): 0 before the morph's start, 1 from its end, linear between. A grid point at an odd
     * place slides towards its even neighbour below as the morph grows, reaching it at 1, so a patch fully morphed is the
     * next coarser level's grid exactly; even points stay.
@@ -303,6 +340,7 @@ namespace {
 
 void testTerrain() {
     testHeightsAreSampledFromTheFinestGrid();
+    testTheDrawnSurfaceIsTheGridsTriangles();
     testTheMorphSlidesOddPointsOntoEvenOnes();
     testTheSelectionCoversTheLandOnce();
     testNeighboursMeetWithoutCracks();

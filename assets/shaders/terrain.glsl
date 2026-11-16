@@ -23,4 +23,14 @@ float terrainBilinear(float nearLeft, float nearRight, float farLeft, float farR
     return upper + (lower - upper) * down;
 }
 
+// The height on the drawn grid square at a place (across and down in 0..1): the plane through the triangle holding it,
+// the square split as the grid mesh splits it, from the near right corner to the far left (terrainTriangleHeight).
+float terrainTriangleHeight(float nearLeft, float nearRight, float farLeft, float farRight, float across, float down) {
+    if (across + down <= 1.0) {
+        return nearLeft + (nearRight - nearLeft) * across + (farLeft - nearLeft) * down;
+    }
+
+    return farRight + (farLeft - farRight) * (1.0 - across) + (nearRight - farRight) * (1.0 - down);
+}
+
 #endif

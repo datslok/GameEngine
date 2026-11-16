@@ -3,6 +3,7 @@
 #include "assets/image_loader.h"
 #include "games/forest/climbers.h"
 #include "games/forest/epiphytes.h"
+#include "games/forest/floor_cover.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/grass.h"
 #include "games/forest/hanging_moss.h"
@@ -255,6 +256,26 @@ Material forestGrassMaterial(AssetManager& assets, const std::string& assetFolde
     material.roughness = forestGrassRoughness;
     material.metallic = 0.0f;
     material.texture = assets.addTexture(grassBladeImage(forestGrassBladeTexels, colour));
+    return material;
+}
+
+Material forestFloorCoverMaterial(AssetManager& assets, const std::string& assetFolder) {
+    const ForestGroundLayer& litterLayer = forestGroundLayers[forestLitterLayer];
+    const ForestTextureFiles litterFiles = findForestTextureFiles((std::filesystem::path{assetFolder} / litterLayer.folder).string());
+    const Pixel litter = litterFiles.colour.empty() ? litterLayer.standIn : meanColour(loadImage(litterFiles.colour), litterLayer.standIn);
+    const ForestTextureFiles leafFiles = findForestTextureFiles((std::filesystem::path{assetFolder} / forestTreeLeafFolder).string());
+    const Pixel leaf = !leafFiles.colour.empty() && !leafFiles.opacity.empty() ? meanColour(colourWithOpacity(leafFiles), forestLeafStandIn) : forestLeafStandIn;
+    const auto tinted = [](std::uint8_t value, std::uint8_t tint) {
+        return static_cast<std::uint8_t>(static_cast<int>(value) * static_cast<int>(tint) / 255);
+    };
+    const Pixel green{tinted(leaf.r, forestTreeLeafTint.r), tinted(leaf.g, forestTreeLeafTint.g), tinted(leaf.b, forestTreeLeafTint.b)};
+
+    Material material;
+    material.doubleSided = true;
+    material.backKeepsNormal = true;
+    material.roughness = forestFloorCoverRoughness;
+    material.metallic = 0.0f;
+    material.texture = assets.addTexture(floorCoverImage(forestFloorCoverTexels, litter, green));
     return material;
 }
 

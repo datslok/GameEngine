@@ -40,6 +40,10 @@ struct TestForest {
         game.getGrassSettings().variants = 1;
         game.getGrassSettings().densitySteps = 2;
         game.getGrassSettings().reachMetres = 40.0f;
+        game.getFloorSettings().leavesPerSquareMetre = 2.0f;
+        game.getFloorSettings().variants = 1;
+        game.getFloorSettings().densitySteps = 2;
+        game.getFloorSettings().reachMetres = 40.0f;
         game.useJobs(testJobs());
         game.onInit(world, assets);
     }

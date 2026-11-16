@@ -35,12 +35,17 @@ namespace {
         return heights;
     }
 
-    // A point lifted onto the land is raised by the land's height at its own place, as the vertex shaders raise it.
+    /*
+    * A point lifted onto the land is raised by the drawn land's height at its own place (its grid's triangles, not the
+    * smooth bilinear height, which on lumpy land lies centimetres off the triangles and buried fallen leaves), as the
+    * vertex shaders raise it.
+    */
     void testAPointIsLiftedByTheLandUnderIt() {
         const TerrainHeights heights = heightsOf(waves);
         const Vec3 lifted = liftedOntoGround(heights, Vec3{3.5f, 0.4f, -2.25f});
         assert(lifted.x == 3.5f && lifted.z == -2.25f);
-        assert(near(lifted.y, 0.4f + terrainHeight(heights, 3.5f, -2.25f), 1e-5f));
+        assert(near(lifted.y, 0.4f + terrainSurfaceHeight(heights, 3.5f, -2.25f), 1e-5f));
+        assert(std::abs(terrainSurfaceHeight(heights, 3.5f, -2.25f) - terrainHeight(heights, 3.5f, -2.25f)) > 1e-4f);
 
         // Without any land, nothing moves (the shaders' terrainHeight reads 0 with no grids).
         assert(liftedOntoGround(TerrainHeights{}, Vec3{1.0f, 2.0f, 3.0f}).y == 2.0f);
