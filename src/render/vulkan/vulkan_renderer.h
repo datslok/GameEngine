@@ -151,7 +151,8 @@ public:
     // built on the CPU (a cut-out's, keeping its coverage). Between frames only.
     // A deforming mesh (scene/deforming_mesh.h) gets a ring of buffers its shape is written into each frame
     // (FrameDescription::deformedMeshes); mesh is then its rest shape.
-    void uploadMesh(const IndexedMesh& mesh, bool deforming = false);
+    // Returns one past the mesh's first entry in the hanging vertices (IndexedMesh::hanging), 0 when it has none.
+    std::uint32_t uploadMesh(const IndexedMesh& mesh, bool deforming = false);
     void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips = {});
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
@@ -504,6 +505,14 @@ private:
     const TerrainHeights* uploadedTerrain = nullptr;
     std::uint64_t uploadedTerrainVersion = 0;
     void updateTerrainHeights(const FrameDescription& description);
+
+    // Every hanging mesh's vertices (render/gpu/wind.h, packHangingVertex), gathered as the meshes are uploaded and
+    // copied to the GPU before the next frame that finds them changed; a stand-in bound until there are any.
+    std::vector<std::array<std::uint32_t, 2>> hangingRecords;
+    bool hangingChanged = false;
+    VulkanBuffer hangingVertices;
+    VulkanBuffer noHangingVertices;
+    void updateHangingVertices();
 
     // This frame's camera in the atmosphere's frame: its distance from the planet's centre, km (0 without an atmosphere).
     float cameraAtmosphereRadius = 0.0f;

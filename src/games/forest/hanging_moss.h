@@ -35,7 +35,9 @@ ImageData mossStrandImage(int width, int height, Pixel colour, std::uint32_t see
 * about the vertical, each length long and mossClumpWidthShare of it wide, centred under top; the texture's top edge
 * (v 1) at the top. Tangent across (+u), bitangent up (+v).
 */
-void appendMossClump(IndexedMesh& mesh, const Vec3& top, float length, float turnRadians);
+// Each corner hangs (scene/wind.h) from a fixed anchor, its arm armAbove (what its top already hangs by: a root tip's) plus
+// its depth below the top.
+void appendMossClump(IndexedMesh& mesh, const Vec3& top, float length, float turnRadians, float armAbove = 0.0f);
 
 // A place moss can hang from: a point of a shape's surface and the level way out of the shape there.
 struct MossPlace {
@@ -73,4 +75,5 @@ IndexedMesh pillarMoss(const PillarPlacement& pillar, const SurfaceGrid& surface
 * An island's moss, in its own frame: a clump on tipShare of its roots' and vines' tips, and undersidePerTenMetres for
 * each 10 m of radius over its underside (chosen as the roots' anchors are, more often near the rim).
 */
-IndexedMesh islandMoss(const IslandPlacement& island, const SurfaceGrid& surface, const std::vector<Vec3>& tips, const ForestMossSettings& settings);
+IndexedMesh islandMoss(const IslandPlacement& island, const SurfaceGrid& surface, const std::vector<Vec3>& tips, const ForestMossSettings& settings,
+                        const std::vector<float>& tipArms = {});

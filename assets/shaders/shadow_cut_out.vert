@@ -32,7 +32,7 @@ void main() {
 
     // In the sun's nearest cascades, the wind's sway as the camera's views draw it; the rest keep still shadows.
     if (tileOptions.x != 0.0) {
-        world.xyz += windSwayOfVertex(instance.model, instance.sway, instance.handedness.y, position, world.xyz, cameraOrigin.xyz, false);
+        world.xyz += windSwayOfVertex(instance.model, instance.sway, instance.handedness.y, instance.hanging, gl_VertexIndex, position, world.xyz, cameraOrigin.xyz, false);
     }
 
     gl_Position = tileMatrix * world;

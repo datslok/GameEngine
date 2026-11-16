@@ -261,8 +261,9 @@ private:
 
     // One species' variants grown and its placed trees added, bark then leaves, with its leaf material; with climbers,
     // each variant's grown too (none for the mid layer), and likewise with epiphytes.
-    void plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                    std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
+    // Returns each variant's height (its box's top, in its mesh's units), which its sway bends against.
+    std::vector<float> plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
+                                  std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
 
     // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified,
     // placed many times.
@@ -319,6 +320,12 @@ private:
     ForestSwaySettings swaySettings;
     std::optional<ForestSwaySettings> appliedSwaySettings;
     std::vector<ForestSwayer> swayers;
+
+    // The canopy and emergent trees' variants' heights (plantTrees), and the anchors the lianas hang from in their crowns
+    // (scene/wind.h), on the air entity, their bend the trees' (applySway).
+    std::vector<float> canopyHeights;
+    std::vector<float> emergentHeights;
+    std::vector<WindAnchor> lianaAnchors;
     ForestFloorSettings floorSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;

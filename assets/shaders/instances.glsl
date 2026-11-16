@@ -10,6 +10,7 @@ struct InstanceData {
     vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1
     uvec4 material;    // x: the material's number in the material buffer, y: the mesh's (for ray hits)
     vec4 sway;         // how it sways in the wind (render/gpu/wind.h, packSway): category (-1 still), height, bend, flutter
+    uvec4 hanging;     // x: one past its mesh's first hanging vertex (0 none), y: its swing's bits
 };
 
 // Every object in the frame: instance i is the frame's draw i.

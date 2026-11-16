@@ -98,6 +98,11 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             frame.wind = wind;
         }
     });
+    world.each<WindAnchors>([&](Entity, WindAnchors& anchors) {
+        if (!frame.windAnchors) {
+            frame.windAnchors = anchors.anchors;
+        }
+    });
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();
 
     if (renderers == nullptr) {

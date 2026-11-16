@@ -47,7 +47,7 @@ void main() {
     relativePosition.y += groundLift(kind, relativePosition + cameraOrigin.xyz);
     float scale = instances[instance].handedness.y;
     vec4 sway = instances[instance].sway;
-    relativePosition += windSwayOfVertex(instances[instance].model, sway, scale, position, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    relativePosition += windSwayOfVertex(instances[instance].model, sway, scale, instances[instance].hanging, gl_VertexIndex, position, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
 
     // Last frame's sway from last frame's springs and time (the same fade: it changes too slowly to show).
@@ -57,7 +57,7 @@ void main() {
     currentClip = view.current * vec4(relativePosition, 1.0);
     vec3 previousRelative = (before * vec4(previousPosition, 1.0)).xyz;
     previousRelative.y += groundLift(kind, previousRelative + cameraOrigin.xyz);
-    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, previousPosition, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
+    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, instances[instance].hanging, gl_VertexIndex, previousPosition, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
     previousClip = view.previous * vec4(previousRelative, 1.0);
     textureUv = uv;
     materialIndex = instances[instance].material.x;

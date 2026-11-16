@@ -33,6 +33,10 @@
 // Swaying (render/gpu/wind.h, windSwayOffset). A sway's category for things that stand still.
 #define WIND_CATEGORY_STILL -1
 
+// A hanging vertex's anchor codes (scene/wind.h): one that never moves, and its own object's sway at the vertex.
+#define WIND_ANCHOR_FIXED 65535
+#define WIND_ANCHOR_OWN 65534
+
 // The most lean (radians) a soft limit lets a spring give, however hard it blows.
 #define WIND_MOST_LEAN 0.5
 

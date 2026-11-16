@@ -33,6 +33,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <tuple>
@@ -791,6 +792,7 @@ void VulkanRenderer::createFixedTextures() {
     noProbeStates = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noProbeCascades = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeCascade), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noTerrainHeights = VulkanBuffer{device.getAllocator(), sizeof(GpuTerrainHeightsHeader), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    noHangingVertices = VulkanBuffer{device.getAllocator(), sizeof(std::array<std::uint32_t, 2>), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
 
 /*
@@ -2228,6 +2230,16 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     updateTerrainHeights(description);
     buffers.wind.write(&frameWind, sizeof(frameWind));
 
+    // The anchors hanging things hang from (at least one record, so the buffer is never empty), and their vertices.
+    std::vector<GpuWindAnchor> anchors(description.windAnchors ? std::max<std::size_t>(description.windAnchors->size(), 1) : 1);
+
+    if (description.windAnchors) {
+        std::transform(description.windAnchors->begin(), description.windAnchors->end(), anchors.begin(), packWindAnchor);
+    }
+
+    buffers.windAnchors.write(anchors);
+    updateHangingVertices();
+
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         SampledImage{shadowAtlas.getView(), shadowDepthSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -2256,6 +2268,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.probeCascades = !probes.empty() ? ddgi->describeProbeCascades(frame.frameIndex) : VkDescriptorBufferInfo{noProbeCascades.get(), 0, VK_WHOLE_SIZE};
     views.skyLight = description.lighting.atmosphere ? atmosphere->describeSkyLight() : buffers.skyLight.describe();
     views.terrainHeights = VkDescriptorBufferInfo{uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get(), 0, VK_WHOLE_SIZE};
+    views.hangingVertices = VkDescriptorBufferInfo{hangingRecords.empty() ? noHangingVertices.get() : hangingVertices.get(), 0, VK_WHOLE_SIZE};
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
 
@@ -3397,9 +3410,13 @@ SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
 // Uploads wait for the GPU with their own command buffer, so they must happen between frames. A texture takes its slot
 // in the bindless array at once (slots in-flight frames do not read may change while they run).
 // With ray tracing, each mesh also gets its acceleration structure, numbered like the mesh.
-void VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
+std::uint32_t VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
     if (recording) {
         throw std::logic_error("Upload meshes before beginning a frame");
+    }
+
+    if (!mesh.hanging.empty() && mesh.hanging.size() != mesh.vertices.size()) {
+        throw std::invalid_argument("A hanging mesh needs one hanging entry a vertex");
     }
 
     meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh, deforming));
@@ -3407,6 +3424,39 @@ void VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
     if (rayTracing) {
         rayTracing->addMesh(uploads, *meshes.back());
     }
+
+    if (mesh.hanging.empty()) {
+        return 0;
+    }
+
+    // Its entries follow every earlier hanging mesh's; copied to the GPU once before the next frame.
+    const std::uint32_t entry = static_cast<std::uint32_t>(hangingRecords.size()) + 1;
+    std::transform(mesh.hanging.begin(), mesh.hanging.end(), std::back_inserter(hangingRecords), packHangingVertex);
+    hangingChanged = true;
+    return entry;
+}
+
+/*
+* The hanging vertices change only as meshes arrive (at start-up), so they live in GPU memory, copied there whole
+* through a staging buffer when new ones came; the frames in flight may still read the old buffer, so the GPU is waited
+* for first.
+*/
+void VulkanRenderer::updateHangingVertices() {
+    if (!hangingChanged) {
+        return;
+    }
+
+    const VkDeviceSize bytes = hangingRecords.size() * sizeof(hangingRecords.front());
+    device.waitIdle();
+    hangingVertices = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
+    VulkanBuffer staging{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
+    std::memcpy(staging.getMapped(), hangingRecords.data(), bytes);
+    staging.flush();
+    uploads.run([&](VkCommandBuffer commands) {
+        const VkBufferCopy copy{0, 0, bytes};
+        vkCmdCopyBuffer(commands, staging.get(), hangingVertices.get(), 1, &copy);
+    });
+    hangingChanged = false;
 }
 
 void VulkanRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips) {

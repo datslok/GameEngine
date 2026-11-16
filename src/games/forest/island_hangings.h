@@ -23,7 +23,23 @@ inline constexpr float hangingStepMetres = 1.0f;
 struct HangingStrand {
     std::vector<Vec3> points;
     std::vector<float> radii;
+
+    // How each point hangs in the wind (scene/wind.h; docs/WIND.md stage 3), or none: appendTube and appendLeafCards
+    // give their vertices the entry of the point they are built round.
+    std::vector<HangingVertex> hanging{};
 };
+
+// The strand's hanging entry a share of the way from point segment to the next: the first's anchors, the share along
+// and the arm blended. Null for a strand without entries.
+const HangingVertex* strandHangingAt(const HangingStrand& strand, std::size_t segment, float share, HangingVertex& blended);
+
+// The strand hung from one anchor (scene/wind.h: fixed on rock, or its own object's sway): each point's arm its length
+// along the strand from the first point, so it swings more the further down it hangs.
+void hangFrom(HangingStrand& strand, std::uint16_t anchor);
+
+// The strand hung between two anchors (a liana from crown to crown, or to the ground, fixed): each point's share along
+// its length, and its arm how far it sags below the straight line between its ends, so a loop swings most in its middle.
+void hangBetween(HangingStrand& strand, std::uint16_t first, std::uint16_t second);
 
 /*
 * A strand of length metres from anchor: it leaves leaning out (outward, made level), turns down within a few metres
@@ -155,6 +171,7 @@ struct IslandHangings {
     IndexedMesh leaves;
     std::vector<Vec3> anchors;
     std::vector<Vec3> tips;
+    std::vector<float> tipArms; // how far each tip hangs below its anchor along its strand (metres), for its swing
     int rootCount = 0;
     int vineCount = 0;
 };

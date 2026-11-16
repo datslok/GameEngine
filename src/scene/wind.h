@@ -1,6 +1,11 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "math/vec3.h"
+
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 /*
 * Component: the wind over the land, which the renderer's wind force field (render/gpu/wind.h) turns into the sway of
@@ -40,11 +45,52 @@ enum class SwayKind {
 * vertex at height h leans by bend times its spring's lean (radians) times h^2 / height, keeping its distance from the
 * foot (a cantilever's shape), and its branches bob more the further from the trunk. A tree's climbers and epiphytes
 * take the tree's height, so they stay on it. flutter is how many metres its leaves shiver per radian of lean, more
-* towards the top.
+* towards the top. swing is how far what hangs from it (its mesh's hanging vertices, below) swings per radian of the
+* hanging spring's lean and metre of its arm.
 */
 struct WindSway {
     SwayKind kind = SwayKind::Still;
     float height = 1.0f;
     float bend = 1.0f;
     float flutter = 0.0f;
+    float swing = 0.0f;
+};
+
+// A hanging vertex's anchor that never moves (rock, the ground), and one that moves as its own object sways there (a
+// root hanging inside its tree's frame).
+inline constexpr std::uint16_t windAnchorFixed = 0xFFFF;
+inline constexpr std::uint16_t windAnchorOwn = 0xFFFE;
+
+/*
+* A vertex of something hanging (IndexedMesh::hanging, docs/WIND.md stage 3): the two anchors it hangs between (indices
+* into the frame's WindAnchors, or the codes above; the same twice for something hanging from one), its share of the
+* way from the first to the second (their motions blended by it), and its arm: how far it hangs below the line between
+* them, or below its one anchor (metres), which swings it on the hanging spring as a chain's links swing.
+*/
+struct HangingVertex {
+    std::uint16_t first = windAnchorOwn;
+    std::uint16_t second = windAnchorOwn;
+    float along = 0.0f;
+    float arm = 0.0f;
+
+    bool operator==(const HangingVertex&) const = default;
+};
+
+/*
+* A point things hang from on a swaying tree (a liana's hold in a crown): the tree's foot and its height in its mesh's
+* units, its scale and bend (as its WindSway), and the point in the world. The shaders move it exactly as the tree's
+* own vertex there moves.
+*/
+struct WindAnchor {
+    Vec3 foot{};
+    float height = 1.0f;
+    float scale = 1.0f;
+    float bend = 1.0f;
+    Vec3 point{};
+};
+
+// Component: the anchors a game's hanging things hang from (FrameDescription::windAnchors; the first counts), shared so
+// each frame takes them without copying.
+struct WindAnchors {
+    std::shared_ptr<const std::vector<WindAnchor>> anchors;
 };

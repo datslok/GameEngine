@@ -46,9 +46,10 @@ struct GpuInstance {
     float handedness[4];    // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale), for lengths in model units
     std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: its kind (instance_shared.h)
     float sway[4];          // how it sways in the wind (render/gpu/wind.h, packSway): category (-1 still), height, bend, flutter
+    std::uint32_t hanging[4]; // x: one past its mesh's first hanging vertex (DrawItem::hangingEntry, 0 none), y: its swing's bits (WindSway::swing)
 };
 
-static_assert(sizeof(GpuInstance) == 176, "GpuInstance must match the shader's InstanceData struct");
+static_assert(sizeof(GpuInstance) == 192, "GpuInstance must match the shader's InstanceData struct");
 
 // A shadow tile's view, pushed before its draws: the view-projection (column-major, world space), the plane its draws
 // are clipped at (ShadowTile::clipPlane, world space; noClipPlane for all but an image light's), and where its light is

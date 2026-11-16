@@ -66,6 +66,7 @@ void testGrass();
 void testFloorCover();
 void testWind();
 void testWindSway();
+void testWindHanging();
 void testSimplifyMesh();
 void testLevelOfDetail();
 void testTerrain();
@@ -368,6 +369,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testFloorCover", testFloorCover);
     runTest("testWind", testWind);
     runTest("testWindSway", testWindSway);
+    runTest("testWindHanging", testWindHanging);
     runTest("testSimplifyMesh", testSimplifyMesh);
     runTest("testLevelOfDetail", testLevelOfDetail);
     runTest("testTerrain", testTerrain);

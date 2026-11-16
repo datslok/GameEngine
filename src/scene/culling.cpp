@@ -38,6 +38,12 @@ void attachFlatFaces(std::span<DrawItem> draws, const std::vector<std::vector<Fl
     }
 }
 
+void attachHangingEntries(std::span<DrawItem> draws, const std::vector<std::uint32_t>& entryByMesh) {
+    for (DrawItem& draw : draws) {
+        draw.hangingEntry = draw.mesh.isValid() && draw.mesh.index < entryByMesh.size() ? entryByMesh[draw.mesh.index] : 0u;
+    }
+}
+
 namespace {
     // Unknown sizes are always kept: drawing something unneeded is cheap, missing something is a bug.
     bool mightBeSeen(const DrawItem& draw, const Frustum& frustum) {

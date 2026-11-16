@@ -38,9 +38,9 @@ namespace {
     }
 
     // A clump of 30-100% of longest under top, turned at random.
-    void addClump(IndexedMesh& mesh, const Vec3& top, float longest, std::uint32_t seed, std::uint64_t index) {
+    void addClump(IndexedMesh& mesh, const Vec3& top, float longest, std::uint32_t seed, std::uint64_t index, float armAbove = 0.0f) {
         const float length = longest * (0.3f + 0.7f * forestUnitRandom(seed, 3 * index + 1));
-        appendMossClump(mesh, top, length, fullTurnRadians * forestUnitRandom(seed, 3 * index + 2));
+        appendMossClump(mesh, top, length, fullTurnRadians * forestUnitRandom(seed, 3 * index + 2), armAbove);
     }
 }
 
@@ -106,7 +106,7 @@ ImageData mossStrandImage(int width, int height, Pixel colour, std::uint32_t see
     return image;
 }
 
-void appendMossClump(IndexedMesh& mesh, const Vec3& top, float length, float turnRadians) {
+void appendMossClump(IndexedMesh& mesh, const Vec3& top, float length, float turnRadians, float armAbove) {
     const float halfWidth = 0.5f * mossClumpWidthShare * length;
     const Vec3 bottom = top - up * length;
 
@@ -121,6 +121,12 @@ void appendMossClump(IndexedMesh& mesh, const Vec3& top, float length, float tur
         mesh.vertices.push_back(MeshVertex{bottom + across * halfWidth, normal, Vec2{1.0f, 0.0f}, tangent});
         mesh.vertices.push_back(MeshVertex{top + across * halfWidth, normal, Vec2{1.0f, 1.0f}, tangent});
         mesh.vertices.push_back(MeshVertex{top - across * halfWidth, normal, Vec2{0.0f, 1.0f}, tangent});
+
+        for (std::uint32_t added = corner; added < corner + 4; ++added) {
+            const HangingVertex hanging{windAnchorFixed, windAnchorFixed, 0.0f, armAbove + (top.y - mesh.vertices[added].position.y)};
+            appendHanging(mesh, added, &hanging);
+        }
+
         mesh.indices.insert(mesh.indices.end(), {corner, corner + 1, corner + 2, corner, corner + 2, corner + 3});
     }
 }
@@ -174,13 +180,14 @@ IndexedMesh pillarMoss(const PillarPlacement& pillar, const SurfaceGrid& surface
     return moss;
 }
 
-IndexedMesh islandMoss(const IslandPlacement& island, const SurfaceGrid& surface, const std::vector<Vec3>& tips, const ForestMossSettings& settings) {
+IndexedMesh islandMoss(const IslandPlacement& island, const SurfaceGrid& surface, const std::vector<Vec3>& tips, const ForestMossSettings& settings,
+                        const std::vector<float>& tipArms) {
     IndexedMesh moss;
     const std::uint32_t seed = forestShapeSeed(island.seed, 30);
 
     for (std::size_t tip = 0; tip < tips.size(); ++tip) {
         if (forestUnitRandom(seed, 3 * tip) < settings.tipShare) {
-            addClump(moss, tips[tip], tipMossShare * settings.longestMoss, seed, tip);
+            addClump(moss, tips[tip], tipMossShare * settings.longestMoss, seed, tip, tip < tipArms.size() ? tipArms[tip] : 0.0f);
         }
     }
 

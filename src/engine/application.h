@@ -160,6 +160,7 @@ private:
 
     // Each mesh's flat faces, for planar reflections; none for a deforming mesh, which stays flat only by chance.
     std::vector<std::vector<FlatFace>> flatFacesByMesh;
+    std::vector<std::uint32_t> hangingEntryByMesh; // each mesh's DrawItem::hangingEntry, as the renderer gave it
 
     // What every model part was drawn with last frame, so each frame's draws say how they moved (for temporal anti-aliasing).
     MotionHistory motionHistory;

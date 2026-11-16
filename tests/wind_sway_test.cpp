@@ -306,7 +306,7 @@ namespace {
         }
 
         for (const Entity entity : forest.game.getLianas()) {
-            assert(forest.world.get<ModelRenderer>(entity).sway.kind == SwayKind::Still);
+            assert(forest.world.get<ModelRenderer>(entity).sway.kind == SwayKind::Hanging);
         }
 
         for (const Entity entity : forest.game.getClimbers()) {
@@ -333,7 +333,7 @@ namespace {
 
         FieldCounter counter;
         visit(forest.game.getSwaySettings(), counter);
-        assert(counter.fields == 8 && counter.live == 8);
+        assert(counter.fields == 10 && counter.live == 10);
     }
 }
 
