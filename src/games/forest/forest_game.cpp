@@ -1078,6 +1078,13 @@ void ForestGame::updateDaylight(World& world) {
         world.remove<Fog>(air);
     }
 
+    // The wind over the valley (scene/wind.h), on the air entity too.
+    if (world.has<Wind>(air)) {
+        world.get<Wind>(air) = windSettings;
+    } else {
+        world.add(air, windSettings);
+    }
+
     // The ground and the rock shapes are still: written, and announced, only when their settings changed.
     if (appliedGroundSettings != groundSettings) {
         Material& nearGround = world.get<ModelRenderer>(ground).parts.front().material;
@@ -1154,6 +1161,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Atmosphere", [&] {
         visit(atmosphereSettings, visitor);
+    });
+    visitor.group("Wind", [&] {
+        visit(windSettings, visitor);
     });
     visitor.group("Mist", [&] {
         visit(mistSettings, visitor);
@@ -1525,6 +1535,10 @@ const std::vector<Entity>& ForestGame::getGrass() const {
 
 ForestFloorSettings& ForestGame::getFloorSettings() {
     return floorSettings;
+}
+
+Wind& ForestGame::getWindSettings() {
+    return windSettings;
 }
 
 const std::vector<GroundCell>& ForestGame::getFloorCells() const {

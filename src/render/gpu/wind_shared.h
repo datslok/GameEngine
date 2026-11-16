@@ -1,0 +1,33 @@
+#ifndef WIND_SHARED_H
+#define WIND_SHARED_H
+
+// The wind force field's fixed sizes (render/gpu/wind.h, wind.glsl, wind_field.comp), shared by C++ and GLSL.
+
+// Cells a side of each cascade's window round the camera, and the cascades (near and far).
+#define WIND_CELLS 64
+#define WIND_CASCADES 2
+
+// The categories of springs (Horizon Zero Dawn's four): trees, plants, grass, and hanging things.
+#define WIND_CATEGORIES 4
+#define WIND_CATEGORY_TREES 0
+#define WIND_CATEGORY_PLANTS 1
+#define WIND_CATEGORY_GRASS 2
+#define WIND_CATEGORY_HANGING 3
+
+// The field pass's workgroup side (an 8 x 8 square of cells, one layer).
+#define WIND_GROUP_SIDE 8
+
+// The longest step the springs take in one frame (seconds): a frame slower than this moves them by this much, so a
+// hitch never throws them.
+#define WIND_LONGEST_STEP 0.1
+
+// The most radians of a spring's swing in one substep, and the most substeps a frame: semi-implicit Euler stays near
+// the true swing well inside its limit of 2.
+#define WIND_SUBSTEP_TURN 0.5
+#define WIND_MOST_SUBSTEPS 8
+
+// How much slower gusts change shape than they travel, and the sideways turbulence's lattice offset from the gusts'.
+#define WIND_GUST_EVOLUTION 0.25
+#define WIND_TURBULENCE_OFFSET 37.0
+
+#endif

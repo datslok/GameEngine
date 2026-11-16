@@ -65,7 +65,10 @@ enum SceneBinding : std::uint32_t {
     GlassDepthsBinding = 34,
     TerrainHeightsBinding = 35,
     TerrainPatchesBinding = 36,
-    SceneBindingCount = 37
+    WindFieldBinding = 37,
+    WindSpringsBinding = 38,
+    WindPreviousSpringsBinding = 39,
+    SceneBindingCount = 40
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -161,6 +164,9 @@ struct SceneBuffers {
 
     // The terrain's patches this frame (GpuTerrainPatch, render/gpu/terrain_gpu.h; one unused without a terrain).
     UploadArray terrainPatches;
+
+    // The wind force field's record (GpuWindField, render/gpu/wind.h; off without wind).
+    UploadArray wind;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light
@@ -182,6 +188,8 @@ struct SceneImages {
     SampledImage lightContactShadows; // the local lights' contact shadows, a channel each (a stand-in without)
     SampledImage glassTint;         // the coloured shadow maps' tint (a stand-in without; read only for tiles with glass)
     SampledImage glassDepths;       // and their nearest glass depths
+    SampledImage windSprings;       // the wind field's springs, this frame's and last frame's (render/gpu/wind.h)
+    SampledImage windPreviousSprings;
 };
 
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light

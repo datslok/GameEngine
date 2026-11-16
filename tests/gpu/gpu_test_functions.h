@@ -228,4 +228,10 @@
 #define GPU_TEST_IMPOSTOR_DECODE 1
 #define GPU_TEST_IMPOSTOR_FRAME_UV 2
 
+// wind_test.comp
+#define GPU_TEST_WIND_NOISE 0
+#define GPU_TEST_WIND_VELOCITY 1
+#define GPU_TEST_WIND_SPRING 2
+#define GPU_TEST_WIND_CELL 3
+
 #endif

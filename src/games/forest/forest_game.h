@@ -21,6 +21,7 @@
 #include "physics/static_level.h"
 #include "scene/atmosphere.h"
 #include "scene/fog.h"
+#include "scene/wind.h"
 
 #include <optional>
 #include <string>
@@ -216,6 +217,8 @@ public:
     const std::vector<Entity>& getGrass() const;
     // The forest floor's cover's settings, its cells and their entities (a patch each, following the ground).
     ForestFloorSettings& getFloorSettings();
+    // The wind over the valley, on the air entity (scene/wind.h).
+    Wind& getWindSettings();
     const std::vector<GroundCell>& getFloorCells() const;
     const std::vector<Entity>& getFloorCover() const;
 
@@ -301,6 +304,10 @@ private:
     ForestClimberSettings climberSettings;
     ForestEpiphyteSettings epiphyteSettings;
     ForestGrassSettings grassSettings;
+
+    // The wind over the valley (docs/WIND.md): down it, along the path from the rim towards the Monolith (-z), a few m/s
+    // above the canopy as measured over rainforests; under the canopy the plants' springs answer it less.
+    Wind windSettings{.towardsDegrees = 270.0f, .speed = 3.0f};
     ForestFloorSettings floorSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;

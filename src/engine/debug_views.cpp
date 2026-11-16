@@ -1,4 +1,5 @@
 #include "engine/debug_views.h"
+#include "render/gpu/wind.h"
 #include "math/transform.h"
 #include "physics/collider.h"
 #include "scene/interpolation.h"
@@ -389,4 +390,29 @@ void drawColliders(const World& world, float alpha, DebugDraw& debug) {
         const Mat4 model = getRenderTransform(world, entity, alpha).getMatrix();
         debug.shape(worldShape(collider.shape, model), colliderDebugColour);
     });
+}
+
+void drawWindField(const Wind& wind, const Vec3& eye, float seconds, const TerrainHeights* land, DebugDraw& debug) {
+    constexpr float arrowSeconds = 0.5f;
+    constexpr float galeMetresPerSecond = 15.0f;
+    constexpr float headShare = 0.25f;
+    const float half = 0.5f * static_cast<float>(windArrowsAcross - 1) * windArrowSpacing;
+
+    for (int row = 0; row < windArrowsAcross; ++row) {
+        for (int column = 0; column < windArrowsAcross; ++column) {
+            const float x = eye.x - half + static_cast<float>(column) * windArrowSpacing;
+            const float z = eye.z - half + static_cast<float>(row) * windArrowSpacing;
+            const float ground = land != nullptr && !land->grids.empty() ? terrainSurfaceHeight(*land, x, z) : eye.y - windArrowEyeDrop;
+            const Vec2 velocity = windVelocity(wind, Vec2{x, z}, seconds);
+            const Vec3 from{x, ground, z};
+            const Vec3 to = from + Vec3{velocity.x, 0.0f, velocity.y} * arrowSeconds;
+            const float strength = std::clamp(velocity.length() / galeMetresPerSecond, 0.0f, 1.0f);
+            const Vec3 colour{1.0f, 1.0f - strength, 1.0f - strength};
+            const Vec3 back = (from - to) * headShare;
+            const Vec3 side = Vec3{-back.z, 0.0f, back.x} * 0.5f;
+            debug.line(from, to, colour);
+            debug.line(to, to + back + side, colour);
+            debug.line(to, to + back - side, colour);
+        }
+    }
 }

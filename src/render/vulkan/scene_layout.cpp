@@ -56,6 +56,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // their nearest glass depths
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the terrain's heights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the terrain's patches
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the wind field's record
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the wind's springs
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // and last frame's (the velocity pass)
     }};
 }
 
@@ -161,7 +164,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     glassBounds(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     fog(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     skyVisibilityCascades(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    terrainPatches(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    terrainPatches(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    wind(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -207,6 +211,9 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         views.terrainHeights,
         buffers.terrainPatches.describe(),
+        buffers.wind.describe(),
+        VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -227,6 +234,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[LightContactShadowsBinding] = imageInfo(images.lightContactShadows);
     imageInfos[GlassTintBinding] = imageInfo(images.glassTint);
     imageInfos[GlassDepthsBinding] = imageInfo(images.glassDepths);
+    imageInfos[WindSpringsBinding] = imageInfo(images.windSprings);
+    imageInfos[WindPreviousSpringsBinding] = imageInfo(images.windPreviousSprings);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

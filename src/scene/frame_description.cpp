@@ -91,6 +91,12 @@ void buildEntityDraws(const World& world, Entity entity, const ModelRenderer& re
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history, JobSystem& jobs, std::size_t laterDraws,
                             StillDraws* still) {
     FrameDescription frame{.camera = camera, .lighting = collectLighting(world, alpha), .lightFocus = camera.getPosition()};
+
+    world.each<Wind>([&](Entity, Wind& wind) {
+        if (!frame.wind) {
+            frame.wind = wind;
+        }
+    });
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();
 
     if (renderers == nullptr) {

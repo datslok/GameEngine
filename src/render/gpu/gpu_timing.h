@@ -17,6 +17,7 @@ enum class GpuPass {
     RayScene,
     Atmosphere,
     Probes,
+    Wind,         // the wind force field's springs stepped (render/gpu/wind.h), before anything that sways is drawn
     Clusters,
     Shadows,
     Fog,          // the fog's grid lit and integrated (render/gpu/volumetric_fog.h)

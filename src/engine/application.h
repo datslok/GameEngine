@@ -209,6 +209,9 @@ private:
     // tick budget charges it for every tick while the cloth is on the GPU.
     double gpuClothTickEstimate = 0.0;
 
+    // The time the wind field's debug arrows read the wind at (render-only, like the renderer's own wind clock).
+    float windArrowSeconds = 0.0f;
+
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;
 
