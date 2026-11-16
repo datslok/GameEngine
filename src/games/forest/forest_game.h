@@ -10,6 +10,7 @@
 #include "games/forest/island_hangings.h"
 #include "games/forest/climbers.h"
 #include "games/forest/epiphytes.h"
+#include "games/forest/grass.h"
 #include "games/forest/lianas.h"
 #include "games/forest/palms.h"
 #include "games/forest/understorey.h"
@@ -208,6 +209,10 @@ public:
     const std::vector<Entity>& getEpiphytes() const;
     // Each tree carrying rosettes' first rosette in the world, in the order forest-epiphyte numbers them.
     const std::vector<Vec3>& getEpiphyteViews() const;
+    // The grass's settings, its cells and their entities (a patch each, following the ground), in the cells' order.
+    ForestGrassSettings& getGrassSettings();
+    const std::vector<GrassCell>& getGrassCells() const;
+    const std::vector<Entity>& getGrass() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -252,6 +257,9 @@ private:
     // The understorey palms (docs/JUNGLE.md, Palms): a few variants grown on every core, placed many times.
     void buildPalms(World& world, AssetManager& assets);
 
+    // The grass in the open (docs/GROUNDCOVER.md): a few patches grown on every core, a cell of land each.
+    void buildGrass(World& world, AssetManager& assets);
+
     // The lianas hanging from the canopy and emergent trees' crowns (docs/VINES.md, stage 1), a chunk of ground a mesh.
     void buildLianas(World& world, AssetManager& assets);
 
@@ -283,6 +291,7 @@ private:
     ForestLianaSettings lianaSettings;
     ForestClimberSettings climberSettings;
     ForestEpiphyteSettings epiphyteSettings;
+    ForestGrassSettings grassSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
 
@@ -312,6 +321,8 @@ private:
     std::vector<TreePlacement> climbedTrees;
     std::vector<Vec3> climbedFacing; // each one's first climber's way out of the trunk, in the world (forest-climber looks from it)
     std::vector<Entity> epiphyteEntities;
+    std::vector<GrassCell> grassCells;
+    std::vector<Entity> grassEntities;
     std::vector<Vec3> epiphyteViews;   // each tree carrying rosettes' first rosette, in the world
     std::vector<Vec3> epiphyteOutward; // the level way from its trunk to it (forest-epiphyte looks from there)
     std::vector<Entity> trees;

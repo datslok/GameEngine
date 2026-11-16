@@ -166,6 +166,16 @@ inline constexpr float forestEpiphyteLeafDepth = 0.01f;
 inline constexpr float forestEpiphyteLeafRoughness = 0.45f;
 Material forestEpiphyteLeafMaterial(AssetManager& assets, const std::string& assetFolder);
 
+/*
+* The grass blades' material (games/forest/grass.h): their picture drawn at start-up (grassBladeImage) in the ground's
+* grass scan's mean colour (its stand-in's without it), so blades and the ground they end on match; opaque, as the
+* blades are cut to their outline, double-sided with its back keeping its up-tilted normal (Material::backKeepsNormal);
+* rough. Letting light through is withLeafLight's.
+*/
+inline constexpr int forestGrassBladeTexels = 128;
+inline constexpr float forestGrassRoughness = 0.85f;
+Material forestGrassMaterial(AssetManager& assets, const std::string& assetFolder);
+
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";
 inline constexpr Pixel forestMossStandIn{96, 104, 62};

@@ -36,6 +36,10 @@ struct TestForest {
         game.getMidSettings().attractors = 150;
         game.getMidSettings().variants = 2;
         game.getMidSettings().clusterTexels = 64;
+        game.getGrassSettings().bladesPerSquareMetre = 4.0f;
+        game.getGrassSettings().variants = 1;
+        game.getGrassSettings().densitySteps = 2;
+        game.getGrassSettings().reachMetres = 40.0f;
         game.useJobs(testJobs());
         game.onInit(world, assets);
     }

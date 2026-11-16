@@ -76,6 +76,10 @@ struct Material {
     // behind. One-sided surfaces skip their backs, as a closed mesh's are never seen.
     bool doubleSided = false;
 
+    // With doubleSided, the back keeps the front's normal instead of its mirror image: grass, whose normals are tilted up
+    // so a field is lit from above whichever way each blade faces.
+    bool backKeepsNormal = false;
+
     // An impostor (scene/impostor.h): its colour and normal textures are atlases of frames x frames pictures of a tree from
     // over the hemisphere, which the shaders blend on a card facing the viewer. 0 for every other material.
     int impostorFrames = 0;
