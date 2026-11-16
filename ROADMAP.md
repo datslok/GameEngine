@@ -361,7 +361,10 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
   - Big searchlights sweeping the land (the user, Nov 14 2026): spot lights with shadows near the camera, and for beams kilometres long, more than the fog's 100 m grid can light, a beam of their own through the height fog (its closed form along the cone).
   - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, searchlights sweeping beams through the mist, vines hanging hundreds of metres.
-- [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured
+- [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured. After Horizon Zero Dawn's global wind force field (research in `docs/WIND.md`, the user's pick and go Nov 16 2026):
+  - [x] The wind force field: springs per category round the camera, stepped each frame in a compute pass (`wind-field`)
+  - [ ] Swaying plants: trees, plants, climbers, epiphytes, grass and floor cover sampling their springs in every vertex shader, motion vectors from last frame's, the nearest shadow cascade animated (`wind-sway`)
+  - [ ] Hanging things: lianas, roots, vines and moss swinging on the fourth category (`wind-hanging`)
 - [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer) (research in `docs/LOD.md`)
   - [x] Levels chosen per view by their error in pixels: trees, plants and rock shapes (`tree-lod`)
   - [x] Shadows from the same levels, each tile choosing by its own texels (`shadow-lod`)

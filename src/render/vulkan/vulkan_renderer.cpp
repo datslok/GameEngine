@@ -138,6 +138,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     depthOfField = std::make_unique<VulkanDepthOfField>(device, nearestSampler.get(), linearSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
+    wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -1659,6 +1660,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const GpuFog frameFog = fog->prepare(fogInAir ? &*fogInAir : nullptr, settings.fog, motionViewProjection, cameraOrigin, !probes.empty(), memoryFrameNumber,
                                          camera.getFarPlane());
 
+    // The wind force field (render/gpu/wind.h): its windows round the camera and the frame's time, before the scene set
+    // is written with its record.
+    frameWind = wind->prepare(description.wind ? &*description.wind : nullptr, settings.wind, cameraOrigin, description.frameSeconds);
+
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
     // points copied up before the fog and the main pass read them.
     const bool readsSkyVisibility = readsSkyGrid(description, settings);
@@ -1711,6 +1716,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ddgi->update(frame.commands, frame.descriptors, probeSets, illumination, description.lighting.background, description.frameSeconds,
                      hitLights.fast > 0, !mirrorPairs.empty() && settings.mirroredLights.bounce, events, frame.frameIndex);
         endGpuPass(frame, GpuPass::Probes);
+    }
+
+    // The wind's springs stepped before anything that sways is drawn (the shadows are first).
+    if (wind->runs()) {
+        beginGpuPass(frame, GpuPass::Wind);
+        wind->step(frame.commands, frame.descriptors, frames[frame.frameIndex].scene->wind.describe().buffer);
+        endGpuPass(frame, GpuPass::Wind);
     }
 
     // The lists feed both clustered shading and its heatmap.
@@ -2208,6 +2220,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     std::transform(description.terrainPatches.begin(), description.terrainPatches.end(), patches.begin(), packTerrainPatch);
     buffers.terrainPatches.write(patches);
     updateTerrainHeights(description);
+    buffers.wind.write(&frameWind, sizeof(frameWind));
 
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -2228,6 +2241,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                : sampled(*noProbesTexture),
         glassMapSize.width > 0 ? SampledImage{glassShadowDepth.getView(), nearestSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
                                : sampled(*noProbesTexture),
+        wind->sampledSprings(),
+        wind->sampledPreviousSprings(),
     };
 
     SceneBufferViews views;

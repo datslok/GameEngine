@@ -15,6 +15,7 @@
 #include "scene/mesh_level.h"
 #include "scene/model_renderer.h"
 #include "scene/terrain_heights.h"
+#include "scene/wind.h"
 #include "physics/static_level.h"
 
 #include <cstddef>
@@ -177,6 +178,10 @@ struct FrameDescription {
     std::vector<TerrainPatch> terrainPatches{};
     std::shared_ptr<const TerrainHeights> terrainHeights{};
     std::uint64_t terrainHeightsVersion = 0;
+
+    // The wind over the land (scene/wind.h, the first Wind placed), which the renderer's wind field turns into sway;
+    // none without one.
+    std::optional<Wind> wind{};
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.

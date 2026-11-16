@@ -50,6 +50,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Fog", [&] {
         visit(settings.fog, visitor);
     });
+    visitor.group("Wind", [&] {
+        visit(settings.wind, visitor);
+    });
     visitor.group("Materials", [&] {
         visit(settings.materials, visitor);
     });

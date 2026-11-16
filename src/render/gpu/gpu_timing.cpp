@@ -12,6 +12,8 @@ const char* gpuPassName(GpuPass pass) {
         return "TLAS";
     case GpuPass::Atmosphere:
         return "SKY";
+    case GpuPass::Wind:
+        return "WIND";
     case GpuPass::Probes:
         return "PROBES";
     case GpuPass::Clusters:

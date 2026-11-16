@@ -373,6 +373,13 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         }
     }
 
+    // The wind's arrows round the camera, while the field's debug view is on and the frame has wind.
+    windArrowSeconds += frameSeconds;
+
+    if (settings.render.wind.showField && frame.wind) {
+        drawWindField(*frame.wind, camera.getPosition(), windArrowSeconds, frame.terrainHeights.get(), debugDraw);
+    }
+
     game.onDebugDraw(world, debugDraw, alpha);
     frame.debugLines = debugDraw.getLines();
     frame.debugScreenLines = debugDraw.getScreenLines();

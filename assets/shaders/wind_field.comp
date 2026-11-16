@@ -1,0 +1,47 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The wind force field's springs stepped one frame (render/gpu/wind.h): one invocation per cell of each cascade's
+* window and each category (a layer each). A cell still in last frame's window carries its spring on from last frame's
+* image (the same texel: the window wraps round its texels); one new to the window, or every cell when last frame's
+* windows are unknown, starts at rest where the wind now holds it.
+*/
+#include "wind.glsl"
+
+layout(local_size_x = WIND_GROUP_SIDE, local_size_y = WIND_GROUP_SIDE) in;
+
+// The record (WindField, wind.glsl), the frame's.
+layout(std430, set = 0, binding = 0) readonly buffer WindFieldRecord {
+    WindField field;
+};
+
+layout(set = 0, binding = 1) uniform sampler2DArray previous;
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2DArray current;
+
+void main() {
+    ivec3 texel = ivec3(gl_GlobalInvocationID);
+
+    if (texel.x >= WIND_CELLS || texel.y >= WIND_CELLS || texel.z >= WIND_CASCADES * WIND_CATEGORIES) {
+        return;
+    }
+
+    int cascade = texel.z / WIND_CATEGORIES;
+    int category = texel.z % WIND_CATEGORIES;
+    ivec4 window = field.windows[cascade];
+    ivec2 cell = windCellOfTexel(texel.xy, window.xy);
+    vec2 place = (vec2(cell) + 0.5) * field.cells[cascade].x;
+    vec4 spring = field.springs[category];
+    vec2 velocity = windVelocity(field.wind.xy, field.wind.z, field.gusts, place, field.wind.w);
+    vec2 target = windSpringTarget(velocity, spring.z);
+
+    vec4 state;
+
+    if (field.flags.x != 0 && windCellInWindow(cell, window.zw)) {
+        state = windSpringStep(texelFetch(previous, texel, 0), target, spring.x, spring.y, field.step.x);
+    } else {
+        state = vec4(target, 0.0, 0.0);
+    }
+
+    imageStore(current, texel, state);
+}

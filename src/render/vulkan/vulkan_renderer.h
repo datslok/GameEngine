@@ -55,6 +55,7 @@
 #include "render/vulkan/vulkan_motion_blur.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
+#include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_sky_visibility.h"
 #include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
@@ -319,6 +320,10 @@ private:
 
     // Volumetric fog (render/gpu/volumetric_fog.h): its grid, lit after the shadows, and the picture seen through it.
     std::unique_ptr<VulkanFog> fog;
+
+    // The wind force field (render/gpu/wind.h) and this frame's record, prepared before the scene set is written.
+    std::unique_ptr<VulkanWind> wind;
+    GpuWindField frameWind{};
 
     // The sky visibility grid (render/gpu/sky_visibility.h): baked on the CPU round the camera, its points copied up
     // when they change, read by the main pass and the fog without light probes.

@@ -45,6 +45,20 @@ namespace {
     }
 
     /*
+    * The wind's springs, written by a compute pass, are read by every vertex shader (and by the next frame's pass, as
+    * its history): the barrier waits for the compute writes and makes them visible to vertex and compute sampling.
+    */
+    void testComputeWritesBecomeVertexReadable() {
+        const VkImageMemoryBarrier2 barrier = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::ComputeStorage,
+                                                           ImageState::VertexRead, ImageContents::Keep);
+        assert(barrier.srcStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        assert(barrier.dstStageMask == (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT));
+        assert(barrier.dstAccessMask == VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        assert(barrier.newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        assert(!needsBarrier(ImageState::VertexRead, ImageState::VertexRead));
+    }
+
+    /*
     * Overwriting an image that was being read (write after read): the writes must wait until the reads are done, but
     * reads leave nothing in caches to flush, so the source half names the stage and no access. Discarding the old
     * contents lets the layout start from undefined, which is free.
@@ -214,6 +228,7 @@ namespace {
 void testImageState() {
     testDrawnImageBecomesReadable();
     testOnlyReadAfterReadNeedsNoBarrier();
+    testComputeWritesBecomeVertexReadable();
     testOverwritingWaitsForReadsWithoutFlushing();
     testAcquiredImageChainsWithTheSemaphore();
     testPresentTakesThePresentLayout();

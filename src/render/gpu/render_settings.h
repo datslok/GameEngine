@@ -20,6 +20,7 @@
 #include "render/gpu/transparency.h"
 #include "render/gpu/upscaling.h"
 #include "render/gpu/volumetric_fog.h"
+#include "render/gpu/wind.h"
 #include "scene/level_of_detail.h"
 #include "scene/terrain.h"
 
@@ -66,6 +67,9 @@ struct RenderSettings {
 
     // Volumetric fog (render/gpu/volumetric_fog.h): the air lit by the lights, when the frame has a Fog.
     FogSettings fog;
+
+    // The wind force field: the springs plants sway by (render/gpu/wind.h, F5 Wind).
+    WindSettings wind;
 
     // What materials may draw (render/gpu/material_settings.h): clear coats and parallax occlusion mapping.
     MaterialSettings materials;

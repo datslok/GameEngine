@@ -18,6 +18,7 @@ enum class ImageState {
     DepthTarget,         // depth tested and written by a render pass
     FragmentRead,        // sampled by fragment shaders
     SurfaceRead,         // sampled by fragment and compute shaders alike (the scene's textures, which probe rays read too)
+    VertexRead,          // sampled by vertex and compute shaders (the wind's springs: every draw, and the next frame's pass)
     DepthFragmentRead,   // a depth image sampled (and compared) by fragment shaders
     DepthComputeRead,    // a depth image read by compute shaders (the scene's depth, measured for the sun's cascades)
     ComputeRead,         // sampled by compute shaders (the light probes, read by the next frame's probe rays)

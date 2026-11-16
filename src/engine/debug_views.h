@@ -9,6 +9,8 @@
 #include "scene/frame_description.h"
 #include "scene/level_of_detail.h"
 #include "scene/model.h"
+#include "scene/terrain_heights.h"
+#include "scene/wind.h"
 
 #include <array>
 #include <optional>
@@ -29,6 +31,17 @@
 */
 void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, const Camera& camera, const LevelView& levels,
                        DebugDraw& debug);
+
+/*
+* The wind round the eye (RenderSettings::wind's showField; render/gpu/wind.h): windArrowsAcross x windArrowsAcross
+* arrows windArrowSpacing metres apart, centred on the eye, each from the ground (the drawn land's height, or
+* windArrowEyeDrop below the eye without land) along the wind there at that time, as long as half a second of it, its
+* head two short strokes; white in a calm, red in a gale.
+*/
+inline constexpr int windArrowsAcross = 9;
+inline constexpr float windArrowSpacing = 4.0f;
+inline constexpr float windArrowEyeDrop = 1.7f;
+void drawWindField(const Wind& wind, const Vec3& eye, float seconds, const TerrainHeights* land, DebugDraw& debug);
 
 // The debug readout is lines of text down the top-left corner; this is where line `line` (0 first) starts.
 constexpr float debugReadoutTextHeight = 14.0f;
