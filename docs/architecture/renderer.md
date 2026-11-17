@@ -12,7 +12,7 @@ Covers: `src/render/vulkan/vulkan_renderer`, `src/render/vulkan/vulkan_device`, 
 | `pipelineProgress`, `finishPipelines`, `drawLoadingScreen` | The loading screen (below) |
 | `render(frame, settings, ui)` | One frame to the screen; false while minimised or out of date |
 | `capture` | A frame into an image read back (golden images), after warm-up frames (`drawFramesBeforeCapture`) |
-| `uploadMesh`, `uploadTexture`, counts | GPU copies in arrays indexed exactly like the handles |
+| `uploadMesh`, `uploadTexture`, `uploadCompressedTexture` (BC7, when `supportsBlockCompression`), counts | GPU copies in arrays indexed exactly like the handles |
 | `startDebugUi`, `beginDebugUiFrame`, `stopDebugUi` | ImGui's Vulkan backend |
 | `setPresentMode`, `setFramesInFlight` and getters | Applied live by `Application` |
 | `getLastFrameStats`, `getDisplayOutput`, `getFrameAspectRatio`, `getDeviceName` (the golden folder's name), `supportsRayQueries`, `upscalerSupport` | Queries |
@@ -132,7 +132,7 @@ The port drew every golden image bit for bit the same, so these stay:
 - **Pipelines:** depth clamp on, counter-clockwise front faces, line width 1, dynamic viewport and scissor. `setViewport` flips y (origin at `y + height`, negative height); `beginRendering` sets the whole target.
 - **Formats:** swapchain `B8G8R8A8_SRGB` (else `R8G8B8A8_SRGB`), or `R16G16B16A16_SFLOAT` in `EXTENDED_SRGB_LINEAR` for HDR; bloom levels `B10G11R11_UFLOAT_PACK32` when drawable, blendable and filterable.
 - **Shared samplers:** surfaces (trilinear, repeat, anisotropy 16 or the GPU's limit, `VK_LOD_CLAMP_NONE`); tables (bilinear, clamped); nearest; linear clamped; shadow compare (`GREATER_OR_EQUAL`, linear); shadow raw depth (nearest).
-- **Mipmaps:** linear blits from the level above, each `max(1, size >> level)`; a cut-out's built on the CPU to keep its coverage (`coveragePreservingMips`) and copied in with level 0.
+- **Mipmaps:** linear blits from the level above, each `max(1, size >> level)`; a cut-out's built on the CPU to keep its coverage (`coveragePreservingMips`) and copied in with level 0; a BC7 texture's every level built on the CPU and copied in (the GPU cannot write blocks: [assets.md](assets.md#texture-compression)).
 
 ## Uniform blocks (`FrameUniforms`)
 
