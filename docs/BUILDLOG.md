@@ -1672,6 +1672,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The include graph** differed from the old text: `scene/impostor.h` includes `assets/` (a listed exception until `ImageData` moves), and `core/` includes `math/`.
   - **The docs test** (`testDocs`): layers read from `docs/LAYOUT.md`'s table rather than copied, budgets, line lengths, the paths the checked docs name, the index, and repeated 12-word runs (shingling, Broder 1997). Its first run found a sentence repeated between two of the new files.
   - **Measured:** 740 ms at first; 185 ms after `fs::relative` (which resolves both paths on disk: 300 ms over 600 sources) became `lexically_relative` and `src/` was walked once.
+  - **The reminder hook** (`tools/docs_reminder.ps1`, run by Claude Code before any `git commit` it makes): names the changed `src/` folders whose architecture doc did not change (each doc's `Covers:` line, the rest `docs/ARCHITECTURE.md`); compared with HEAD, untracked files included, since staging and committing share one command. A reminder, not a block: most commits change nothing a doc describes. An `if` filter starts it on commits alone (PowerShell takes about half a second to start).
 
 ## Tools outside the phases
 

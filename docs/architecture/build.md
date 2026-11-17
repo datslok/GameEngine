@@ -1,5 +1,7 @@
 # Build
 
+Covers: `makefile`, `tools/package_demo.py`
+
 ## Makefile
 
 - Finds `src/**/*.cpp` recursively (`rwildcard`), `tests/*.cpp` and `tests/gpu/*.cpp`; new files need no makefile change.

@@ -63,5 +63,5 @@ Pick the narrowest home. One home per fact; elsewhere, link to it.
 - Dense: bullets and tables, no history or dates outside `BUILDLOG.md` and `ROADMAP.md`.
 - When behaviour changes, rewrite its section; do not append. A new rule removes or merges what it replaces.
 - Budgets: this file 8 KB; each folder `CLAUDE.md` and rule 4 KB; `README.md` 20 KB; each architecture file 20 KB, past which it splits into narrower topics.
-- Each feature branch: tick its `ROADMAP.md` line, add its `BUILDLOG.md` entry, update its architecture section, and `README.md` if players see it.
+- Each feature branch: tick its `ROADMAP.md` line, add its `BUILDLOG.md` entry, update its architecture section, and `README.md` if players see it. Before each commit, `tools/docs_reminder.ps1` names code whose architecture doc did not change; an architecture file claims folders with a `Covers:` line.
 - End of a phase: `docs-review` skill.

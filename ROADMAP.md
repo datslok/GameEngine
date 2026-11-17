@@ -355,7 +355,7 @@ Done before the rest of phase 18, at the user's request (Nov 17 2026). Starts fr
 - [x] Memory deduplicated: project rules out of memory, into `CLAUDE.md` or rules
 - [x] Checks against needless growth (`testDocs`, `docs-refactor`): layers from `docs/LAYOUT.md`, budgets, line lengths, paths, the index, repeated 12-word runs, over the docs refactored so far
 - [ ] The docs report (`tests.exe --docs-report`, after the split): warnings for dates and measurements outside `BUILDLOG.md` and `ROADMAP.md` and for backticked names gone from `src/`; every `src/` folder covered by an architecture file
-- [ ] A pre-commit reminder (a Claude Code hook): `src/<x>` changed but its architecture file did not; sections are rewritten when behaviour changes, not appended to
+- [x] A pre-commit reminder (`tools/docs_reminder.ps1`, a Claude Code hook in `.claude/settings.json`, `docs-refactor`): code changed but the architecture file covering it did not
 - [x] The docs-review skill, run at the end of each phase: finished phases in `ROADMAP.md` cut to their milestone and branches, memory deduplicated, misplaced items moved to their narrowest home
 - [x] The documentation workflow written down: a branch ticks its `ROADMAP.md` line, adds a `BUILDLOG.md` entry of at most 10 bullets, replaces its architecture section, adds a `README.md` line if players see it
 
