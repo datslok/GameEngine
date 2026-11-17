@@ -20,7 +20,7 @@ Finished items are kept to one line, with their branch names so they can be foun
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising, and keep graphics features that cost a lot (ray tracing, GI quality) as settings that scale down to typical GPUs.
 
-**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 18 (a forest showcase) and 17 (rendering), then 7 onwards, as the phases sit in this file.
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 18 (a forest showcase), 19 (refactoring the docs and `CLAUDE.md`) and 17 (rendering), then 7 onwards, as the phases sit in this file.
 
 ---
 
@@ -378,6 +378,18 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] Golden views, tests, packaging with the downloaded assets, docs
 
 **Milestone:** with the typical GPU setup, the scale is felt from the valley's rim (pillars, floating islands and the Monolith layered into kilometres of haze), and walking down through the jungle to the Monolith's foot looks lush and alive (wind in leaves and vines, light through the canopy, mist in the valley) by day and at dusk, at a frame rate a mid-range GPU holds (measured on the laptop's RTX 4070, 8 GB).
+
+---
+
+## Phase 19: Refactoring the documentation and CLAUDE.md
+
+A pass over the docs once the forest is done (added Nov 17 2026), before phase 17: they have grown feature by feature and are due a reorganisation. The plan is made with the user first.
+
+**Items**
+- [ ] `CLAUDE.md`: refactored to the rules and essentials, with the detail it has gathered (every file, name and number) moved to the docs it belongs in
+- [ ] The documentation (`docs/ARCHITECTURE.md`, `docs/ENGINE_GUIDE.md`, `docs/BUILDLOG.md`, the research docs, `README.md`): refactored so each topic lives in one place, with nothing out of date
+
+**Milestone:** `CLAUDE.md` is short enough to read in full, and every doc is current and easy to find one's way around.
 
 ---
 
