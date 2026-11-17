@@ -9,7 +9,7 @@
 class JobSystem;
 
 /*
-* BC7 block compression (docs/TEXTURECOMPRESSION.md): an RGBA picture stored as 4 x 4 texel blocks of 16 bytes, one
+* BC7 block compression (docs/research/TEXTURECOMPRESSION.md): an RGBA picture stored as 4 x 4 texel blocks of 16 bytes, one
 * byte a texel against four, which the GPU decodes as it samples, so textures take a quarter of the video memory. Each
 * block holds one to three pairs of endpoint colours and, per texel, where it lies on the line between its pair: the
 * encoder searches for the endpoints and indices that miss the original least. The search is bc7enc's

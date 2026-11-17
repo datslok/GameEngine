@@ -24,7 +24,7 @@ struct HangingStrand {
     std::vector<Vec3> points;
     std::vector<float> radii;
 
-    // How each point hangs in the wind (scene/wind.h; docs/WIND.md stage 3), or none: appendTube and appendLeafCards
+    // How each point hangs in the wind (scene/wind.h; docs/research/WIND.md stage 3), or none: appendTube and appendLeafCards
     // give their vertices the entry of the point they are built round.
     std::vector<HangingVertex> hanging{};
 };
@@ -124,7 +124,7 @@ void appendLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip,
 * The same card drawn as a convex outline instead of its square: each corner given in the card's own units (x across
 * from its left edge, 0 to 1; y from the stem to the tip, 0 to 1), counterclockwise, placed and textured exactly as the
 * square card's point there would be, as a fan of triangles. A cut-out card's empty part still runs the shader on every
-* pixel; an outline round its leaves leaves most of it out (docs/JUNGLE.md, The understorey: overdraw).
+* pixel; an outline round its leaves leaves most of it out (docs/research/JUNGLE.md, The understorey: overdraw).
 */
 void appendOutlinedLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip, const Vec3& facing, const Vec3& normal, float length,
                             float width, const Vec2& uvMin, const Vec2& uvMax, const std::vector<Vec2>& outline);

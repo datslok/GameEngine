@@ -212,7 +212,7 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log):
 
 Today light stops at the first surface it hits, so a room lit through one window is black wherever the sunbeam does not land, and the ambient light is a flat stand-in for all the light bouncing around. DDGI measures that bounced light at points in space each frame and lets every surface look it up.
 
-Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINATION.md](docs/ILLUMINATION.md)
+Research notes, exact formulas and the reference code's numbers: [docs/research/ILLUMINATION.md](docs/research/ILLUMINATION.md)
 
 - Needs first: the HDR target and tone mapping above (bounce light routinely adds up to more than 1 and would clip to white), compute pipelines, and the Vulkan renderer (for ray queries)
 - [x] Probe grid: probe volumes placed by each game, octahedral irradiance and distance atlases written from compute (`ddgi-probes`)
@@ -326,6 +326,7 @@ The docs cut down and kept down, taken ahead of the forest at the user's request
 - [x] `README.md` cut from 68 KB to 12.5 KB; the guide rewritten into 11 chapters in `docs/guide/`; the build log split into parts in `docs/buildlog/`
 - [x] Memory deduplicated: project rules out of memory
 - [x] The checks: `testDocs` in the routine suite, `tests.exe --docs-report` for the review, the pre-commit reminder (`tools/docs_reminder.ps1`), the `docs-review` skill
+- [x] Research docs moved into `docs/research/` (the user, Nov 17 2026; `docs-research-folder`)
 
 **Milestone:** the root `CLAUDE.md` within 8 KB and readable in one sitting, every doc listed in `docs/INDEX.md`, the checks passing in the routine suite. Met Nov 17 2026.
 
@@ -355,21 +356,21 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), on the valley floor and as crowns on the pillars' tops and the islands, the jungle understorey (broad-leaved plants grown from `Leaf001` on generated stems, as no CC0 library has palms, bananas or tree ferns), logs and rocks, scattered by a seeded Poisson disk
   - In stages (the user's go, Nov 14 2026): `tree-growth` (space colonisation in a crown's envelope, Leonardo's rule for the radii, tubes of bark with buttress lobes, leaf cards with crown normals; jungle emergents, a few round the clearing), light through leaves (diffuse transmission, its own branch), `forest-floor` (the floor, the pillars' tops and islands, trunk colliders, leaves in the sky visibility bake, the frame measured), `understorey`.
   - **Re-planned after the user's look at the first emergents (Nov 14 2026: "i was thinking a lush jungle like crysis"):** sparse see-through crowns on bare ground do not read as jungle, which is density and layers. One patch of real jungle along the path past the Ring first, every layer in it, judged as a whole: denser, darker crowns with leaning, tapering trunks (on `tree-growth`); a mid-canopy species packed between the giants so the canopy closes; the understorey (broad leaves and ferns); vines and ground cover in the patch; then light through leaves and wind. The rest of the valley after.
-  - **The jungle patch in stages (research in `docs/JUNGLE.md`, the user's go Nov 14 2026):** [x] `jungle-canopy` (canopy trees to 38 m, emergents of 55 m over them, real-sized leaves), [x] `jungle-midstorey` (a slender 10-20 m species every 8-10 m), [x] `understorey-scans` (scanned ferns, calatheas and anthuriums at 1.3-1.7 m, about 10,000 along the path; four times the crown cover above them), [x] generated palms (2-6 m, `jungle-palms`), [x] vines and epiphytes (research in `docs/VINES.md`: [x] lianas, `jungle-vines`; [x] climbers, `jungle-climbers`; [x] epiphytes, `jungle-epiphytes`), [x] light through leaves (`leaf-transmission`), [ ] wind.
+  - **The jungle patch in stages (research in `docs/research/JUNGLE.md`, the user's go Nov 14 2026):** [x] `jungle-canopy` (canopy trees to 38 m, emergents of 55 m over them, real-sized leaves), [x] `jungle-midstorey` (a slender 10-20 m species every 8-10 m), [x] `understorey-scans` (scanned ferns, calatheas and anthuriums at 1.3-1.7 m, about 10,000 along the path; four times the crown cover above them), [x] generated palms (2-6 m, `jungle-palms`), [x] vines and epiphytes (research in `docs/research/VINES.md`: [x] lianas, `jungle-vines`; [x] climbers, `jungle-climbers`; [x] epiphytes, `jungle-epiphytes`), [x] light through leaves (`leaf-transmission`), [ ] wind.
   - **Sight lines (the user, Nov 14 2026):** some of the Monolith and the Ring stays in view from the path, the meadow and the clearing at all times: a tree whose crown meets a sight line from the path to them is not planted.
 - [x] Smooth moving shadows in the far shadow map (`far-shadow-movers`)
 - [x] Staggered far cascades: the far two take turns redrawing while the camera turns (`cascade-stagger`)
 - [x] Building the frame on every core: the motion history flat, the draws and instances built in parallel (`frame-build-speed`)
 - [x] Big copies off the frame: the terrain's draws into room kept for them, the sky bake reading a grid copy brought up to date, only new planes walked (`frame-copies`)
-- [ ] A persistent scene: static objects' instances uploaded once, only moving ones each frame (Unreal's GPU Scene, Unity's BatchRendererGroup). Research and plan in `docs/PERSISTENTSCENE.md` (the user's go, Nov 15 2026):
+- [ ] A persistent scene: static objects' instances uploaded once, only moving ones each frame (Unreal's GPU Scene, Unity's BatchRendererGroup). Research and plan in `docs/research/PERSISTENTSCENE.md` (the user's go, Nov 15 2026):
   - [x] Still objects: `ModelRenderer::still`, their draws kept between frames, changes announced (`still-objects`)
   - [x] Still draws' records kept: instances, last-frame matrices and a material table packed once, repacked where built (`gpu-scene-persistent`)
   - [ ] Lasting GPU buffers updated only where they change (the 8 MB copy a frame left, about 2 ms; measured first)
   - [ ] Views without full scans (measured first)
 - [x] Cheaper forest shadows: the understorey in the nearest two cascades, shadow bark, leaf cards cut to their twigs' outline (`understorey-shadow-cascades`)
-- [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/SHADOWCACHE.md`)
+- [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/research/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
-- [x] Grass and ground cover (research in `docs/GROUNDCOVER.md`, the user's go Nov 15 2026): a few shared flat patches lifted onto the land by the vertex shaders, each 8 x 8 m cell choosing its density, thinning with distance; no shadows cast
+- [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`, the user's go Nov 15 2026): a few shared flat patches lifted onto the land by the vertex shaders, each 8 x 8 m cell choosing its density, thinning with distance; no shadows cast
   - [x] Ground-following meshes: the vertex shaders lift them onto the land, their spheres lifted on the CPU (`ground-cover-patches`)
   - [x] Grass in the open: clumped curved blades wherever the ground is painted grass near the path (`meadow-grass`)
   - [x] The forest floor: fallen leaves, tree seedlings and small ferns under the canopy (`forest-floor-cover`)
@@ -377,19 +378,19 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
   - Big searchlights sweeping the land (the user, Nov 14 2026): spot lights with shadows near the camera, and for beams kilometres long, more than the fog's 100 m grid can light, a beam of their own through the height fog (its closed form along the cone).
   - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, searchlights sweeping beams through the mist, vines hanging hundreds of metres.
-- [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured. After Horizon Zero Dawn's global wind force field (research in `docs/WIND.md`, the user's pick and go Nov 16 2026):
+- [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured. After Horizon Zero Dawn's global wind force field (research in `docs/research/WIND.md`, the user's pick and go Nov 16 2026):
   - [x] The wind force field: springs per category round the camera, stepped each frame in a compute pass (`wind-field`)
   - [x] Swaying plants: trees, plants, climbers, epiphytes, grass and floor cover in every vertex shader, the nearest cascade swaying (`wind-sway`)
   - [x] Hanging things: lianas, roots, vines and moss swinging on the fourth category (`wind-hanging`)
   - [x] Wind follow-ups: the lower layers' flutter slower and in step (`wind-flutter`); longer hanging things swinging slower, as chains do (`wind-chain-swing`)
-- [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer) (research in `docs/LOD.md`)
+- [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer) (research in `docs/research/LOD.md`)
   - [x] Levels chosen per view by their error in pixels: trees, plants and rock shapes (`tree-lod`)
   - [x] Shadows from the same levels, each tile choosing by its own texels (`shadow-lod`)
   - [x] The terrain's own level of detail, CDLOD (`terrain-lod`)
 - [x] Impostors: far trees and plants as cards baked from their meshes (`tree-impostors`, `impostor-switch`, `plant-impostors`)
-- [ ] Pop-in (the user, Nov 17 2026: "quite bad", next session's first item): the switches between mesh levels of detail look jarring (the impostor switches are fine, the user says); hide them (cross-fades by dithering, closer levels, morphing, hysteresis); research how shipped games hide it first. Done in `lod-pop-in`: researched (`docs/LOD.md`, Hiding the switches), levels by the output height, the trees' leaf cards thinned one by one (the user: "looks good"); the palms' leaflets likewise in `palm-thinning` (the user: "looks good"); left for later: the scanned small plants still pop (a dithered fade), and the trees' bark if it shows
+- [ ] Pop-in (the user, Nov 17 2026: "quite bad", next session's first item): the switches between mesh levels of detail look jarring (the impostor switches are fine, the user says); hide them (cross-fades by dithering, closer levels, morphing, hysteresis); research how shipped games hide it first. Done in `lod-pop-in`: researched (`docs/research/LOD.md`, Hiding the switches), levels by the output height, the trees' leaf cards thinned one by one (the user: "looks good"); the palms' leaflets likewise in `palm-thinning` (the user: "looks good"); left for later: the scanned small plants still pop (a dithered fade), and the trees' bark if it shows
 - [ ] Occlusion culling (moved from phase 14): culling in compute against last frame's depth pyramid (Hi-Z), so what hides behind the Monolith or a pillar is not drawn
-- [x] Texture compression (moved from phase 12's asset cooking): BC7 for every texture, normal maps too (x, y and z kept for Toksvig), a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB; mips on the CPU, `bc7enc`, a disk cache in `build/texture_cache`, `engine.textureCompression` settings; a game's lookup textures stay exact (`texture-compression`, research in `docs/TEXTURECOMPRESSION.md`)
+- [x] Texture compression (moved from phase 12's asset cooking): BC7 for every texture, normal maps too (x, y and z kept for Toksvig), a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB; mips on the CPU, `bc7enc`, a disk cache in `build/texture_cache`, `engine.textureCompression` settings; a game's lookup textures stay exact (`texture-compression`, research in `docs/research/TEXTURECOMPRESSION.md`)
 - [x] Video memory in use on F4: the bytes the engine's resources take (VMA's allocation bytes) beside the blocks it holds, which move in 256 MB steps and hid most of texture compression's 466 MB saving (`vram-in-use`)
 - [ ] Far terrain following the camera, only if needed: the rough valley's fixed rings reach 20 km round the walk
 - [ ] Aerial perspective: the air between the camera and far scenery from the sky's own tables (Hillaire 2020's aerial perspective volume), so distant things turn blue by distance; the fog's grid near, this beyond it (only if the haze looks wrong later: the rough valley showed it already turns blue)
@@ -421,8 +422,8 @@ The top of the quality ladder, once the path without ray tracing is finished. Al
   - **Rays:** against the valley's rock (about 3 million triangles), roots and moss; the cut-out moss and leaves left out of bounce rays (an alpha test at every card hit), as the glowing stand-ins for lamps are. Estimated, not measured: 8,192 probes x 256 rays, about 2 million rays a frame, 1-2 ms on the RTX 4070 Laptop.
   - **Leaks, the weakness:** a 256 m cell is wider than a 40 m pillar, so one cell holds its sunlit and shaded sides and the shaded side gets about their mean. Soft bounce tolerates it (sharp sun shadows come from the shadow maps); it shows under the islands, lit by the ground's bounce, and in narrow gaps between pillars; the fine cascades take over near the camera.
   - **Worth it for:** the sunlit floor's warm bounce onto the pillars' and islands' undersides (flat sky light alone leaves them grey), the mist lit by it (the fog reads the probes), deep shade among clusters of pillars.
-  - **As others do it:** RTXGI's scrolling cascades with rarely updated far ones; Lumen's near detail, far field and stand-in meshes beyond (`docs/LUMEN.md`). Test it in the valley.
-- [ ] Lumen-like global illumination (as in Unreal Engine 5; research, numbers and a staged plan in `docs/LUMEN.md`, read Oct 20 2026)
+  - **As others do it:** RTXGI's scrolling cascades with rarely updated far ones; Lumen's near detail, far field and stand-in meshes beyond (`docs/research/LUMEN.md`). Test it in the valley.
+- [ ] Lumen-like global illumination (as in Unreal Engine 5; research, numbers and a staged plan in `docs/research/LUMEN.md`, read Oct 20 2026)
   - **The idea:** probes placed on the visible surfaces themselves, one every 16 pixels plus more at depth and normal edges, 8x8 octahedral, each tracing its own rays, filtered 3x3 in probe space and over time, so light near a surface is what that surface sees.
   - **What it fixes:** probe parallax. A probe sits a little off the surface and sees what the surface cannot.
     - So beside a lit doorway at night the outside wall glows within a probe spacing of the opening (found Oct 20 2026: the lamp-lit jambs and room seen at grazing angles by the probes in front of the wall; wider on Low, narrower on Ultra), and the back room's ceiling glows beside its doorway.
@@ -451,7 +452,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - It builds on phase 5's particle store and collision shapes and phase 6's compute pipelines.
 - Cloth code lives in its own module on top of the core, like the FPS and MOBA code.
 - The pattern editor, garments on moving characters and the game itself follow in phase 10, once phase 9 has skinned characters to dress.
-- The solver's plan and research: `docs/CLOTHGPU.md` (read it first).
+- The solver's plan and research: `docs/research/CLOTHGPU.md` (read it first).
 - **Parked on Nov 6 2026** (the user's choice) for phases 16 and 17. Its unmerged work stays on the `gpu-self-collision` branch; self-collision is to be rebuilt later with a more real-time friendly system, not finished as it stands.
 
 **Items**
@@ -477,7 +478,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] The dress-sized test: XPBD fails it held by contact or pinned and tethered, so garments need more (`dress-yardstick`)
 - [x] Cheaper substeps: 30 a tick, the fewest edge colours, bending optionally less often (`cheaper-substeps`)
 - [x] Self-collision on the CPU: contacts a thickness apart and Planar-DAT's cut, the cloth lab's pile sheet (`cloth-self-collision`)
-- [ ] Self-collision on the GPU, parked, to be rebuilt with a more real-time friendly system (what was tried is on `gpu-self-collision`), on by default then: a spatial hash built in parallel, coloured contacts, the cut as an atomic minimum (`docs/CLOTHGPU.md`, The plan, step 5). Its tests: the dress (a crossings column in the dress test), the pile
+- [ ] Self-collision on the GPU, parked, to be rebuilt with a more real-time friendly system (what was tried is on `gpu-self-collision`), on by default then: a spatial hash built in parallel, coloured contacts, the cut as an atomic minimum (`docs/research/CLOTHGPU.md`, The plan, step 5). Its tests: the dress (a crossings column in the dress test), the pile
   - Watch for the swaying hem found in `cheaper-substeps`: the 0.7 cm pinned dress's back hem kept swinging about 6 cm through 20 s, fed by something (not the tethers, nor the sewing). Gone with `dress-ease`'s roomier dress (19 mm in its last second), so it hangs on the drape; suspects if it returns: the skirt passing through itself, friction on the legs
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
@@ -495,7 +496,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 
 Euphoria-style characters: a simulated body held up by joint motors and kept standing by balance controllers, so a shove makes it stagger, step, fall with its hands out and get up again.
 
-- **The plan:** layers 1-5 of the plan in `docs/RAGDOLLPLAN.md` (read it first: it holds the papers' formulas and numbers and how each layer fits the engine). Layer 6, following animation clips, comes in phase 9 with skeletal animation.
+- **The plan:** layers 1-5 of the plan in `docs/research/RAGDOLLPLAN.md` (read it first: it holds the papers' formulas and numbers and how each layer fits the engine). Layer 6, following animation clips, comes in phase 9 with skeletal animation.
 - **Why here:** placed straight after cloth because the rigid-body solver is phase 7's XPBD with rotation and inertia added; quaternions come from phase 6a.
 - **Units:** real-world values throughout, as in the papers: gravity 9.81 for ragdolls (the character controller keeps its Overwatch 17.5), SI masses, torques and push forces, so the papers' results can be reproduced.
 - **Drawing:** until phase 9 the body is drawn as its capsules, a mannequin.
@@ -537,7 +538,7 @@ Euphoria-style characters: a simulated body held up by joint motors and kept sta
 - [ ] Skeletal animation from glTF skins: joints, playing and blending clips
   - Skinning in a compute shader once per frame into a vertex buffer that the main pass, every shadow view, ray tracing and cloth collision all read.
   - Skinning in the vertex shader would repeat the work in every shadow tile
-- [ ] Ragdolls follow animation (layer 6 of `docs/RAGDOLLPLAN.md`)
+- [ ] Ragdolls follow animation (layer 6 of `docs/research/RAGDOLLPLAN.md`)
   - A table from skeleton bones to ragdoll bodies, clip poses as the joint drives' targets (a powered ragdoll).
   - Skinned characters drawn from the bodies, softening and shaped impulses on a hit.
   - Then a smooth blend back into a matching clip or get-up animation
@@ -672,7 +673,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - **Tracing:** sphere marching in place of the probe rays' ray queries, its hits lit from a coarse volume of the scene's albedo and emissive times the probes' light, checked against the ray-traced result.
   - Probes only need blurry diffuse light, so coarse geometry is enough.
   - **Why not voxels:** chosen over a voxel grid (Oct 20 2026). Epic tried voxels for Lumen (cone tracing, then bit bricks) and dropped them as leaky and slow for exactly this, and AMD's Brixelizer builds the same at run time.
-  - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/LUMEN.md`
+  - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/research/LUMEN.md`
   - **Moved here from 6d** (Oct 23 2026, the user's choice): a large piece of work that only GPUs without ray tracing would use; image quality (6e) comes first.
   - **On hold with DDGI** (Nov 6 2026, the user's choice): it feeds the probes, so phase 16 uses screen-space GI instead. It is the way to fix closed rooms on these GPUs if that is ever wanted.
   - **Expected, not measured:** close to the ray-traced look, since the probes' light is blurry anyway; leaks through walls thinner than the field's voxels unless thickened, thin objects (the light lab's fence) lost at the coarse levels, coarser colour bleeding at hits, and moving objects stamped in each frame. Perhaps 0.5-2 ms for the default's rays on a GTX 1060-class GPU; slower than ray queries on an RTX card.
@@ -692,7 +693,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - **Gain:** about one shadow texel per screen pixel at every distance, with no cascade seams, and caching makes still scenes nearly free.
   - **Needs:** a pass marking the pages the depth buffer touches, a page table the shaders read through, GPU-driven culling and drawing per page, and invalidation from moving casters.
   - A large project; after DDGI (6d) and TAA (6e), and only if ray-traced sun shadows turn out too slow on typical GPUs
-  - **For the jungle valley (the user's question, Nov 14 2026):** it would replace the cascades and the far map; the far map's 2.7 m texels drop drifting rocks under two texels, which pages fine near the camera would keep. Unreal draws its pages with Nanite; without GPU-driven culling and drawing per page (phase 18's occlusion culling is a first step) the per-page draws dominate, and foliage moving in the wind invalidates pages constantly. Research in `docs/SHADOWCACHE.md`.
+  - **For the jungle valley (the user's question, Nov 14 2026):** it would replace the cascades and the far map; the far map's 2.7 m texels drop drifting rocks under two texels, which pages fine near the camera would keep. Unreal draws its pages with Nanite; without GPU-driven culling and drawing per page (phase 18's occlusion culling is a first step) the per-page draws dominate, and foliage moving in the wind invalidates pages constantly. Research in `docs/research/SHADOWCACHE.md`.
 
 ### Performance and scale
 
@@ -732,7 +733,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 
 A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it, and bring down whole buildings that fall by real physics. Buildings are chunks bonded together, carrying their weight down to the ground; break the right supports and the load shifts, the next supports overload, and it comes down floor by floor.
 
-- **The plan and research:** `docs/DESTRUCTION.md` (read it first): the feel of speed, rigid bodies for debris, fracture, why buildings collapse (bond stress, progressive collapse, real materials' numbers), dust and light.
+- **The plan and research:** `docs/research/DESTRUCTION.md` (read it first): the feel of speed, rigid bodies for debris, fracture, why buildings collapse (bond stress, progressive collapse, real materials' numbers), dust and light.
 - **When:** numbered after phase 14 to keep the other phases' numbers; it can start any time after phase 8's rigid bodies, and is better after phase 9's audio (sound is half of feeling fast).
 - **Units:** real-world values, as for cloth and ragdolls: gravity 9.81, real sizes and material strengths (concrete 20-40 MPa in compression), so big things fall as slowly as they should.
 
@@ -755,7 +756,7 @@ A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it,
   - An intact building is kinematic and costs nothing until something changes it; impacts are forces over their duration.
   - Tests against hand calculations: a column's base carries the weight above, a cantilever's root the bending moment w L^2 / 2, a beam on two supports splits its load by the lever rule, a removed support's load moves to the others
 - [ ] Breaking (`bond-breaking`): elastic and fatal limits (damage between them), pieces cut off from the ground found by union-find and turned into falling clusters, the excess force into the pieces' speed
-  - Tests: a ten-storey frame stands with a quarter of its base columns gone and collapses with half (the worked example in `docs/DESTRUCTION.md`)
+  - Tests: a ten-storey frame stands with a quarter of its base columns gone and collapses with half (the worked example in `docs/research/DESTRUCTION.md`)
 - [ ] On the GPU (`gpu-destruction`): thousands of chunks and the stress solve as passes, measured on a ladder of building sizes
 - [ ] Debris and dust: small debris as particles that hit the world but not each other; dust as density in the volumetric fog's grid, lit for free; each collapse a `ProbeEvent`
 - [ ] Flight (`flight-controller`): hover, cruise, boost and a quick stop, turns limited by sideways acceleration so speed widens the arcs, every move a sweep

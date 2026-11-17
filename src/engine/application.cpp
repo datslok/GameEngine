@@ -304,7 +304,7 @@ void Application::applyMouseMode() {
 /*
 * Games may load assets at any time. Assets are only appended, so the new ones are exactly those past the renderer's count: no per-entity checks.
 * Uploads must happen before the frame begins. New textures are compressed (or read from the texture cache) together,
-* a texture a job, then uploaded in handle order (docs/TEXTURECOMPRESSION.md).
+* a texture a job, then uploaded in handle order (docs/research/TEXTURECOMPRESSION.md).
 */
 void Application::prepareNewResources() {
     while (renderer.getMeshCount() < assets.getMeshCount()) {

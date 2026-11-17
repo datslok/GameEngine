@@ -47,7 +47,7 @@ namespace {
     }
 
     /*
-    * A frond's bend (docs/JUNGLE.md, Palms): a tapering cantilever under its own weight, so its turn grows from 0 at the
+    * A frond's bend (docs/research/JUNGLE.md, Palms): a tapering cantilever under its own weight, so its turn grows from 0 at the
     * crown to all of it at the tip, never turning back, and bends most in its middle (the moment falls towards the tip,
     * the stiffness faster still near it, then the moment wins).
     */
@@ -190,7 +190,7 @@ namespace {
     }
 
     /*
-    * A palm thins leaflet by leaflet (scene/card_thinning.h, docs/LOD.md, Hiding the switches): grown thinned it holds
+    * A palm thins leaflet by leaflet (scene/card_thinning.h, docs/research/LOD.md, Hiding the switches): grown thinned it holds
     * exactly the full palm's vertices, only reordered, every palmKeepEvery-th pair's leaflets first with the stem and the
     * stalks, so the kept leaflets stand where they stood; the rest after, each ranked past the least share. The stem and
     * stalks are their own anchors, so they never move; each leaflet's vertices share its base. The coarser level is the

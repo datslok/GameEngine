@@ -11,7 +11,7 @@
 #include <cstdint>
 
 /*
-* The wind force field (docs/WIND.md, after Horizon Zero Dawn's global wind force field): round the camera, in a near
+* The wind force field (docs/research/WIND.md, after Horizon Zero Dawn's global wind force field): round the camera, in a near
 * and a far cascade of WIND_CELLS x WIND_CELLS cells over the ground, each cell holds a spring for each category of
 * growing thing (trees, plants, grass, hanging things), pushed each frame by the wind there and integrated in a compute
 * pass (wind_field.comp), its state kept from frame to frame. The springs, not the wind, are what plants sample: they lag
@@ -37,7 +37,7 @@ struct WindFlutter {
 };
 
 /*
-* The field (RenderSettings::wind, F5 Wind). The springs' frequencies from measurements (docs/WIND.md): trees sway about
+* The field (RenderSettings::wind, F5 Wind). The springs' frequencies from measurements (docs/research/WIND.md): trees sway about
 * 0.3-0.5 Hz, plants and grass faster, hanging things as chains (5.2255 sqrt(L / g)): the short band at 0.6 Hz (a
 * chain about 1.1 m long), the medium at 0.2 Hz (9 m), the long at 0.08 Hz (56 m).
 */
@@ -73,7 +73,7 @@ struct WindSettings {
     bool showField = false;
 
     /*
-    * Swaying (docs/WIND.md, stage 2): what the vertex shaders do with the springs. Off, everything stands still while the
+    * Swaying (docs/research/WIND.md, stage 2): what the vertex shaders do with the springs. Off, everything stands still while the
     * field still runs. The sway fades out between fadeStart and fadeEnd metres from the camera (an impostor card does
     * not sway, so a tree turning into one, at about 1 km in the forest, does not jump; 400 m chosen by eye from far off); shadowCascades of the sun's nearest cascades sway with it,
     * redrawn every frame they hold something swaying, and the rest keep still shadows, as Horizon Zero Dawn's do.
@@ -168,7 +168,7 @@ GpuWindField packWindField(const Wind* wind, const WindSettings& settings, const
                            const std::array<WindWindow, WIND_CASCADES>& previous, bool previousKnown, float seconds, float stepSeconds);
 
 /*
-* Swaying (docs/WIND.md, stage 2). A sway as the shaders read it (GpuInstance::sway): x the spring's category
+* Swaying (docs/research/WIND.md, stage 2). A sway as the shaders read it (GpuInstance::sway): x the spring's category
 * (WIND_CATEGORY_*, -1 still), y the height its bend is measured against (the mesh's units), z its bend, w its flutter.
 */
 Vec4 packSway(const WindSway& sway);
@@ -221,7 +221,7 @@ bool tileSways(int sunCascade, const WindSettings& settings);
 std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSways, std::uint64_t frame);
 
 /*
-* Hanging things (docs/WIND.md, stage 3). A hanging vertex as the shaders read it (scene set 1, binding 40, from the
+* Hanging things (docs/research/WIND.md, stage 3). A hanging vertex as the shaders read it (scene set 1, binding 40, from the
 * hanging mesh's first entry on, three words each): its anchors (first in the low 16 bits), its share along and its arm
 * as half floats (GLSL's packHalf2x16), and its swing's length as a half float in the low 16 bits.
 */

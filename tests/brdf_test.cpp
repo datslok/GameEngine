@@ -657,7 +657,7 @@ namespace {
 
 namespace {
     /*
-    * Light through a leaf (diffuse transmission, docs/JUNGLE.md, Light through leaves): none changes nothing, to the last
+    * Light through a leaf (diffuse transmission, docs/research/JUNGLE.md, Light through leaves): none changes nothing, to the last
     * bit, so every other material draws as before; a light behind it still gives nothing.
     */
     void testNoTransmissionChangesNothing() {

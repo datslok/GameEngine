@@ -8,7 +8,7 @@
 #include <vector>
 
 /*
-* The cells ground cover is drawn in (docs/GROUNDCOVER.md): squares of the land, each drawing one of a few shared
+* The cells ground cover is drawn in (docs/research/GROUNDCOVER.md): squares of the land, each drawing one of a few shared
 * patches the vertex shaders lift onto it (ModelRenderer::followsGround), as dense as one of the ground's paint channels
 * there. The grass reads the grass paint (games/forest/grass.h), the forest floor's cover the leaf litter's
 * (games/forest/floor_cover.h), so each grows exactly where the ground is painted as it.

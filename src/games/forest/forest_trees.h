@@ -142,7 +142,7 @@ std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius)
 
 /*
 * One species of tree (F5 Forest, Canopy trees and Emergent trees; read at start-up: they are grown once). The defaults
-* are the canopy trees'; emergentTreeSettings gives the emergents'. Sizes from docs/JUNGLE.md: the canopy 20-40 m, the
+* are the canopy trees'; emergentTreeSettings gives the emergents'. Sizes from docs/research/JUNGLE.md: the canopy 20-40 m, the
 * emergents 45-60 m above it.
 */
 struct ForestTreeSettings {
@@ -156,7 +156,7 @@ struct ForestTreeSettings {
     float spacingShare = 0.55f;
 
     // The tree's top and where its trunk forks into limbs, above the ground, and the crown's radius across (metres):
-    // a canopy tree at the canopy's top, its crown from about half its height (docs/JUNGLE.md, The mid layer's shape:
+    // a canopy tree at the canopy's top, its crown from about half its height (docs/research/JUNGLE.md, The mid layer's shape:
     // forking at 12 m left no room under it for the mid layer). The crown fills the space between the fork and the top.
     float height = 38.0f;
     float forkHeight = 18.0f;
@@ -180,7 +180,7 @@ struct ForestTreeSettings {
     // How far the most leaning variant's fork stands off its foot (metres); each leans 30-100% of it its own way.
     float lean = 2.5f;
 
-    // Foliage on leaf-cluster cards (docs/TREES.md, Part 2): a card's size (metres a side), a leaf's length on it, how
+    // Foliage on leaf-cluster cards (docs/research/TREES.md, Part 2): a card's size (metres a side), a leaf's length on it, how
     // thick a branch may be and still carry foliage, how many cards each such node in a clump's shell carries, how far
     // out of its clump a node must be to have one (a share of the clump's radius), how many bigger cards fill each
     // clump's inside so it cannot be seen through, and the clusters' texture's texels a cell (four cells). Real-sized
@@ -207,7 +207,7 @@ struct ForestTreeSettings {
     // turned (1,300 trees: 19 ms of shadows on the RTX 4070 Laptop, Nov 15 2026).
     float shadowBarkShare = 0.1f;
 
-    // The levels of detail between the seen meshes and the shadows' stand-ins, which are the coarsest (docs/LOD.md):
+    // The levels of detail between the seen meshes and the shadows' stand-ins, which are the coarsest (docs/research/LOD.md):
     // levelCardShare of the leaf cards, each grown to keep their area (SpeedTree's fewer, bigger cards), and the bark
     // simplified to levelBarkShare of its triangles.
     float levelCardShare = 0.5f;
@@ -218,7 +218,7 @@ struct ForestTreeSettings {
     // smaller and the crown thinner far off, which people preferred for light thinning (Neubert et al. 2011).
     float levelCardGrowth = 0.5f;
 
-    // The impostor past them (scene/impostor.h, docs/LOD.md): the error, in metres, from which the tree is drawn as its
+    // The impostor past them (scene/impostor.h, docs/research/LOD.md): the error, in metres, from which the tree is drawn as its
     // card (at least the shadow stand-ins'; 1.5 m switches about 580 m off at 1080 pixels and a 70 degree view, about
     // 90 m in the reflection probe's faces), and its atlas: frames a side over the hemisphere, texels a frame (8 x 128:
     // 1024 square, Fortnite's trees 12 x 12 in 2048).
@@ -230,14 +230,14 @@ struct ForestTreeSettings {
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
 
 /*
-* The emergents' settings (docs/JUNGLE.md): ten trees 55 m tall, standing apart (their whole crown's radius), standing over the canopy, a clear trunk to 36 m and a
+* The emergents' settings (docs/research/JUNGLE.md): ten trees 55 m tall, standing apart (their whole crown's radius), standing over the canopy, a clear trunk to 36 m and a
 * wide crown spread from its top, about half their height across, as real emergents' are; bigger buttresses, little
 * lean. Their leaves are the canopy trees', so both share one clusters' texture.
 */
 ForestTreeSettings emergentTreeSettings();
 
 /*
-* The mid layer's settings (docs/JUNGLE.md): 1200 slender trees 15 m tall, their crowns interlocking, in the canopy's shade, a trunk 20-40 cm across,
+* The mid layer's settings (docs/research/JUNGLE.md): 1200 slender trees 15 m tall, their crowns interlocking, in the canopy's shade, a trunk 20-40 cm across,
 * a shallow crown from 10 m about 5 m in radius with few clumps (shade trees have flatter crowns and fewer leaf layers),
 * placed under and between the canopy crowns. Their leaves are the canopy trees'.
 */
@@ -247,7 +247,7 @@ ForestTreeSettings midTreeSettings();
 int clumpOf(const Vec3& point, const std::vector<TreeClump>& clumps);
 
 // A direction with its downward part halved, made unit again: the clump's underside lit as a cone, not a floor
-// (docs/TREES.md, Part 3).
+// (docs/research/TREES.md, Part 3).
 Vec3 coneFlattened(const Vec3& direction);
 
 /*

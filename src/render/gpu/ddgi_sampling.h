@@ -14,7 +14,7 @@
 #include <vector>
 
 /*
-* Reading global illumination's light probes back at a surface (docs/ILLUMINATION.md, "Shading a point from the
+* Reading global illumination's light probes back at a surface (docs/research/ILLUMINATION.md, "Shading a point from the
 * probes"): the 8 probes at the corners of the grid cell around the point are blended, each weighted by how near it is
 * (trilinear), whether it lies in front of the surface (a soft wrap) and whether it can see the point at all (Chebyshev's
 * bound on its stored distances, as in variance shadow maps), which keeps light from leaking through walls. The blend

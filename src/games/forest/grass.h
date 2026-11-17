@@ -13,7 +13,7 @@
 #include <vector>
 
 /*
-* Grass in the open (docs/GROUNDCOVER.md, stage 2): blades as curves, clumped as Ghost of Tsushima's are, on a few
+* Grass in the open (docs/research/GROUNDCOVER.md, stage 2): blades as curves, clumped as Ghost of Tsushima's are, on a few
 * shared square patches the vertex shaders lift onto the land (ModelRenderer::followsGround). Each cell of the land
 * within reach of the path draws one patch, as dense as the ground's grass paint there, so the blades end where the
 * grass texture does: the meadow, the clearing, the canopy's gaps. A real jungle floor under a closed canopy has little

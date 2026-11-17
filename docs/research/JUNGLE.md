@@ -1,6 +1,6 @@
 # A jungle patch: research
 
-Notes on how real rainforest is built and how shipped games draw dense jungle, gathered on Nov 14, 2026, for phase 18's jungle patch along the path past the Ring. The trees' own growth is in `docs/TREES.md`; this doc is about layers, sizes, density and the look.
+Notes on how real rainforest is built and how shipped games draw dense jungle, gathered on Nov 14, 2026, for phase 18's jungle patch along the path past the Ring. The trees' own growth is in `docs/research/TREES.md`; this doc is about layers, sizes, density and the look.
 
 Each part records what the sources say and then **what it means here**. Facts marked **(unverified)** are from memory or secondary sources; check them before relying on them.
 
@@ -17,11 +17,11 @@ What makes them read small:
 
 | Layer | Height | Source |
 |---|---|---|
-| Emergents | 45-60 m and more | `docs/TREES.md` (Banin 2012, NSW) |
+| Emergents | 45-60 m and more | `docs/research/TREES.md` (Banin 2012, NSW) |
 | Canopy | 20-40 m | same |
 | Understorey | 3-10 m | same |
 
-- **Height against trunk:** 845 tropical trees of 52 species spanned 10-208 cm across at breast height and 8-67 m tall, crown areas 1.4-1,495 m^2 ([Research Square](https://www.researchsquare.com/article/rs-2209593/v1)). Menara, 100.8 m, is 2.12 m across above its buttresses (`docs/TREES.md`).
+- **Height against trunk:** 845 tropical trees of 52 species spanned 10-208 cm across at breast height and 8-67 m tall, crown areas 1.4-1,495 m^2 ([Research Square](https://www.researchsquare.com/article/rs-2209593/v1)). Menara, 100.8 m, is 2.12 m across above its buttresses (`docs/research/TREES.md`).
 - **Emergents' crowns:** above about 25 m, six Costa Rican emergent species' crowns were about 0.49 of the tree's height across **(unverified: from a truncated abstract)** ([ResearchGate](https://www.researchgate.net/publication/231749507_Allometry_of_emergent_tree_species_from_saplings_to_above-canopy_adults_in_a_Costa_Rican_rain_forest)). A 55 m emergent: a crown about 27 m across.
 - **Region matters:** at the same trunk, Asian, African and Guyana Shield trees are taller than most Amazonian ones ([Feldpausch 2011](https://bg.copernicus.org/articles/8/1081/2011/)). Lianas make trees about 1.8 m shorter at the same trunk ([PLOS ONE](https://journals.plos.org/plosone/article/file?id=10.1371%2Fjournal.pone.0255197&type=printable)).
 
@@ -64,7 +64,7 @@ Gathered on Nov 14, 2026, after the user's look at the mid layer: "it doesnt rea
 
 **What it means here:**
 
-- **Plants built as geometry, not cards:** a palm frond's leaflets and a big leaf as meshes cut to their outline, so nothing is drawn where there is no leaf, and the depth prepass keeps the main pass's cost to the pixels seen. No CC0 library has palm or banana scans (`docs/TREES.md`), so their shapes are generated and their surface takes the scanned broad leaf's (`Leaf001`) colour and detail.
+- **Plants built as geometry, not cards:** a palm frond's leaflets and a big leaf as meshes cut to their outline, so nothing is drawn where there is no leaf, and the depth prepass keeps the main pass's cost to the pixels seen. No CC0 library has palm or banana scans (`docs/research/TREES.md`), so their shapes are generated and their surface takes the scanned broad leaf's (`Leaf001`) colour and detail.
 - **Three kinds** at mixed heights: understorey palms (2-6 m: a short or no stem, a fan of arching pinnate fronds), big-leaved herbs (0.5-2.5 m: a few huge leaves on long stalks, like elephant ears and young bananas) and ferns (0.3-1.5 m: a rosette of finely divided fronds).
 - **Density:** thick along and round the path, where the view should close at eye level, thinning away from it; a few thousand plants in the patch, a few variants of each kind instanced.
 
@@ -78,7 +78,7 @@ Gathered on Nov 14, 2026, after the user's look at the mid layer: "it doesnt rea
 - **Ambient:** a hemisphere, `lerp(0.5 ambient, ambient, N.z * 0.5 + 0.5)`; flat ambient "looks very boring".
 - **Wind:** main bending (the whole plant, bend `height * scale`, kept on a sphere so it never stretches) and detail bending (leaf edges and leaves, four smoothed triangle waves at 1.975, 0.793, 0.375, 0.193), with vertex colours holding edge stiffness, a phase per leaf and leaf stiffness. Too much bending "will ruin the illusion".
 
-**Horizon Zero Dawn** (`docs/TREES.md`): vegetation placed on the GPU layer by layer from density maps, over 500 kinds of asset. **Horizon Forbidden West** sped up foliage and cut-outs with deferred texturing ([GDC](https://gdcvault.com/play/1027553/Adventures-with-Deferred-Texturing-in)).
+**Horizon Zero Dawn** (`docs/research/TREES.md`): vegetation placed on the GPU layer by layer from density maps, over 500 kinds of asset. **Horizon Forbidden West** sped up foliage and cut-outs with deferred texturing ([GDC](https://gdcvault.com/play/1027553/Adventures-with-Deferred-Texturing-in)).
 
 **Ghost of Tsushima:** procedural grass generated near the camera, distant foliage swapped for textures **(unverified, secondary)** ([GDC](https://gdcvault.com/play/1027214/Advanced-Graphics-Summit-Procedural-Grass-in)); few kinds of plant per biome, so each area has its own look ([PlayStation Blog](https://blog.playstation.com/?p=333111)).
 
@@ -120,7 +120,7 @@ The spec's parameters: `diffuseTransmissionFactor` (default 0; the share of the 
 
 ## Palms
 
-Gathered on Nov 15, 2026, before the jungle patch's palms. No CC0 library has palm scans (`docs/TREES.md`), so they are grown by the engine.
+Gathered on Nov 15, 2026, before the jungle patch's palms. No CC0 library has palm scans (`docs/research/TREES.md`), so they are grown by the engine.
 
 **Real understorey palms:**
 
@@ -149,7 +149,7 @@ Gathered on Nov 15, 2026, before the jungle patch's palms. No CC0 library has pa
 - **The frond's curve:** the rachis leaves the crown 40-70 degrees above level and bends down as a cantilever under its own weight does (Euler-Bernoulli: curvature = moment / stiffness). The moment grows as `(1 - s)^2` towards the base; a rachis tapering to 30% of its radius has a stiffness going as the radius^4, so the curvature goes as `(1 - s)^2 / (1 - 0.7 s)^4`, an arch bending most mid-frond (an untapered beam would bend most at its base). One droop number a frond, varied.
 - **Leaflets as geometry, cut to their outline:** 20-40 pairs a frond, nearly at right angles to the rachis, longest in the middle (a spindle outline), each a narrow strip folded into a V along its midrib and arching under its own weight. Opaque and double-sided, so no cut-out test and no overdraw from empty card area; light through leaves as the trees'.
 - **Texture:** our leaves (`Leaf001`, the leaf sets) are broad and net-veined, unlike a palm leaflet's parallel veins, so a strip of one would look wrong when stretched.
-- **Levels:** fewer leaflet pairs and segments for the far levels, then the impostor cards the trees and plants already use; shadows in the nearest cascades only, as the understorey's. Since `lod-pop-in` the leaflets thin one by one instead (`docs/LOD.md`, Hiding the switches).
+- **Levels:** fewer leaflet pairs and segments for the far levels, then the impostor cards the trees and plants already use; shadows in the nearest cascades only, as the understorey's. Since `lod-pop-in` the leaflets thin one by one instead (`docs/research/LOD.md`, Hiding the switches).
 
 ## The plan for this engine
 

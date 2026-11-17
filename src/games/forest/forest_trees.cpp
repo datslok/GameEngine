@@ -820,7 +820,7 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
     const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
     meshes.leafyCount = static_cast<int>(std::count(leafy.begin(), leafy.end(), true));
     /*
-    * The leaves, thinned one by one with distance (scene/card_thinning.h, docs/LOD.md, Hiding the switches): first the
+    * The leaves, thinned one by one with distance (scene/card_thinning.h, docs/research/LOD.md, Hiding the switches): first the
     * first levelCardShare of each node's and each clump's cards, which the thinning keeps, then the rest, which it
     * shrinks away past their random ranks while the kept ones grow by share^-levelCardGrowth; the same seed numbers
     * them all as one set. The level of detail is the kept cards alone, the leaves' first vertices and triangles, which the
@@ -854,7 +854,7 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
     meshes.shadowBark = simplifyMesh(meshes.bark, settings.shadowBarkShare, shadowBarkError, false, &meshes.shadowBarkError);
 
     /*
-    * The levels of detail between (docs/LOD.md): the leaves' kept cards (above). The bark: simplified within the shadow
+    * The levels of detail between (docs/research/LOD.md): the leaves' kept cards (above). The bark: simplified within the shadow
     * bark's error, so its own is no larger. The shadow leaves and bark are the second levels; the cards' error is how much
     * longer their sides grew.
     */

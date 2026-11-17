@@ -22,7 +22,7 @@ namespace {
     constexpr float leastLeafShare = 0.85f;
 
     /*
-    * Each kind's leaves (docs/VINES.md, Epiphytes): the youngest's and the oldest's elevation (degrees above level)
+    * Each kind's leaves (docs/research/VINES.md, Epiphytes): the youngest's and the oldest's elevation (degrees above level)
     * and droop (StrapFold's), the fold of the halves, the widest across as a share of the length and the segments
     * along. A bird's-nest fern's fronds open as a funnel, the outer ones arching over and down, nearly flat across; a
     * tank bromeliad's are stiffer and channelled, so they hold water.

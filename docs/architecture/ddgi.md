@@ -4,7 +4,7 @@ Covers: `src/render/gpu/ddgi`, `src/render/gpu/ddgi_shared.h`, `src/render/gpu/d
 
 **On hold:** off by default (`GlobalIlluminationSettings::enabled` and the ray tracing master switch), tests parked (`runParkedTests`); resumes in phase 17.
 
-Bounce light from probes traced with hardware ray queries (`ray-tracing.md`). Method, formulas and the papers' numbers: `docs/ILLUMINATION.md`. Placement, relocation and states: `ddgi-cascades.md`. Fast lights, ray budget, adaptive memory, scene events, sharing: `ddgi-memory.md`.
+Bounce light from probes traced with hardware ray queries (`ray-tracing.md`). Method, formulas and the papers' numbers: `docs/research/ILLUMINATION.md`. Placement, relocation and states: `ddgi-cascades.md`. Fast lights, ray budget, adaptive memory, scene events, sharing: `ddgi-memory.md`.
 
 ## When probes run
 
@@ -77,7 +77,7 @@ Mirrored in `ddgi.glsl`; tested in `ddgi_test` and `ddgi_gpu_test` (`GPU_TEST_PR
 1. **Cell:** `probeSelfShadowBias(n, v, spacing, bias)` = (0.2 n + 0.8 v) x 0.75 x smallest spacing x setting. `probeCell` finds the cell round the biased point (corner clamped, alpha per axis), `probeCellCorner` its 8 corners (bit 0 x, 1 y, 2 z), `probeTrilinearWeight` (each factor at least 0.001).
 2. **Corner weight:** `probeCornerWeight` = `crushProbeWeight(probeBackFaceWeight x probeVisibility)` x trilinear.
    - Back face: ((cos + 1) / 2)^2 + 0.2, from the unbiased offset.
-   - Visibility: 1 up to the stored mean distance, beyond it Chebyshev's bound cubed, at least 0.05 (`docs/ILLUMINATION.md`).
+   - Visibility: 1 up to the stored mean distance, beyond it Chebyshev's bound cubed, at least 0.05 (`docs/research/ILLUMINATION.md`).
    - Crush: below 0.2, w^3 / 0.04.
 3. **Blend:** `addProbeSample`, `finishProbeBlend`: square roots of the irradiances, weighted, averaged, squared. `ProbeLight {diffuse, specular}` (specular: same corners read in the mirror direction, a fully rough stand-in); `ProbeLights {still, fast}`, each blended alone and summed by the caller.
 

@@ -243,7 +243,7 @@ namespace {
     }
 
     /*
-    * Impostors (docs/LOD.md): a tree's parts end on a level without a mesh, drawing nothing past it; its impostor is
+    * Impostors (docs/research/LOD.md): a tree's parts end on a level without a mesh, drawing nothing past it; its impostor is
     * hidden until the same error fits, so at every distance exactly one of them is drawn. Both choose by one shared box
     * (MeshLevelOptions::chooseBounds), placed by each draw's model matrix, so they switch at the same place; batching
     * leaves out a draw drawing nothing.

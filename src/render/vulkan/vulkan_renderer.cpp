@@ -1459,7 +1459,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Each view draws the levels of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass
     // redraws the camera's with the same levels, so its depths match the main pass's. The camera's are chosen by the
     // output's height, not the render's: the upscalers rebuild the output's detail from jittered frames, and chosen by
-    // the render's, DLSS Quality pulled every switch a third closer (docs/LOD.md, Hiding the switches).
+    // the render's, DLSS Quality pulled every switch a third closer (docs/research/LOD.md, Hiding the switches).
     validateLevelOfDetail(settings.levelOfDetail);
     cpuClock.lap(CpuStage::Lights, profilerSeconds());
     const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);

@@ -44,7 +44,7 @@ Owns every CPU-side mesh, image and imported model. Append-only, so "new since l
 
 ### Levels of detail
 
-`setMeshLevels(base, levels)`, `setMeshLevelOptions`, `getMeshLevels`, `getLevelsVersion` (bumped on every change, so kept still draws rebuild). Validation in the header; how levels are chosen: `docs/LOD.md`.
+`setMeshLevels(base, levels)`, `setMeshLevelOptions`, `getMeshLevels`, `getLevelsVersion` (bumped on every change, so kept still draws rebuild). Validation in the header; how levels are chosen: `docs/research/LOD.md`.
 
 ### Models to entities
 
@@ -77,7 +77,7 @@ Textures: new ones are cooked together, a texture a job, then uploaded in handle
 
 ## Texture compression
 
-Research and choices: `docs/TEXTURECOMPRESSION.md` (BC7 for everything compressible, normal maps included, so Toksvig keeps reading the averaged length).
+Research and choices: `docs/research/TEXTURECOMPRESSION.md` (BC7 for everything compressible, normal maps included, so Toksvig keeps reading the averaged length).
 
 | Step | Where | Does |
 |---|---|---|

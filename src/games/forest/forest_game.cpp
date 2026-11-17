@@ -473,12 +473,12 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
     const bool sameLeaves = emergentSettings.clusterTexels == treeSettings.clusterTexels &&
                             emergentSettings.leafLength / emergentSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
 
-    // The big trees' climbers (docs/VINES.md, stage 2): their stems in the islands' brown bark, their leaves drawn.
+    // The big trees' climbers (docs/research/VINES.md, stage 2): their stems in the islands' brown bark, their leaves drawn.
     const TreeClimbers climbers{.settings = &climberSettings,
                                 .stem = forestLayerMaterial(assets, assetFolder, forestBarkLayer),
                                 .leaf = withLeafLight(forestAroidLeafMaterial(assets, assetFolder), leafLightSettings)};
 
-    // Every tree's epiphytes (docs/VINES.md, stage 3): the rosettes' strap leaves in their own atlas, the
+    // Every tree's epiphytes (docs/research/VINES.md, stage 3): the rosettes' strap leaves in their own atlas, the
     // limbs' moss from the moss scan; the mid layer's trees are small, carrying a few bromeliads.
     const TreeEpiphytes bigEpiphytes{.settings = &epiphyteSettings,
                                      .bigTree = true,
@@ -534,7 +534,7 @@ namespace {
     };
 
     /*
-    * A plant's variant made ready to draw (docs/LOD.md): its seen mesh, with its coarser level and then its shadow's
+    * A plant's variant made ready to draw (docs/research/LOD.md): its seen mesh, with its coarser level and then its shadow's
     * stand-in as its levels, then nothing from impostorErrorMetres (or the stand-in's error, if larger) on, where its
     * card begins (scene/impostor.h, baked from the seen mesh as the trees' are from theirs, the texture copied first:
     * adding the atlases can move the asset manager's textures). All choose by the seen mesh's one box, so exactly one is
@@ -641,7 +641,7 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
             }
 
             /*
-            * The leaves seen keep their outline; their levels of detail (docs/LOD.md) let it go, as the shadow's stand-in
+            * The leaves seen keep their outline; their levels of detail (docs/research/LOD.md) let it go, as the shadow's stand-in
             * does, which is the coarsest. Both are simplified within the same error, so the first strays no further.
             */
             float levelError = 0.0f;
@@ -712,7 +712,7 @@ namespace {
     };
 
     /*
-    * A kind of ground cover placed (docs/GROUNDCOVER.md): every variant at every density step grown on every core
+    * A kind of ground cover placed (docs/research/GROUNDCOVER.md): every variant at every density step grown on every core
     * (grow(variant seed, density); a sparser step the first of the same pieces), then made drawable, each with its half
     * and quarter levels and nothing past the farthest. Each cell then draws its patch, turned its quarter turns about
     * its middle, lifted onto the land by the vertex shaders; casting no shadow (contact shadows and ambient occlusion
@@ -1002,7 +1002,7 @@ std::vector<float> ForestGame::plantTrees(World& world, AssetManager& assets, co
         cardMaterials.back().diffuseTransmission = leaf.diffuseTransmission;
         cardMaterials.back().diffuseTransmissionTint = leaf.diffuseTransmissionTint;
 
-        // The levels of detail (docs/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing. The
+        // The levels of detail (docs/research/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing. The
         // leaves' coarser level is their own first vertices, thinned as the leaves are (scene/card_thinning.h).
         assets.setMeshLevels(barkMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
                                                  MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}, MeshLevel{MeshHandle{}, impostorError}});

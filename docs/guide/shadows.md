@@ -49,7 +49,7 @@ Most lights and most of the world stand still, so most tiles would come out iden
 - **The renderer remembers what it drew.** Per square, `ShadowTileMemory` keeps the view matrix and a 64-bit **hash** (a fingerprint) of the casters: their meshes and model matrices. Each frame the fingerprint is recomputed, which is cheap next to drawing; if matrix and fingerprint match, the tile is skipped. A moving light changes the matrix; a box that moves, appears or vanishes changes the fingerprint.
 - **Wiping one tile.** A clear at the start of a pass would wipe the whole atlas, so each redrawn tile first gets one big triangle at the far depth, drawn with the depth test off, which overwrites exactly that tile.
 
-When nothing needs drawing, the shadow pass is skipped. F4 counts tiles drawn, kept and skipped. Moving casters inside an otherwise still tile, the stagger and the research behind it: `docs/architecture/lights-and-shadow-atlas.md` and `docs/SHADOWCACHE.md`.
+When nothing needs drawing, the shadow pass is skipped. F4 counts tiles drawn, kept and skipped. Moving casters inside an otherwise still tile, the stagger and the research behind it: `docs/architecture/lights-and-shadow-atlas.md` and `docs/research/SHADOWCACHE.md`.
 
 ## Three problems and their fixes
 

@@ -254,7 +254,7 @@ namespace {
     }
 
     /*
-    * The dress-sized test (docs/CLOTHGPU.md, Part 5): the cloth lab's dress on its mannequin, at each rung held by
+    * The dress-sized test (docs/research/CLOTHGPU.md, Part 5): the cloth lab's dress on its mannequin, at each rung held by
     * contact alone and pinned at its shoulders and tethered, with XPBD at the fabric's substeps, each made, sewn and
     * settled as the lab does it (dressOnMannequin, prepareDressTick), on the CPU and then the GPU.
     */

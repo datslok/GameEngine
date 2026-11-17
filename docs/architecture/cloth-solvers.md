@@ -2,7 +2,7 @@
 
 Covers: `src/cloth/cloth_energy`, `src/cloth/cloth_block_descent`, `src/cloth/cloth_hierarchy`, `src/cloth/cloth_tethers`
 
-What carries a pin's pull across a fine sheet, which a local solver (XPBD or vertex block descent alone) moves about one edge a pass, so fine sheets hang stretched. Two answers live here: coarse levels under vertex block descent, and tethers under either solver. The step, XPBD and the settings: `cloth.md`. Papers, formulas and the yardstick's numbers: `docs/CLOTHGPU.md`, Parts 2 and 5.
+What carries a pin's pull across a fine sheet, which a local solver (XPBD or vertex block descent alone) moves about one edge a pass, so fine sheets hang stretched. Two answers live here: coarse levels under vertex block descent, and tethers under either solver. The step, XPBD and the settings: `cloth.md`. Papers, formulas and the yardstick's numbers: `docs/research/CLOTHGPU.md`, Parts 2 and 5.
 
 | | Coarse levels | Tethers |
 |---|---|---|

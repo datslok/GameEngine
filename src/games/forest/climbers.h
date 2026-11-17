@@ -12,7 +12,7 @@
 #include <vector>
 
 /*
-* Climbers on the big trees' trunks (docs/VINES.md, stage 2): root climbers such as philodendrons and monsteras, which
+* Climbers on the big trees' trunks (docs/research/VINES.md, stage 2): root climbers such as philodendrons and monsteras, which
 * take a trunk of any size. Each climbs from the foot, between the buttresses, up the bark, winding a little; low down
 * its leaves are small and pressed flat to the bark like tiles ("shingling"), higher up big heart-shaped leaves on
 * stalks stand off the trunk and droop; feeder roots hang straight down from it to the ground, some ending in mid air.

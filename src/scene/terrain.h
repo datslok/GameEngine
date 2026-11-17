@@ -16,7 +16,7 @@
 #include <vector>
 
 /*
-* Terrain level of detail (CDLOD, Strugar 2010; docs/LOD.md, Terrain): the land as a quadtree of square nodes over its
+* Terrain level of detail (CDLOD, Strugar 2010; docs/research/LOD.md, Terrain): the land as a quadtree of square nodes over its
 * heights, each drawn as one small grid mesh the vertex shaders lift onto the land (terrain.glsl). Each frame the nodes
 * are chosen round the camera, finer near it, each level reaching twice as far as the last, and every vertex slides
 * smoothly into the next coarser level's grid towards the end of its level's range, so the levels meet without cracks

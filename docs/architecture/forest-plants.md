@@ -2,7 +2,7 @@
 
 Covers: `src/games/forest/understorey`, `src/games/forest/palms`, `src/games/forest/grass`, `src/games/forest/floor_cover`, `src/games/forest/ground_cells`
 
-What grows under and between the trees. Research: `docs/JUNGLE.md` (the understorey, palms), `docs/GROUNDCOVER.md` (grass, the floor). The game: `forest.md`; level-of-detail and impostor machinery: `level-of-detail.md`.
+What grows under and between the trees. Research: `docs/research/JUNGLE.md` (the understorey, palms), `docs/research/GROUNDCOVER.md` (grass, the floor). The game: `forest.md`; level-of-detail and impostor machinery: `level-of-detail.md`.
 
 ## The planting grid (`understorey`)
 

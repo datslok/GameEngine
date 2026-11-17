@@ -7,11 +7,11 @@
 #include <span>
 
 /*
-* Meshes that follow the ground (ModelRenderer::followsGround; docs/GROUNDCOVER.md): a patch of grass or ground cover
+* Meshes that follow the ground (ModelRenderer::followsGround; docs/research/GROUNDCOVER.md): a patch of grass or ground cover
 * is built standing on y = 0 of its own frame, and every vertex shader lifts each vertex by the land's height at the
 * vertex's own place in the world as the land is drawn there (terrainSurfaceHeight, terrain_data.glsl), as the terrain lifts its own flat patches. Over a
 * blade's few centimetres of lean that is its root's height, so a few shared patches cover every lumpy spot of land
-* instead of a mesh each (docs/GROUNDCOVER.md: about 1.2 GB for the forest's meadow and clearing).
+* instead of a mesh each (docs/research/GROUNDCOVER.md: about 1.2 GB for the forest's meadow and clearing).
 *
 * The CPU never moves the vertices; it lifts what it reasons with, the spheres views cull by and levels are chosen by.
 */

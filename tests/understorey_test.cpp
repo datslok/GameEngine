@@ -28,7 +28,7 @@ namespace {
     }
 
     /*
-    * The understorey's places (docs/JUNGLE.md, The understorey): on the trees' stretch of the floor, clear of the path
+    * The understorey's places (docs/research/JUNGLE.md, The understorey): on the trees' stretch of the floor, clear of the path
     * and every trunk, on the ground, no plant blocking a sight line; every kind, each scaled within its range; thick
     * near the path and thinning away from it; the same every run.
     */
@@ -176,7 +176,7 @@ namespace {
             assert(!leaves.castsShadows && !leaves.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
             assert(shadow.shadowCascades == ForestUnderstoreySettings{}.shadowCascades);
 
-            // The leaves seen have two coarser levels (docs/LOD.md): simplified further, then the shadow's own stand-in,
+            // The leaves seen have two coarser levels (docs/research/LOD.md): simplified further, then the shadow's own stand-in,
             // then nothing, where the card begins.
             const std::vector<MeshLevel>& levels = forest.assets.getMeshLevels().at(leaves.parts.front().mesh.index);
             assert(levels.size() == 3 && levels[1].mesh == shadow.parts.front().mesh && levels[1].errorMetres >= levels[0].errorMetres);

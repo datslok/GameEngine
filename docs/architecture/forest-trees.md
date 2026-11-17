@@ -2,7 +2,7 @@
 
 Covers: `src/games/forest/forest_trees`, `src/games/forest/leaf_clusters`, `src/games/forest/lianas`, `src/games/forest/climbers`, `src/games/forest/epiphytes`
 
-The grown trees and what grows on them. Research: `docs/TREES.md`, `docs/JUNGLE.md`, `docs/VINES.md`. The game: `forest.md`; tubes and leaf cards: `forest-rock.md`, Strands, tubes and cards.
+The grown trees and what grows on them. Research: `docs/research/TREES.md`, `docs/research/JUNGLE.md`, `docs/research/VINES.md`. The game: `forest.md`; tubes and leaf cards: `forest-rock.md`, Strands, tubes and cards.
 
 ## Species
 
@@ -36,7 +36,7 @@ Three, each a `ForestTreeSettings` (F5 Forest, Canopy trees, Emergent trees, Mid
 
 ## Leaf-cluster cards
 
-A twig of 12-18 leaves on each card, so more leaf for fewer cards (`docs/TREES.md`, Part 2).
+A twig of 12-18 leaves on each card, so more leaf for fewer cards (`docs/research/TREES.md`, Part 2).
 
 - `appendClusterCards`: `cardsPerNode` (6) cards at every leafy node (`leafyNodes`: at most `leafyRadius`, 6 cm, thick) at least `shellShare` (0.3) of its clump's radius out of the clump it is deepest in (`clumpOf`), each `clusterSize` (1 m) a side, its front a random turn from out of its clump, the twig reaching out and up; then `fillCards` (32) cards 1.5 times as big near each clump's middle, facing every way, so the crown is not seen through.
 - Normals (`foliageNormal`): `cardNormalShare` 0.3 the card's facing, `clumpNormalShare` 0.5 out of its clump, `crownNormalShare` 0.2 out of the crown, the last two cone-flattened underneath (`coneFlattened`), never past square to the card's front: each clump gets a lit top and shaded underside.
@@ -68,7 +68,7 @@ Engine side: `level-of-detail.md`. Per variant (`plantTrees` in `forest_game`):
 
 ## Lianas (`lianas`)
 
-Woody vines from the canopy and emergent crowns (`LianaCrown`), built after the trees (`buildLianas`). `docs/VINES.md`, stage 1.
+Woody vines from the canopy and emergent crowns (`LianaCrown`), built after the trees (`buildLianas`). `docs/research/VINES.md`, stage 1.
 
 - **Which** (`chooseLianas` → `Liana`): a crown carries some with `treeShare` (0.8), `pathShare` (0.95) within `pathReach` (15 m) of the path; 1 to `mostPerTree` (8). A rope (`ropeShare` 0.35, or when no crown's centre is within `neighbourSpan`, 30 m) hangs to the ground 1-6 m off, sunk `lianaGroundSink` (0.2 m), `ropeSlack` (up to 5%) longer than straight; a loop hangs into a random neighbour's crown with a sag of `leastSag` to `mostSag` (0.1-0.4) of its span, L = span (1 + 8/3 share²). Holds in a crown's lower part, so its leaves hide the ends.
 - **Thickness** (`lianaDiameter`): Barro Colorado's census (Schnitzer et al. 2012) by a random share (half 1-2 cm, 42% 2-5, 7% 5-10, 1% 10-20), times `thickness` (2), so the thin ones still cover a pixel.
@@ -79,7 +79,7 @@ Woody vines from the canopy and emergent crowns (`LianaCrown`), built after the 
 
 ## Climbers (`climbers`)
 
-Root climbers (philodendrons, monsteras) up the canopy and emergent trunks, grown into each variant in its own frame (`growClimbers` from `TreeMeshes::trunk`; none for the mid layer). `docs/VINES.md`, stage 2.
+Root climbers (philodendrons, monsteras) up the canopy and emergent trunks, grown into each variant in its own frame (`growClimbers` from `TreeMeshes::trunk`; none for the mid layer). `docs/research/VINES.md`, stage 2.
 
 - **The host:** `ClimbHost` and its `tubeFrames`; `hostSurface` (`HostPoint` at a height and angle, at the lobed radius) and `hostClearance` follow the drawn surface exactly.
 - **How many** (`climbersOnTree`): `treeShare` (0.8) of variants, 1 to `mostPerTree` (4) each, from the variant's seed.
@@ -91,7 +91,7 @@ Root climbers (philodendrons, monsteras) up the canopy and emergent trunks, grow
 
 ## Epiphytes (`epiphytes`)
 
-Rosettes and moss on the limbs at the crown's base, grown into each variant of every species from `TreeMeshes::skeleton` (`growEpiphytes` → `EpiphyteMeshes`). `docs/VINES.md`, stage 3.
+Rosettes and moss on the limbs at the crown's base, grown into each variant of every species from `TreeMeshes::skeleton` (`growEpiphytes` → `EpiphyteMeshes`). `docs/research/VINES.md`, stage 3.
 
 - **Sites** (`epiphyteSites` → `EpiphyteSite`): crotches (nodes with two children or more) and each limb segment's top, on limbs at least `limbShare` (0.25) of the trunk's radius and `leastLimbRadius` (3 cm) thick, no steeper than `steepestLimbDegrees` (35). `chooseEpiphyteSites` takes crotches first, then limbs, each in a seeded order, `spacing` (1.2 m) apart.
 - **How many** (`epiphytesOnTree`): a big tree `leastPerBigTree` to `mostPerBigTree` (20-60), a mid tree up to `mostPerSmallTree` (5), room allowing.
