@@ -37,6 +37,9 @@ namespace {
         return packSway(WindSway{.kind = SwayKind::Tree, .height = 20.0f, .bend = bend, .flutter = flutter});
     }
 
+    // A tree's leaves' flutter rate: 3 Hz, its phase changing every half metre.
+    const Vec2 leafRate{3.0f, 0.5f};
+
     // Each kind's category in the field's order, still ones -1, the rest copied.
     void testThePackedSway() {
         assert(packSway(WindSway{}).x == static_cast<float>(WIND_CATEGORY_STILL));
@@ -108,12 +111,12 @@ namespace {
     void testTheBend() {
         const Vec2 spring{0.05f, 0.0f};
         const Vec3 top{0.0f, 20.0f, 0.0f};
-        assert(windSwayOffset(top, 20.0f, top, packSway(WindSway{}), 1.0f, spring, 1.0f, 3.0f).length() == 0.0f);
-        assert(windSwayOffset(top, 20.0f, top, treeSway(), 1.0f, Vec2{0.0f, 0.0f}, 1.0f, 3.0f).length() == 0.0f);
-        assert(windSwayOffset(Vec3{0.0f, 0.0f, 0.0f}, 0.0f, Vec3{}, treeSway(1.0f, 0.5f), 1.0f, spring, 1.0f, 3.0f).length() == 0.0f);
-        assert(windSwayOffset(top, 20.0f, top, treeSway(1.0f, 0.5f), 1.0f, spring, 0.0f, 3.0f).length() == 0.0f);
+        assert(windSwayOffset(top, 20.0f, top, packSway(WindSway{}), 1.0f, spring, 1.0f, leafRate, 3.0f).length() == 0.0f);
+        assert(windSwayOffset(top, 20.0f, top, treeSway(), 1.0f, Vec2{0.0f, 0.0f}, 1.0f, leafRate, 3.0f).length() == 0.0f);
+        assert(windSwayOffset(Vec3{0.0f, 0.0f, 0.0f}, 0.0f, Vec3{}, treeSway(1.0f, 0.5f), 1.0f, spring, 1.0f, leafRate, 3.0f).length() == 0.0f);
+        assert(windSwayOffset(top, 20.0f, top, treeSway(1.0f, 0.5f), 1.0f, spring, 0.0f, leafRate, 3.0f).length() == 0.0f);
 
-        const Vec3 moved = windSwayOffset(top, 20.0f, top, treeSway(), 1.0f, spring, 1.0f, 3.0f);
+        const Vec3 moved = windSwayOffset(top, 20.0f, top, treeSway(), 1.0f, spring, 1.0f, leafRate, 3.0f);
         const Vec2 lean = windSoftLean(spring);
         assert(moved.x > 0.0f && near(moved.z, 0.0f, 1e-6f));
         assert(near(moved.x, lean.x * 20.0f, 0.01f * lean.x * 20.0f));
@@ -121,20 +124,20 @@ namespace {
         assert(moved.y < 0.0f);
 
         const Vec3 half{0.0f, 10.0f, 0.0f};
-        const Vec3 halfMoved = windSwayOffset(half, 10.0f, half, treeSway(), 1.0f, spring, 1.0f, 3.0f);
+        const Vec3 halfMoved = windSwayOffset(half, 10.0f, half, treeSway(), 1.0f, spring, 1.0f, leafRate, 3.0f);
         assert(near(halfMoved.x, 0.25f * moved.x, 0.02f * moved.x));
 
         // Along the other axis likewise, and the bend scales the spring before it is softened.
-        const Vec3 sideways = windSwayOffset(top, 20.0f, top, treeSway(0.5f), 1.0f, Vec2{0.0f, -0.05f}, 1.0f, 3.0f);
+        const Vec3 sideways = windSwayOffset(top, 20.0f, top, treeSway(0.5f), 1.0f, Vec2{0.0f, -0.05f}, 1.0f, leafRate, 3.0f);
         const float halfLean = windSoftLean(Vec2{0.0f, -0.025f}).y * 20.0f;
         assert(sideways.z < 0.0f && near(sideways.z, halfLean, 0.01f * std::abs(halfLean)) && near(sideways.x, 0.0f, 1e-6f));
 
         const Vec3 bigTop{0.0f, 40.0f, 0.0f};
-        const Vec3 bigMoved = windSwayOffset(bigTop, 20.0f, bigTop, treeSway(), 2.0f, spring, 1.0f, 3.0f);
+        const Vec3 bigMoved = windSwayOffset(bigTop, 20.0f, bigTop, treeSway(), 2.0f, spring, 1.0f, leafRate, 3.0f);
         assert(near(bigMoved.x, 2.0f * moved.x, 1e-4f) && near(bigMoved.y, 2.0f * moved.y, 1e-4f));
 
         // Half faded, about half the lean.
-        const Vec3 faded = windSwayOffset(top, 20.0f, top, treeSway(), 1.0f, spring, 0.5f, 3.0f);
+        const Vec3 faded = windSwayOffset(top, 20.0f, top, treeSway(), 1.0f, spring, 0.5f, leafRate, 3.0f);
         assert(near(faded.x, 0.5f * moved.x, 0.01f * moved.x));
     }
 
@@ -147,16 +150,16 @@ namespace {
         const Vec3 axis{0.0f, 20.0f, 0.0f};
         const Vec3 branch{6.0f, 20.0f, 0.0f};
         const float lean = windSoftLean(spring).length();
-        const Vec3 axisAtStart = windSwayOffset(axis, 20.0f, axis, treeSway(), 1.0f, spring, 1.0f, 0.0f);
+        const Vec3 axisAtStart = windSwayOffset(axis, 20.0f, axis, treeSway(), 1.0f, spring, 1.0f, leafRate, 0.0f);
         float highest = -1.0f;
         float lowest = 1.0f;
 
         for (int frame = 0; frame < 240; ++frame) {
             const float seconds = 0.01f * static_cast<float>(frame);
-            const Vec3 onAxis = windSwayOffset(axis, 20.0f, axis, treeSway(), 1.0f, spring, 1.0f, seconds);
+            const Vec3 onAxis = windSwayOffset(axis, 20.0f, axis, treeSway(), 1.0f, spring, 1.0f, leafRate, seconds);
             assert(near(onAxis.y, axisAtStart.y, 1e-5f) && near(onAxis.x, axisAtStart.x, 1e-5f));
-            assert(windSwayOffset(branch, 20.0f, branch, treeSway(), 1.0f, Vec2{0.0f, 0.0f}, 1.0f, seconds).length() == 0.0f);
-            const float height = windSwayOffset(branch, 20.0f, branch, treeSway(), 1.0f, spring, 1.0f, seconds).y;
+            assert(windSwayOffset(branch, 20.0f, branch, treeSway(), 1.0f, Vec2{0.0f, 0.0f}, 1.0f, leafRate, seconds).length() == 0.0f);
+            const float height = windSwayOffset(branch, 20.0f, branch, treeSway(), 1.0f, spring, 1.0f, leafRate, seconds).y;
             highest = std::max(highest, height);
             lowest = std::min(lowest, height);
         }
@@ -172,20 +175,78 @@ namespace {
         const float lean = windSoftLean(spring).length();
         const Vec3 leaf{0.0f, 20.0f, 0.0f};
         const Vec3 low{0.0f, 5.0f, 0.0f};
-        const Vec3 bent = windSwayOffset(leaf, 20.0f, leaf, treeSway(), 1.0f, spring, 1.0f, 1.0f);
+        const Vec3 bent = windSwayOffset(leaf, 20.0f, leaf, treeSway(), 1.0f, spring, 1.0f, leafRate, 1.0f);
         float largest = 0.0f;
         float largestLow = 0.0f;
 
         for (int frame = 0; frame < 120; ++frame) {
             const float seconds = 1.0f + 0.013f * static_cast<float>(frame);
-            const Vec3 shiver = windSwayOffset(leaf, 20.0f, leaf, treeSway(1.0f, 0.5f), 1.0f, spring, 1.0f, seconds) - bent;
+            const Vec3 shiver = windSwayOffset(leaf, 20.0f, leaf, treeSway(1.0f, 0.5f), 1.0f, spring, 1.0f, leafRate, seconds) - bent;
             assert(std::abs(shiver.x) <= 0.5f * lean * 1.0001f && std::abs(shiver.y) <= 0.5f * lean * 1.0001f && std::abs(shiver.z) <= 0.5f * lean * 1.0001f);
             largest = std::max(largest, shiver.length());
-            const Vec3 lowBent = windSwayOffset(low, 5.0f, low, treeSway(), 1.0f, spring, 1.0f, seconds);
-            largestLow = std::max(largestLow, (windSwayOffset(low, 5.0f, low, treeSway(1.0f, 0.5f), 1.0f, spring, 1.0f, seconds) - lowBent).length());
+            const Vec3 lowBent = windSwayOffset(low, 5.0f, low, treeSway(), 1.0f, spring, 1.0f, leafRate, seconds);
+            largestLow = std::max(largestLow, (windSwayOffset(low, 5.0f, low, treeSway(1.0f, 0.5f), 1.0f, spring, 1.0f, leafRate, seconds) - lowBent).length());
         }
 
         assert(largest > 0.1f * lean && largestLow < largest);
+    }
+
+    /*
+    * The flutter on its own: nothing for no amount, each direction within it; twice as fast at twice the hertz (the same
+    * shiver at half the time) and the same shiver twice as far along at twice the metres. The sway's flutter is it, at
+    * the top's full amount, with the rate given.
+    */
+    void testTheFlutterRate() {
+        const Vec3 place{12.0f, 3.0f, -7.0f};
+        assert(windFlutterOffset(place, 0.0f, leafRate, 5.0f).length() == 0.0f);
+
+        for (int frame = 0; frame < 120; ++frame) {
+            const float seconds = 2.0f + 0.017f * static_cast<float>(frame);
+            const Vec3 shiver = windFlutterOffset(place, 0.2f, leafRate, seconds);
+            assert(std::abs(shiver.x) <= 0.2f * 1.0001f && std::abs(shiver.y) <= 0.2f * 1.0001f && std::abs(shiver.z) <= 0.2f * 1.0001f);
+            const Vec3 faster = windFlutterOffset(place, 0.2f, Vec2{2.0f * leafRate.x, leafRate.y}, 0.5f * seconds);
+            assert((faster - shiver).length() < 1e-4f);
+            const Vec3 longer = windFlutterOffset(place * 2.0f, 0.2f, Vec2{leafRate.x, 2.0f * leafRate.y}, seconds);
+            assert((longer - shiver).length() < 1e-4f);
+        }
+
+        const Vec2 spring{0.08f, 0.0f};
+        const Vec3 leaf{0.0f, 20.0f, 0.0f};
+        const Vec2 slow{1.0f, 6.0f};
+        const float amount = 0.5f * windSoftLean(spring).length();
+        const Vec3 shiver = windSwayOffset(leaf, 20.0f, leaf, treeSway(1.0f, 0.5f), 1.0f, spring, 1.0f, slow, 4.0f) -
+                            windSwayOffset(leaf, 20.0f, leaf, treeSway(), 1.0f, spring, 1.0f, slow, 4.0f);
+        assert((shiver - windFlutterOffset(leaf, amount, slow, 4.0f)).length() < 1e-6f);
+    }
+
+    /*
+    * The lower layers (the plants, and the grass with the floor's cover) flutter slower than the trees' leaves and in
+    * step over a frond or tuft: two leaves 30 cm apart shiver nearly alike at their rate, while at the trees' rate they
+    * part. The trees' and hanging things' rates are the old ones (3 Hz, half a metre).
+    */
+    void testTheLowerLayersFlutterInStep() {
+        const WindSettings settings;
+        const Vec2 trees = windFlutterRate(settings, WIND_CATEGORY_TREES);
+        assert(trees.x == 3.0f && trees.y == 0.5f);
+        assert(windFlutterRate(settings, WIND_CATEGORY_HANGING).x == 3.0f && windFlutterRate(settings, WIND_CATEGORY_HANGING).y == 0.5f);
+
+        for (const int category : {WIND_CATEGORY_PLANTS, WIND_CATEGORY_GRASS}) {
+            const Vec2 rate = windFlutterRate(settings, category);
+            assert(rate.x < 0.6f * trees.x && rate.y >= 8.0f * trees.y);
+            const Vec3 one{4.0f, 0.5f, 9.0f};
+            const Vec3 other = one + Vec3{0.3f, 0.0f, 0.0f};
+            float apart = 0.0f;
+            float apartAtTreesRate = 0.0f;
+
+            for (int frame = 0; frame < 300; ++frame) {
+                const float seconds = 0.01f * static_cast<float>(frame);
+                apart = std::max(apart, (windFlutterOffset(one, 1.0f, rate, seconds) - windFlutterOffset(other, 1.0f, rate, seconds)).length());
+                apartAtTreesRate =
+                    std::max(apartAtTreesRate, (windFlutterOffset(one, 1.0f, trees, seconds) - windFlutterOffset(other, 1.0f, trees, seconds)).length());
+            }
+
+            assert(apart < 0.4f && apartAtTreesRate > 1.0f);
+        }
     }
 
     // Which draws sway: a still one never; a near one with the sway on; none past the fade's end or with it off.
@@ -239,10 +300,28 @@ namespace {
         assert(packWindField(nullptr, settings, windows, windows, true, 12.5f, 0.25f).sway[0] == 0.0f);
     }
 
-    // The settings: the fade must end after it starts, and no negative cascades.
+    // The record carries each category's flutter rate (hertz, metres).
+    void testTheRecordsFlutter() {
+        WindSettings settings;
+        settings.flutters[WIND_CATEGORY_GRASS] = WindFlutter{.hertz = 0.7f, .metres = 9.0f};
+        Wind wind;
+        const std::array<WindWindow, WIND_CASCADES> windows{};
+        const GpuWindField field = packWindField(&wind, settings, windows, windows, true, 12.5f, 0.25f);
+        assert(field.flutters[WIND_CATEGORY_GRASS][0] == 0.7f && field.flutters[WIND_CATEGORY_GRASS][1] == 9.0f);
+        assert(field.flutters[WIND_CATEGORY_TREES][0] == settings.flutters[WIND_CATEGORY_TREES].hertz);
+        assert(windFlutterRate(settings, WIND_CATEGORY_GRASS).x == 0.7f && windFlutterRate(settings, WIND_CATEGORY_GRASS).y == 9.0f);
+    }
+
+    // The settings: the fade must end after it starts, no negative cascades, a flutter's hertz and metres above 0.
     void testTheSwaySettings() {
         WindSettings settings;
         assert(!throwsInvalid(settings));
+        WindSettings still = settings;
+        still.flutters[WIND_CATEGORY_PLANTS].hertz = 0.0f;
+        assert(throwsInvalid(still));
+        WindSettings everywhere = settings;
+        everywhere.flutters[WIND_CATEGORY_GRASS].metres = 0.0f;
+        assert(throwsInvalid(everywhere));
         WindSettings backwards = settings;
         backwards.swayFadeEnd = backwards.swayFadeStart;
         assert(throwsInvalid(backwards));
@@ -346,9 +425,12 @@ void testWindSway() {
     testTheBend();
     testTheBranches();
     testTheFlutter();
+    testTheFlutterRate();
+    testTheLowerLayersFlutterInStep();
     testWhichDrawsSway();
     testTheShadows();
     testTheRecordsSway();
+    testTheRecordsFlutter();
     testTheSwaySettings();
     testTheSwayReachesTheGpu();
     testTheForestSways();

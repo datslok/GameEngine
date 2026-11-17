@@ -23,6 +23,9 @@ namespace {
         return std::abs(a - b) <= tolerance;
     }
 
+    // Leaves' flutter rate: 3 Hz, its phase changing every half metre.
+    const Vec2 leafRate{3.0f, 0.5f};
+
     // A strand of points straight down from the origin, a metre apart.
     HangingStrand straightDown(int points) {
         HangingStrand strand;
@@ -147,7 +150,7 @@ namespace {
         const Vec3 moved = windAnchorOffset(packWindAnchor(anchor), spring, 0.8f, 7.0f);
         const Vec3 fromFoot = anchor.point - anchor.foot;
         const Vec4 sway = packSway(WindSway{.kind = SwayKind::Tree, .height = 20.0f, .bend = 0.3f, .flutter = 0.0f});
-        const Vec3 vertex = windSwayOffset(fromFoot, fromFoot.y / 1.5f, anchor.point, sway, 1.5f, spring, 0.8f, 7.0f);
+        const Vec3 vertex = windSwayOffset(fromFoot, fromFoot.y / 1.5f, anchor.point, sway, 1.5f, spring, 0.8f, leafRate, 7.0f);
         assert(moved.length() > 0.0f && (moved - vertex).length() < 1e-6f);
     }
 
@@ -156,19 +159,19 @@ namespace {
     * stays its arm from where it hangs, as a pendulum; further for a longer arm; and flutter on top within its share.
     */
     void testTheSwing() {
-        assert(windSwingOffset(5.0f, Vec3{}, 1.0f, 0.5f, Vec2{0.0f, 0.0f}, 1.0f, 3.0f).length() == 0.0f);
-        assert(windSwingOffset(0.0f, Vec3{}, 1.0f, 0.0f, Vec2{0.1f, 0.0f}, 1.0f, 3.0f).length() == 0.0f);
-        assert(windSwingOffset(5.0f, Vec3{}, 1.0f, 0.0f, Vec2{0.1f, 0.0f}, 0.0f, 3.0f).length() == 0.0f);
+        assert(windSwingOffset(5.0f, Vec3{}, 1.0f, 0.5f, Vec2{0.0f, 0.0f}, 1.0f, leafRate, 3.0f).length() == 0.0f);
+        assert(windSwingOffset(0.0f, Vec3{}, 1.0f, 0.0f, Vec2{0.1f, 0.0f}, 1.0f, leafRate, 3.0f).length() == 0.0f);
+        assert(windSwingOffset(5.0f, Vec3{}, 1.0f, 0.0f, Vec2{0.1f, 0.0f}, 0.0f, leafRate, 3.0f).length() == 0.0f);
 
         const Vec2 spring{0.1f, 0.05f};
-        const Vec3 swung = windSwingOffset(5.0f, Vec3{}, 0.5f, 0.0f, spring, 1.0f, 3.0f);
+        const Vec3 swung = windSwingOffset(5.0f, Vec3{}, 0.5f, 0.0f, spring, 1.0f, leafRate, 3.0f);
         const Vec2 lean = windSoftLean(spring * 0.5f);
         assert(near(swung.x, lean.x * 5.0f, 1e-5f) && near(swung.z, lean.y * 5.0f, 1e-5f) && swung.y > 0.0f);
         const Vec3 bob = Vec3{0.0f, -5.0f, 0.0f} + swung;
         assert(near(bob.length(), 5.0f, 1e-4f));
-        assert(windSwingOffset(10.0f, Vec3{}, 0.5f, 0.0f, spring, 1.0f, 3.0f).x > swung.x);
+        assert(windSwingOffset(10.0f, Vec3{}, 0.5f, 0.0f, spring, 1.0f, leafRate, 3.0f).x > swung.x);
 
-        const Vec3 fluttering = windSwingOffset(5.0f, Vec3{1.0f, 2.0f, 3.0f}, 0.5f, 0.2f, spring, 1.0f, 3.0f) - swung;
+        const Vec3 fluttering = windSwingOffset(5.0f, Vec3{1.0f, 2.0f, 3.0f}, 0.5f, 0.2f, spring, 1.0f, leafRate, 3.0f) - swung;
         const float most = 0.2f * lean.length() * 1.0001f;
         assert(std::abs(fluttering.x) <= most && std::abs(fluttering.y) <= most && std::abs(fluttering.z) <= most);
     }

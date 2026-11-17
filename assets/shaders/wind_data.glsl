@@ -57,7 +57,7 @@ vec3 windOwnSway(mat4 model, vec4 sway, float scale, vec3 position, vec3 world, 
     vec3 foot = world - fromFoot;
     vec2 spring = windSpringAt(foot.xz, category, previous);
     float fade = windSwayFade(distance(foot, eye), windField.sway.y, windField.sway.z);
-    return windSwayOffset(fromFoot, position.y, world, sway, scale, spring, fade, seconds);
+    return windSwayOffset(fromFoot, position.y, world, sway, scale, spring, fade, windField.flutters[category].xy, seconds);
 }
 
 // How an anchor of a hanging vertex moves: not at all when fixed, as its own object sways at the vertex (own), else as
@@ -107,7 +107,8 @@ vec3 windSwayOfVertex(mat4 model, vec4 sway, float scale, uvec4 hanging, int ver
     vec3 secondMotion = windAnchorMotion(second, own, eye, seconds, previous);
     vec2 spring = windSpringAt(world.xz, WIND_CATEGORY_HANGING, previous);
     float fade = windSwayFade(distance(world, eye), windField.sway.y, windField.sway.z);
-    vec3 swing = windSwingOffset(alongAndArm.y, world, uintBitsToFloat(hanging.y), needsOwn ? 0.0 : sway.w, spring, fade, seconds);
+    vec3 swing = windSwingOffset(alongAndArm.y, world, uintBitsToFloat(hanging.y), needsOwn ? 0.0 : sway.w, spring, fade,
+                                 windField.flutters[WIND_CATEGORY_HANGING].xy, seconds);
     return windHangingOffset(firstMotion, secondMotion, alongAndArm.x, swing);
 }
 

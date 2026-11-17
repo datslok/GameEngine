@@ -160,7 +160,7 @@ namespace {
     /*
     * Vertices of trees, plants and grass of every size, in any wind, faded or not, at times into a session. Inputs: the
     * vertex from its foot and its height in the mesh; its place and the model's scale; the sway; the spring, fade and
-    * time. The flutter's and branches' sines of large phases are the GPU's own, so the tolerance is a few millimetres.
+    * time; the flutter's rate (hertz, metres). The flutter's and branches' sines of large phases are the GPU's own, so the tolerance is a few millimetres.
     */
     void checkSway(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{89};
@@ -174,18 +174,21 @@ namespace {
             inputs.push_back(gpuVec4(random.between(-2000.0f, 2000.0f), random.between(-50.0f, 300.0f), random.between(-2000.0f, 2000.0f), scale));
             inputs.push_back(gpuVec4(std::floor(random.between(-1.0f, 4.0f)), height, random.between(0.0f, 1.0f), random.between(0.0f, 0.5f)));
             inputs.push_back(gpuVec4(random.between(-0.3f, 0.3f), random.between(-0.3f, 0.3f), random.between(0.0f, 1.0f), random.between(0.0f, 600.0f)));
+            inputs.push_back(gpuVec4(random.between(0.5f, 4.0f), random.between(0.3f, 12.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_SWAY, inputs, 4, 1);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_SWAY, inputs, 5, 1);
         const FloatTolerance tolerance{.absolute = 3e-3f, .relative = 1e-3f};
 
         for (std::size_t i = 0; i < outputs.size(); ++i) {
-            const GpuVec4& vertex = inputs[4 * i];
-            const GpuVec4& place = inputs[4 * i + 1];
-            const GpuVec4& sway = inputs[4 * i + 2];
-            const GpuVec4& spring = inputs[4 * i + 3];
+            const GpuVec4& vertex = inputs[5 * i];
+            const GpuVec4& place = inputs[5 * i + 1];
+            const GpuVec4& sway = inputs[5 * i + 2];
+            const GpuVec4& spring = inputs[5 * i + 3];
+            const GpuVec4& rate = inputs[5 * i + 4];
             const Vec3 expected = windSwayOffset(Vec3{vertex[0], vertex[1], vertex[2]}, vertex[3], Vec3{place[0], place[1], place[2]},
-                                                 Vec4{sway[0], sway[1], sway[2], sway[3]}, place[3], Vec2{spring[0], spring[1]}, spring[2], spring[3]);
+                                                 Vec4{sway[0], sway[1], sway[2], sway[3]}, place[3], Vec2{spring[0], spring[1]}, spring[2],
+                                                 Vec2{rate[0], rate[1]}, spring[3]);
             report.check("windSwayOffset", tolerance, expected.x, outputs[i][0]);
             report.check("windSwayOffset", tolerance, expected.y, outputs[i][1]);
             report.check("windSwayOffset", tolerance, expected.z, outputs[i][2]);
@@ -234,7 +237,7 @@ namespace {
     }
 
     // Arms from none to a long root's, swings and flutters of every size. Inputs: the place and arm; the swing and
-    // flutter; the spring, fade and time.
+    // flutter; the spring, fade and time; the flutter's rate.
     void checkSwing(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{101};
         std::vector<GpuVec4> inputs;
@@ -244,16 +247,19 @@ namespace {
                                      random.between(0.0f, 100.0f)));
             inputs.push_back(gpuVec4(random.between(0.0f, 2.0f), random.between(0.0f, 0.5f)));
             inputs.push_back(gpuVec4(random.between(-0.3f, 0.3f), random.between(-0.3f, 0.3f), random.between(0.0f, 1.0f), random.between(0.0f, 600.0f)));
+            inputs.push_back(gpuVec4(random.between(0.5f, 4.0f), random.between(0.3f, 12.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_SWING, inputs, 3, 1);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_SWING, inputs, 4, 1);
         const FloatTolerance tolerance{.absolute = 3e-3f, .relative = 1e-3f};
 
         for (std::size_t i = 0; i < outputs.size(); ++i) {
-            const GpuVec4& place = inputs[3 * i];
-            const GpuVec4& swing = inputs[3 * i + 1];
-            const GpuVec4& spring = inputs[3 * i + 2];
-            const Vec3 expected = windSwingOffset(place[3], Vec3{place[0], place[1], place[2]}, swing[0], swing[1], Vec2{spring[0], spring[1]}, spring[2], spring[3]);
+            const GpuVec4& place = inputs[4 * i];
+            const GpuVec4& swing = inputs[4 * i + 1];
+            const GpuVec4& spring = inputs[4 * i + 2];
+            const GpuVec4& rate = inputs[4 * i + 3];
+            const Vec3 expected = windSwingOffset(place[3], Vec3{place[0], place[1], place[2]}, swing[0], swing[1], Vec2{spring[0], spring[1]}, spring[2],
+                                                  Vec2{rate[0], rate[1]}, spring[3]);
             report.check("windSwingOffset", tolerance, expected.x, outputs[i][0]);
             report.check("windSwingOffset", tolerance, expected.y, outputs[i][1]);
             report.check("windSwingOffset", tolerance, expected.z, outputs[i][2]);
@@ -286,6 +292,35 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Leaves' shiver at every rate the settings allow in practice, at places across the world and times into a session.
+    * Inputs: the place and amount; the rate (hertz, metres) and time. Its sines' large phases are the GPU's own.
+    */
+    void checkFlutter(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{107};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            inputs.push_back(gpuVec4(random.between(-2000.0f, 2000.0f), random.between(-50.0f, 600.0f), random.between(-2000.0f, 2000.0f),
+                                     random.between(0.0f, 0.3f)));
+            inputs.push_back(gpuVec4(random.between(0.5f, 4.0f), random.between(0.3f, 12.0f), random.between(0.0f, 600.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_FLUTTER, inputs, 2, 1);
+        const FloatTolerance tolerance{.absolute = 3e-3f, .relative = 1e-3f};
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4& place = inputs[2 * i];
+            const GpuVec4& rate = inputs[2 * i + 1];
+            const Vec3 expected = windFlutterOffset(Vec3{place[0], place[1], place[2]}, place[3], Vec2{rate[0], rate[1]}, rate[2]);
+            report.check("windFlutterOffset", tolerance, expected.x, outputs[i][0]);
+            report.check("windFlutterOffset", tolerance, expected.y, outputs[i][1]);
+            report.check("windFlutterOffset", tolerance, expected.z, outputs[i][2]);
+        }
+    }
+}
+
 void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("wind.glsl");
     checkNoise(runner, report);
@@ -297,5 +332,6 @@ void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkSway(runner, report);
     checkAnchor(runner, report);
     checkSwing(runner, report);
+    checkFlutter(runner, report);
     checkHanging(runner, report);
 }
