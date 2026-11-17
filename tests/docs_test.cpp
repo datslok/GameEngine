@@ -27,6 +27,13 @@ namespace {
     constexpr std::uintmax_t architectureFileBudget = 20 * 1024;
     constexpr std::uintmax_t readmeBudget = 20 * 1024;
 
+    // A part of a long doc (the build log, the guide) is read whole, so it stays well inside what one read takes.
+    constexpr std::uintmax_t partBudget = 40 * 1024;
+
+    // Long docs split into parts, each with the index file that lists them (docs/INDEX.md names the index).
+    const std::vector<std::pair<std::string, std::string>> partedDocs{{"docs/buildlog", "docs/BUILDLOG.md"},
+                                                                       {"docs/guide", "docs/ENGINE_GUIDE.md"}};
+
     // Longer than about four sentences is a wall of prose in a file Claude reads as rules. Table rows are exempt.
     constexpr std::size_t longestRuleLine = 400;
 
@@ -189,6 +196,10 @@ namespace {
             docs.push_back(file);
         }
 
+        for (const fs::path& file : filesIn("docs/guide", ".md")) {
+            docs.push_back(file);
+        }
+
         return docs;
     }
 
@@ -211,6 +222,12 @@ namespace {
 
         for (const fs::path& file : filesIn("docs/architecture", ".md")) {
             checkBudget(file, architectureFileBudget, problems);
+        }
+
+        for (const auto& [folder, index] : partedDocs) {
+            for (const fs::path& file : filesIn(folder, ".md")) {
+                checkBudget(file, partBudget, problems);
+            }
         }
     }
 
@@ -475,14 +492,24 @@ namespace {
 
     // ---- The index --------------------------------------------------------------------------------------------------
 
+    // Every doc is in docs/INDEX.md, except a long doc's parts, which are in their own index (partedDocs).
     void checkIndex(Problems& problems) {
         const std::string index = readText("docs/INDEX.md");
 
         for (const fs::path& doc : filesIn("docs", ".md")) {
             const std::string name = slashed(doc);
+            std::string listing = "docs/INDEX.md";
 
-            if (name != "docs/INDEX.md" && index.find("`" + name + "`") == std::string::npos) {
-                problems.push_back(name + " is missing from docs/INDEX.md");
+            for (const auto& [folder, partIndex] : partedDocs) {
+                if (name.starts_with(folder + "/")) {
+                    listing = partIndex;
+                }
+            }
+
+            const std::string listed = listing == "docs/INDEX.md" ? index : readText(listing);
+
+            if (name != "docs/INDEX.md" && listed.find("`" + name + "`") == std::string::npos) {
+                problems.push_back(name + " is missing from " + listing);
             }
         }
     }

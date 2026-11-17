@@ -1,0 +1,259 @@
+# Build log: Phase 6: Rendering foundations, lighting and global illumination (Oct 18-24 2026) (part 1 of 5)
+
+## Phase 6: Rendering foundations, lighting and global illumination (Oct 18-24 2026) (part 1 of 5)
+
+### The re-plan (Oct 18 2026)
+
+After a three-way review of the roadmap (a hyper-critical, a neutral and an advantages-focused reviewer, who then answered each other; `roadmap-review`):
+
+- **SDL_GPU is replaced by the engine's own Vulkan 1.3 renderer before global illumination.**
+  - SDL_GPU never hands out its Vulkan device, so it could not reach hardware ray tracing, GPU timestamps, bindless resources, GPU-written draw counts or DLSS and FSR.
+  - The old phase 14 plan ("SDL keeps the window while a second backend talks to Vulkan") would have meant every pass written twice.
+  - Raw Vulkan with volk, VMA and vk-bootstrap rather than a layer such as NVRHI: full performance and the real concepts, with NVRHI as the fallback if the port stalled past about four weeks (it did not).
+- **Work that does not touch the graphics API comes first (6a), renderer work after the port (6c onwards)**, so no renderer code is written twice.
+- **DDGI is traced with hardware ray queries first**; a software tracer for GPUs without ray tracing follows as the lower quality setting.
+- **Shader maths keeps its tested CPU mirrors**, and a GPU test tier checks the real shaders against them.
+- Gaps a modern renderer needs were added: cascaded sun shadows, TAA, reflections, transparency, volumetric fog.
+
+### Before the re-plan
+
+- `hdr-tone-mapping`: it came before the HUD (phase 9) because it changes where everything drawn on top of the scene goes, so the HUD is built once, over the finished image.
+  - The dither moved into the tone mapping pass (the float scene image needs none).
+  - Exposure defaults to 1.5 so scenes tuned for the old clipped look keep their shadows and mid-tones; AgX is the default curve.
+- `hdr-output`: built for the user's HDR monitor; the renderer reads the window's HDR state every frame and swaps the swapchain when it changes.
+- `bloom`: tone mapping mixes a share of the blur in place of the same share of the scene, so light is moved, never added.
+- `pbr-materials`:
+  - The BRDF is multiplied by π so lights keep their old brightness (a white matte surface lit head-on by 1 shows 1), and the old Blinn-Phong default matches roughness 0.5.
+  - The metallic-roughness texture was the engine's first non-sRGB texture.
+
+### 6a: groundwork that does not touch the graphics API
+
+- `engine-hygiene`:
+  - The GPU device's debug mode had been hardcoded on, which skewed every release measurement.
+  - The determinism test came before cloth and ragdolls make the simulation fragile.
+  - The deferred create and destroy queue replaced `updateGrenades` doing it by hand.
+- `quaternions` (moved here from phase 8): a tumbling body passes through gimbal lock, and blending three angles separately does not give the in-between orientation; ragdolls and glTF skins need them.
+  - Earlier was cheaper: 29 uses of Euler angles in 10 files then.
+  - Spinners keep Euler angles and convert each tick; characters keep their own yaw, so the turning logic did not change.
+- `reversed-z` (moved here from phase 13): two surfaces 1 cm apart at 1 km now get about 270 floats between their depths, where before they got the same depth.
+  - Camera-relative rendering: 12 km out, the screen error dropped from about a quarter pixel to about 20,000 times less.
+  - The shadow pass, culling and debug lines stayed in world space so cached shadow tiles survive camera movement.
+  - The far plane stays finite.
+- `debug-ui` (moved here from phase 9): tuning GI, PBR and cloth without sliders is slow.
+  - One `visit()` list per settings struct drives the sliders, presets, the saved file and the tests of the defaults.
+  - The UI is drawn into its own overlay image and laid over everything last, decoded and scaled to the white level so it looks right in HDR: the path phase 9's HUD will take.
+  - The Low and Medium presets were first guesses until 6b's GPU timings.
+- `normal-maps` (moved here from phase 10): every glTF asset uses them, and PBR looks flat without them.
+  - MikkTSpace, because it is the standard every baking tool uses, so maps look as their authors made them; checked against the tangents Blender exported for NormalTangentMirrorTest.
+  - The demo got a gallery of three Khronos test models.
+
+### 6b: the Vulkan 1.3 renderer (Oct 18-19 2026)
+
+- `golden-images` first, on SDL_GPU, so the port could be checked bit for bit.
+  - The planned furnace sphere became the gold teapot and the gallery, since the night scene cannot light anything evenly.
+  - All twelve images took about 6.5 MB; two runs, and the debug and release builds, matched bit for bit.
+- `vulkan-backend`: built beside `GpuRenderer` behind a temporary interface, running the same compiled shaders in SDL_GPU's descriptor layout, until all twelve golden images matched SDL_GPU's bit for bit in the debug and release builds with the validation layers silent.
+  - It was then tried live (debug UI, HDR on and off, resizing, minimising, present modes), and SDL_GPU, the interface and ImGui's SDL_GPU backend were removed.
+  - Barriers are written by hand per pass; a render graph waits until the passes outgrow that.
+- `gpu-timestamps` (the renderer timing breakdown, moved here from phase 14), so every later change is judged by its own number.
+  - First numbers on the RTX 5080 at the start view: 0.20 ms for the whole frame (main pass 0.11, bloom 0.04, shadows 0.03, tone mapping 0.02).
+  - Debug labels stay on in release builds, since they cost nothing without a tool attached.
+- `frames-in-flight`: two by default, one as a low-latency option, switchable live. At 0.2 ms of GPU work per frame the two modes measured the same; two pays off once the GPU's work grows towards the CPU's.
+- `gpu-test-tier`: the shaders' maths moved into eight libraries of pure functions with the golden images unchanged bit for bit; about 20,000 values in 32 groups compared with the C++ mirrors.
+  - First results on the RTX 5080: every group within 16% of its tolerance except the noise (40%); planted bugs failed at 4,000 to 27,000 times the tolerance.
+  - Also fixed: the shaders' dependency files had lived in a folder per build, which let the other build keep stale shaders; they now share one.
+  - Not done: the optional Slang trial (phase 14).
+
+### 6c: GPU scene, compute and lights (Oct 19 2026)
+
+- `gpu-scene`, in three steps:
+  1. The same per-object data moved into storage buffers, golden images unchanged bit for bit. Lamp field: 161 visible objects in 10 draw calls; CPU recording went from 1.75 to about 1.15 ms with every shadow tile redrawn.
+  2. Shadow casters culled by each light's range sphere before its faces (from phase 14's performance list): 1861 caster instances instead of 2299. 6 pixels of one golden image changed, where a soft shadow's wide filter reached past a light's range.
+  3. One world-space instance per object shared by every view: about 61 KB uploaded per frame instead of 155. The golden references were saved again for rounding (scattered soft shadow samples flipping; at most 6 steps of 255 in the final images).
+
+  Bounds are not in the GPU records yet: nothing on the GPU reads them before GPU culling.
+- `depth-prepass`:
+  - **Plan and change:** the plan was to reuse the shadow pass's depth-only pipeline, but it multiplies world matrices and the main pass camera-relative ones, which round differently, and the `EQUAL` test needs identical bits. It uses the main pass's own vertex shader with `gl_Position` declared `invariant` instead; `invariant` alone changed 10 references by rounding (single edge pixels).
+  - **Measured** on the RTX 5080, main pass plus prepass at 2560x1440:
+    - floodlights 0.39 to 0.32 ms
+    - start and gallery 3-4% less
+    - the lamp field unchanged at 1.2 ms (little overdraw there; its cost was every pixel looping over 64 lights, which clustered shading removed)
+    - the prepass itself costs 0.005-0.017 ms.
+- Compute pipelines: built with clustered shading, on the GPU test tier's `ComputePipeline`.
+  - Storage images (writing textures from compute) wait for their first user, DDGI's probe atlas.
+  - Shaders now compile for Vulkan 1.3.
+- `clustered-shading` (moved here from phase 14): each pixel walks its cluster's bits lowest first, which is slot order, so all twelve golden images were identical bit for bit with clustering on and off.
+  - Then every light the buffers hold was seated by default (new lamp-field references, its back rows now lit).
+  - **Measured** on the RTX 5080 at 2560x1440, main pass:
+    - lamp field 1.18 to 0.75 ms with 64 lamps (0.62 to 0.30 without point shadows; the rest is the soft shadows of lamps that really reach)
+    - 0.78 ms with all 88 in view (1.40 the old way)
+    - start and gallery about 11-13% less, floodlights unchanged
+    - the cluster pass 0.004-0.008 ms.
+  - The heatmap shows far clusters listing 16 or more lamps where 4-8 reach; tighter clusters are the next step if many lights ever cost more than a distance check each (phase 14).
+- `lightlab`: a second game for judging cascades and DDGI, since the demo is a 40 m night scene with no inside; the demo stays as the regression scene.
+  - Moving the demo's camera, modes and body into `PlayerControls` left its golden images and determinism unchanged bit for bit.
+  - Its golden views are the "before" picture: sun shadows ended about 30 m out, and the room was lit only by its beam and the flat ambient.
+- `cascaded-shadows`: judged in the light lab, which drove three rounds of changes:
+  - **Splits:** λ 0.75 left the first cascade 13 m deep with 3.6 cm texels; 0.95 gives about 3, 9, 36 and 200 m.
+  - **Tiles:** 1024 left medium distances at 10 cm per texel, so every cascade became 2048.
+    - Then a new Ultra preset, made the default, with 4096 cascades in an atlas grown to 384 MB (High keeps 2048 in the usual 128 MB).
+    - Texels at 4096 for a 70° view: 0.22 cm near the camera, 0.65 cm to 9 m, 2.5 cm to 36 m, 14 cm to 200 m.
+  - **Bias:** a normal offset moves the point sideways by an amount growing with the texel, so a building's shadow edge landed in different places in neighbouring cascades (a visible step under a low sun). Moving the point towards the sun instead fixed it, and also the stair-stepped window patch in the sunlit room.
+
+  Only the brightest directional light is shadowed now; its 4 old tiles became the cascades. All 18 golden references were saved again (shadows now reach 200 m, the moon's are crisper).
+- `vram-readout`: asked for once the Ultra preset's 384 MB atlas made memory a choice.
+- `sun-disc`: the disc's brightness is capped at 30,000 by scaling the whole colour, because full sun would overflow the half-float scene image about 4.6 times.
+- `sdsm` (sample distribution shadow maps, Lauritzen 2011): the cascades end at the farthest surface on screen instead of always at 200 m. Decisions:
+  - **Only the far end is fitted.** Starting the splits at the nearest surface (about 1.5 m when standing in the open) pushes every logarithmic split outwards, so the pixels nearest the camera land in a bigger, coarser box than before.
+  - **The measurement is used a frame or two late**, read back from the frame that drew it, rather than building the cascade matrices on the GPU.
+    - That keeps the CPU's per-cascade culling and the shadow cache; GPU-built cascades would need GPU culling (phase 14).
+    - The price is that a sudden reveal (turning from a wall to the horizon) can leave the newly seen far ground unshadowed for a frame or two.
+  - **A ladder of distances:** the fitted distance moves on a ladder of steps 1.25 apart, after a 10% margin, climbing at once and coming down only two steps later. A distance following every small change would resize every texel every frame (shimmer) and redraw the cascades every frame.
+  - **The reduction** keeps depths as their float bits, which sort like the numbers for positive floats, so the GPU combines them with integer atomics. The range lives in GPU memory and is copied to read-back memory, rather than having every workgroup's atomics cross the bus.
+  - **The GPU test** runs the real pass on uploaded depth images. Its first version planted a denormal, which the D32 image flushed to zero (sky); real depths never come near one, so the case uses the smallest normal float.
+  - **A mistake along the way:** adding `sampledImages` in the middle of `ComputePipelineDescription` broke the GPU test runner, which fills the struct positionally (every library test read 0). The field went after `pushConstantBytes`.
+  - **Golden captures** are a cold first frame, with no earlier frame to have measured. They now draw the frame once to measure it.
+    - With the measurement ignored, that extra frame alone still changed the lamp field (a warm light history moved shadows between lamps).
+    - So it now restores the light history, atlas layout and shadow cache afterwards; with the measurement ignored, all 22 references then matched bit for bit.
+
+  Results on the RTX 5080 (sdsm):
+
+  - The sunlit room fits to 11.6 m, and its cascades' texels went from 0.22, 0.65, 2.5 and 14 cm to 0.032, 0.092, 0.27 and 0.81 cm (7 to 17 times finer).
+  - Views reaching the horizon (towers, overview, sunset, sun disc, moon) are unchanged, since surfaces reach past 200 m; the demo's close views changed, since its moonlight is a shadowed sun too.
+  - 12 references saved again (10 demo, `sunlit-room`), differing only along sun shadow edges.
+  - The pass costs 0.015-0.04 ms at 2560x1440.
+  - The main pass grew by 0.06 ms in the demo's start view and 0.09 ms in the sunlit room (+8-18%): the window patch's penumbra (about 1 cm) used to be under one 2.5 cm texel and now spans about four of 0.27 cm, so the soft shadow's samples spread wider in the atlas; other views were within 2%.
+
+### 6d: global illumination (Oct 19 2026 onwards)
+
+#### Units, ray queries and the first probes
+
+- Units re-derived for DDGI against physically based shading (in `docs/ILLUMINATION.md`):
+  - The old claim that a probe's value goes straight into the ambient slot still holds, for a new reason (pixel values are π times radiance, and ambient is the sky's irradiance), but only as diffuse light, so the furnace test now expects B × (1 − specular albedo).
+  - It also showed the light lab's sky ambient dial (0.2) is about 4 times below what its drawn sky (about 0.75) would give, to retune once DDGI lights it.
+- `ray-queries`: hardware ray tracing's foundation. Decisions:
+  - **Vertex data through buffer device addresses** (a per-mesh table), not one merged vertex buffer: meshes stay as they were, and ray tracing needs device addresses anyway. Addresses travel as two 32-bit halves (`GL_EXT_buffer_reference_uvec2`); the first version used 64-bit integers, which need the optional `shaderInt64` feature, caught by the validation layers.
+  - **The top-level structure is rebuilt from scratch every frame** rather than refitted: simple and never stale, and measured at 0.05-0.11 ms for 29-900 instances.
+  - **Every drawn object goes in, with a mask:** shadow casters solid, the rest visual-only.
+    - The first plan was shadow casters only. The user asked whether anything else would ever be wanted, and three cases came up: glowing things that are not lights should light their surroundings, reflections will need the sun disc and bulbs, and a game might switch shadows off on cheap clutter for speed.
+    - Masks keep all of them open at no cost; GI rays see only solid ones, so the glowing faces of lights already counted are not counted twice.
+  - **Which side is the front** was left for the GPU test to settle: with no instance flags the hardware's front is the engine's anticlockwise winding, mirrored instances included, matching the CPU on every ray.
+  - **The test** compares 2,000 rays with the CPU's triangle raycast.
+    - Its first scene put a cube's bottom exactly on the floor, and five rays hit the coplanar pair at the same distance with the two sides choosing differently; the floor moved down.
+    - One grazing hit then differed by 1.4e-5 of its distance. The tolerance now grows with 1/cosine between ray and surface (rounding of where a plane sits moves a grazing hit along the ray), after which the worst hit used 3% of it.
+  - `triangle.frag`'s material and texture declarations moved into `materials.glsl` for the debug shader to share; the golden images stayed bit for bit the same.
+
+  Measured on the RTX 5080 at 2560x1440: one primary ray per pixel (3.7 million, coherent) in 0.09-0.28 ms.
+- `ddgi-probes`: the probe grid, its rays and update, and a debug view; nothing samples the probes yet, so the picture is unchanged (every golden image identical). Decisions:
+  - **Direct light at probe-ray hits comes from shadow rays, not the shadow atlas.**
+    - The atlas only holds the lights and cube faces the camera needs, and since sample distribution shadow maps the sun's cascades end at the farthest surface on screen. So a probe ray hitting a wall behind the camera would have no sun shadow at all, and sunlight would pour into closed rooms off screen.
+    - Reusing the atlas was rejected as a bug, not a quality trade-off.
+    - This branch lights hits by the sun only (plus the sky for misses), which is the light lab's whole lighting; point and spot lights come next, capped to the brightest few per hit by a setting.
+  - **Each game places its probe volume** (a `ProbeVolume` component), rather than one fitted to the level's bounds (the light lab runs to the horizon: millions of probes at 1 m, or a grid too coarse for a room) or a window following the camera (the right answer for large maps, but it adds scrolling planes and blending before the basics are proven).
+    - The indexing is a single function, so a per-axis scroll offset can be added later.
+    - The light lab's 12 x 5 x 16 probes sit on half-metre marks so every wall falls between layers, which stands in for probe relocation for now.
+  - **Hysteresis is set as time constants** (0.5 s for irradiance, 1 s for distances; the papers give 0.98 a frame at about 60 fps, 0.83 s, and no values for 2021's split), converted each frame with exp(-frameSeconds / tau).
+  - **Borders:** the update copies each square's border from shared memory at the end of its own workgroup, instead of 2021's separate border pass: one dispatch fewer and no barrier between them.
+  - **Infinite bounces** (last frame's probes read at each hit) wait for the sampling function, which `triangle.frag` and the trace will share, so it is written and tested once.
+  - **The GPU test** runs the real passes on three scenes the CPU works out ray by ray (furnace, sealed box, sunlit floor).
+    - The floor first read zero light: the bindless texture set was visible to fragment shaders only, which the validation layers also reported. It is now visible to compute too, and textures end their upload in a new `SurfaceRead` state covering both.
+    - It then read 0.4% low, one whole half-float step: Vulkan lets a GPU round toward zero when it stores 16-bit floats, so the tolerance allows a full step (fifth root times five, 6e-3) rather than half of one.
+    - The ball shader's `discard` needed `shaderDemoteToHelperInvocation` (required by Vulkan 1.3, turned on), and the two-channel distance atlas `shaderStorageImageExtendedFormats`.
+  - **The debug balls** first faced the camera's forward axis and came out cut off near the edges of the view, where a ball's outline stretches away from the middle; each ball's square now faces the line from the camera to it.
+
+  Not measured yet: the probe passes' GPU time (F4 shows it as PROBES); 960 probes at 64 rays are about 61,000 rays plus as many shadow rays a frame, against the 3.7 million primary rays measured at 0.09-0.28 ms.
+
+#### Sampling the probes, and the flicker hunt
+
+- `ddgi-sampling`: the probes light the picture. Surfaces sample them in `triangle.frag`, probe rays' hits read last frame's probes (one more bounce a frame) and add the brightest point and spot lights by shadow rays. Decisions:
+  - **The 2021 reference code's weights throughout**, blended in square-root space:
+    - wrap back-face weight
+    - cubed Chebyshev visibility with its 0.05 floor
+    - the crush below 0.2
+    - trilinear factors at least 0.001
+    - the self-shadow bias of (0.2 n + 0.8 v) × 0.75 × the smallest spacing × 0.3, the cell found from the biased point.
+
+    Visibility and back-face weights use the geometric normal, steadier than the normal map's; the irradiance is read along the shaded normal.
+  - **The volume's edge:** the 2021 paper fades a volume out across its outermost cell, inside the probes. That would have left the light lab's floor, half a cell below the lowest layer, on the flat ambient. So a volume here lights points out to half a cell beyond its outer probes at full weight and fades over the next half cell (`DDGI_VOLUME_MARGIN`, `DDGI_VOLUME_FADE`), the flat ambient taking over beyond.
+  - **Lights at hits:** the CPU lists the point and spot lights whose range reaches the probes' box grown by the longest recorded distance (1.5 cell diagonals).
+    - Each hit ranks those by unshadowed luminance, keeps the brightest `lightsPerHit` (4, at most 8; ties keep the earlier light, so rounding cannot reorder them) and sends a shadow ray to each.
+    - A light farther out still lights the screen; only its light on far surfaces the probes see is missed.
+  - **Bounce energy 0.85** (the 2019 code's) as a setting. 1 would be physically right, since albedo below 1 already makes the series converge, but the faint leaks it would amplify are what the eye sees first in dark rooms.
+  - **Specular from the probes:** the plan kept the specular part on the flat ambient until reflections.
+    - With the light lab's ambient raised to match its sky (below), the varnished floor of the sunlit room reflected a bright blue sky it cannot see and turned blue-grey.
+    - The specular part now reads the same probes, with the same weights, in the mirror direction: a reflection as blurred as a fully rough one (the 2021 paper's "reflections from probes"), right in brightness indoors and out, for 8 more texture reads.
+    - Without probes it is still the flat ambient.
+  - **Pictures without probes stay bit for bit the same.**
+    - With the probe code behind an ordinary branch, the demo's views moved by a half-float step at about 25 pixels each (one HDR view beyond tolerance): the driver compiled the rest of the shader a little differently.
+    - Sampling is now a specialization constant (`DDGI_SAMPLE_PROBES_CONSTANT`), with two more main-pass pipelines, so the pipelines without probes hold none of the code; every demo reference matched exactly again.
+    - Graphics pipelines gained `fragmentConstants` for it.
+  - **The scene set holds the atlases now** (a one-texel stand-in when there are none), so `VulkanDdgi::prepare` creates them before the set is written each frame. They rest as `SurfaceRead` between updates: sampled by the main pass, the debug balls and the next frame's trace.
+  - **Golden images** are one frame from cold, so a view with probes is drawn 240 times first (2 s at a tick each: four irradiance time constants), then captured. The whole light lab check takes 9 s, and a second run reproduces the references exactly.
+  - **Light lab:** the sky ambient dial is gone; the flat ambient is the drawn sky's value (a uniform sky drawn at B gives a surface facing it the irradiance B), as the probes see it.
+    - Outdoor shadows are lighter, filled by the sky; the sunlit room is darker than before and lit only by the beam, its bounce and the sky through the window.
+    - All 10 light lab references saved again for it; the 12 demo references are unchanged.
+  - **GPU tests:** the new library's functions against their mirrors, plus a lamp-lit floor pass test (two lamps, one kept per hit).
+    - The visibility's variance is the mean square less the mean's square, which cancels when the spread is small, so its tolerance grows with mean square / variance.
+    - A first version of the brightest-lights test shader read zeros for lights 2 and 3 (a vector indexed by a loop counter inside `?:`); spelled out as an array, it matched exactly.
+  - **Flicker in the dark rooms**, reported on first look, led to dropping 2021's fifth-root storage and per-texel speed-ups for plain linear blending (details and numbers in `docs/ILLUMINATION.md`, Hysteresis).
+    - A dark-room texel seeing a small sunlit patch settled at 51% of its true light and moved 8.7% in 0.1 s; linear, within 0.1% and 1.5% (`ddgi_test`).
+    - On screen, though, the brightness was fixed but the crawl barely moved: the sunlit room's 90th-percentile change over 0.2 s, 5.8% before and 5.6% after.
+    - Measured by changing one default at a time and comparing captures 24 frames apart (a scratch tool, relative luminance change per pixel): 256 rays halved it, holding the distances still changed nothing, no bounces made it worse (a darker room, the same noise).
+    - With 8 s to settle, 64 rays gave 3.7% at a 0.5 s time constant, 2.2% at 1 s, 1.4% at 2 s, and 128 rays at 1 s 1.5%.
+    - So what is left is Monte Carlo noise, 1/sqrt(rays x time constant); the defaults (64 rays, 0.5 s) were left for the user to choose.
+    - Stored irradiance is now checked three times tighter in the GPU test (2e-3), since no fifth power magnifies the half-float rounding.
+  - **The flicker hunt went on in the dark back room itself** (the first measurements were of the sunlit room, which hides it): 6.4% of crawl over 0.2 s at the defaults, against 3.7% next door, and 2.1% even at 256 rays.
+    - A preview showed that the rays' own luck is most of it: frames taking turns through one long spiral (16 frames a cycle, `DDGI_RAY_CYCLE`, one random rotation per cycle) left 3.8% at 64 rays and 1.3% at 256, for nothing.
+    - 8 and 64 frames a cycle did slightly worse (4.3%, 4.4%; single measurements, good to a few tenths).
+    - The user tried it live with the rays and time constant sliders and chose interleaving with a 2 s irradiance time constant ("eliminates it completely"), keeping 64 rays: 1.2% in the back room, 0.66% at 256 rays.
+    - The price, told to the user, is lag: bounce light follows a change over a few seconds, and moving lights and objects trail theirs, until scene events exist.
+    - Golden views with probes now warm up for 960 frames (8 s, four time constants); the GPU tier takes 33 s.
+    - The CPU sparse-texel test crawls 2.4% with independent rotations, 1.3% interleaved and 0.33% at 2 s.
+  - **The light lab got the demo's flashlight** (F, off at the start, so its golden images are unchanged), to watch how a moving light's bounce trails behind it with the 2 s time constant.
+    - Its logic moved from `DemoGame` into a shared `gameplay/flashlight` (`Flashlight`, `flashlightInHand`, `flashlightBeam`) rather than being copied; the demo's golden images are unchanged too.
+    - The ways to fix trailing for fast lights, explained to the user: two irradiance atlases split by how fast their light's source moves (fast lights at a short time constant, no extra rays; recommended), faster probes near moving lights, reflective shadow maps for spotlights' first bounce, or screen-space GI.
+  - **A dense-probe test for the light lab** (`lightlab-dense-probes`): the user asked for probes 20 cm apart.
+    - The whole volume at that spacing would be 89,376 probes, past both the 65,535-probe limit (one workgroup per probe, along one dispatch axis) and the 16,384-texel atlas width.
+    - So the dense grid covers the building only: 27 x 15 x 47 = 19,035 probes, about 20 times the probe work, a setting off by default (golden images unchanged).
+    - Rendered once with the validation layers on: clean, and the bounce light visibly sharper (corners and wall feet darken, the beam's glow beside the doorway tighter).
+    - Per-probe noise is unchanged (still 64 rays each), only finer-grained.
+
+  Not measured yet: the main pass's added cost of 8 corners, 24 texture reads a pixel, and the trace's added sampling and shadow rays; F4 shows both (MAIN and PROBES).
+
+#### Fast lights, presets and the ray budget
+
+- `ddgi-fast-lights`: a flashlight's bounce trailed behind it for seconds, because the probes' memory is 2 s, kept that long against flicker.
+  - **The split:** light adds up, so it is split. Lights flagged fast (`PointLight::fast`, `SpotLight::fast`; the flashlight is) have their bounce kept in a second irradiance atlas with a 0.05 s memory, summed with the still one wherever the probes are read.
+  - **Bounces keep their source's memory:** the trace keeps each ray's light from still and fast lights apart, including the bounce read from last frame's probes, still into still and fast into fast, so a fast light's later bounces keep its short memory too.
+  - **More rays near fast lights:** probes within reach of a fast light (its range plus the probes' longest distance, as the hit lights are chosen) trace 256 rays, the rest 64.
+  - **Hitches:** the fast blend counts a frame as at most 1/30 s, so a hitch cannot replace its history with one noisy frame.
+
+  Decisions:
+  - **Each atlas is blended on its own** with the same corner weights and the two added, rather than adding the probes' values first: a probe ray's hit must pass each on into its own atlas anyway, and with the fast atlas empty the picture is exactly the old one. Every golden image stayed bit for bit the same; a new light lab view, `flashlight` (the dark back room lit by the flashlight), puts the fast atlas into the golden images.
+  - **The fast light's part of each ray** is stored as half floats in a buffer of its own (8 bytes a ray), so the still rays stay full floats (the pictures without fast lights unchanged) and the ray memory grows by half rather than doubling (the dense probe test's 19,035 probes x 256 rays: 39 MB more, not 78).
+  - **Which probes trace more rays is decided on the GPU:** the trace checks its probe against the fast hit lights and writes a flag the update reads. The dispatch makes room for 256 rays a probe only when a fast light is listed, so frames without one dispatch exactly as before.
+  - **Tried and dropped: a ray cycle fitted to each light's memory.**
+    - The plan: a power of two with about three whole cycles in the time constant's frames (from a back-room measurement at 0.5 s and 120 fps, where 8 and 16 frames a cycle were about equally good and 64 worse), from a smoothed frame rate, with hysteresis against jitter, under the still cycle's rotation with the phase taken modulo the shorter cycle.
+    - Built and measured, it lost. The 90th percentile of brightness change in 0.2 s in the back room, fast part at 0.05 s and 256 rays:
+
+      | Frame rate | The rule's cycle | The long cycle |
+      |---|---|---|
+      | 240 fps | 0.69% (4 frames) | 0.55% |
+      | 120 fps | 1.36% | 1.22% |
+      | 60 fps | 2.59% | 1.60% |
+
+      Other cycles at 240 fps: 8 frames 0.52%, 2: 1.16%, 1: 1.89%.
+    - Why: under the shared rotation, which turns only every 16 frames, a short cycle traces the same few ray sets again and again until it turns (at 60 fps, the rule's cycle of 1 traced the identical 256 rays for 16 frames), and repeated directions add nothing.
+    - The cycle fitting, the frame-rate smoothing, the rays' clock and the cycles-per-window setting were removed: every probe takes turns through the same 16-frame cycle, and fast probes simply trace more rays. Fitting cycles each with its own rotation was not tried.
+  - **The fast memory stays 0.05 s** (the user's choice, keeping up with the flashlight best). Flicker in the back room:
+    - at 240 fps: 0.55% at 0.05 s, 0.32% at 0.1 s, 0.22% at 0.2 s, against 0.25% for the still light alone (the fast part at 2 s)
+    - at 60 fps: 1.6% at 0.05 s and 0.47% at 0.2 s
+    - 64 fast rays flickered 2.0% at 240 fps.
+  - **Measured with two scratch tools:**
+    - Captures of the `flashlight` view N and N + k frames apart, compared as relative luminance change per pixel. `Application::captureGoldenView` gained the warm-up frame count for it: the probes are deterministic, so two runs warmed up for N and N + k frames are frames N and N + k of one run.
+    - The renderer's GPU timestamps for the same view at 1280 x 720 on the RTX 5080, against the same view built from `main`.
+
+    Results:
+    - PROBES went from 0.032 ms to 0.106 ms with the flashlight on (every probe of the light lab's volume is within its 50 m reach, so all trace 256 rays), and from 0.031 to 0.036 ms with it off (the fast atlas's update and the reach test).
+    - MAIN from 0.275 to 0.287 ms (the fast atlas's 8 more texture reads, 16 with the specular part).
+    - With the dense probe test and the flashlight on, PROBES went from 0.58 ms to 2.84 ms (0.76 ms with 64 fast rays): the price of 256 rays for every probe in reach.

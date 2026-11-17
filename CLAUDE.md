@@ -50,9 +50,9 @@ Pick the narrowest home. One home per fact; elsewhere, link to it.
 |---|---|
 | Planned or done (one line an item, with its branch) | `ROADMAP.md` |
 | How it works now | `docs/architecture/<system>.md` |
-| Why, what was tried and measured (at most 10 bullets a branch) | `docs/BUILDLOG.md` |
+| Why, what was tried and measured (at most 10 bullets a branch) | the current phase's last part in `docs/buildlog/` (listed in `docs/BUILDLOG.md`) |
 | Research and sources | `docs/<TOPIC>.md`, listed in `docs/INDEX.md` |
-| Learning the engine (prose) | `docs/ENGINE_GUIDE.md`, at the end of a phase |
+| Learning the engine (prose) | a chapter in `docs/guide/` (listed in `docs/ENGINE_GUIDE.md`), at the end of a phase |
 | Features, controls (the packaged demo reads `## Controls`) | `README.md` |
 | A rule for almost every task | this file |
 | A rule for one folder | `src/<folder>/CLAUDE.md` |

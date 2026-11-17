@@ -351,7 +351,7 @@ Done before the rest of phase 18, at the user's request (Nov 17 2026). Starts fr
 - [x] Root `CLAUDE.md` rewritten: overview, build and test, hard rules, where to look, where new instructions go
 - [x] `ARCHITECTURE.md` split per system and cut to how it works now (`docs-refactor`: 51 files, each checked against the code)
 - [x] `README.md` cut to pitch, features a line each, install, build, controls, a pointer to the layout (68 KB to 12.5 KB, in the docs test)
-- [ ] `ENGINE_GUIDE.md` trimmed of repetition
+- [x] `ENGINE_GUIDE.md` trimmed of repetition and split into 11 chapters in `docs/guide/`, checked against the code; `docs/BUILDLOG.md` split into 17 parts in `docs/buildlog/` by phase, text unchanged (`docs-refactor`)
 - [x] Memory deduplicated: project rules out of memory, into `CLAUDE.md` or rules
 - [x] Checks against needless growth (`testDocs`, `docs-refactor`): layers from `docs/LAYOUT.md`, budgets, line lengths, paths, the index, repeated 12-word runs, over the docs refactored so far
 - [ ] The docs report (`tests.exe --docs-report`, after the split): warnings for dates and measurements outside `BUILDLOG.md` and `ROADMAP.md` and for backticked names gone from `src/` (every source and shader having an architecture file is already a check in `testDocs`)
