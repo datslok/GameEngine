@@ -25,6 +25,6 @@ Folders not in the table (`cgltf/`, `imgui/`, `volk/` and the rest) are librarie
 
 ## Known exceptions
 
-- `scene/impostor.h` includes `assets/image_loader.h`: `ImageData` is to move below `scene/`.
+None.
 
 Each system's design: `docs/ARCHITECTURE.md`.

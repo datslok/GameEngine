@@ -1,28 +1,12 @@
 #pragma once
 
-#include "core/coverage_mips.h"
 #include "core/raw_image.h"
-#include "scene/asset_handles.h"
+#include "scene/image_data.h"
 
 #include <cstdint>
 #include <string>
 #include <vector>
 #include <span>
-
-struct ImageData {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-
-    // Four bytes per pixel: red, green, blue, alpha.
-    std::vector<std::uint8_t> pixels;
-
-    // Whether the bytes are sRGB colour or plain numbers, which decides the GPU format they are uploaded in.
-    TextureEncoding encoding = TextureEncoding::Srgb;
-
-    // The smaller mip levels, when built on the CPU (a cut-out's, keeping its coverage: core/coverage_mips.h). Empty:
-    // the GPU makes them by averaging.
-    std::vector<ImageLevel> mips{};
-};
 
 // Flip rows by default to use bottom-left UV coordinates.
 ImageData loadImage(
