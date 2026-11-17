@@ -70,7 +70,8 @@ enum SceneBinding : std::uint32_t {
     WindPreviousSpringsBinding = 39,
     HangingVerticesBinding = 40,
     WindAnchorsBinding = 41,
-    SceneBindingCount = 42
+    ThinningCardsBinding = 42,
+    SceneBindingCount = 43
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -205,6 +206,7 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo probeCascades{};
     VkDescriptorBufferInfo terrainHeights{}; // the terrain's heights (a stand-in without a terrain)
     VkDescriptorBufferInfo hangingVertices{}; // every hanging mesh's vertices' anchors and arms (a stand-in without)
+    VkDescriptorBufferInfo thinningCards{};   // every thinned mesh's header and cards (a stand-in without; scene/card_thinning.h)
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

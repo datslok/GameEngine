@@ -40,6 +40,7 @@ int main() {
             gpuTestTerrain(runner, report);
             gpuTestImpostor(runner, report);
             gpuTestWind(runner, report);
+            gpuTestCardThinning(runner, report);
             gpuTestCameraFinish(runner, report);
             gpuTestMotionBlur(runner, report);
             gpuTestDepthOfField(runner, report);

@@ -8,4 +8,8 @@
 #define INSTANCE_KIND_IMPOSTOR 1
 #define INSTANCE_KIND_FOLLOWS_GROUND 2
 
+// A draw list entry's top bit: the view draws the instance with its thinned mesh (scene/card_thinning.h), so the vertex
+// shaders thin its cards; the rest of the entry is the instance's number.
+#define DRAW_LIST_THINNED_BIT 0x80000000u
+
 #endif

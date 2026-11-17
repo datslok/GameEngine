@@ -9,6 +9,7 @@
 #include "terrain_data.glsl"
 #include "impostor.glsl"
 #include "wind_data.glsl"
+#include "card_thinning_data.glsl"
 
 // Whether this pipeline draws a capture (a reflection probe's cube face, or a flat mirror's picture): its
 // view-projection comes as push constants (render/gpu/reflection_probe.h, cubeFaceViewProjection;
@@ -19,7 +20,7 @@ layout(constant_id = PROBE_CAPTURE_VERTEX_CONSTANT) const bool captureView = fal
 layout(push_constant) uniform CaptureView {
     mat4 captureViewProjection;
     vec4 captureClipPlane; // what is behind it is cut away: a mirror's plane (planarClipPlane), or one nothing is behind
-    vec4 captureEye;       // xyz: the eye it is seen from (the camera, or the camera reflected across the mirror)
+    vec4 captureEye;       // xyz: the eye it is seen from (the camera, or the camera reflected across the mirror); w: its error allowed a metre away, for card thinning
 };
 
 // Every pipeline clamps depth rather than clip at the near plane, so a mirror's picture cuts what is behind the mirror
@@ -53,7 +54,8 @@ layout(location = 8) flat out mat3 frameAxes;
 invariant gl_Position;
 
 void main() {
-    InstanceData instance = instances[drawList[gl_InstanceIndex]];
+    uint entry = drawList[gl_InstanceIndex];
+    InstanceData instance = instances[drawnInstance(entry)];
     mat4 normalMatrix = instance.normalMatrix;
     vec4 handedness = instance.handedness;
     materialIndex = instance.material.x;
@@ -113,10 +115,14 @@ void main() {
         return;
     }
 
-    relativePosition = (model * vec4(position, 1.0)).xyz;
+    // Thinned cards (scene/card_thinning.h): each shrunk or grown about its stem as the view's distance allows, in every view
+    // that marks it the same way, so the prepass and the main pass agree to the bit.
+    vec3 shaped = thinnedVertex(instance, entry, gl_VertexIndex, position, captureView ? captureEye.xyz : vec3(0.0), cameraOrigin.xyz,
+                                captureView ? captureEye.w : levelOptions.x);
+    relativePosition = (model * vec4(shaped, 1.0)).xyz;
     relativePosition.y += groundLift(instance.material.w, relativePosition + cameraOrigin.xyz);
     // The wind (render/gpu/wind.h): the same sway in every view, so the prepass and the main pass agree to the bit.
-    relativePosition += windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, gl_VertexIndex, position, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    relativePosition += windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, gl_VertexIndex, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
     gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
     viewerPosition = captureView ? captureEye.xyz : vec3(0.0);
@@ -127,7 +133,7 @@ void main() {
     // The model is a rotation times a scale: the vertex stretched by the scale is where it sits along the object's axes.
     vec3 frameScale = projectionScale(mat3(instance.model));
     frameAxes = projectionAxes(mat3(instance.model), frameScale);
-    framePosition = position * frameScale;
+    framePosition = shaped * frameScale;
 
     // The normal matrix keeps normals perpendicular to the surface under non-uniform scaling.
     vec3 transformedNormal = mat3(normalMatrix) * normal;

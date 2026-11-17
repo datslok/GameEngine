@@ -38,6 +38,14 @@ float errorInPixels(float errorMetres, float distance, const LevelView& view) {
     return errorMetres * view.pixelsPerMetre / distance;
 }
 
+float thinningErrorPerMetre(const LevelView& view) {
+    if (!view.enabled || view.orthographic || !(view.pixelsPerMetre > 0.0f)) {
+        return 0.0f;
+    }
+
+    return view.pixelError / view.pixelsPerMetre;
+}
+
 // The levels go coarsest last, each straying further, so the first that does not fit ends the search; so does one
 // without a mesh while impostors are off, keeping the last level that draws something.
 std::size_t chooseLevel(std::span<const MeshLevel> levels, float distance, const LevelView& view) {

@@ -151,8 +151,9 @@ public:
     // built on the CPU (a cut-out's, keeping its coverage). Between frames only.
     // A deforming mesh (scene/deforming_mesh.h) gets a ring of buffers its shape is written into each frame
     // (FrameDescription::deformedMeshes); mesh is then its rest shape.
-    // Returns one past the mesh's first entry in the hanging vertices (IndexedMesh::hanging), 0 when it has none.
-    std::uint32_t uploadMesh(const IndexedMesh& mesh, bool deforming = false);
+    // Returns where its per-vertex records begin: one past its first entry in the hanging vertices (IndexedMesh::hanging),
+    // one past its header in the card thinning records (IndexedMesh::thinning); 0 for none.
+    VertexEntries uploadMesh(const IndexedMesh& mesh, bool deforming = false);
     void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips = {});
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
@@ -344,6 +345,12 @@ private:
     int probeNextFace = 0;
     Vec3 probeCycleOrigin{0.0f, 0.0f, 0.0f};
 
+    // This frame's error allowed a metre away in each view that thins cards (scene/card_thinning.h, thinningErrorPerMetre):
+    // the camera's (frame data), a probe face's and a mirror's (their capture views); 0 thins nothing.
+    float cameraThinning = 0.0f;
+    float probeThinning = 0.0f;
+    float mirrorThinning = 0.0f;
+
     // A flat mirror's picture (render/gpu/planar_reflection.h), and last frame's mirror, kept until another is clearly better.
     std::unique_ptr<VulkanPlanarReflection> planarReflection;
     std::optional<MirrorPlane> lastMirror;
@@ -512,7 +519,15 @@ private:
     bool hangingChanged = false;
     VulkanBuffer hangingVertices;
     VulkanBuffer noHangingVertices;
-    void updateHangingVertices();
+
+    // Every thinned mesh's header and cards (render/gpu/gpu_scene.h, packCardThinning; scene/card_thinning.h), likewise.
+    std::vector<GpuThinningRecord> thinningRecords;
+    bool thinningChanged = false;
+    VulkanBuffer thinningCards;
+    VulkanBuffer noThinningCards;
+
+    // Copies a kind of per-vertex records to the GPU when new ones came (bytes their size).
+    void updateVertexRecords(const void* records, VkDeviceSize bytes, bool& changed, VulkanBuffer& buffer);
 
     // This frame's camera in the atmosphere's frame: its distance from the planet's centre, km (0 without an atmosphere).
     float cameraAtmosphereRadius = 0.0f;

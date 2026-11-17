@@ -85,9 +85,9 @@ struct RenderStats {
     // readout wraps to it); 0 before a frame was drawn.
     std::uint32_t outputWidth = 0;
 
-    // The height the scene was drawn at (before upscaling), which the camera's levels of detail are chosen for; 0
-    // before a frame was drawn.
-    std::uint32_t renderHeight = 0;
+    // The height of the image the frame was presented in (after upscaling), which the camera's levels of detail are
+    // chosen for; 0 before a frame was drawn.
+    std::uint32_t outputHeight = 0;
 
     // The renderer's CPU time by stage this frame (render/cpu_timing.h).
     CpuStageTimings cpu;

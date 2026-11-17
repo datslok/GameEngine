@@ -85,9 +85,20 @@ struct DrawItem {
     // frame and the shadow tiles that sway redraw while it is in them (render/gpu/wind.h).
     WindSway sway{};
 
-    // One past its mesh's first entry in the renderer's hanging vertices (IndexedMesh::hanging, attachHangingEntries;
+    // One past its mesh's first entry in the renderer's hanging vertices (IndexedMesh::hanging, attachVertexEntries;
     // 0 for a mesh with none), so the vertex shaders find each vertex's anchors and arm.
     std::uint32_t hangingEntry = 0;
+
+    // One past its mesh's header in the renderer's card thinning records (IndexedMesh::thinning, attachVertexEntries; 0 for
+    // a mesh not thinned), so the vertex shaders shrink and grow its cards (scene/card_thinning.h).
+    std::uint32_t thinningEntry = 0;
+};
+
+// Where a mesh's per-vertex records begin in the renderer's buffers, as it gave them when the mesh was uploaded: one past
+// its first hanging vertex (DrawItem::hangingEntry), one past its card thinning header (DrawItem::thinningEntry); 0 none.
+struct VertexEntries {
+    std::uint32_t hanging = 0;
+    std::uint32_t thinning = 0;
 };
 
 /*

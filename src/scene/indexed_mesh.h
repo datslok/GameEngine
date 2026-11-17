@@ -4,6 +4,7 @@
 #include "math/vec2.h"
 #include "math/vec3.h"
 #include "math/vec4.h"
+#include "scene/card_thinning.h"
 #include "scene/mesh.h"
 #include "scene/wind.h"
 
@@ -40,7 +41,19 @@ struct IndexedMesh {
     // Something hanging (scene/wind.h, HangingVertex): each vertex's anchors, share and arm, one a vertex, or none at all
     // for everything else. Whatever appends vertices to a hanging mesh appends their entries too (appendHanging).
     std::vector<HangingVertex> hanging{};
+
+    // Cards thinned one by one (scene/card_thinning.h): how, and each vertex's card (its anchor and rank), one a vertex,
+    // or none at all for everything else.
+    CardThinning thinning{};
+    std::vector<ThinningCard> thinningCards{};
 };
+
+/*
+* A mesh's first vertexCount vertices and indexCount indices as a mesh of their own (a level of detail sharing its
+* mesh's first vertices, MeshLevel::sharesVertices); its records stay with the mesh, whose thinning shapes it. Throws
+* std::invalid_argument for more than the mesh has, or a triangle reaching past the kept vertices.
+*/
+IndexedMesh meshPrefix(const IndexedMesh& mesh, std::size_t vertexCount, std::size_t indexCount);
 
 /*
 * The hanging entries for the vertices from firstVertex on, each entry: a mesh that had none yet gets the default (its

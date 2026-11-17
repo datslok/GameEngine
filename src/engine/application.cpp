@@ -311,16 +311,16 @@ void Application::prepareNewResources() {
         // A drawn-only mesh is in the render format already, and is never a mirror (big rough scenery).
         if (assets.isDrawnOnly(next)) {
             const IndexedMesh& drawn = assets.getDrawnMesh(next);
-            hangingEntryByMesh.push_back(renderer.uploadMesh(drawn));
+            vertexEntriesByMesh.push_back(renderer.uploadMesh(drawn));
             boundsByMesh.push_back(indexedMeshBounds(drawn));
             flatFacesByMesh.push_back({});
             continue;
         }
 
         if (assets.isDeforming(next)) {
-            hangingEntryByMesh.push_back(renderer.uploadMesh(assets.getDeformingTopology(next).rest, true));
+            vertexEntriesByMesh.push_back(renderer.uploadMesh(assets.getDeformingTopology(next).rest, true));
         } else {
-            hangingEntryByMesh.push_back(renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next))));
+            vertexEntriesByMesh.push_back(renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next))));
         }
         boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
         flatFacesByMesh.push_back(assets.isDeforming(next) ? std::vector<FlatFace>{} : findFlatFaces(assets.getMesh(next)));
@@ -349,7 +349,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
     if (game.wantsDebugView()) {
         // The boxes of what the camera draws, its levels chosen for the height last frame was drawn at.
-        const LevelView boxLevels = levelView(camera.getPosition(), static_cast<float>(renderer.getLastFrameStats().renderHeight),
+        const LevelView boxLevels = levelView(camera.getPosition(), static_cast<float>(renderer.getLastFrameStats().outputHeight),
                                               camera.getVerticalFov(), settings.render.levelOfDetail);
         drawBoundingBoxes(frame.draws, boundsByMesh, camera, boxLevels, debugDraw);
         drawColliders(world, alpha, debugDraw);
@@ -512,7 +512,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     const auto attach = [&](std::span<DrawItem> draws) {
         attachBoundingSpheres(draws, boundsByMesh);
         attachFlatFaces(draws, flatFacesByMesh);
-        attachHangingEntries(draws, hangingEntryByMesh);
+        attachVertexEntries(draws, vertexEntriesByMesh);
         attachMeshLevels(draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
         liftGroundDraws(draws, groundHeights);
     };

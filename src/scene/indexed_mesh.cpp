@@ -171,3 +171,23 @@ Aabb indexedMeshBounds(const IndexedMesh& mesh) {
 
     return bounds;
 }
+
+IndexedMesh meshPrefix(const IndexedMesh& mesh, std::size_t vertexCount, std::size_t indexCount) {
+    if (vertexCount > mesh.vertices.size() || indexCount > mesh.indices.size() || indexCount % 3 != 0) {
+        throw std::invalid_argument("A mesh's prefix cannot hold more than the mesh, nor part of a triangle");
+    }
+
+    IndexedMesh prefix;
+    prefix.vertices.assign(mesh.vertices.begin(), mesh.vertices.begin() + static_cast<std::ptrdiff_t>(vertexCount));
+    prefix.indices.assign(mesh.indices.begin(), mesh.indices.begin() + static_cast<std::ptrdiff_t>(indexCount));
+
+    if (std::any_of(prefix.indices.begin(), prefix.indices.end(), [vertexCount](std::uint32_t index) { return index >= vertexCount; })) {
+        throw std::invalid_argument("A mesh's prefix has a triangle reaching past its vertices");
+    }
+
+    if (!mesh.hanging.empty()) {
+        prefix.hanging.assign(mesh.hanging.begin(), mesh.hanging.begin() + static_cast<std::ptrdiff_t>(vertexCount));
+    }
+
+    return prefix;
+}

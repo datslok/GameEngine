@@ -995,10 +995,11 @@ std::vector<float> ForestGame::plantTrees(World& world, AssetManager& assets, co
         cardMaterials.back().diffuseTransmission = leaf.diffuseTransmission;
         cardMaterials.back().diffuseTransmissionTint = leaf.diffuseTransmissionTint;
 
-        // The levels of detail (docs/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing.
+        // The levels of detail (docs/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing. The
+        // leaves' coarser level is their own first vertices, thinned as the leaves are (scene/card_thinning.h).
         assets.setMeshLevels(barkMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
                                                  MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}, MeshLevel{MeshHandle{}, impostorError}});
-        assets.setMeshLevels(leafMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError},
+        assets.setMeshLevels(leafMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError, true},
                                                  MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}, MeshLevel{MeshHandle{}, impostorError}});
         assets.setMeshLevelOptions(barkMeshes.back(), sharedBox);
         assets.setMeshLevelOptions(leafMeshes.back(), sharedBox);

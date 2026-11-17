@@ -63,7 +63,7 @@ Measured in a hidden copy at the trees' start (the RTX 4070 Laptop, TAA, render 
 
 - **Screen size** (Unreal, `ComputeBoundsScreenSize`): 2 R / (d · 2 tan(fovY / 2)), the bounding sphere's diameter over the view's height; a narrower field of view raises it.
 - **Error in pixels** (Nanite, 3D tiles, meshoptimizer): e · H / (2 d tan(fovY / 2)), with e a level's error in metres; pick the coarsest level under a pixel budget (about 1 pixel for Nanite) **(the formula from general knowledge)**.
-- H is the **render** height (under DLSS or TAAU, not the output's), times a global bias.
+- H was first the **render** height (under DLSS or TAAU, not the output's); since `lod-pop-in` the output's (Hiding the switches, below).
 - Each view picks for itself: the reflection probe's small faces pick coarser levels on their own. Shadow cascades choose by the camera's distance, not the light's, so a tree's shadow matches the tree.
 - **Hysteresis:** no source gives a number; engines hide flicker with timed or ranged fades. A 5-10% dead band is common practice **(unverified)**.
 
