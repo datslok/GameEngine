@@ -34,6 +34,7 @@ Covers: `makefile`, `tools/package_demo.py`
 |---|---|---|
 | SDL3, SDL3_image, glslc (`shaderc`), Vulkan headers, validation layers | MSYS2 | Install: `README.md` |
 | cgltf, MikkTSpace, meshoptimizer v0.22, Dear ImGui 1.92.9b (SDL3 and Vulkan backends) | `external/`, unmodified | |
+| bc7enc (BC7 encoder, C; decoder, C++; MIT or public domain) | `external/bc7enc`, unmodified | Commit in `VERSION.txt`; `-O2` in debug too |
 | volk, vk-bootstrap, VMA | `external/`, unmodified | Versions in each `VERSION.txt`, matched to MSYS2's Vulkan headers |
 | FidelityFX FSR 3.1 (SDK v1.1.4, last with Vulkan) | `external/fidelityfx`, DLL committed | Loaded at run time (`SDL_LoadObject`); without it FSR is unavailable |
 | NVIDIA Streamline (DLSS) | MIT headers in `external/streamline/include`; DLLs fetched by `python tools/fetch_streamline.py` | Signature-checked at load (`-lwintrust -lcrypt32`); started before the device |

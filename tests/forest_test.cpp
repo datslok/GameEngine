@@ -624,6 +624,7 @@ namespace {
         const ImageData image = forestWeightsImage(size, extent);
         assert(image.width == static_cast<std::uint32_t>(size) && image.height == static_cast<std::uint32_t>(size));
         assert(image.encoding == TextureEncoding::Linear && image.pixels.size() == static_cast<std::size_t>(size * size * 4));
+        assert(image.storage == TextureStorage::Exact); // blend weights, never block-compressed
         assert(near(forestTextureU(extent.centre.x - extent.halfSize, extent), 0.0f, 1e-6f));
         assert(near(forestTextureV(extent.centre.y + extent.halfSize, extent), 1.0f, 1e-6f));
         const float texelMetres = 2.0f * extent.halfSize / static_cast<float>(size);
@@ -828,6 +829,7 @@ namespace {
         const int texels = 1024;
         const ImageData image = strataImage(bands, texels);
         assert(image.width == static_cast<std::uint32_t>(texels) && image.height == 1 && image.encoding == TextureEncoding::Linear);
+        assert(image.storage == TextureStorage::Exact);
         const float texelMetres = (valleyStrataTop - valleyStrataBottom) / static_cast<float>(texels);
 
         for (int texel = 0; texel < texels; ++texel) {
@@ -887,6 +889,7 @@ namespace {
         const int size = 128;
         const ImageData streaks = streakImage(size);
         assert(streaks.width == static_cast<std::uint32_t>(size) && streaks.encoding == TextureEncoding::Linear);
+        assert(streaks.storage == TextureStorage::Exact && strataWarpImage(8).storage == TextureStorage::Exact && toneVariationImage(8).storage == TextureStorage::Exact);
         int clean = 0;
         int darkest = 255;
 

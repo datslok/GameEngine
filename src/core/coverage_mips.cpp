@@ -140,6 +140,18 @@ ImageLevel halveImage(const ImageLevel& level, bool srgb) {
     return half;
 }
 
+std::vector<ImageLevel> averagedMips(const ImageLevel& full, bool srgb) {
+    std::vector<ImageLevel> levels;
+    const ImageLevel* above = &full;
+
+    while (above->width > 1 || above->height > 1) {
+        levels.push_back(halveImage(*above, srgb));
+        above = &levels.back();
+    }
+
+    return levels;
+}
+
 /*
 * Each level is halved from the last one as averaged, before its scaling, so scales do not compound down the chain;
 * then its alpha alone is scaled.

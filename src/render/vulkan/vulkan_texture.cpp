@@ -20,6 +20,10 @@ VulkanTextureDescription surfaceTexture(TextureEncoding encoding) {
     return description;
 }
 
+VkFormat compressedSurfaceFormat(TextureEncoding encoding) {
+    return encoding == TextureEncoding::Srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
+}
+
 /*
 * The upload: level 0 is copied in from an upload buffer, then each smaller level is blitted from the one above
 * (generateMipmaps), and every level is left for shaders to read. Levels built on the CPU follow level 0 in the upload
@@ -109,6 +113,69 @@ VulkanTexture::VulkanTexture(const VulkanDevice& device, ImmediateCommands& uplo
                                                       ImageContents::Keep));
             image.setState(ImageState::SurfaceRead);
         }
+    });
+}
+
+/*
+* Every level's blocks one after another in an upload buffer (each a multiple of 16 bytes, so each copy starts on a
+* block as Vulkan requires), copied in one region a level, the image extent the level's own size (Vulkan allows a
+* partial block at the edge only there). No blits: the GPU cannot write compressed formats.
+*/
+VulkanTexture::VulkanTexture(const VulkanDevice& device, ImmediateCommands& uploads, const CompressedTexture& compressed) {
+    if (compressed.width == 0 || compressed.height == 0 || compressed.levels.size() != mipLevelCount(compressed.width, compressed.height)) {
+        throw std::invalid_argument("A compressed texture needs every level of its mip chain");
+    }
+
+    VkDeviceSize uploadBytes = 0;
+
+    for (std::size_t level = 0; level < compressed.levels.size(); ++level) {
+        const CompressedLevel& each = compressed.levels[level];
+
+        if (each.width != std::max(compressed.width >> level, 1u) || each.height != std::max(compressed.height >> level, 1u) ||
+            each.blocks.size() != bc7LevelBytes(each.width, each.height)) {
+            throw std::invalid_argument("A compressed level does not have its level's size");
+        }
+
+        uploadBytes += each.blocks.size();
+    }
+
+    ImageDescription imageDescription;
+    imageDescription.format = compressedSurfaceFormat(compressed.encoding);
+    imageDescription.width = compressed.width;
+    imageDescription.height = compressed.height;
+    imageDescription.levels = static_cast<std::uint32_t>(compressed.levels.size());
+    imageDescription.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    image = VulkanImage{device, imageDescription};
+
+    VulkanBuffer staging{device.getAllocator(), uploadBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
+    auto* mapped = static_cast<std::uint8_t*>(staging.getMapped());
+    std::vector<VkBufferImageCopy> copies;
+    VkDeviceSize offset = 0;
+
+    for (std::size_t level = 0; level < compressed.levels.size(); ++level) {
+        const CompressedLevel& each = compressed.levels[level];
+        std::memcpy(mapped + offset, each.blocks.data(), each.blocks.size());
+        VkBufferImageCopy copy{};
+        copy.bufferOffset = offset;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.mipLevel = static_cast<std::uint32_t>(level);
+        copy.imageSubresource.layerCount = 1;
+        copy.imageExtent = {each.width, each.height, 1};
+        copies.push_back(copy);
+        offset += each.blocks.size();
+    }
+
+    staging.flush();
+
+    uploads.run([&](VkCommandBuffer commands) {
+        const VkImage handle = image.get();
+        recordImageBarrier(commands, imageBarrier(handle, VK_IMAGE_ASPECT_COLOR_BIT, ImageState::Undefined,
+                                                  ImageState::TransferDestination, ImageContents::Discard));
+        vkCmdCopyBufferToImage(commands, staging.get(), handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<std::uint32_t>(copies.size()),
+                               copies.data());
+        recordImageBarrier(commands, imageBarrier(handle, VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination, ImageState::SurfaceRead,
+                                                  ImageContents::Keep));
+        image.setState(ImageState::SurfaceRead);
     });
 }
 

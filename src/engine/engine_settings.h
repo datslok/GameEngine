@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assets/texture_cooking.h"
 #include "core/settings_visitor.h"
 #include "core/build_info.h"
 #include "render/frames_in_flight.h"
@@ -64,6 +65,9 @@ struct EngineSettings {
     // outside this computer can reach: game.exe --send <command> talks to it. Read once, at start-up.
     bool commandServer = true;
     int commandPort = defaultCommandPort;
+
+    // Textures block-compressed for the GPU, kept in the texture cache (assets/texture_cooking.h).
+    TextureCompressionSettings textureCompression;
 
     RenderSettings render;
 };

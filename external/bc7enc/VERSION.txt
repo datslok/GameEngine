@@ -1,0 +1,1 @@
+bc7enc (Rich Geldreich), github.com/richgel999/bc7enc, commit f66c2e489b07138f2673a2fb3d27c1aa1d565c48 (Jul 3 2022). Files copied unmodified.

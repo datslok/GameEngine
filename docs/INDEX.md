@@ -48,6 +48,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/VINES.md` | Lianas, climbers, epiphytes (phase 18) |
 | `docs/WIND.md` | The wind field and swaying |
 | `docs/GROUNDCOVER.md` | Grass and floor cover |
+| `docs/TEXTURECOMPRESSION.md` | Block-compressed textures, the encoder, the texture cache |
 | `docs/CLOTHGPU.md` | Any cloth solver, low-frequency layer or self-collision work (phases 7, 10); yardstick numbers in Part 5 |
 | `docs/RAGDOLLPLAN.md` | Active ragdolls (phase 8); check formulas marked as from memory |
 | `docs/DESTRUCTION.md` | Flight and destruction (phase 15); check facts marked as from memory |

@@ -143,6 +143,9 @@ public:
     // Whether the GPU has hardware ray tracing (ray queries), which ray-traced settings need.
     bool supportsRayQueries() const;
 
+    // Whether the GPU reads BC block-compressed textures (uploadCompressedTexture).
+    bool supportsBlockCompression() const;
+
     // The vendors' upscalers this PC can run (their libraries loaded, the GPU able).
     UpscalerSupport upscalerSupport() const;
 
@@ -155,6 +158,8 @@ public:
     // one past its header in the card thinning records (IndexedMesh::thinning); 0 for none.
     VertexEntries uploadMesh(const IndexedMesh& mesh, bool deforming = false);
     void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips = {});
+    // The next texture already BC7-compressed (assets/texture_cooking.h), numbered as uploadTexture's are.
+    void uploadCompressedTexture(const CompressedTexture& texture);
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
 

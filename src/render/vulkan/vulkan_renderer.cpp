@@ -3223,6 +3223,10 @@ bool VulkanRenderer::supportsRayQueries() const {
     return device.supportsRayQueries();
 }
 
+bool VulkanRenderer::supportsBlockCompression() const {
+    return device.supportsBlockCompression();
+}
+
 /*
 * A frame has few deforming meshes, so each looks through the frame's list. Every deforming mesh shows or holds once
 * per frame, which keeps its ring of slots safe from the frames still in flight.
@@ -3477,6 +3481,16 @@ void VulkanRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const 
     }
 
     textures.push_back(std::make_unique<VulkanTexture>(device, uploads, width, height, pixels, surfaceTexture(encoding), mips));
+    const TextureHandle handle{static_cast<std::uint32_t>(textures.size() - 1)};
+    bindlessTextures->write(bindlessTextureSlot(handle), textures.back()->getView(), surfaceSampler.get());
+}
+
+void VulkanRenderer::uploadCompressedTexture(const CompressedTexture& texture) {
+    if (recording) {
+        throw std::logic_error("Upload textures before beginning a frame");
+    }
+
+    textures.push_back(std::make_unique<VulkanTexture>(device, uploads, texture));
     const TextureHandle handle{static_cast<std::uint32_t>(textures.size() - 1)};
     bindlessTextures->write(bindlessTextureSlot(handle), textures.back()->getView(), surfaceSampler.get());
 }

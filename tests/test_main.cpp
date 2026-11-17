@@ -83,6 +83,8 @@ void testLeafClusters();
 void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
+void testBlockCompression();
+void testTextureCooking();
 void testAlphaMask();
 void testTransparency();
 void testGltfMaterials();
@@ -348,6 +350,8 @@ const RoutineTest routineTests[] = {
     {"testDepthPrepass", testDepthPrepass},
     {"testTextureEncoding", testTextureEncoding},
     {"testCoverageMips", testCoverageMips},
+    {"testBlockCompression", testBlockCompression},
+    {"testTextureCooking", testTextureCooking},
     {"testAlphaMask", testAlphaMask},
     {"testTransparency", testTransparency},
     {"testGltfMaterials", testGltfMaterials},

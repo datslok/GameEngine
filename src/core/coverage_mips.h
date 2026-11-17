@@ -9,7 +9,7 @@
 * levels down the whole picture sinks under the cutoff: trees go bald and fences vanish with distance. Castano's fix
 * (2010, "Computing alpha mipmaps") scales each level's alpha so the share of texels that pass the cutoff (its
 * coverage) stays the full-size picture's. Built on the CPU when the texture is loaded; other textures' mips the GPU
-* makes by itself.
+* makes by itself, unless they are compressed (core/block_compression.h), whose every level is averaged here first.
 */
 
 // One level of an RGBA8 image: four bytes per texel, red, green, blue, alpha, rows top to bottom.
@@ -28,6 +28,10 @@ float alphaCoverage(const ImageLevel& level, float cutoff);
 * averaged, encoded), alpha always as a plain share.
 */
 ImageLevel halveImage(const ImageLevel& level, bool srgb);
+
+// Every level below the full size, down to one texel, each the one above halved: what the GPU's blits make, built on
+// the CPU for a texture compressed before upload (the GPU cannot write compressed blocks).
+std::vector<ImageLevel> averagedMips(const ImageLevel& full, bool srgb);
 
 // Every level below the full size, down to one texel, each with its alpha scaled to keep the full size's coverage.
 std::vector<ImageLevel> coveragePreservingMips(const ImageLevel& full, bool srgb, float cutoff);
