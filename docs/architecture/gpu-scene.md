@@ -2,7 +2,7 @@
 
 Covers: `src/render/gpu/gpu_scene`, `src/render/gpu/still_instances`, `src/render/gpu/material_uniforms`, `src/render/gpu/instance_shared.h`, `src/render/vulkan/scene_layout`, `src/render/vulkan/bindless_textures`, `assets/shaders/instances.glsl`, `assets/shaders/frame_data.glsl`, `assets/shaders/materials.glsl`, `assets/shaders/triangle.vert`, `src/render/gpu/light_uniforms`, `src/render/gpu/material_shared`, `assets/shaders/scene_lights.glsl`
 
-Every scene pass reads its objects, materials, lights and shadow tiles from storage buffers written once a frame, so nothing is bound or pushed per object and all objects sharing a mesh are one instanced draw per view. Staged plan for keeping more of it on the GPU: `docs/PERSISTENTSCENE.md`. How a frame uses it: `renderer.md`.
+Every scene pass reads its objects, materials, lights and shadow tiles from storage buffers written once a frame, so nothing is bound or pushed per object and all objects sharing a mesh are one instanced draw per view. Staged plan for keeping more of it on the GPU: `docs/research/PERSISTENTSCENE.md`. How a frame uses it: `renderer.md`.
 
 ## Records
 

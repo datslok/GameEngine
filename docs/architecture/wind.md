@@ -2,7 +2,7 @@
 
 Covers: `src/scene/wind`, `src/render/gpu/wind`, `src/render/gpu/wind_shared.h`, `src/render/vulkan/vulkan_wind`, `assets/shaders/wind.glsl`, `assets/shaders/wind_data.glsl`, `assets/shaders/wind_field.comp`
 
-A wind force field of springs round the camera, after Horizon Zero Dawn's, that every vertex shader bends growing and hanging things by. Research and plan: `docs/WIND.md`. Maths in `render/gpu/wind`, mirrored in `wind.glsl`. The forest's use (sway groups, lianas' anchors): [forest.md](forest.md), [forest-trees.md](forest-trees.md), [forest-rock.md](forest-rock.md).
+A wind force field of springs round the camera, after Horizon Zero Dawn's, that every vertex shader bends growing and hanging things by. Research and plan: `docs/research/WIND.md`. Maths in `render/gpu/wind`, mirrored in `wind.glsl`. The forest's use (sway groups, lianas' anchors): [forest.md](forest.md), [forest-trees.md](forest-trees.md), [forest-rock.md](forest-rock.md).
 
 ## The wind (`scene/wind`)
 

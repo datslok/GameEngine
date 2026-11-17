@@ -2,7 +2,7 @@
 
 Covers: `src/cloth/cloth`, `src/cloth/cloth_particles`, `src/cloth/cloth_constraints`, `src/cloth/cloth_collision`, `src/cloth/cloth_grab`, `src/cloth/cloth_shared.h`
 
-**Parked.** Rules, test status and measuring commands: `src/cloth/CLAUDE.md`. Research and every recorded number: `docs/CLOTHGPU.md`.
+**Parked.** Rules, test status and measuring commands: `src/cloth/CLAUDE.md`. Research and every recorded number: `docs/research/CLOTHGPU.md`.
 
 The cloth module sits above `physics/` and `scene/`, below `render/`, `engine/` and the games. This file: points, the XPBD step, constraints and colouring, pins, bodies, the hand, settings, threads and determinism. Elsewhere:
 

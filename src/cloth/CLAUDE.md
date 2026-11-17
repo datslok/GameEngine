@@ -1,6 +1,6 @@
 # cloth/
 
-Phase 7, parked (`ROADMAP.md`). Before changing a solver, the low-frequency layer or self-collision, read `docs/CLOTHGPU.md`.
+Phase 7, parked (`ROADMAP.md`). Before changing a solver, the low-frequency layer or self-collision, read `docs/research/CLOTHGPU.md`.
 
 - Cloth tests are in `runParkedTests`: do not run them; the user accepts they may break while parked. When cloth work resumes, bring them back and fix what broke.
 - Compiled `-O2` in the debug build too (too hot to run unoptimised).
@@ -14,5 +14,5 @@ Phase 7, parked (`ROADMAP.md`). Before changing a solver, the low-frequency laye
 |---|---|
 | `make test-slow` | After changing the solver: vertex block descent and its levels (about 31 s) |
 | `make yardstick-quick` | Judge a change: three resolutions on the CPU (about a minute) |
-| `make yardstick` | Record numbers in `docs/CLOTHGPU.md` Part 5 (several minutes, CPU and GPU) |
+| `make yardstick` | Record numbers in `docs/research/CLOTHGPU.md` Part 5 (several minutes, CPU and GPU) |
 | `make yardstick-dress` | The dress-sized test alone (a few minutes) |

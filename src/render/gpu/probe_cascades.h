@@ -12,7 +12,7 @@
 #include <vector>
 
 /*
-* Cascades of light probes (docs/ILLUMINATION.md, "Large worlds"): nested grids round a point (the camera), each twice
+* Cascades of light probes (docs/research/ILLUMINATION.md, "Large worlds"): nested grids round a point (the camera), each twice
 * the spacing of the last, so twice as far across for the same probes. Bounce light is smooth and a far surface covers
 * few pixels, so the detail needed falls with distance, like a texture's mipmaps: four cascades cost four grids and
 * reach eight times as far as one.

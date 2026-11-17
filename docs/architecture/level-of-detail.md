@@ -2,7 +2,7 @@
 
 Covers: `src/scene/simplify_mesh`, `src/scene/impostor`, `src/scene/card_thinning`, `src/scene/card_thinning_shared.h`, `assets/shaders/impostor.glsl`, `assets/shaders/impostor_sampling.glsl`, `assets/shaders/card_thinning.glsl`, `assets/shaders/card_thinning_data.glsl`
 
-How a mesh's coarser stand-ins are made and named, far trees as cards, and leaf cards fading out one by one. How each view picks a level (`chooseLevel`, `chosenMesh`, `LevelView`, the settings): [game-interface.md](game-interface.md), Level of detail. Shadow tiles' own choice: [lights-and-shadow-atlas.md](lights-and-shadow-atlas.md). Research: `docs/LOD.md`. The forest's chains: [forest-trees.md](forest-trees.md), [forest-plants.md](forest-plants.md), [forest-rock.md](forest-rock.md).
+How a mesh's coarser stand-ins are made and named, far trees as cards, and leaf cards fading out one by one. How each view picks a level (`chooseLevel`, `chosenMesh`, `LevelView`, the settings): [game-interface.md](game-interface.md), Level of detail. Shadow tiles' own choice: [lights-and-shadow-atlas.md](lights-and-shadow-atlas.md). Research: `docs/research/LOD.md`. The forest's chains: [forest-trees.md](forest-trees.md), [forest-plants.md](forest-plants.md), [forest-rock.md](forest-rock.md).
 
 ## A mesh's levels
 
@@ -22,7 +22,7 @@ How a mesh's coarser stand-ins are made and named, far trees as cards, and leaf 
 
 ## Impostors
 
-A far tree as one card facing the viewer, showing pictures baked from many directions; Brucks 2018 and Epic's Impostor Baker (`docs/LOD.md`, Impostors). Maths in `scene/impostor`, mirrored in `impostor.glsl`.
+A far tree as one card facing the viewer, showing pictures baked from many directions; Brucks 2018 and Epic's Impostor Baker (`docs/research/LOD.md`, Impostors). Maths in `scene/impostor`, mirrored in `impostor.glsl`.
 
 **Directions.** `frames` x `frames` over the upper hemisphere folded onto a square (`hemiOctahedralEncode`/`Decode`: straight up the middle, horizon the edge, below it counts as on it). `impostorFrameDirection(frame, frames)`: frame (column, row) corner to corner over the square. `impostorFrameBasis`: right level with the ground, up square to it and the direction.
 
@@ -51,7 +51,7 @@ A far tree as one card facing the viewer, showing pictures baked from many direc
 
 ## Card thinning
 
-A mesh of cards (leaf clusters, palm leaflets) fades into its coarser level one card at a time instead of switching: dropped cards shrink away, kept ones grow (SpeedTree's runtime; Cook et al. 2007; `docs/LOD.md`, Hiding the switches). Maths in `scene/card_thinning`, mirrored in `card_thinning.glsl`.
+A mesh of cards (leaf clusters, palm leaflets) fades into its coarser level one card at a time instead of switching: dropped cards shrink away, kept ones grow (SpeedTree's runtime; Cook et al. 2007; `docs/research/LOD.md`, Hiding the switches). Maths in `scene/card_thinning`, mirrored in `card_thinning.glsl`.
 
 **Per mesh** (`IndexedMesh::thinning`, a `CardThinning`): `cardSize` (metres; 0 = not thinned), `growth` (kept cards' sides grow by share^-growth; 0.5 keeps their area), `leastShare` (what the coarser level keeps). **Per vertex** (`IndexedMesh::thinningCards`, a `ThinningCard` each): its card's anchor (the stem it shrinks and grows about) and rank (0: always kept).
 

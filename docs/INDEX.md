@@ -38,17 +38,17 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 
 | Doc | Read before |
 |---|---|
-| `docs/ILLUMINATION.md` | Light probes, DDGI (phases 6d, 17) |
-| `docs/LUMEN.md` | The software tracer or the Lumen-like layer (phase 14) |
-| `docs/SHADOWCACHE.md` | Shadow caching for still and moving casters |
-| `docs/PERSISTENTSCENE.md` | The persistent GPU scene's later stages |
-| `docs/LOD.md` | Level of detail, impostors, card thinning |
-| `docs/JUNGLE.md` | The jungle's layers, sizes and density (phase 18) |
-| `docs/TREES.md` | Growing trees (phase 18) |
-| `docs/VINES.md` | Lianas, climbers, epiphytes (phase 18) |
-| `docs/WIND.md` | The wind field and swaying |
-| `docs/GROUNDCOVER.md` | Grass and floor cover |
-| `docs/TEXTURECOMPRESSION.md` | Block-compressed textures, the encoder, the texture cache |
-| `docs/CLOTHGPU.md` | Any cloth solver, low-frequency layer or self-collision work (phases 7, 10); yardstick numbers in Part 5 |
-| `docs/RAGDOLLPLAN.md` | Active ragdolls (phase 8); check formulas marked as from memory |
-| `docs/DESTRUCTION.md` | Flight and destruction (phase 15); check facts marked as from memory |
+| `docs/research/ILLUMINATION.md` | Light probes, DDGI (phases 6d, 17) |
+| `docs/research/LUMEN.md` | The software tracer or the Lumen-like layer (phase 14) |
+| `docs/research/SHADOWCACHE.md` | Shadow caching for still and moving casters |
+| `docs/research/PERSISTENTSCENE.md` | The persistent GPU scene's later stages |
+| `docs/research/LOD.md` | Level of detail, impostors, card thinning |
+| `docs/research/JUNGLE.md` | The jungle's layers, sizes and density (phase 18) |
+| `docs/research/TREES.md` | Growing trees (phase 18) |
+| `docs/research/VINES.md` | Lianas, climbers, epiphytes (phase 18) |
+| `docs/research/WIND.md` | The wind field and swaying |
+| `docs/research/GROUNDCOVER.md` | Grass and floor cover |
+| `docs/research/TEXTURECOMPRESSION.md` | Block-compressed textures, the encoder, the texture cache |
+| `docs/research/CLOTHGPU.md` | Any cloth solver, low-frequency layer or self-collision work (phases 7, 10); yardstick numbers in Part 5 |
+| `docs/research/RAGDOLLPLAN.md` | Active ragdolls (phase 8); check formulas marked as from memory |
+| `docs/research/DESTRUCTION.md` | Flight and destruction (phase 15); check facts marked as from memory |

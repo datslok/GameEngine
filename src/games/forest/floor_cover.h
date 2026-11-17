@@ -12,7 +12,7 @@
 #include <vector>
 
 /*
-* The forest floor's cover (docs/GROUNDCOVER.md, stage 3): under a closed canopy a jungle floor has little grass but
+* The forest floor's cover (docs/research/GROUNDCOVER.md, stage 3): under a closed canopy a jungle floor has little grass but
 * leaf litter nearly everywhere, tree seedlings (its commonest small plants) and small ferns. Drawn as the grass is:
 * a few shared patches the vertex shaders lift onto the land, a cell of land each, as dense as the ground's leaf
 * litter paint there. Fallen leaves give the litter scan relief; one picture of four bands serves every piece.

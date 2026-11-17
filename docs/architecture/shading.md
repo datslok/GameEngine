@@ -83,7 +83,7 @@ Test scene: the light lab's two red balls, one bare and one lacquered (`LabSurfa
 
 ## Light through leaves (`addDiffuseTransmission`)
 
-Diffuse transmission, as `KHR_materials_diffuse_transmission` and Unreal's two-sided foliage: a leaf scatters light many times inside, so light reaching its far side leaves the seen side evenly in all directions; a backlit leaf glows from any view. Research: `docs/JUNGLE.md`.
+Diffuse transmission, as `KHR_materials_diffuse_transmission` and Unreal's two-sided foliage: a leaf scatters light many times inside, so light reaching its far side leaves the seen side evenly in all directions; a backlit leaf glows from any view. Research: `docs/research/JUNGLE.md`.
 
 - `ShadingPoint::transmitted` = diffuse colour × `Material::diffuseTransmissionTint` (linear) × `Material::diffuseTransmission` (the share; about 1 for a leaf). Reflection is unchanged, so the lit side looks the same. glTF splits the diffuse colour between sides instead; its numbers map onto these.
 - Cut per channel so diffuse + specular albedo + transmitted ≤ 1 (the furnace from both sides).

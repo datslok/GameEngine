@@ -13,7 +13,7 @@
 #include <vector>
 
 /*
-* Understorey palms (ROADMAP phase 18, docs/JUNGLE.md, Palms): 2-6 m palms with feather-shaped fronds, grown here since
+* Understorey palms (ROADMAP phase 18, docs/research/JUNGLE.md, Palms): 2-6 m palms with feather-shaped fronds, grown here since
 * no CC0 library has palm scans. Each frond's rachis (its midrib) leaves the crown rising and bends down as a tapering
 * cantilever does under its own weight; its leaflets, in pairs along it, are geometry cut to their outline (narrow
 * strips folded into a V along their own midrib), so nothing is drawn where there is no leaf. A few variants are grown
@@ -62,7 +62,7 @@ struct ForestPalmSettings {
     // How many of the sun's cascades its shadows are drawn into, nearest first (ModelRenderer::shadowCascades).
     int shadowCascades = 2;
 
-    // The card past the levels (scene/impostor.h, docs/LOD.md), as the understorey's: the error from which a palm is
+    // The card past the levels (scene/impostor.h, docs/research/LOD.md), as the understorey's: the error from which a palm is
     // drawn as its card, its frames a side and each frame's texels.
     float impostorErrorMetres = 0.15f;
     int impostorFrames = 8;
@@ -75,7 +75,7 @@ void visit(ForestPalmSettings& settings, SettingsVisitor& visitor);
 // keeps a quarter of them.
 inline constexpr int palmKeepEvery = 4;
 
-// The fixed parts of a palm's shape (docs/JUNGLE.md, Palms).
+// The fixed parts of a palm's shape (docs/research/JUNGLE.md, Palms).
 inline constexpr float palmFrondLengthShare = 0.45f; // a frond's length, a share of the palm's height
 inline constexpr float palmPetioleShare = 0.25f;     // the bare stalk, a share of the frond, before the leaflets
 inline constexpr float palmLeafletShare = 0.3f;      // the longest leaflet, a share of the frond

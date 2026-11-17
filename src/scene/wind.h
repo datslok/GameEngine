@@ -12,7 +12,7 @@
 * everything growing. A game places one, as it places a Fog; the first counts. It blows towards towardsDegrees (from +x
 * towards +z, about up) at speed, its speed rising and falling by up to gustStrength of it in gusts about gustSize across
 * that travel with it, and pushing sideways by up to turbulence of it in eddies about turbulenceSize across. Under a
-* closed rainforest canopy the wind is under 1 m/s; above it a few m/s (docs/WIND.md).
+* closed rainforest canopy the wind is under 1 m/s; above it a few m/s (docs/research/WIND.md).
 */
 struct Wind {
     float towardsDegrees = 0.0f;
@@ -40,7 +40,7 @@ enum class SwayKind {
 };
 
 /*
-* How a drawn thing sways (ModelRenderer::sway, docs/WIND.md). Its mesh stands with its foot at its frame's origin and up
+* How a drawn thing sways (ModelRenderer::sway, docs/research/WIND.md). Its mesh stands with its foot at its frame's origin and up
 * along y; height (in the mesh's own units, so it scales with the object) is what its bend is measured against: a
 * vertex at height h leans by bend times its spring's lean (radians) times h^2 / height, keeping its distance from the
 * foot (a cantilever's shape), and its branches bob more the further from the trunk. A tree's climbers and epiphytes
@@ -62,7 +62,7 @@ inline constexpr std::uint16_t windAnchorFixed = 0xFFFF;
 inline constexpr std::uint16_t windAnchorOwn = 0xFFFE;
 
 /*
-* A vertex of something hanging (IndexedMesh::hanging, docs/WIND.md stage 3): the two anchors it hangs between (indices
+* A vertex of something hanging (IndexedMesh::hanging, docs/research/WIND.md stage 3): the two anchors it hangs between (indices
 * into the frame's WindAnchors, or the codes above; the same twice for something hanging from one), its share of the
 * way from the first to the second (their motions blended by it), and its arm: how far it hangs below the line between
 * them, or below its one anchor (metres), which swings it on the hanging spring as a chain's links swing; and its swing's

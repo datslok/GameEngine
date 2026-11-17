@@ -11,7 +11,7 @@
 #include <vector>
 
 /*
-* Level of detail (docs/LOD.md): each view draws a coarser level of a mesh wherever the level's error, seen from the
+* Level of detail (docs/research/LOD.md): each view draws a coarser level of a mesh wherever the level's error, seen from the
 * view, would cover no more than pixelError pixels. The error's size on screen is how Nanite and meshoptimizer choose;
 * Unreal and Unity's screen sizes are the same idea with the error left to the artist.
 */

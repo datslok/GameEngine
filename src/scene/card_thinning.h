@@ -4,7 +4,7 @@
 #include "scene/card_thinning_shared.h"
 
 /*
-* Cards thinned one by one (docs/LOD.md, Hiding the switches): instead of swapping a crown of leaf cards for a coarser
+* Cards thinned one by one (docs/research/LOD.md, Hiding the switches): instead of swapping a crown of leaf cards for a coarser
 * mesh of fewer, bigger cards in one frame, the vertex shaders shrink the cards that mesh leaves out away one by one
 * as the view allows more error, and grow the rest towards their size there, so the crown never jumps (SpeedTree's
 * runtime; Cook et al. 2007's stochastic simplification). The coarser mesh is the kept cards alone, first in the mesh,

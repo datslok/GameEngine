@@ -174,7 +174,7 @@ struct ClearCoatProperties {
 void addClearCoat(ShadingPoint& point, const ClearCoatProperties& coat, const BrdfTable& table);
 
 /*
-* Light through a thin surface such as a leaf (diffuse transmission; docs/JUNGLE.md, Light through leaves): what its far
+* Light through a thin surface such as a leaf (diffuse transmission; docs/research/JUNGLE.md, Light through leaves): what its far
 * side receives comes through as diffuse light on the side seen, evenly in every direction, as a leaf's many scatterings
 * inside leave it. Its colour is the diffuse colour times tint (a leaf's comes through deeper and yellower) times share
 * (about 1 for a leaf, which lets through about as much as it reflects); the reflection is left as it was, so a material's

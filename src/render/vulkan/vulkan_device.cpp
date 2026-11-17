@@ -230,7 +230,7 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     independent.independentBlend = VK_TRUE;
     independentBlending = physicalDevice.enable_features_if_present(independent);
 
-    // Optional: BC block-compressed textures (docs/TEXTURECOMPRESSION.md), a quarter of RGBA8's memory. Every desktop
+    // Optional: BC block-compressed textures (docs/research/TEXTURECOMPRESSION.md), a quarter of RGBA8's memory. Every desktop
     // GPU has it; without it textures are uploaded uncompressed.
     VkPhysicalDeviceFeatures blockCompressed{};
     blockCompressed.textureCompressionBC = VK_TRUE;

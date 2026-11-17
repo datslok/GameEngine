@@ -166,4 +166,4 @@ A game places no probes, only one `ProbeCascades` component. The renderer keeps 
 
 Frames without probes draw exactly as if the feature did not exist: probe sampling lives in separate pipeline variants chosen by a specialization constant, since even skipped code changed how the driver compiled the rest.
 
-Exact details: [ddgi.md](../architecture/ddgi.md), [ddgi-cascades.md](../architecture/ddgi-cascades.md), [ddgi-memory.md](../architecture/ddgi-memory.md); the papers' formulas in `docs/ILLUMINATION.md`.
+Exact details: [ddgi.md](../architecture/ddgi.md), [ddgi-cascades.md](../architecture/ddgi-cascades.md), [ddgi-memory.md](../architecture/ddgi-memory.md); the papers' formulas in `docs/research/ILLUMINATION.md`.

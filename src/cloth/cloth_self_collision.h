@@ -14,7 +14,7 @@
 struct ClothSettings;
 
 /*
-* Self-collision: folds and layers of one cloth never pass through each other (docs/CLOTHGPU.md, Part 3 and the plan's
+* Self-collision: folds and layers of one cloth never pass through each other (docs/research/CLOTHGPU.md, Part 3 and the plan's
 * step 5).
 *
 * Two parts. Contacts keep layers a thickness apart (ClothSettings::thickness, as from bodies): each pair of features

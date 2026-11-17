@@ -12,7 +12,7 @@
 #include <vector>
 
 /*
-* Epiphytes on the trees (docs/VINES.md, stage 3): plants growing on the branches, not the ground. Big rosettes
+* Epiphytes on the trees (docs/research/VINES.md, stage 3): plants growing on the branches, not the ground. Big rosettes
 * (bird's-nest ferns and tank bromeliads) sit in the crotches and on top of thick, nearly level limbs at the crown's
 * base, where humus gathers (Johansson's zone III), and moss covers the upper sides of the limbs. A Panama plot had
 * about 34 on each tree carrying any, and trunk thickness predicts them best: here 20-60 on a big tree, a few

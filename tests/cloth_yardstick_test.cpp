@@ -107,7 +107,7 @@ namespace {
     /*
     * The problem the yardstick is for, as today's solver has it: the same fabric on a mesh twice as fine stretches
     * more, since each pass carries a correction only about one edge (the tethers off: they hide it). A solver with a
-    * low-frequency layer should turn this test round (docs/CLOTHGPU.md).
+    * low-frequency layer should turn this test round (docs/research/CLOTHGPU.md).
     */
     void testFinerSheetStretchesMore() {
         Cloth coarse = yardstickSheet(10, untetheredSettings());

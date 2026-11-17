@@ -9,7 +9,7 @@
 #include <vector>
 
 /*
-* Leaf clusters (docs/TREES.md, Part 2): games put a whole twig with many leaves on each foliage card, not one leaf, so
+* Leaf clusters (docs/research/TREES.md, Part 2): games put a whole twig with many leaves on each foliage card, not one leaf, so
 * a crown gets more leaf for fewer cards and less overdraw. No CC0 library has such a texture, so the forest composes its
 * own at start-up from a single-leaf atlas (ambientCG's LeafSet024): a stem up each cell with leaves turned out from it,
 * each leaf's colour, normal and roughness copied from the atlas, its normals turned with it.

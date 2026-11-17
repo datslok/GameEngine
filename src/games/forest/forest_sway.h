@@ -5,9 +5,9 @@
 #include "scene/wind.h"
 
 /*
-* How the forest sways in the wind (docs/WIND.md, stage 2): each kind of growth's answer to its spring of the wind
+* How the forest sways in the wind (docs/research/WIND.md, stage 2): each kind of growth's answer to its spring of the wind
 * force field (render/gpu/wind.h), F5 Forest, Sway. Under a rainforest's canopy the wind is weak and the crowns above
-* move most (docs/WIND.md, Real wind and plants), so the plants' bend stands in for the shelter as much as for their
+* move most (docs/research/WIND.md, Real wind and plants), so the plants' bend stands in for the shelter as much as for their
 * stiffness.
 */
 

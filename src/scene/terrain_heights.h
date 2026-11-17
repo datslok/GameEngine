@@ -10,7 +10,7 @@
 #include <vector>
 
 /*
-* The terrain's heights and its patches' vertices (CDLOD, Strugar 2010; docs/LOD.md, Terrain): the maths the vertex
+* The terrain's heights and its patches' vertices (CDLOD, Strugar 2010; docs/research/LOD.md, Terrain): the maths the vertex
 * shaders run (terrain.glsl mirrors every function here), so the patches the GPU draws can be tested on the CPU.
 */
 

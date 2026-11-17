@@ -12,7 +12,7 @@
 class JobSystem;
 
 /*
-* Cooking a texture for the GPU (docs/TEXTURECOMPRESSION.md): every mip level built on the CPU and encoded as BC7, a
+* Cooking a texture for the GPU (docs/research/TEXTURECOMPRESSION.md): every mip level built on the CPU and encoded as BC7, a
 * quarter of the video memory of RGBA8. Encoding is slow (a search per block), so each result is kept in a file in the
 * texture cache, named by a hash of everything that decides its blocks; later starts read the file instead. A game's
 * generated textures are seeded, so they are kept too.

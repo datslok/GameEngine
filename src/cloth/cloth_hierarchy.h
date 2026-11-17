@@ -13,7 +13,7 @@
 #include <vector>
 
 /*
-* The low-frequency layer (docs/CLOTHGPU.md, Part 2). A pass over the edges carries a correction about one edge, so a
+* The low-frequency layer (docs/research/CLOTHGPU.md, Part 2). A pass over the edges carries a correction about one edge, so a
 * pin's pull crosses a fine sheet slowly and the sheet stretches. Coarser levels carry it across in a few steps.
 *
 * The levels are Muller 2008's (Hierarchical Position Based Dynamics): each keeps a subset of the points below it, and

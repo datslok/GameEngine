@@ -115,7 +115,7 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
 Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare);
 
 /*
-* Light through the leaves (docs/JUNGLE.md, Light through leaves; Material::diffuseTransmission): a leaf lets through
+* Light through the leaves (docs/research/JUNGLE.md, Light through leaves; Material::diffuseTransmission): a leaf lets through
 * about as much as it reflects, so share is about 1, the light coming through deeper and yellower than the leaf's own
 * colour, so the tint (linear) keeps less blue. The scans have no translucency maps; these stand in for them. Read at
 * start-up, when the leaves' materials are made; engine.render.materials.lightThroughLeaves switches it live.

@@ -2,7 +2,7 @@
 
 Covers: `src/scene/terrain`, `src/scene/terrain_heights`, `src/scene/terrain_shared.h`, `src/scene/ground_follow`, `src/render/gpu/terrain_gpu`, `assets/shaders/terrain.glsl`, `assets/shaders/terrain_data.glsl`
 
-Land drawn as a quadtree of grid patches round the camera (CDLOD, Strugar 2010), and flat meshes lifted onto it by the vertex shaders. Research: `docs/LOD.md`, Terrain; `docs/GROUNDCOVER.md`. Where it sits in frame building (TERRAIN, ATTACH): [game-interface.md](game-interface.md). The forest's land: [forest.md](forest.md).
+Land drawn as a quadtree of grid patches round the camera (CDLOD, Strugar 2010), and flat meshes lifted onto it by the vertex shaders. Research: `docs/research/LOD.md`, Terrain; `docs/research/GROUNDCOVER.md`. Where it sits in frame building (TERRAIN, ATTACH): [game-interface.md](game-interface.md). The forest's land: [forest.md](forest.md).
 
 ## Heights (`scene/terrain_heights`)
 

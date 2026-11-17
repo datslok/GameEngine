@@ -24,7 +24,7 @@ void markRenderChanged(World& world, Entity entity);
 void clearRenderChanged(World& world);
 
 /*
-* The still entities' draws kept from frame to frame (docs/PERSISTENTSCENE.md, stage 1), so a frame builds only what
+* The still entities' draws kept from frame to frame (docs/research/PERSISTENTSCENE.md, stage 1), so a frame builds only what
 * moves: the 35,000 objects of the forest cost the CPU 8.5 ms a frame to build and attach, almost all of them still.
 * buildFrame takes the kept draws, puts them first (FrameDescription::stillDraws) and builds the moving ones after;
 * once the frame is drawn the engine gives the list back (giveBack), and the next frame starts from it.

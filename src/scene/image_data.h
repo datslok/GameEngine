@@ -8,7 +8,7 @@
 #include <vector>
 
 /*
-* Whether a texture may be block-compressed for the GPU (core/block_compression.h; docs/TEXTURECOMPRESSION.md). Exact
+* Whether a texture may be block-compressed for the GPU (core/block_compression.h; docs/research/TEXTURECOMPRESSION.md). Exact
 * is for textures read as exact numbers, whose small errors would show: a game's lookup tables and blend weights.
 */
 enum class TextureStorage {

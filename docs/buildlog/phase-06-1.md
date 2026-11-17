@@ -128,7 +128,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
 
 #### Units, ray queries and the first probes
 
-- Units re-derived for DDGI against physically based shading (in `docs/ILLUMINATION.md`):
+- Units re-derived for DDGI against physically based shading (in `docs/research/ILLUMINATION.md`):
   - The old claim that a probe's value goes straight into the ambient slot still holds, for a new reason (pixel values are π times radiance, and ambient is the sky's irradiance), but only as diffuse light, so the furnace test now expects B × (1 − specular albedo).
   - It also showed the light lab's sky ambient dial (0.2) is about 4 times below what its drawn sky (about 0.75) would give, to retune once DDGI lights it.
 - `ray-queries`: hardware ray tracing's foundation. Decisions:
@@ -195,7 +195,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **GPU tests:** the new library's functions against their mirrors, plus a lamp-lit floor pass test (two lamps, one kept per hit).
     - The visibility's variance is the mean square less the mean's square, which cancels when the spread is small, so its tolerance grows with mean square / variance.
     - A first version of the brightest-lights test shader read zeros for lights 2 and 3 (a vector indexed by a loop counter inside `?:`); spelled out as an array, it matched exactly.
-  - **Flicker in the dark rooms**, reported on first look, led to dropping 2021's fifth-root storage and per-texel speed-ups for plain linear blending (details and numbers in `docs/ILLUMINATION.md`, Hysteresis).
+  - **Flicker in the dark rooms**, reported on first look, led to dropping 2021's fifth-root storage and per-texel speed-ups for plain linear blending (details and numbers in `docs/research/ILLUMINATION.md`, Hysteresis).
     - A dark-room texel seeing a small sunlit patch settled at 51% of its true light and moved 8.7% in 0.1 s; linear, within 0.1% and 1.5% (`ddgi_test`).
     - On screen, though, the brightness was fixed but the crawl barely moved: the sunlit room's 90th-percentile change over 0.2 s, 5.8% before and 5.6% after.
     - Measured by changing one default at a time and comparing captures 24 frames apart (a scratch tool, relative luminance change per pixel): 256 rays halved it, holding the distances still changed nothing, no bounces made it worse (a darker room, the same noise).

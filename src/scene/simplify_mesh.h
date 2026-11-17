@@ -23,7 +23,7 @@ struct SimplifiedLevel {
 };
 
 /*
-* A generated shape's levels of detail (docs/LOD.md): keepShares of its triangles in turn, coarsest last, borders free
+* A generated shape's levels of detail (docs/research/LOD.md): keepShares of its triangles in turn, coarsest last, borders free
 * (a closed shape has none, and a far level's outline may move), each within maxError (a share of the mesh's size) and
 * simplified from the mesh itself; the errors made rising, as the asset manager wants them.
 */

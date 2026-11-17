@@ -10,7 +10,7 @@
 #include <vector>
 
 /*
-* The yardstick every cloth solver is judged by (docs/CLOTHGPU.md, Part 5): the same 1 m sheet of the same fabric hung
+* The yardstick every cloth solver is judged by (docs/research/CLOTHGPU.md, Part 5): the same 1 m sheet of the same fabric hung
 * from its two top corners at four resolutions, settled, then measured. Real cotton barely stretches (about 0.15% under
 * its own weight), and a fixed compliance per edge gives the same fabric on any square mesh, so whatever stretch a
 * sheet shows beyond that, and whatever differs between its resolutions, is the solver's error, not the fabric's.
@@ -45,7 +45,7 @@ struct SheetMeasure {
 SheetMeasure measureSheet(const Cloth& cloth, int squares);
 
 /*
-* What the dress-sized test reads off a garment, which has no columns or corners to measure along (docs/CLOTHGPU.md,
+* What the dress-sized test reads off a garment, which has no columns or corners to measure along (docs/research/CLOTHGPU.md,
 * Part 5):
 * - meanStretch: the mean of every edge's stretch, length / rest length - 1, a squashed edge counting as none: the
 *   garment-wide, low-frequency stretch a solver removes slowly, spread over its edges.

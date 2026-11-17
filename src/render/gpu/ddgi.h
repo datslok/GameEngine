@@ -14,7 +14,7 @@
 
 /*
 * Global illumination from light probes: DDGI ("Dynamic Diffuse Global Illumination", Majercik et al. 2019, in the form
-* of its 2021 production follow-up; research notes and formulas in docs/ILLUMINATION.md). A grid of probes (a
+* of its 2021 production follow-up; research notes and formulas in docs/research/ILLUMINATION.md). A grid of probes (a
 * ProbeVolume) each traces a few rays a frame, and blends what they bring back into two small images of the sphere of
 * directions: the light arriving from around each direction (irradiance, in the units of the ambient light: a probe in a
 * uniform sky drawn at B stores B), and the mean and mean square distance to the nearest surface (for telling later

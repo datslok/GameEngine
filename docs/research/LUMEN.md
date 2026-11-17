@@ -2,7 +2,7 @@
 
 Notes on how Unreal Engine 5's Lumen global illumination is built and tuned, and what a Lumen-like layer would mean for this engine.
 
-Like [ILLUMINATION.md](ILLUMINATION.md) (DDGI), this records what the sources say, with their numbers, and keeps our own inferences apart, under "What this means for the engine". The plan itself stays in [ROADMAP.md](../ROADMAP.md).
+Like [ILLUMINATION.md](ILLUMINATION.md) (DDGI), this records what the sources say, with their numbers, and keeps our own inferences apart, under "What this means for the engine". The plan itself stays in [ROADMAP.md](../../ROADMAP.md).
 
 Read in October 2026, from the sources below. How claims are tagged:
 

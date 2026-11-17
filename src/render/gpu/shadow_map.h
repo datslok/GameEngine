@@ -87,7 +87,7 @@ struct ShadowSettings {
     // The far half of the sun's cascades take turns (holdStaggeredCascades): each redrawn every this many frames, the
     // others keeping their last box meanwhile, so turning the camera redraws fewer of them each frame. 1 redraws every
     // cascade every frame. The cascades follow the view, so turning redrew them all: the jungle's leaves cost 7 ms of
-    // shadows a frame while turning (docs/SHADOWCACHE.md).
+    // shadows a frame while turning (docs/research/SHADOWCACHE.md).
     int cascadeStagger = 2;
 
     // Each cascade's tile size (see CascadeResolution); 4096 by default (Ultra), 2048 on High. The atlas is remade when
@@ -288,7 +288,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, cons
                        const std::optional<MirrorShadowView>& mirror = std::nullopt);
 
 /*
-* Staggered cascades (ShadowSettings::cascadeStagger, docs/SHADOWCACHE.md): in the far half of each sun's own cascades
+* Staggered cascades (ShadowSettings::cascadeStagger, docs/research/SHADOWCACHE.md): in the far half of each sun's own cascades
 * (not a mirror's, not the far map), the cascade at place k among them is redrawn on frames where (frame + k) is a whole
 * number of intervals; on the others it keeps previous's tile, its box and square (so the atlas cache keeps what it drew
 * there) and its record, with the shader's matrix rebuilt from the camera's place now (origin), so its shadows stay put

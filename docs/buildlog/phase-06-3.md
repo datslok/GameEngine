@@ -140,7 +140,7 @@
     - The demo's first saved `lamp-field` was the odd one of four runs (22 pixels, up to 2 steps).
     - Both views have many lights at probe hits, so something there is not quite reproducible from run to run. `main` before this branch does the same (`street-night` passed, then failed by the same 73 pixels): the view lands on one of two pictures, not random noise.
 - `lumen-research` (Oct 20 2026): the user asked how Lumen is made and tuned, and how to build something like it.
-  - **Read:** Epic's SIGGRAPH 2021 and 2022 Advances talks in full (with speaker notes), their documentation and release notes, a copy of the scalability settings, and the published alternatives (GI-1.0, Brixelizer, kajiya, ReSTIR GI, radiance cascades, hash-grid caches, denoisers); written up as `docs/LUMEN.md`.
+  - **Read:** Epic's SIGGRAPH 2021 and 2022 Advances talks in full (with speaker notes), their documentation and release notes, a copy of the scalability settings, and the published alternatives (GI-1.0, Brixelizer, kajiya, ReSTIR GI, radiance cascades, hash-grid caches, denoisers); written up as `docs/research/LUMEN.md`.
   - **What it showed:**
     - Our DDGI cascades are Lumen's outer layer (a world-space cache round the camera).
     - What we lack is its inner one, probes on the visible pixels, which Epic built after trying an irradiance field like ours and finding that irradiance computed at the probe, not the pixel, leaks and looks flat (the doorway glow found in the light lab).
@@ -192,7 +192,7 @@
 
 - `docs-readability` (Oct 23 2026): the user found the docs' very long, unspaced paragraphs hard to read (single lines up to 13,029 characters in `docs/ARCHITECTURE.md`).
   - **The style:** `README.md` was rewritten first as the sample and agreed: short paragraphs with one idea each, headings, bullets with short bold lead-ins, tables where data is tabular, formulas on their own lines.
-  - **The rest:** `ROADMAP.md`, `docs/BUILDLOG.md`, `docs/ENGINE_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/ILLUMINATION.md`, `docs/LUMEN.md` and `docs/RAGDOLLPLAN.md`, one agent each in parallel and one commit each. Not `CLAUDE.md`, which is for Claude only.
+  - **The rest:** `ROADMAP.md`, `docs/BUILDLOG.md`, `docs/ENGINE_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/research/ILLUMINATION.md`, `docs/research/LUMEN.md` and `docs/research/RAGDOLLPLAN.md`, one agent each in parallel and one commit each. Not `CLAUDE.md`, which is for Claude only.
   - **Nothing lost:** a script compared each rewrite with the committed version and listed every number, code span, link and heading that occurs fewer times. Every drop is a stale fact corrected or a duplicate merged (`ddgi-probe-relocation` was in this log twice, word for word). Every heading text is kept, since code and docs refer to sections by name.
   - **Longest line now:** 557 characters (the guide), from 13,029.
   - **Stale facts corrected on the way**, each checked in the code: 128 probe rays by default (not 64), every light seated by default, the fast lights' rays, the adaptive memory's 8 spreads, the presets' cascades, the probe cascades' defaults, the GPU pass names and readout line, `GpuFrameData`'s and `ToneMapUniformData`'s sizes, quaternions and the release build done (the ragdoll plan), the software tracer a distance field (not a voxel grid). Bigger stale parts of `docs/ARCHITECTURE.md` are a roadmap item.

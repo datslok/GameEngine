@@ -655,7 +655,7 @@ namespace {
         assert(!tree.shadowBark.indices.empty() && tree.shadowBark.indices.size() <= tree.bark.indices.size() / 4);
 
         /*
-        * The levels of detail (docs/LOD.md): the leaves thinned to levelCardShare of the cards, each grown to keep their
+        * The levels of detail (docs/research/LOD.md): the leaves thinned to levelCardShare of the cards, each grown to keep their
         * area (SpeedTree's fewer, bigger cards; a simplifier cannot reduce separate cards), then the shadow leaves; the
         * bark simplified to levelBarkShare, then the shadow bark. Each level's error rises: the cards' by how much they
         * grew, the bark's by how far the simplifier moved it.
@@ -665,7 +665,7 @@ namespace {
         assert(tree.leafLevelError > 0.0f && tree.shadowLeafError > tree.leafLevelError);
 
         /*
-        * The cards thin one by one on the way there (scene/card_thinning.h, docs/LOD.md, Hiding the switches): the kept
+        * The cards thin one by one on the way there (scene/card_thinning.h, docs/research/LOD.md, Hiding the switches): the kept
         * cards first in the leaves, so the level is the leaves' first vertices and triangles, drawn by the vertex shaders
         * grown as the fade left them; each vertex its card's stem and rank, rank 0 for the kept cards, the others' spread
         * past the least share so all are gone there. The level's error is the fade's at the least share.
@@ -853,8 +853,8 @@ namespace {
     }
 
     /*
-    * The canopy trees at the canopy's top (20-40 m, docs/JUNGLE.md), their crowns from about half their height (room for
-    * the mid layer under them: docs/JUNGLE.md, The mid layer's shape), their leaves real-sized (15-25 cm, the
+    * The canopy trees at the canopy's top (20-40 m, docs/research/JUNGLE.md), their crowns from about half their height (room for
+    * the mid layer under them: docs/research/JUNGLE.md, The mid layer's shape), their leaves real-sized (15-25 cm, the
     * user's choice after the 30-40 cm ones made the trees read small), on cards that keep the clusters' twigs as full as
     * before (the leaf's share of a card unchanged).
     */
@@ -876,7 +876,7 @@ namespace {
     }
 
     /*
-    * The emergents (docs/JUNGLE.md): 50-60 m, a clear trunk to over 60% of their height, a crown about half their height
+    * The emergents (docs/research/JUNGLE.md): 50-60 m, a clear trunk to over 60% of their height, a crown about half their height
     * across, a few of them, leaves as the canopy trees' so both share one clusters' texture.
     */
     void testTheEmergentSettings() {
@@ -889,7 +889,7 @@ namespace {
     }
 
     /*
-    * The mid layer (docs/JUNGLE.md): 1200 slender trees 10-20 m tall, their crowns shallow (less deep than wide) and from
+    * The mid layer (docs/research/JUNGLE.md): 1200 slender trees 10-20 m tall, their crowns shallow (less deep than wide) and from
     * over half their height, under the canopy crowns' bottom, leaves as the canopy trees'.
     */
     void testTheMidLayerSettings() {
@@ -1052,7 +1052,7 @@ namespace {
             const Material& leaf = world.get<ModelRenderer>(leaves).parts.front().material;
             assert(isCutOut(leaf) && leaf.doubleSided);
 
-            // Light comes through the leaves (docs/JUNGLE.md, Light through leaves), and through their card alike.
+            // Light comes through the leaves (docs/research/JUNGLE.md, Light through leaves), and through their card alike.
             const ForestLeafLightSettings leafLight;
             assert(leaf.diffuseTransmission == leafLight.share && leaf.diffuseTransmissionTint.z == leafLight.tintBlue);
             assert(card.parts.front().material.diffuseTransmission == leaf.diffuseTransmission);
@@ -1086,7 +1086,7 @@ namespace {
 
 namespace {
     /*
-    * The leaves' light (docs/JUNGLE.md, Light through leaves): about as much through as reflected, deeper and yellower
+    * The leaves' light (docs/research/JUNGLE.md, Light through leaves): about as much through as reflected, deeper and yellower
     * (least blue), read at start-up; withLeafLight gives a material that share and tint, and a share of nothing lets
     * nothing through.
     */

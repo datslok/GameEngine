@@ -12,7 +12,7 @@
 #include <vector>
 
 /*
-* Lianas, the woody vines hanging in the jungle patch (docs/VINES.md, stage 1): loops sagging from one crown into a
+* Lianas, the woody vines hanging in the jungle patch (docs/research/VINES.md, stage 1): loops sagging from one crown into a
 * neighbour's, and ropes hanging from a crown to the ground, as old lianas are left when their hosts grow and fall. Each
 * hangs as a catenary between its two holds, its thickness drawn from Barro Colorado's census, swept into a bark tube,
 * with ivy only where it runs through a crown. Built once at start-up in world space, a chunk of ground a mesh.

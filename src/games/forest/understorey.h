@@ -9,7 +9,7 @@
 #include <vector>
 
 /*
-* The jungle's understorey (ROADMAP phase 18, docs/JUNGLE.md, The understorey): plants at knee to chest height, thick
+* The jungle's understorey (ROADMAP phase 18, docs/research/JUNGLE.md, The understorey): plants at knee to chest height, thick
 * along the path so the view closes at eye level, thinning away from it. Scanned plants (Poly Haven's fern, calathea and
 * anthurium, each file several plants side by side, each a variant) stood on their feet, simplified (scene/simplify_mesh)
 * once for drawing and further for their shadow's stand-in, and placed many times, turned and scaled up from house-plant
@@ -51,7 +51,7 @@ struct ForestUnderstoreySettings {
     float calatheaHeight = 1.5f;
     float anthuriumHeight = 1.7f;
 
-    // The share of each scan's triangles drawn (its border kept), the share its first level of detail keeps (docs/LOD.md;
+    // The share of each scan's triangles drawn (its border kept), the share its first level of detail keeps (docs/research/LOD.md;
     // the shadow's stand-in is the second), and the share its shadow's stand-in keeps.
     float keepShare = 0.3f;
     float levelKeepShare = 0.12f;
@@ -61,7 +61,7 @@ struct ForestUnderstoreySettings {
     // shadow is a few metres long; the 10,000 plants in every cascade cost most of 22 ms of shadows while turning.
     int shadowCascades = 2;
 
-    // The card past the levels (scene/impostor.h, docs/LOD.md), as the trees': the error, in metres, from which a plant is
+    // The card past the levels (scene/impostor.h, docs/research/LOD.md), as the trees': the error, in metres, from which a plant is
     // drawn as its card (a plant a twentieth of a tree's height, so about that share of the trees' 1.5 m: a 1.5 m plant
     // turns into its card some 20 m away at 2 pixels on a 1080-line screen), its frames a side and each frame's texels
     // (fewer than the trees': a plant's card is never big on screen).

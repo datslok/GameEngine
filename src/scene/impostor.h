@@ -13,7 +13,7 @@
 #include <vector>
 
 /*
-* Impostors (docs/LOD.md, Impostors; Brucks 2018, Epic's Impostor Baker): a far tree drawn as one card facing the
+* Impostors (docs/research/LOD.md, Impostors; Brucks 2018, Epic's Impostor Baker): a far tree drawn as one card facing the
 * camera, showing pictures of the tree baked from frames x frames directions over the upper hemisphere. The four frames
 * nearest the view are blended, each read where the card's point falls on that frame's own plane, and lit with the
 * normals baked beside the colour, so the sun still moves over them. The maths here is mirrored in impostor.glsl.

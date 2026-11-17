@@ -14,7 +14,7 @@ Research for phase 18's wind item: how shipped games move foliage in the wind, w
 - A cantilever beam predicts a conifer's frequency well, not a broadleaf's: its branches damp and detune it ([J R Soc Interface 2019](https://pubmed.ncbi.nlm.nih.gov/31164076/)).
 - Sway follows the wind averaged over a minute or more, not second by second: a trunk filters gusts out.
 
-**Hanging things swing as chains:** a period of 5.22 sqrt(L / g), 7.5 s for a 20 m liana, 3.7 s for 5 m (`docs/VINES.md`).
+**Hanging things swing as chains:** a period of 5.22 sqrt(L / g), 7.5 s for a 20 m liana, 3.7 s for 5 m (`docs/research/VINES.md`).
 
 ## How games do it
 
@@ -80,7 +80,7 @@ Each branch's and leaf's pivot, parent and direction baked into textures; the sh
 ### The two traps
 
 - **Motion vectors.** Foliage moved in the vertex shader without its own motion smears under temporal anti-aliasing: the history is reprojected as if it stood still. Unreal's fix is writing velocity from the wind's motion, which needs last frame's displacement too ([forum](https://forums.unrealengine.com/t/foliage-wpo-velocity-for-taa-smearing/148166/12), **(unverified)**).
-- **Cached shadows.** Anything that moves every frame redraws the shadow tiles it is in every frame. This engine caches its sun cascades and redraws them only when something changes; the leaves alone once cost 23 ms of shadows on the laptop when the camera turned. Unreal's virtual shadow maps have the same problem with foliage (`docs/SHADOWCACHE.md`).
+- **Cached shadows.** Anything that moves every frame redraws the shadow tiles it is in every frame. This engine caches its sun cascades and redraws them only when something changes; the leaves alone once cost 23 ms of shadows on the laptop when the camera turned. Unreal's virtual shadow maps have the same problem with foliage (`docs/research/SHADOWCACHE.md`).
 
 ## What this means for this engine
 

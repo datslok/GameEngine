@@ -2,7 +2,7 @@
 
 Covers: `src/cloth/cloth_pattern`, `src/cloth/cloth_seams`, `src/cloth/cloth_self_collision`, `src/cloth/cloth_yardstick`, `src/math/delaunay`, `src/app/cloth_yardstick_run`
 
-Garments cut from flat pieces and sewn, cloth kept off itself, and the yardstick every solver is judged by. The step and settings: `cloth.md`; tethers measured along pieces: `cloth-solvers.md`. Research: `docs/CLOTHGPU.md` (Part 3 self-collision, Part 5 the yardstick and its tables). The cloth lab's dress and mannequin: `games/clothlab/cloth_lab_dress`.
+Garments cut from flat pieces and sewn, cloth kept off itself, and the yardstick every solver is judged by. The step and settings: `cloth.md`; tethers measured along pieces: `cloth-solvers.md`. Research: `docs/research/CLOTHGPU.md` (Part 3 self-collision, Part 5 the yardstick and its tables). The cloth lab's dress and mannequin: `games/clothlab/cloth_lab_dress`.
 
 ## Patterns
 
@@ -86,7 +86,7 @@ Garments cut from flat pieces and sewn, cloth kept off itself, and the yardstick
 
 ## The yardstick
 
-`cloth_yardstick`: how every solver is judged. Tables: `docs/CLOTHGPU.md`, Part 5. Commands: `src/cloth/CLAUDE.md`.
+`cloth_yardstick`: how every solver is judged. Tables: `docs/research/CLOTHGPU.md`, Part 5. Commands: `src/cloth/CLAUDE.md`.
 
 - **Why it measures the solver:** a fixed compliance per edge is the same fabric at any square resolution, so stretch past the fabric's own, or any difference between rungs, is solver error.
 - `yardstickSheet(squares, settings)`: a 1 m sheet (`yardstickSheetSize`), upright in x-y, top edge on y = 0, pinned at its top corners. `yardstickRungs`: 25, 50, 100, 200 squares a side.

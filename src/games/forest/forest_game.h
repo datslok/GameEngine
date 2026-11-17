@@ -176,12 +176,12 @@ public:
     ForestDriftSettings& getDriftSettings();
     // The rocks drifting round the islands and some pillars.
     const std::vector<Entity>& getDriftingRocks() const;
-    // The canopy trees' settings and places, and the emergents' (docs/JUNGLE.md).
+    // The canopy trees' settings and places, and the emergents' (docs/research/JUNGLE.md).
     ForestTreeSettings& getTreeSettings();
     const std::vector<TreePlacement>& getTreePlacements() const;
     ForestTreeSettings& getEmergentSettings();
     const std::vector<TreePlacement>& getEmergentPlacements() const;
-    // The mid layer's (docs/JUNGLE.md).
+    // The mid layer's (docs/research/JUNGLE.md).
     ForestTreeSettings& getMidSettings();
     const std::vector<TreePlacement>& getMidPlacements() const;
     // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, the emergents, the mid layer.
@@ -269,17 +269,17 @@ private:
     // placed many times.
     void buildUnderstorey(World& world, AssetManager& assets);
 
-    // The understorey palms (docs/JUNGLE.md, Palms): a few variants grown on every core, placed many times.
+    // The understorey palms (docs/research/JUNGLE.md, Palms): a few variants grown on every core, placed many times.
     void buildPalms(World& world, AssetManager& assets);
 
-    // The grass in the open (docs/GROUNDCOVER.md): a few patches grown on every core, a cell of land each.
+    // The grass in the open (docs/research/GROUNDCOVER.md): a few patches grown on every core, a cell of land each.
     void buildGrass(World& world, AssetManager& assets);
 
-    // The forest floor's cover under the canopy (docs/GROUNDCOVER.md): fallen leaves, seedlings and small ferns, as the
+    // The forest floor's cover under the canopy (docs/research/GROUNDCOVER.md): fallen leaves, seedlings and small ferns, as the
     // grass is, a cell of the leaf litter's land each.
     void buildFloorCover(World& world, AssetManager& assets);
 
-    // The lianas hanging from the canopy and emergent trees' crowns (docs/VINES.md, stage 1), a chunk of ground a mesh.
+    // The lianas hanging from the canopy and emergent trees' crowns (docs/research/VINES.md, stage 1), a chunk of ground a mesh.
     void buildLianas(World& world, AssetManager& assets);
 
     // Every tree's trunk as far round as the floor's plants keep from it: the big trees' buttresses, the mid layer's trunk.
@@ -312,7 +312,7 @@ private:
     ForestEpiphyteSettings epiphyteSettings;
     ForestGrassSettings grassSettings;
 
-    // The wind over the valley (docs/WIND.md): down it, along the path from the rim towards the Monolith (-z), a few m/s
+    // The wind over the valley (docs/research/WIND.md): down it, along the path from the rim towards the Monolith (-z), a few m/s
     // above the canopy as measured over rainforests; under the canopy the plants' springs answer it less.
     Wind windSettings{.towardsDegrees = 270.0f, .speed = 3.0f};
 

@@ -32,8 +32,8 @@ Vertex numbering and error cases: the header.
 - `resolveCorners(mesh)`: three corners a triangle, unshared, each with its file normal or the face normal, its UV or (0, 0), its tangent. Throws for empty meshes, non-finite positions, w ≠ 1, missing vertices.
 - `buildIndexedMesh(mesh)`: `resolveCorners`, then corners identical in every component share a vertex (the key adds +0.0, so -0.0 and +0.0 match).
 - Built once, when a mesh first reaches the GPU; `VulkanMesh` only validates (`checkMeshUpload`) and uploads.
-- Optional per-vertex records riding along: `hanging` (`HangingVertex`, see `docs/WIND.md`), `thinning` and `thinningCards` (`scene/card_thinning.h`). Each list is one entry a vertex or empty.
-- `meshPrefix`, `thinnedLevel`: a mesh's first vertices and indices as a level of its own (levels sharing vertices; `docs/LOD.md`). `simplifyMesh`, `simplifiedLevels` (`scene/simplify_mesh`, meshoptimizer) make coarser levels.
+- Optional per-vertex records riding along: `hanging` (`HangingVertex`, see `docs/research/WIND.md`), `thinning` and `thinningCards` (`scene/card_thinning.h`). Each list is one entry a vertex or empty.
+- `meshPrefix`, `thinnedLevel`: a mesh's first vertices and indices as a level of its own (levels sharing vertices; `docs/research/LOD.md`). `simplifyMesh`, `simplifiedLevels` (`scene/simplify_mesh`, meshoptimizer) make coarser levels.
 - `indexedMeshBounds`: the box, as `meshBounds` gives a `Mesh`'s.
 
 ## Normals
@@ -88,7 +88,7 @@ In `Application::describeFrame`, one mesh a job (`parallelFor`):
 4. `attachShapes` sets `DrawItem::shape` on that mesh's draws built this frame (kept still draws never deform); `shadowCasterSignature` hashes it, so a caster changing shape in place redraws its tiles and a still one keeps them.
 
 - A single big sheet is one job, not split across threads.
-- **GPU cloth** (`shapedOnGpu`): `gpuClothDeformedMesh` (`engine/gpu_cloth`) sends no vertices; bounds from the points read back, grown by the fastest point's speed × the frames' lateness plus the thickness; `shape` a per-frame fingerprint. The cloth's shape pass (`cloth_shape.comp`) writes the vertices straight into the mesh's slot, one invocation a render vertex gathering its own triangles; `DeformingAdjacency` and `deformVertexAt` are its CPU mirror, bit for bit `deformVertices`. Cloth itself: `docs/CLOTHGPU.md` and the cloth architecture.
+- **GPU cloth** (`shapedOnGpu`): `gpuClothDeformedMesh` (`engine/gpu_cloth`) sends no vertices; bounds from the points read back, grown by the fastest point's speed × the frames' lateness plus the thickness; `shape` a per-frame fingerprint. The cloth's shape pass (`cloth_shape.comp`) writes the vertices straight into the mesh's slot, one invocation a render vertex gathering its own triangles; `DeformingAdjacency` and `deformVertexAt` are its CPU mirror, bit for bit `deformVertices`. Cloth itself: `docs/research/CLOTHGPU.md` and the cloth architecture.
 
 ### The ring of slots
 

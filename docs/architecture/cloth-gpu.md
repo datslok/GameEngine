@@ -2,7 +2,7 @@
 
 Covers: `src/render/gpu/cloth_gpu`, `src/render/gpu/cloth_gpu_shared.h`, `src/render/gpu/cloth_timing`, `src/render/vulkan/vulkan_cloth`, `src/render/vulkan/cloth_pass_stamps`, `src/engine/gpu_cloth`, `assets/shaders/cloth.glsl`, `assets/shaders/cloth_pass.glsl`, `assets/shaders/cloth_levels.glsl`, `assets/shaders/cloth_point_lanes.glsl`, `assets/shaders/cloth_shape.comp`, `assets/shaders/cloth_bend.comp`, `assets/shaders/cloth_block.comp`, `assets/shaders/cloth_coarse_step.comp`, `assets/shaders/cloth_finish.comp`, `assets/shaders/cloth_gradient.comp`, `assets/shaders/cloth_held.comp`, `assets/shaders/cloth_line_apply.comp`, `assets/shaders/cloth_line_terms.comp`, `assets/shaders/cloth_line_total.comp`, `assets/shaders/cloth_predict.comp`, `assets/shaders/cloth_spread.comp`, `assets/shaders/cloth_stitch.comp`, `assets/shaders/cloth_stretch.comp`
 
-The CPU solver ported as it is: XPBD, or vertex block descent with its coarse levels, as each tick's settings say; tethers and stitches with either. The CPU solver is the shaders' mirror (`src/cloth/CLAUDE.md`). Self-collision is not ported. The solver itself: `cloth.md`, `cloth-solvers.md`. Recorded GPU numbers: `docs/CLOTHGPU.md`, Part 5.
+The CPU solver ported as it is: XPBD, or vertex block descent with its coarse levels, as each tick's settings say; tethers and stitches with either. The CPU solver is the shaders' mirror (`src/cloth/CLAUDE.md`). Self-collision is not ported. The solver itself: `cloth.md`, `cloth-solvers.md`. Recorded GPU numbers: `docs/research/CLOTHGPU.md`, Part 5.
 
 - Within rounding of the CPU, not to the bit (fused multiply-adds, the GPU's own division and roots).
 - Bit for bit repeatable on one GPU and driver: no pass depends on the order its invocations run.

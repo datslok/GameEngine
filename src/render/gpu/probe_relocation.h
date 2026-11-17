@@ -14,7 +14,7 @@
 
 /*
 * Moving the light probes off the level and choosing which ones to trace (the 2021 DDGI paper's relocation and probe
-* states; docs/ILLUMINATION.md). A grid ignores the level's shape: some probes land inside walls, where they see only
+* states; docs/research/ILLUMINATION.md). A grid ignores the level's shape: some probes land inside walls, where they see only
 * back faces and lend darkness to the surfaces around them, and some a hair from a surface, whose distances then say
 * little. At start-up each probe traces a fixed spiral of rays against the static level and moves (at most
 * probeOffsetLimit of a spacing per axis, so it stays in its own cell) out through the nearest back face, or away from

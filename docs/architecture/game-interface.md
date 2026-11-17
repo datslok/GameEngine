@@ -122,7 +122,7 @@ Glass is never a solid caster, nor a solid caster glass. Which views call these:
 
 ## Level of detail: choosing
 
-Each view draws the coarsest of a mesh's levels whose error covers at most `pixelError` pixels. Naming levels, their options, impostors and card thinning: `level-of-detail.md`; research: `docs/LOD.md`.
+Each view draws the coarsest of a mesh's levels whose error covers at most `pixelError` pixels. Naming levels, their options, impostors and card thinning: `level-of-detail.md`; research: `docs/research/LOD.md`.
 
 - **Levels:** `MeshLevel` {mesh, `errorMetres`, `sharesVertices`}, coarsest last, at most three (`meshLevelSlots` = 4 with the mesh); a last level without a mesh draws nothing.
 - **Attaching:** `attachMeshLevels` gives each draw its levels' span and options, `chooseBounds` placed by the draw's matrix into `levelBounds`. `DrawItem::mesh` stays the mesh itself for bounds, rays, flat faces, the sky bake.

@@ -28,7 +28,7 @@ std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const st
                                     const LevelView* levels = nullptr);
 
 /*
-* Still and moving casters (docs/SHADOWCACHE.md): a tile that keeps them apart (ShadowTile::separateMovers, the far
+* Still and moving casters (docs/research/SHADOWCACHE.md): a tile that keeps them apart (ShadowTile::separateMovers, the far
 * shadow map) holds a cached copy of its still casters, and every frame its moving casters' patches are copied back from
 * that copy and the movers drawn over them, so things moving in it neither redraw it whole nor wait for a redraw.
 */

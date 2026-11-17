@@ -2,7 +2,7 @@
 
 Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/games/forest/forest_ground`, `src/games/forest/forest_sway`
 
-`ForestGame` (`--game forest`, title "Forest"): a jungle valley at a scale meant to be felt. Rules for working here: `src/games/forest/CLAUDE.md`; research: `docs/JUNGLE.md`. North is -z.
+`ForestGame` (`--game forest`, title "Forest"): a jungle valley at a scale meant to be felt. Rules for working here: `src/games/forest/CLAUDE.md`; research: `docs/research/JUNGLE.md`. North is -z.
 
 Other forest files: `forest-rock.md` (pillars, islands, what hangs from them, drifting rocks), `forest-trees.md` (trees, lianas, climbers, epiphytes), `forest-plants.md` (understorey, palms, grass, floor cover).
 
