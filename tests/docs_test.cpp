@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -624,6 +625,207 @@ namespace {
             }
         }
     }
+    // ---- The docs report (warnings, never a failure) ----------------------------------------------------------------
+
+    // A line with its `inline code` spans removed: a path or command may hold digits that are not dates or timings.
+    std::string withoutCode(const std::string& line) {
+        std::string text;
+        bool inCode = false;
+
+        for (char c : line) {
+            if (c == '`') {
+                inCode = !inCode;
+            } else if (!inCode) {
+                text.push_back(c);
+            }
+        }
+
+        return text;
+    }
+
+    std::string lowercase(std::string text) {
+        for (char& c : text) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+
+        return text;
+    }
+
+    // Every identifier in the code and its tools, and every file name, in lowercase: the names a doc may put in backticks.
+    std::set<std::string> codeIdentifiers() {
+        std::set<std::string> names;
+        std::vector<fs::path> files = sourceTreeFiles();
+
+        for (const char* folder : {"assets/shaders", "tests", "tools"}) {
+            for (const fs::directory_entry& entry : fs::recursive_directory_iterator(folder)) {
+                if (entry.is_regular_file()) {
+                    files.push_back(entry.path());
+                }
+            }
+        }
+
+        files.push_back("makefile");
+
+        for (const fs::path& file : files) {
+            names.insert(lowercase(file.stem().string()));
+            std::string name;
+
+            for (char c : readText(file) + "\n") {
+                const unsigned char byte = static_cast<unsigned char>(c);
+
+                if (std::isalnum(byte) || c == '_') {
+                    name.push_back(c);
+                } else if (!name.empty()) {
+                    names.insert(lowercase(name));
+                    name.clear();
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /*
+    * Whether the code has a name, in any case, whole or between underscores of a longer one: docs shorten Vulkan's names
+    * (`R16G16_SFLOAT` for VK_FORMAT_R16G16_SFLOAT, `COMPACT` for VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR) and write
+    * extensions as Vulkan's spec does (`VK_KHR_dedicated_allocation`, the code's VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME).
+    */
+    bool codeHas(const std::set<std::string>& identifiers, const std::string& name) {
+        const std::string wanted = lowercase(name);
+
+        if (identifiers.contains(wanted)) {
+            return true;
+        }
+
+        // An extension's macro splits a number off with an underscore (requirements2, ..._REQUIREMENTS_2_EXTENSION_NAME).
+        if (wanted.starts_with("vk_")) {
+            std::string joined = wanted;
+            std::erase(joined, '_');
+
+            return std::ranges::any_of(identifiers, [&](std::string identifier) {
+                std::erase(identifier, '_');
+                return identifier.find(joined) != std::string::npos;
+            });
+        }
+
+        return std::ranges::any_of(identifiers, [&](const std::string& identifier) {
+            for (std::size_t at = identifier.find(wanted); at != std::string::npos; at = identifier.find(wanted, at + 1)) {
+                const std::size_t after = at + wanted.size();
+
+                if ((at == 0 || identifier[at - 1] == '_') && (after == identifier.size() || identifier[after] == '_')) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+    }
+
+    bool isIdentifier(std::string_view text) {
+        if (text.empty() || text.front() == '_' || std::isdigit(static_cast<unsigned char>(text.front()))) {
+            return false;
+        }
+
+        return std::ranges::all_of(text, [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
+    }
+
+    /*
+    * The parts of a backticked span that name code: `Type`, `function()`, `Type::member`, `call(arguments)`. Only spans
+    * that look like code (a capital past the first letter, an underscore, `::` or a call) count, so plain words in
+    * backticks (`make`, `quit`) are not taken for names.
+    */
+    std::vector<std::string> codeNames(std::string span) {
+        bool looksLikeCode = false;
+        const std::size_t call = span.find('(');
+
+        if (call != std::string::npos) {
+            span.resize(call);
+            looksLikeCode = true;
+        }
+
+        std::vector<std::string> parts;
+        std::size_t start = 0;
+
+        while (true) {
+            const std::size_t separator = span.find("::", start);
+            parts.push_back(span.substr(start, separator == std::string::npos ? std::string::npos : separator - start));
+
+            if (separator == std::string::npos) {
+                break;
+            }
+
+            start = separator + 2;
+            looksLikeCode = true;
+        }
+
+        for (const std::string& part : parts) {
+            if (!isIdentifier(part)) {
+                return {};
+            }
+
+            if (part.find('_') != std::string::npos ||
+                std::ranges::any_of(part.substr(1), [](char c) { return std::isupper(static_cast<unsigned char>(c)); })) {
+                looksLikeCode = true;
+            }
+        }
+
+        return looksLikeCode ? parts : std::vector<std::string>{};
+    }
+
+    /*
+    * What the docs-review skill reads at the end of a phase: dates and measurements that belong in the build log or the
+    * roadmap ("Dense: no history or dates outside BUILDLOG.md and ROADMAP.md"), and backticked names no longer in the
+    * code. Warnings, not failures: a budget ("16 ms a tick") is a measurement-shaped fact that belongs where it is.
+    */
+    Problems docsWarnings() {
+        static const std::regex date(
+            R"(\b(19|20)\d\d-\d\d-\d\d\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}\b)");
+        static const std::regex measurement(R"(\b\d+(\.\d+)? ?(ms|us|fps|FPS)\b|\b\d+(\.\d+)? ?µs)");
+        const std::set<std::string> identifiers = codeIdentifiers();
+        Problems warnings;
+
+        for (const fs::path& path : checkedDocs()) {
+            const std::vector<std::string> lines = splitLines(readText(path));
+            std::set<std::string> missingNames;
+            bool fenced = false;
+
+            // Every line, so the numbers are the file's, but code blocks skipped (examples, not claims).
+            for (std::size_t index = 0; index < lines.size(); ++index) {
+                if (trimmed(lines[index]).starts_with("```")) {
+                    fenced = !fenced;
+                    continue;
+                }
+
+                if (fenced) {
+                    continue;
+                }
+
+                const std::string where = slashed(path) + ":" + std::to_string(index + 1);
+                const std::string prose = withoutCode(lines[index]);
+                std::smatch match;
+
+                if (std::regex_search(prose, match, date)) {
+                    warnings.push_back(where + " has a date (\"" + match.str() + "\"): history goes in the build log");
+                }
+
+                if (std::regex_search(prose, match, measurement)) {
+                    warnings.push_back(where + " has a measurement (\"" + match.str() +
+                                       "\"): if it was measured, not a budget, it goes in the build log");
+                }
+
+                for (const std::string& span : backticked(lines[index])) {
+                    for (const std::string& name : codeNames(span)) {
+                        if (!missingNames.contains(name) && !codeHas(identifiers, name)) {
+                            missingNames.insert(name);
+                            warnings.push_back(where + " names `" + span + "`, which the code no longer has");
+                        }
+                    }
+                }
+            }
+        }
+
+        return warnings;
+    }
 }
 
 /*
@@ -646,4 +848,18 @@ void testDocs() {
     }
 
     assert(problems.empty() && "the docs check found problems (listed above)");
+}
+
+/*
+* `tests.exe --docs-report`: the warnings the docs-review skill reads at the end of a phase (dates, measurements, names
+* the code no longer has). Prints them and returns; it never fails, since some are meant (a budget in milliseconds).
+*/
+void printDocsReport() {
+    const Problems warnings = docsWarnings();
+
+    for (const std::string& warning : warnings) {
+        std::cout << warning << '\n';
+    }
+
+    std::cout << warnings.size() << " docs warnings\n";
 }

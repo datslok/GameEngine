@@ -100,6 +100,8 @@ The documentation is tested too. `tests/docs_test.cpp` runs with the routine sui
 
 The last check uses **shingling** (Broder 1997, how search engines spot copied pages): every run of twelve words is hashed, and a run already seen in another doc is a repeat. Each fact then has one home, and the others link to it.
 
+`tests.exe --docs-report` finds what a test cannot judge, and only prints it: dates and timings outside the build log and roadmap (a measurement belongs to its history, while a setting's value is fine where it is), and backticked code names the code no longer has. The end-of-phase docs review reads it.
+
 ## The software renderer
 
 `render/software/` is a CPU rasteriser kept as a tested reference for rasterising, clipping and depth testing. It does flat shading only, with its own fixed light, and is used only by tests.

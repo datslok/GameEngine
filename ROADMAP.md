@@ -20,7 +20,7 @@ Finished items are kept to one line, with their branch names so they can be foun
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising, and keep graphics features that cost a lot (ray tracing, GI quality) as settings that scale down to typical GPUs.
 
-**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (refactoring the docs and `CLAUDE.md`, taken ahead of the forest), 18 (a forest showcase) and 17 (rendering), then 7 onwards, as the phases sit in this file.
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase) and 17 (rendering), then 7 onwards, as the phases sit in this file.
 
 ---
 
@@ -315,55 +315,23 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 
 ---
 
-## Phase 19: Documentation refactor ← current
+## Phase 19: Documentation refactor (done, Nov 17 2026)
 
-Done before the rest of phase 18, at the user's request (Nov 17 2026). Starts from an external reviewer's plan, amended with the user.
+The docs cut down and kept down, taken ahead of the forest at the user's request; started from an external reviewer's plan. The rules it set (one home per fact, budgets, the workflow) live in the root `CLAUDE.md`.
 
-**At the start:** `CLAUDE.md` 103 KB (79 lines of paragraphs, loaded every session), `README.md` 68 KB, `docs/ARCHITECTURE.md` 625 KB, `docs/BUILDLOG.md` 401 KB, `docs/ENGINE_GUIDE.md` 226 KB.
+**Items** (all on `docs-refactor`)
 
-**Decisions**
-- Dense over prose: bullets and tables, no history or dates outside `BUILDLOG.md`, sections edited in place, not appended to.
-- One home per fact:
+- [x] The root `CLAUDE.md` rewritten (103 KB to under 6 KB); folder `CLAUDE.md` files, path rules, skills, `docs/INDEX.md`, `docs/LAYOUT.md`
+- [x] `docs/ARCHITECTURE.md` split into 51 files in `docs/architecture/`, each checked against the code
+- [x] `README.md` cut from 68 KB to 12.5 KB; the guide rewritten into 11 chapters in `docs/guide/`; the build log split into parts in `docs/buildlog/`
+- [x] Memory deduplicated: project rules out of memory
+- [x] The checks: `testDocs` in the routine suite, `tests.exe --docs-report` for the review, the pre-commit reminder (`tools/docs_reminder.ps1`), the `docs-review` skill
 
-| Kind | Home |
-|---|---|
-| Planned or done, one line an item | `ROADMAP.md` |
-| How it works now | `docs/architecture/<system>.md` |
-| Why, what was tried and measured | `docs/BUILDLOG.md` |
-| Sources and research | `docs/<TOPIC>.md` |
-| Learning the engine (prose) | `docs/ENGINE_GUIDE.md` |
-| Pitch, features, install, build, controls | `README.md` |
-| Rules for every task | root `CLAUDE.md` |
-| Rules for one folder | `src/<module>/CLAUDE.md` (loads when a file there is read) |
-| Rules across folders | `.claude/rules/<name>.md` with `paths:` |
-| Step-by-step procedures | `.claude/skills/<name>/SKILL.md` |
-| The user's personal preferences | Claude's memory |
-| Anything a tool can check | a check, not a rule |
-
-- Growth is fine, needless growth is not. Budgets in bytes, not lines: root `CLAUDE.md` 8 KB, each module `CLAUDE.md` and rule 4 KB, `README.md` 20 KB; each architecture file 20 KB, past which it splits into narrower topics (new knowledge always has room).
-- No `@imports` (they load eagerly).
-- `ARCHITECTURE.md` split into one file a system; `ENGINE_GUIDE.md` stays prose, trimmed; old `BUILDLOG.md` entries kept, new ones at most 10 bullets.
-- Checks as a C++ test in the routine suite (no Python in tests).
-
-**Items**
-- [x] Audit: every `CLAUDE.md` section bucketed (root, module, rule, skill, docs, check, delete) in `docs/claude-md-migration.md`, contradictions with the code flagged; approved by the user before anything moves
-- [x] Structure: module `CLAUDE.md` files, `.claude/rules/shader-mirror.md`, skills (add a test, a game, a shader library function, golden references), `docs/INDEX.md`, `docs/LAYOUT.md`
-- [x] Root `CLAUDE.md` rewritten: overview, build and test, hard rules, where to look, where new instructions go
-- [x] `ARCHITECTURE.md` split per system and cut to how it works now (`docs-refactor`: 51 files, each checked against the code)
-- [x] `README.md` cut to pitch, features a line each, install, build, controls, a pointer to the layout (68 KB to 12.5 KB, in the docs test)
-- [x] `ENGINE_GUIDE.md` trimmed of repetition and split into 11 chapters in `docs/guide/`, checked against the code; `docs/BUILDLOG.md` split into 17 parts in `docs/buildlog/` by phase, text unchanged (`docs-refactor`)
-- [x] Memory deduplicated: project rules out of memory, into `CLAUDE.md` or rules
-- [x] Checks against needless growth (`testDocs`, `docs-refactor`): layers from `docs/LAYOUT.md`, budgets, line lengths, paths, the index, repeated 12-word runs, over the docs refactored so far
-- [ ] The docs report (`tests.exe --docs-report`, after the split): warnings for dates and measurements outside `BUILDLOG.md` and `ROADMAP.md` and for backticked names gone from `src/` (every source and shader having an architecture file is already a check in `testDocs`)
-- [x] A pre-commit reminder (`tools/docs_reminder.ps1`, a Claude Code hook in `.claude/settings.json`, `docs-refactor`): code changed but the architecture file covering it did not
-- [x] The docs-review skill, run at the end of each phase: finished phases in `ROADMAP.md` cut to their milestone and branches, memory deduplicated, misplaced items moved to their narrowest home
-- [x] The documentation workflow written down: a branch ticks its `ROADMAP.md` line, adds a `BUILDLOG.md` entry of at most 10 bullets, replaces its architecture section, adds a `README.md` line if players see it
-
-**Milestone:** root `CLAUDE.md` within 8 KB and readable in one sitting, every doc listed in `docs/INDEX.md`, the checks passing in `make test-release`.
+**Milestone:** the root `CLAUDE.md` within 8 KB and readable in one sitting, every doc listed in `docs/INDEX.md`, the checks passing in the routine suite. Met Nov 17 2026.
 
 ---
 
-## Phase 18: A jungle valley showcase (paused for phase 19)
+## Phase 18: A jungle valley showcase ← current
 
 A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a scale meant to be felt: a jungle valley kilometres across with mist lying in it, sandstone pillars hundreds of metres tall, islands of rock and forest floating above it, and colossal machines built by someone long gone, half reclaimed by the green. Realistic, not stylised: scanned CC0 plants, rocks and textures on generated pillars, islands, structures and trees, judged with the typical GPU setup on.
 

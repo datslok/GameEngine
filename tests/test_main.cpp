@@ -100,6 +100,7 @@ void testEyeAdaptation();
 void testGameRegistry();
 void testCommandRegistry();
 void testDocs();
+void printDocsReport();
 void testEngineCommands();
 void testCommandSocket();
 void testPlayerControls();
@@ -523,6 +524,11 @@ int main(int argumentCount, char** arguments) {
     if (argumentCount > 1 && std::string_view{arguments[1]} == "--parked") {
         runParkedTests();
         std::cout << "All parked tests passed!\n";
+        return 0;
+    }
+
+    if (argumentCount > 1 && std::string_view{arguments[1]} == "--docs-report") {
+        printDocsReport();
         return 0;
     }
 

@@ -138,15 +138,7 @@ Those numbers show why the **release build** matters. The debug build compiles w
 
 `make release` uses `-O2`: values stay in registers, repeated work disappears, and small functions are **inlined** (their body pasted at the call). The compiler can only inline a body it can *see*, so the small vector operations live in their headers (`math/vec3.h` and friends): a body in a separate `.cpp` file is invisible while compiling the files that call it.
 
-Per tick, 40 characters walking a stepped level and 200 bouncing balls:
-
-| Build | 40 characters | 200 balls |
-|---|---|---|
-| Debug (`-O0`) | 0.52 ms | 0.54 ms |
-| `-O2`, vector operations in `.cpp` files | 0.105 ms | 0.090 ms |
-| `-O2`, vector operations in headers | 0.075 ms | 0.067 ms |
-
-Seven to eight times faster in all; the headers' share, 1.4 times, was the cost of the calls themselves. Link-time optimisation (inlining across files at link time) added only 3 to 9% while a one-file rebuild went from 3 to 20 seconds, so it is not used. The builds themselves: [the build reference](../architecture/build.md).
+Measured on 40 characters walking a stepped level and 200 bouncing balls, the release build ticks seven to eight times faster than debug, and 1.4 times of that comes from the vector operations being in headers: the cost of the calls themselves (the numbers: `docs/buildlog/phase-00-05.md`). Link-time optimisation (inlining across files at link time) added only 3 to 9% while a one-file rebuild went from 3 to 20 seconds, so it is not used. The builds themselves: [the build reference](../architecture/build.md).
 
 ## C++ met along the way
 

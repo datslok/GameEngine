@@ -11,7 +11,6 @@ Every doc, one line each. A doc missing here fails the docs test.
 | `docs/LAYOUT.md` | `src/` folders and their layers |
 | `docs/BUILDLOG.md` | Why things were built, what was tried and measured: the index of its parts in `docs/buildlog/`, by phase |
 | `docs/ENGINE_GUIDE.md` | Prose guide for learning the engine (for a reader with a physics background): the index of its chapters in `docs/guide/` |
-| `docs/claude-md-migration.md` | Phase 19's audit of the old `CLAUDE.md`; deleted when phase 19 is done |
 | `tests/golden/README.md` | Golden reference images: layout per GPU and game |
 | `assets/stars/README.md` | The star catalogue's source |
 
