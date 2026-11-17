@@ -1,10 +1,15 @@
 #include <algorithm>
 #include <chrono>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <iomanip>
 #include <iostream>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "test_progress.h"
 
 void testPixelBuffer();
 void testRasterizer();
@@ -69,6 +74,7 @@ void testWindSway();
 void testWindHanging();
 void testSimplifyMesh();
 void testLevelOfDetail();
+void testTestProgress();
 void testCardThinning();
 void testTerrain();
 void testGroundFollow();
@@ -250,10 +256,21 @@ namespace {
     // Each routine test's wall time, for --times: which tests make the run slow.
     std::vector<std::pair<double, const char*>> testTimes;
 
-    void runTest(const char* name, void (*test)()) {
-        const auto start = std::chrono::steady_clock::now();
-        test();
-        testTimes.emplace_back(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), name);
+    struct RoutineTest {
+        const char* name;
+        void (*run)();
+    };
+
+    // Last run's times, beside tests.exe (program its path), so the progress bar knows how long each test takes.
+    std::string timesPath(const char* program) {
+        const std::string path{program};
+        const std::size_t slash = path.find_last_of("/\\");
+        return (slash == std::string::npos ? std::string{} : path.substr(0, slash + 1)) + "test_times.txt";
+    }
+
+    std::string readFile(const std::string& path) {
+        std::ifstream file{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
     }
 
     // The slowest tests first, with their share of the whole run.
@@ -274,6 +291,226 @@ namespace {
     }
 }
 
+// Every routine test, run in this order (make test).
+const RoutineTest routineTests[] = {
+    {"testPixelBuffer", testPixelBuffer},
+    {"testRasterizer", testRasterizer},
+    {"testFilledTriangle", testFilledTriangle},
+    {"testVec2", testVec2},
+    {"testVec3", testVec3},
+    {"testVec4", testVec4},
+    {"testMat4", testMat4},
+    {"testQuat", testQuat},
+    {"testClipper", testClipper},
+    {"testDepthBuffer", testDepthBuffer},
+    {"testTriangleDepth", testTriangleDepth},
+    {"testShading", testShading},
+    {"testTransform", testTransform},
+    {"testObjLoader", testObjLoader},
+    {"testObjUvs", testObjUvs},
+    {"testGltfLoader", testGltfLoader},
+    {"testGltfAttributes", testGltfAttributes},
+    {"testGltfTextures", testGltfTextures},
+    {"testGlbTextures", testGlbTextures},
+    {"testModelBounds", testModelBounds},
+    {"testRay", testRay},
+    {"testMoveToController", testMoveToController},
+    {"testCharacter", testCharacter},
+    {"testInput", testInput},
+    {"testFixedTimestep", testFixedTimestep},
+    {"testSdlInput", testSdlInput},
+    {"testWorld", testWorld},
+    {"testModelRenderer", testModelRenderer},
+    {"testEdgePan", testEdgePan},
+    {"testDemoGame", testDemoGame},
+    {"testCameraControllers", testCameraControllers},
+    {"testAssetManager", testAssetManager},
+    {"testIndexedMesh", testIndexedMesh},
+    {"testLighting", testLighting},
+    {"testLightUniforms", testLightUniforms},
+    {"testMaterialUniforms", testMaterialUniforms},
+    {"testGpuScene", testGpuScene},
+    {"testDeferredChanges", testDeferredChanges},
+    {"testDeterminism", testDeterminism},
+    {"testEngineSettings", testEngineSettings},
+    {"testCpuTiming", testCpuTiming},
+    {"testBrdf", testBrdf},
+    {"testParallax", testParallax},
+    {"testHeightMap", testHeightMap},
+    {"testTypicalGpu", testTypicalGpu},
+    {"testGroundLayers", testGroundLayers},
+    {"testDepthPrepass", testDepthPrepass},
+    {"testTextureEncoding", testTextureEncoding},
+    {"testCoverageMips", testCoverageMips},
+    {"testAlphaMask", testAlphaMask},
+    {"testTransparency", testTransparency},
+    {"testGltfMaterials", testGltfMaterials},
+    {"testGltfNormalMaps", testGltfNormalMaps},
+    {"testSmoothNormals", testSmoothNormals},
+    {"testNormalMatrix", testNormalMatrix},
+    {"testNormalMapping", testNormalMapping},
+    {"testHalfFloat", testHalfFloat},
+    {"testImageCompare", testImageCompare},
+    {"testGoldenViews", testGoldenViews},
+    {"testSun", testSun},
+    {"testCelestial", testCelestial},
+    {"testStars", testStars},
+    {"testEyeAdaptation", testEyeAdaptation},
+    {"testGameRegistry", testGameRegistry},
+    {"testCommandRegistry", testCommandRegistry},
+    {"testEngineCommands", testEngineCommands},
+    {"testCommandSocket", testCommandSocket},
+    {"testPlayerControls", testPlayerControls},
+    {"testLightLab", testLightLab},
+    {"testForest", testForest},
+    {"testIslandHangings", testIslandHangings},
+    {"testHangingMoss", testHangingMoss},
+    {"testDriftingRocks", testDriftingRocks},
+    {"testForestTrees", testForestTrees},
+    {"testUnderstorey", testUnderstorey},
+    {"testPalms", testPalms},
+    {"testLianas", testLianas},
+    {"testClimbers", testClimbers},
+    {"testEpiphytes", testEpiphytes},
+    {"testGrass", testGrass},
+    {"testFloorCover", testFloorCover},
+    {"testWind", testWind},
+    {"testWindSway", testWindSway},
+    {"testWindHanging", testWindHanging},
+    {"testSimplifyMesh", testSimplifyMesh},
+    {"testLevelOfDetail", testLevelOfDetail},
+    {"testCardThinning", testCardThinning},
+    {"testTerrain", testTerrain},
+    {"testGroundFollow", testGroundFollow},
+    {"testImpostors", testImpostors},
+    {"testLeafClusters", testLeafClusters},
+    {"testFlashlight", testFlashlight},
+    {"testRawImagePng", testRawImagePng},
+    {"testTangents", testTangents},
+    {"testGpuDepthRange", testGpuDepthRange},
+    {"testCameraRelative", testCameraRelative},
+    {"testMipLevels", testMipLevels},
+    {"testSrgb", testSrgb},
+    {"testFrameDescription", testFrameDescription},
+    {"testStillDraws", testStillDraws},
+    {"testStillInstances", testStillInstances},
+    {"testShadowMap", testShadowMap},
+    {"testShadowAtlas", testShadowAtlas},
+    {"testSoftShadow", testSoftShadow},
+    {"testCascades", testCascades},
+    {"testDepthRange", testDepthRange},
+    {"testAtmosphere", testAtmosphere},
+    {"testRayTracing", testRayTracing},
+    {"testVideoMemory", testVideoMemory},
+    {"testSkyObject", testSkyObject},
+    {"testLightPriority", testLightPriority},
+    {"testDebugDraw", testDebugDraw},
+    {"testCulling", testCulling},
+    {"testDebugText", testDebugText},
+    {"testDither", testDither},
+    {"testSphereMesh", testSphereMesh},
+    {"testLatheMesh", testLatheMesh},
+    {"testFirefly", testFirefly},
+    {"testSpinner", testSpinner},
+    {"testClosestPoints", testClosestPoints},
+    {"testDelaunay", testDelaunay},
+    {"testOverlap", testOverlap},
+    {"testRaycast", testRaycast},
+    {"testCollisionMesh", testCollisionMesh},
+    {"testAffineInverse", testAffineInverse},
+    {"testCollider", testCollider},
+    {"testColliderRaycast", testColliderRaycast},
+    {"testShapeBounds", testShapeBounds},
+    {"testUniformGrid", testUniformGrid},
+    {"testCollisionScene", testCollisionScene},
+    {"testTriangleContact", testTriangleContact},
+    {"testStaticLevel", testStaticLevel},
+    {"testCharacterController", testCharacterController},
+    {"testAngles", testAngles},
+    {"testFirstPersonBody", testFirstPersonBody},
+    {"testSphereCast", testSphereCast},
+    {"testParticle", testParticle},
+    {"testGrenade", testGrenade},
+    {"testProfiler", testProfiler},
+    {"testJobSystem", testJobSystem},
+    {"testDeformingMesh", testDeformingMesh},
+    {"testDeformingSlots", testDeformingSlots},
+    {"testGpuTiming", testGpuTiming},
+    {"testToneMapping", testToneMapping},
+    {"testToneMapUniforms", testToneMapUniforms},
+    {"testCameraFinish", testCameraFinish},
+    {"testMotionBlur", testMotionBlur},
+    {"testDepthOfField", testDepthOfField},
+    {"testFrostedGlass", testFrostedGlass},
+    {"testImageLights", testImageLights},
+    {"testBloom", testBloom},
+    {"testBlueNoise", testBlueNoise},
+    {"testTaa", testTaa},
+    {"testScreenReflections", testScreenReflections},
+    {"testReflectionProbe", testReflectionProbe},
+    {"testPlanarReflection", testPlanarReflection},
+    {"testMirroredLight", testMirroredLight},
+    {"testAmbientOcclusion", testAmbientOcclusion},
+    {"testContactShadows", testContactShadows},
+    {"testVolumetricFog", testVolumetricFog},
+    {"testSkyVisibility", testSkyVisibility},
+    {"testPipelineCompiler", testPipelineCompiler},
+    {"testLoadingScreen", testLoadingScreen},
+    {"testStaticGeometry", testStaticGeometry},
+    {"testUpscaling", testUpscaling},
+    {"testDisplayOutput", testDisplayOutput},
+    {"testSettingsFile", testSettingsFile},
+    {"testQualityPreset", testQualityPreset},
+    {"testOverlayComposite", testOverlayComposite},
+    {"testSwapchainChoice", testSwapchainChoice},
+    {"testImageState", testImageState},
+    {"testUniformRing", testUniformRing},
+    {"testFloatTolerance", testFloatTolerance},
+    {"testLightFalloff", testLightFalloff},
+    {"testComputeDispatch", testComputeDispatch},
+    {"testClusters", testClusters},
+    {"testTestProgress", testTestProgress},
+};
+
+namespace {
+    // Every routine test in order, with the progress bar (test_progress.h), its time kept for --times and for the next run's bar.
+    void runRoutineTests(const char* program) {
+        std::vector<std::string> names;
+
+        for (const RoutineTest& test : routineTests) {
+            names.emplace_back(test.name);
+        }
+
+        const std::string path = timesPath(program);
+        const std::vector<double> expected = expectedTestSeconds(names, parseTestTimes(readFile(path)));
+        ProgressState state;
+        state.total = names.size();
+
+        for (const double seconds : expected) {
+            state.expectedTotal += seconds;
+        }
+
+        ConsoleProgress progress;
+        const auto runStart = std::chrono::steady_clock::now();
+
+        for (std::size_t index = 0; index < names.size(); ++index) {
+            state.current = names[index];
+            state.elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
+            progress.show(state);
+
+            const auto start = std::chrono::steady_clock::now();
+            routineTests[index].run();
+            testTimes.emplace_back(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), routineTests[index].name);
+            ++state.done;
+            state.expectedDone += expected[index];
+        }
+
+        state.elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
+        progress.finish(state);
+        std::ofstream{path, std::ios::binary} << formatTestTimes(testTimes);
+    }
+}
+
 int main(int argumentCount, char** arguments) {
     if (argumentCount > 1 && std::string_view{arguments[1]} == "--slow") {
         runSlowTests();
@@ -287,182 +524,7 @@ int main(int argumentCount, char** arguments) {
         return 0;
     }
 
-    runTest("testPixelBuffer", testPixelBuffer);
-    runTest("testRasterizer", testRasterizer);
-    runTest("testFilledTriangle", testFilledTriangle);
-    runTest("testVec2", testVec2);
-    runTest("testVec3", testVec3);
-    runTest("testVec4", testVec4);
-    runTest("testMat4", testMat4);
-    runTest("testQuat", testQuat);
-    runTest("testClipper", testClipper);
-    runTest("testDepthBuffer", testDepthBuffer);
-    runTest("testTriangleDepth", testTriangleDepth);
-    runTest("testShading", testShading);
-    runTest("testTransform", testTransform);
-    runTest("testObjLoader", testObjLoader);
-    runTest("testObjUvs", testObjUvs);
-    runTest("testGltfLoader", testGltfLoader);
-    runTest("testGltfAttributes", testGltfAttributes);
-    runTest("testGltfTextures", testGltfTextures);
-    runTest("testGlbTextures", testGlbTextures);
-    runTest("testModelBounds", testModelBounds);
-    runTest("testRay", testRay);
-    runTest("testMoveToController", testMoveToController);
-    runTest("testCharacter", testCharacter);
-    runTest("testInput", testInput);
-    runTest("testFixedTimestep", testFixedTimestep);
-    runTest("testSdlInput", testSdlInput);
-    runTest("testWorld", testWorld);
-    runTest("testModelRenderer", testModelRenderer);
-    runTest("testEdgePan", testEdgePan);
-    runTest("testDemoGame", testDemoGame);
-    runTest("testCameraControllers", testCameraControllers);
-    runTest("testAssetManager", testAssetManager);
-    runTest("testIndexedMesh", testIndexedMesh);
-    runTest("testLighting", testLighting);
-    runTest("testLightUniforms", testLightUniforms);
-    runTest("testMaterialUniforms", testMaterialUniforms);
-    runTest("testGpuScene", testGpuScene);
-    runTest("testDeferredChanges", testDeferredChanges);
-    runTest("testDeterminism", testDeterminism);
-    runTest("testEngineSettings", testEngineSettings);
-    runTest("testCpuTiming", testCpuTiming);
-    runTest("testBrdf", testBrdf);
-    runTest("testParallax", testParallax);
-    runTest("testHeightMap", testHeightMap);
-    runTest("testTypicalGpu", testTypicalGpu);
-    runTest("testGroundLayers", testGroundLayers);
-    runTest("testDepthPrepass", testDepthPrepass);
-    runTest("testTextureEncoding", testTextureEncoding);
-    runTest("testCoverageMips", testCoverageMips);
-    runTest("testAlphaMask", testAlphaMask);
-    runTest("testTransparency", testTransparency);
-    runTest("testGltfMaterials", testGltfMaterials);
-    runTest("testGltfNormalMaps", testGltfNormalMaps);
-    runTest("testSmoothNormals", testSmoothNormals);
-    runTest("testNormalMatrix", testNormalMatrix);
-    runTest("testNormalMapping", testNormalMapping);
-    runTest("testHalfFloat", testHalfFloat);
-    runTest("testImageCompare", testImageCompare);
-    runTest("testGoldenViews", testGoldenViews);
-    runTest("testSun", testSun);
-    runTest("testCelestial", testCelestial);
-    runTest("testStars", testStars);
-    runTest("testEyeAdaptation", testEyeAdaptation);
-    runTest("testGameRegistry", testGameRegistry);
-    runTest("testCommandRegistry", testCommandRegistry);
-    runTest("testEngineCommands", testEngineCommands);
-    runTest("testCommandSocket", testCommandSocket);
-    runTest("testPlayerControls", testPlayerControls);
-    runTest("testLightLab", testLightLab);
-    runTest("testForest", testForest);
-    runTest("testIslandHangings", testIslandHangings);
-    runTest("testHangingMoss", testHangingMoss);
-    runTest("testDriftingRocks", testDriftingRocks);
-    runTest("testForestTrees", testForestTrees);
-    runTest("testUnderstorey", testUnderstorey);
-    runTest("testPalms", testPalms);
-    runTest("testLianas", testLianas);
-    runTest("testClimbers", testClimbers);
-    runTest("testEpiphytes", testEpiphytes);
-    runTest("testGrass", testGrass);
-    runTest("testFloorCover", testFloorCover);
-    runTest("testWind", testWind);
-    runTest("testWindSway", testWindSway);
-    runTest("testWindHanging", testWindHanging);
-    runTest("testSimplifyMesh", testSimplifyMesh);
-    runTest("testLevelOfDetail", testLevelOfDetail);
-    runTest("testCardThinning", testCardThinning);
-    runTest("testTerrain", testTerrain);
-    runTest("testGroundFollow", testGroundFollow);
-    runTest("testImpostors", testImpostors);
-    runTest("testLeafClusters", testLeafClusters);
-    runTest("testFlashlight", testFlashlight);
-    runTest("testRawImagePng", testRawImagePng);
-    runTest("testTangents", testTangents);
-    runTest("testGpuDepthRange", testGpuDepthRange);
-    runTest("testCameraRelative", testCameraRelative);
-    runTest("testMipLevels", testMipLevels);
-    runTest("testSrgb", testSrgb);
-    runTest("testFrameDescription", testFrameDescription);
-    runTest("testStillDraws", testStillDraws);
-    runTest("testStillInstances", testStillInstances);
-    runTest("testShadowMap", testShadowMap);
-    runTest("testShadowAtlas", testShadowAtlas);
-    runTest("testSoftShadow", testSoftShadow);
-    runTest("testCascades", testCascades);
-    runTest("testDepthRange", testDepthRange);
-    runTest("testAtmosphere", testAtmosphere);
-    runTest("testRayTracing", testRayTracing);
-    runTest("testVideoMemory", testVideoMemory);
-    runTest("testSkyObject", testSkyObject);
-    runTest("testLightPriority", testLightPriority);
-    runTest("testDebugDraw", testDebugDraw);
-    runTest("testCulling", testCulling);
-    runTest("testDebugText", testDebugText);
-    runTest("testDither", testDither);
-    runTest("testSphereMesh", testSphereMesh);
-    runTest("testLatheMesh", testLatheMesh);
-    runTest("testFirefly", testFirefly);
-    runTest("testSpinner", testSpinner);
-    runTest("testClosestPoints", testClosestPoints);
-    runTest("testDelaunay", testDelaunay);
-    runTest("testOverlap", testOverlap);
-    runTest("testRaycast", testRaycast);
-    runTest("testCollisionMesh", testCollisionMesh);
-    runTest("testAffineInverse", testAffineInverse);
-    runTest("testCollider", testCollider);
-    runTest("testColliderRaycast", testColliderRaycast);
-    runTest("testShapeBounds", testShapeBounds);
-    runTest("testUniformGrid", testUniformGrid);
-    runTest("testCollisionScene", testCollisionScene);
-    runTest("testTriangleContact", testTriangleContact);
-    runTest("testStaticLevel", testStaticLevel);
-    runTest("testCharacterController", testCharacterController);
-    runTest("testAngles", testAngles);
-    runTest("testFirstPersonBody", testFirstPersonBody);
-    runTest("testSphereCast", testSphereCast);
-    runTest("testParticle", testParticle);
-    runTest("testGrenade", testGrenade);
-    runTest("testProfiler", testProfiler);
-    runTest("testJobSystem", testJobSystem);
-    runTest("testDeformingMesh", testDeformingMesh);
-    runTest("testDeformingSlots", testDeformingSlots);
-    runTest("testGpuTiming", testGpuTiming);
-    runTest("testToneMapping", testToneMapping);
-    runTest("testToneMapUniforms", testToneMapUniforms);
-    runTest("testCameraFinish", testCameraFinish);
-    runTest("testMotionBlur", testMotionBlur);
-    runTest("testDepthOfField", testDepthOfField);
-    runTest("testFrostedGlass", testFrostedGlass);
-    runTest("testImageLights", testImageLights);
-    runTest("testBloom", testBloom);
-    runTest("testBlueNoise", testBlueNoise);
-    runTest("testTaa", testTaa);
-    runTest("testScreenReflections", testScreenReflections);
-    runTest("testReflectionProbe", testReflectionProbe);
-    runTest("testPlanarReflection", testPlanarReflection);
-    runTest("testMirroredLight", testMirroredLight);
-    runTest("testAmbientOcclusion", testAmbientOcclusion);
-    runTest("testContactShadows", testContactShadows);
-    runTest("testVolumetricFog", testVolumetricFog);
-    runTest("testSkyVisibility", testSkyVisibility);
-    runTest("testPipelineCompiler", testPipelineCompiler);
-    runTest("testLoadingScreen", testLoadingScreen);
-    runTest("testStaticGeometry", testStaticGeometry);
-    runTest("testUpscaling", testUpscaling);
-    runTest("testDisplayOutput", testDisplayOutput);
-    runTest("testSettingsFile", testSettingsFile);
-    runTest("testQualityPreset", testQualityPreset);
-    runTest("testOverlayComposite", testOverlayComposite);
-    runTest("testSwapchainChoice", testSwapchainChoice);
-    runTest("testImageState", testImageState);
-    runTest("testUniformRing", testUniformRing);
-    runTest("testFloatTolerance", testFloatTolerance);
-    runTest("testLightFalloff", testLightFalloff);
-    runTest("testComputeDispatch", testComputeDispatch);
-    runTest("testClusters", testClusters);
+    runRoutineTests(arguments[0]);
 
     if (argumentCount > 1 && std::string_view{arguments[1]} == "--times") {
         printTestTimes(30);
