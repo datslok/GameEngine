@@ -132,7 +132,8 @@ std::string videoMemoryText(const VideoMemory& memory) {
         return std::to_string((bytes + megabyte / 2) / megabyte);
     };
 
-    const std::string engine = "ENGINE " + megabytes(memory.engineBytes) + " MB";
+    // In use first: the held blocks move in steps of up to 256 MB and hide most changes.
+    const std::string engine = "ENGINE " + megabytes(memory.inUseBytes) + " MB IN USE, " + megabytes(memory.engineBytes) + " HELD";
 
     if (!memory.driverReported) {
         return "VRAM " + engine + "  NO DRIVER BUDGET";

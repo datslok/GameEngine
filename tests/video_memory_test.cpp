@@ -11,15 +11,16 @@ namespace {
     // A card can have more than one such heap (a small one the CPU can write directly), so they are added up.
     void testOnlyDeviceLocalHeapsCount() {
         const std::vector<HeapMemory> heaps{
-            HeapMemory{true, 500 * megabyte, 600 * megabyte, 14000 * megabyte},
-            HeapMemory{false, 40 * megabyte, 2000 * megabyte, 30000 * megabyte},
-            HeapMemory{true, 20 * megabyte, 30 * megabyte, 200 * megabyte}
+            HeapMemory{true, 500 * megabyte, 410 * megabyte, 600 * megabyte, 14000 * megabyte},
+            HeapMemory{false, 40 * megabyte, 35 * megabyte, 2000 * megabyte, 30000 * megabyte},
+            HeapMemory{true, 20 * megabyte, 12 * megabyte, 30 * megabyte, 200 * megabyte}
         };
 
         const VideoMemory memory = summariseVideoMemory(heaps, true);
 
         assert(memory.valid && memory.driverReported);
         assert(memory.engineBytes == 520 * megabyte);
+        assert(memory.inUseBytes == 422 * megabyte);
         assert(memory.usedBytes == 630 * megabyte);
         assert(memory.budgetBytes == 14200 * megabyte);
     }
@@ -32,26 +33,28 @@ namespace {
 
     // An integrated GPU has no memory of its own: its one heap is system memory, marked device local, and counts.
     void testIntegratedGpuCounts() {
-        const VideoMemory memory = summariseVideoMemory({HeapMemory{true, 300 * megabyte, 900 * megabyte, 8000 * megabyte}}, false);
-        assert(memory.valid && !memory.driverReported && memory.engineBytes == 300 * megabyte);
+        const VideoMemory memory = summariseVideoMemory({HeapMemory{true, 300 * megabyte, 250 * megabyte, 900 * megabyte, 8000 * megabyte}}, false);
+        assert(memory.valid && !memory.driverReported && memory.engineBytes == 300 * megabyte && memory.inUseBytes == 250 * megabyte);
     }
 
     /*
-    * The F4 line: what the whole program uses of the budget the driver gives it, and how much of that the engine
-    * allocated itself, in megabytes (2^20 bytes, rounded to the nearest). Without the driver's budget (an old driver
-    * without VK_EXT_memory_budget) only the engine's own share is known, and the line says so.
+    * The F4 line: what the whole program uses of the budget the driver gives it, then the engine's own share: the
+    * bytes its resources take, and the blocks it holds them in (whole blocks of up to 256 MB, so the held figure moves
+    * in steps and hides most changes), in megabytes (2^20 bytes, rounded to the nearest). Without the driver's budget
+    * (an old driver without VK_EXT_memory_budget) only the engine's own share is known, and the line says so.
     */
     void testReadoutText() {
         VideoMemory memory;
         memory.valid = true;
         memory.driverReported = true;
         memory.engineBytes = 540 * megabyte + megabyte / 3;
+        memory.inUseBytes = 481 * megabyte + megabyte * 3 / 4;
         memory.usedBytes = 612 * megabyte + megabyte * 2 / 3;
         memory.budgetBytes = 14800 * megabyte;
-        assert(videoMemoryText(memory) == "VRAM 613 / 14800 MB  ENGINE 540 MB");
+        assert(videoMemoryText(memory) == "VRAM 613 / 14800 MB  ENGINE 482 MB IN USE, 540 HELD");
 
         memory.driverReported = false;
-        assert(videoMemoryText(memory) == "VRAM ENGINE 540 MB  NO DRIVER BUDGET");
+        assert(videoMemoryText(memory) == "VRAM ENGINE 482 MB IN USE, 540 HELD  NO DRIVER BUDGET");
 
         assert(videoMemoryText(VideoMemory{}) == "VRAM -");
     }

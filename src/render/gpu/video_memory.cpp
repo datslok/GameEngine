@@ -8,6 +8,7 @@ VideoMemory summariseVideoMemory(const std::vector<HeapMemory>& heaps, bool driv
         if (heap.deviceLocal) {
             memory.valid = true;
             memory.engineBytes += heap.engineBytes;
+            memory.inUseBytes += heap.inUseBytes;
             memory.usedBytes += heap.usedBytes;
             memory.budgetBytes += heap.budgetBytes;
         }

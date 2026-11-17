@@ -464,7 +464,7 @@ std::vector<HeapMemory> VulkanDevice::getHeapMemory() const {
 
     for (std::uint32_t heap = 0; heap < properties->memoryHeapCount; ++heap) {
         const bool deviceLocal = (properties->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
-        heaps.push_back(HeapMemory{deviceLocal, budgets[heap].statistics.blockBytes, budgets[heap].usage, budgets[heap].budget});
+        heaps.push_back(HeapMemory{deviceLocal, budgets[heap].statistics.blockBytes, budgets[heap].statistics.allocationBytes, budgets[heap].usage, budgets[heap].budget});
     }
 
     return heaps;
