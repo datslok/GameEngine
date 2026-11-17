@@ -99,6 +99,7 @@ void testStars();
 void testEyeAdaptation();
 void testGameRegistry();
 void testCommandRegistry();
+void testDocs();
 void testEngineCommands();
 void testCommandSocket();
 void testPlayerControls();
@@ -470,6 +471,7 @@ const RoutineTest routineTests[] = {
     {"testComputeDispatch", testComputeDispatch},
     {"testClusters", testClusters},
     {"testTestProgress", testTestProgress},
+    {"testDocs", testDocs},
 };
 
 namespace {

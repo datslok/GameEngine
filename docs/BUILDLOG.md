@@ -1662,6 +1662,17 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Soft edges:** the user's first look: "that works but the shadows are very low res for things that are far away": one hardware-filtered comparison showed the far map's 2.7 m texels as steps. The tap now takes the far tile's soft shadow (blocker search, penumbra, 16 turned samples), its penumbra from the real distance below the blocker (the reach added back, `softShadowFromTileLifted`); the fog keeps one comparison.
   - **The user's look:** "thats good enough for now". Finer far shadows would need a bigger far map or phase 14's virtual shadow maps.
 
+## Phase 19: Documentation refactor (Nov 17 2026 onwards)
+
+- `docs-refactor` (Nov 17 2026): the docs cut down and kept down. The user: "the documentation is getting out of hand ... i want it to be information dense". Taken ahead of the forest's last items.
+  - **Started from** an external reviewer's plan (each `CLAUDE.md` section bucketed, folder files, path rules, skills, an index, enforcement), amended with the user: budgets in bytes, not lines (`CLAUDE.md` was 79 lines and 103 KB), the README and the architecture reference included, memory deduplicated, checks as a C++ test rather than Python.
+  - **Claude Code's docs checked first:** a folder's `CLAUDE.md` loads when a file in it is read, `.claude/rules` files with `paths:` when a matching file is, skills by their description until used; `@imports` load eagerly, so none are used.
+  - **The audit** (`docs/claude-md-migration.md`): about 75 KB of `CLAUDE.md` repeated `docs/ARCHITECTURE.md` (ten names spot-checked) and went; the build's mechanics existed nowhere else and moved to `docs/architecture/build.md`.
+  - **Result:** the root `CLAUDE.md` 103 KB to 5.5 KB; 8 folder files, 2 path rules, 6 skills; 12 memories that repeated project rules removed.
+  - **The include graph** differed from the old text: `scene/impostor.h` includes `assets/` (a listed exception until `ImageData` moves), and `core/` includes `math/`.
+  - **The docs test** (`testDocs`): layers read from `docs/LAYOUT.md`'s table rather than copied, budgets, line lengths, the paths the checked docs name, the index, and repeated 12-word runs (shingling, Broder 1997). Its first run found a sentence repeated between two of the new files.
+  - **Measured:** 740 ms at first; 185 ms after `fs::relative` (which resolves both paths on disk: 300 ms over 600 sources) became `lexically_relative` and `src/` was walked once.
+
 ## Tools outside the phases
 
 - `loading-screen` (Nov 11 2026): pipelines compiled on every core, with a loading screen. The user: "the game takes a very long time to respond after a fresh build", then "can we have a screen that says building shaders and a loading bar or something like that, rather than it just not responding for a min".

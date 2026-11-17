@@ -353,7 +353,8 @@ Done before the rest of phase 18, at the user's request (Nov 17 2026). Starts fr
 - [ ] `README.md` cut to pitch, features a line each, install, build, controls, a pointer to the layout
 - [ ] `ENGINE_GUIDE.md` trimmed of repetition
 - [x] Memory deduplicated: project rules out of memory, into `CLAUDE.md` or rules
-- [ ] Checks (a C++ test) against needless growth: budgets; the same 12-word run in two docs (one home per fact); paths in any doc that no longer exist (fail) and backticked names gone from `src/` (warning); lines or paragraphs past a length in `CLAUDE.md`, rules, skills and architecture files; dates and measurement stories outside `BUILDLOG.md` and `ROADMAP.md` (warning); every `src/` folder covered by an architecture file; every doc in `docs/INDEX.md`; includes follow the layers
+- [x] Checks against needless growth (`testDocs`, `docs-refactor`): layers from `docs/LAYOUT.md`, budgets, line lengths, paths, the index, repeated 12-word runs, over the docs refactored so far
+- [ ] The docs report (`tests.exe --docs-report`, after the split): warnings for dates and measurements outside `BUILDLOG.md` and `ROADMAP.md` and for backticked names gone from `src/`; every `src/` folder covered by an architecture file
 - [ ] A pre-commit reminder (a Claude Code hook): `src/<x>` changed but its architecture file did not; sections are rewritten when behaviour changes, not appended to
 - [x] The docs-review skill, run at the end of each phase: finished phases in `ROADMAP.md` cut to their milestone and branches, memory deduplicated, misplaced items moved to their narrowest home
 - [x] The documentation workflow written down: a branch ticks its `ROADMAP.md` line, adds a `BUILDLOG.md` entry of at most 10 bullets, replaces its architecture section, adds a `README.md` line if players see it

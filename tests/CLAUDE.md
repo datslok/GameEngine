@@ -3,6 +3,7 @@
 - Plain `assert` tests, one `testXxx()` a file. Adding one: `add-test` skill.
 - No GPU or window. GPU tests (`tests/gpu/`, `make gputest`) are their own program, never registered in `test_main.cpp`.
 - Never compile with `-DNDEBUG` (every assert would vanish).
+- `docs_test.cpp` checks the docs: layers from `docs/LAYOUT.md`, budgets, line lengths, paths, the index, repeated text. A doc joins `checkedDocs` when phase 19 refactors it.
 
 ## Lists in `test_main.cpp`
 
