@@ -9,6 +9,7 @@ Never run these on your own: they take long and the user checks the pictures by 
 
 | Command | Does |
 |---|---|
+| `make test-slow-release` | First: includes `testGoldenViewScenes` (each view's scene holds still and repeats); a failure there makes the comparison meaningless |
 | `make golden` | Renders every game's golden views, compares with `tests/golden/<GPU>/<game>/`; captures and difference heatmaps in `build/golden/<GPU>/<game>/` |
 | `make golden-save [GAME=<name>]` | Makes the captures the references (one game with `GAME=`) |
 | `make gputest` / `make gputest-release` | Every shader library against its C++ mirror (worst share of tolerance per group; any validation error fails), then the golden images |

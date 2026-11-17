@@ -93,6 +93,7 @@ void testNormalMapping();
 void testHalfFloat();
 void testImageCompare();
 void testGoldenViews();
+void testGoldenViewScenes();
 void testSun();
 void testCelestial();
 void testStars();
@@ -216,13 +217,16 @@ void testClusters();
 void testComputeDispatch();
 
 /*
-* The slow tests, run only with --slow (make test-slow): vertex block descent and its coarse levels, opt-in solvers
-* parked until phase 10 needs them, whose tests settle sheets with every level on one thread (about 31 s in release, as
-* much as all the routine tests together). Run them when the cloth solver changes.
+* The slow tests, run only with --slow (make test-slow):
+* - vertex block descent and its coarse levels, opt-in solvers parked until phase 10 needs them, whose tests settle
+*   sheets with every level on one thread (about 31 s in release). Run them when the cloth solver changes.
+* - the golden views' scenes, built and checked to hold still and repeat (about 70 s). The golden skill runs them before
+*   a golden run.
 */
 void runSlowTests() {
     testClothHierarchy();
     testClothBlockDescent();
+    testGoldenViewScenes();
 }
 
 /*
