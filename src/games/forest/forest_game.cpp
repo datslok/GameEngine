@@ -549,13 +549,20 @@ namespace {
                                                               .alphaCutoff = isCutOut(material) ? material.alphaCutoff : 0.0f}},
                                                 impostorFrames, impostorTexels, jobs);
         const Aabb box = indexedMeshBounds(seen);
+        // A seen mesh thinned card by card (the palms' leaflets, scene/card_thinning.h) fades into its level, its own first
+        // vertices, and then its card: the shadow's stand-in is never seen.
+        const bool thinned = seen.thinning.cardSize > 0.0f;
         const float shadowLevelError = std::max(shadowError, levelError);
-        const float impostorError = std::max(impostorErrorMetres, shadowLevelError);
+        const float impostorError = std::max(impostorErrorMetres, thinned ? levelError : shadowLevelError);
 
         const MeshHandle leaves = assets.addDrawnMesh(std::move(seen));
         const MeshHandle levelMesh = assets.addDrawnMesh(std::move(level));
         const MeshHandle shadowMesh = assets.addDrawnMesh(std::move(shadow));
-        assets.setMeshLevels(leaves, {MeshLevel{levelMesh, levelError}, MeshLevel{shadowMesh, shadowLevelError}, MeshLevel{MeshHandle{}, impostorError}});
+        if (thinned) {
+            assets.setMeshLevels(leaves, {MeshLevel{levelMesh, levelError, true}, MeshLevel{MeshHandle{}, impostorError}});
+        } else {
+            assets.setMeshLevels(leaves, {MeshLevel{levelMesh, levelError}, MeshLevel{shadowMesh, shadowLevelError}, MeshLevel{MeshHandle{}, impostorError}});
+        }
         assets.setMeshLevelOptions(leaves, MeshLevelOptions{.hiddenBelowError = 0.0f, .chooseBounds = box});
 
         const MeshHandle card = assets.addDrawnMesh(impostorCardMesh(baked.centre, baked.radius));

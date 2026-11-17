@@ -191,3 +191,16 @@ IndexedMesh meshPrefix(const IndexedMesh& mesh, std::size_t vertexCount, std::si
 
     return prefix;
 }
+
+IndexedMesh thinnedLevel(const IndexedMesh& mesh) {
+    const auto going = std::find_if(mesh.thinningCards.begin(), mesh.thinningCards.end(), [](const ThinningCard& card) { return card.rank > 0.0f; });
+    const std::size_t kept = mesh.thinningCards.empty() ? mesh.vertices.size() : static_cast<std::size_t>(going - mesh.thinningCards.begin());
+    std::size_t triangles = 0;
+
+    while (3 * triangles + 2 < mesh.indices.size() && mesh.indices[3 * triangles] < kept && mesh.indices[3 * triangles + 1] < kept &&
+           mesh.indices[3 * triangles + 2] < kept) {
+        ++triangles;
+    }
+
+    return meshPrefix(mesh, kept, 3 * triangles);
+}

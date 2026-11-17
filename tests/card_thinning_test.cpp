@@ -136,6 +136,21 @@ namespace {
         }
 
         assert(threw);
+
+        // A mesh made kept cards first: its level is the vertices before the first card ranked to go, and the triangles
+        // before the first reaching them.
+        mesh.thinningCards[3].rank = 0.7f;
+        mesh.thinningCards[4].rank = 0.8f;
+        mesh.thinningCards[5].rank = 0.9f;
+        mesh.indices = {0, 1, 2, 2, 1, 0, 3, 4, 5};
+        const IndexedMesh kept = thinnedLevel(mesh);
+        assert(kept.vertices.size() == 3 && (kept.indices == std::vector<std::uint32_t>{0, 1, 2, 2, 1, 0}));
+
+        // Nothing to thin: the whole mesh.
+        IndexedMesh plain;
+        plain.vertices = mesh.vertices;
+        plain.indices = mesh.indices;
+        assert(thinnedLevel(plain).indices.size() == 9);
     }
 
     /*

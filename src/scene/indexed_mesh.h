@@ -55,6 +55,10 @@ struct IndexedMesh {
 */
 IndexedMesh meshPrefix(const IndexedMesh& mesh, std::size_t vertexCount, std::size_t indexCount);
 
+// A mesh made kept cards first (scene/card_thinning.h) cut to its kept cards: the vertices before the first card ranked to
+// go and the triangles before the first reaching past them (meshPrefix); the whole mesh when nothing is thinned.
+IndexedMesh thinnedLevel(const IndexedMesh& mesh);
+
 /*
 * The hanging entries for the vertices from firstVertex on, each entry: a mesh that had none yet gets the default (its
 * own sway, no arm) for its earlier vertices first, so the list stays one a vertex. Nothing for a mesh with no entries

@@ -67,8 +67,7 @@ namespace {
     constexpr float stalkTileMetres = 1.0f;
     constexpr float stemStepMetres = 0.5f;
 
-    // The coarser level and the shadow's stand-in: the pairs kept, segments, sides round.
-    constexpr PalmDetail levelDetail{.pairShare = 0.5f, .leafletSegments = 2, .rachisSides = 3, .stemSides = 4};
+    // The shadow's stand-in: the pairs kept, segments, sides round.
     constexpr PalmDetail shadowDetail{.pairShare = 0.25f, .leafletSegments = 2, .rachisSides = 3, .stemSides = 3};
 
     // The leaflet's picture: its parallel veins either side of the midrib, the midrib's and a vein's half-widths (shares
@@ -139,6 +138,16 @@ namespace {
     }
 
     // The leafy part's spacing between pairs (metres) of a frond length long with pairs pairs.
+    // Card thinning's records for the vertices from first on that never move (a thinned palm's stem and stalks): each its
+    // own anchor, so no scale moves it.
+    void recordStillVertices(IndexedMesh& mesh, std::size_t first) {
+        mesh.thinningCards.resize(first, ThinningCard{});
+
+        for (std::size_t vertex = first; vertex < mesh.vertices.size(); ++vertex) {
+            mesh.thinningCards.push_back(ThinningCard{mesh.vertices[vertex].position, 0.0f});
+        }
+    }
+
     float pairSpacing(float frondLength, int pairs) {
         return frondLength * (1.0f - palmPetioleShare) / static_cast<float>(std::max(pairs, 1));
     }
@@ -173,6 +182,7 @@ void visit(ForestPalmSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Most fronds", settings.mostFronds, {.min = 1, .max = 40, .sliderMax = 20, .applies = FieldApplies::AtStartup});
     visitor.field("Leaflet pairs", settings.leafletPairs, {.min = 4, .max = 80, .sliderMax = 50, .applies = FieldApplies::AtStartup});
     visitor.field("Leaflet width", settings.leafletWidthShare, {.min = 0.02f, .max = 0.5f, .sliderMax = 0.3f, .applies = FieldApplies::AtStartup});
+    visitor.field("Leaflet growth", settings.leafletGrowth, {.min = 0.05f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Droop", settings.droopDegrees, {.min = 0.0f, .max = 150.0f, .sliderMax = 120.0f, .unit = "deg", .applies = FieldApplies::AtStartup});
     visitor.field("Shadow cascades", settings.shadowCascades, {.min = 0, .max = 4, .applies = FieldApplies::AtStartup});
     visitor.field("Impostor error", settings.impostorErrorMetres, {.min = 0.001f, .max = 10.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
@@ -226,6 +236,7 @@ PalmShape palmVariantShape(const ForestPalmSettings& settings, int variant, std:
         .droopRadians = radiansFromDegrees(settings.droopDegrees),
         .leafletPairs = settings.leafletPairs,
         .leafletWidthShare = settings.leafletWidthShare,
+        .leafletGrowth = settings.leafletGrowth,
         .seed = forestShapeSeed(seed, static_cast<std::uint32_t>(variant) + 1)
     };
 }
@@ -299,6 +310,15 @@ IndexedMesh growPalm(const PalmShape& shape, const PalmDetail& detail) {
 
     appendStalk(mesh, stem, detail.stemSides);
 
+    // Thinned: the stem still (its vertices their own anchors), the leaflets the thinning leaves out gathered apart.
+    IndexedMesh removed;
+    PinnateThinning thinning{.removed = &removed, .keepEvery = palmKeepEvery, .leastShare = 1.0f / static_cast<float>(palmKeepEvery),
+                             .rankSeed = forestShapeSeed(shape.seed, 7)};
+
+    if (detail.thinned) {
+        recordStillVertices(mesh, 0);
+    }
+
     const int pairs = keptPairs(shape.leafletPairs, detail.pairShare);
     const float widthShare = std::min(widestLeafletShare, shape.leafletWidthShare * static_cast<float>(shape.leafletPairs) / static_cast<float>(pairs));
     const float phase = fullTurnRadians * forestUnitRandom(shape.seed, 0);
@@ -322,13 +342,24 @@ IndexedMesh growPalm(const PalmShape& shape, const PalmDetail& detail) {
         appendPinnateFrond(mesh,
                            PinnateFrond{.base = base, .azimuth = azimuth, .elevation = elevation, .length = length, .droop = droop, .pairs = pairs,
                                         .leafletWidthShare = widthShare, .rachisSides = detail.rachisSides, .leafletSegments = detail.leafletSegments},
-                           random);
+                           random, detail.thinned ? &thinning : nullptr);
+    }
+
+    // The leaflets that go, after everything kept.
+    if (detail.thinned) {
+        const std::uint32_t offset = static_cast<std::uint32_t>(mesh.vertices.size());
+        mesh.vertices.insert(mesh.vertices.end(), removed.vertices.begin(), removed.vertices.end());
+        mesh.thinningCards.insert(mesh.thinningCards.end(), removed.thinningCards.begin(), removed.thinningCards.end());
+
+        for (const std::uint32_t index : removed.indices) {
+            mesh.indices.push_back(index + offset);
+        }
     }
 
     return mesh;
 }
 
-void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std::function<float()>& random) {
+void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std::function<float()>& random, PinnateThinning* thinning) {
     const auto spread = [&](float range) {
         return range * (2.0f * random() - 1.0f);
     };
@@ -341,7 +372,12 @@ void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std:
         rachis.radii.push_back(rachisRadiusShare * frond.length * (1.0f - palmRachisTaper * along));
     }
 
+    const std::size_t stalkStart = mesh.vertices.size();
     appendStalk(mesh, rachis, frond.rachisSides);
+
+    if (thinning != nullptr) {
+        recordStillVertices(mesh, stalkStart);
+    }
 
     // The leaflets in pairs along the leafy part, each side's leaning forward and lifted out of the frond's plane.
     const float longest = palmLeafletShare * frond.length;
@@ -359,28 +395,52 @@ void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std:
             const Vec3 out = side * (hand * std::cos(lift)) + frondUp * std::sin(lift);
             const Vec3 direction = (at.direction * std::cos(angle) + out * std::sin(angle)).normalized();
             const float leafletLength = longest * palmLeafletLength(leafy) * (1.0f + spread(leafletLengthJitter));
-            appendStrapLeaf(mesh, at.point, direction, frondUp, leafletLength, frond.leafletWidthShare * leafletLength, frond.leafletSegments,
+            // Thinned, a pair kept goes to the mesh, any other to the removed ones, each vertex its leaflet's base and rank.
+            const bool kept = thinning == nullptr || pair % std::max(thinning->keepEvery, 1) == 0;
+            IndexedMesh& into = kept ? mesh : *thinning->removed;
+            const std::size_t first = into.vertices.size();
+            appendStrapLeaf(into, at.point, direction, frondUp, leafletLength, frond.leafletWidthShare * leafletLength, frond.leafletSegments,
                             leafletFold());
+
+            if (thinning != nullptr) {
+                const float rank = kept ? 0.0f : removedCardRank(forestUnitRandom(thinning->rankSeed, thinning->leaflets), thinning->leastShare);
+                into.thinningCards.resize(first, ThinningCard{});
+                into.thinningCards.resize(into.vertices.size(), ThinningCard{at.point, rank});
+                ++thinning->leaflets;
+            }
         }
     }
 }
 
 PalmMeshes growPalmMeshes(const PalmShape& shape) {
-    PalmMeshes meshes{growPalm(shape, PalmDetail{}), growPalm(shape, levelDetail), growPalm(shape, shadowDetail)};
+    PalmMeshes meshes{growPalm(shape, PalmDetail{.thinned = true}), IndexedMesh{}, growPalm(shape, shadowDetail)};
 
-    // Fitted to its height: its top, wherever its fronds rose to, at the shape's height.
+    // Fitted to its height: its top, wherever its fronds rose to, at the shape's height (the leaflets' bases too).
     const float top = indexedMeshBounds(meshes.palm).maximum.y;
     const float fit = top > 0.0f ? shape.height / top : 1.0f;
 
-    for (IndexedMesh* mesh : {&meshes.palm, &meshes.level, &meshes.shadow}) {
+    for (IndexedMesh* mesh : {&meshes.palm, &meshes.shadow}) {
         for (MeshVertex& vertex : mesh->vertices) {
             vertex.position = vertex.position * fit;
         }
     }
 
-    // A coarser level strays about as far as the gap its dropped pairs leave.
+    for (ThinningCard& card : meshes.palm.thinningCards) {
+        card.anchor = card.anchor * fit;
+    }
+
+    /*
+    * Thinned leaflet by leaflet into every palmKeepEvery-th pair (scene/card_thinning.h), which is its coarser level (its
+    * first vertices): that level strays about as far as the gap its dropped pairs leave, and the fade spends its error
+    * on the way there, the kept leaflets growing by share^-leafletGrowth.
+    */
     const float spacing = pairSpacing(shape.frondLength, shape.leafletPairs);
-    meshes.levelError = fit * (pairSpacing(shape.frondLength, keptPairs(shape.leafletPairs, levelDetail.pairShare)) - spacing);
+    const float leastShare = 1.0f / static_cast<float>(palmKeepEvery);
+    const float gap = fit * spacing * static_cast<float>(palmKeepEvery - 1);
+    const float growth = std::max(shape.leafletGrowth, 0.01f);
+    meshes.palm.thinning = CardThinning{.cardSize = gap / (std::pow(leastShare, -growth) - 1.0f), .growth = growth, .leastShare = leastShare};
+    meshes.level = thinnedLevel(meshes.palm);
+    meshes.levelError = thinningError(meshes.palm.thinning, leastShare);
     meshes.shadowError = fit * (pairSpacing(shape.frondLength, keptPairs(shape.leafletPairs, shadowDetail.pairShare)) - spacing);
     return meshes;
 }
