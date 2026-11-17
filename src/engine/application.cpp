@@ -1,4 +1,5 @@
 #include "engine/application.h"
+#include "assets/texture_cooking.h"
 #include "core/build_info.h"
 #include "scene/flat_faces.h"
 #include "engine/debug_views.h"
@@ -13,6 +14,7 @@
 
 #include <SDL3/SDL.h>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -301,7 +303,8 @@ void Application::applyMouseMode() {
 
 /*
 * Games may load assets at any time. Assets are only appended, so the new ones are exactly those past the renderer's count: no per-entity checks.
-* Uploads must happen before the frame begins.
+* Uploads must happen before the frame begins. New textures are compressed (or read from the texture cache) together,
+* a texture a job, then uploaded in handle order (docs/TEXTURECOMPRESSION.md).
 */
 void Application::prepareNewResources() {
     while (renderer.getMeshCount() < assets.getMeshCount()) {
@@ -326,10 +329,36 @@ void Application::prepareNewResources() {
         flatFacesByMesh.push_back(assets.isDeforming(next) ? std::vector<FlatFace>{} : findFlatFaces(assets.getMesh(next)));
     }
 
-    while (renderer.getTextureCount() < assets.getTextureCount()) {
-        const TextureHandle next{static_cast<std::uint32_t>(renderer.getTextureCount())};
-        const ImageData& image = assets.getTexture(next);
+    const std::size_t firstTexture = renderer.getTextureCount();
+    const std::size_t newTextures = assets.getTextureCount() - firstTexture;
+    const bool compress = settings.textureCompression.compress && renderer.supportsBlockCompression();
+    std::vector<std::optional<CompressedTexture>> cooked(newTextures);
+    const double cookStart = profilerSeconds();
+
+    if (compress) {
+        jobs.parallelFor(newTextures, 1, [&](std::size_t index) {
+            const ImageData& image = assets.getTexture(TextureHandle{static_cast<std::uint32_t>(firstTexture + index)});
+
+            if (shouldCompress(image)) {
+                cooked[index] = cookTexture(image, settings.textureCompression, textureCacheFolder, jobs);
+            }
+        });
+    }
+
+    for (std::size_t index = 0; index < newTextures; ++index) {
+        if (cooked[index]) {
+            renderer.uploadCompressedTexture(*cooked[index]);
+            cooked[index].reset();
+            continue;
+        }
+
+        const ImageData& image = assets.getTexture(TextureHandle{static_cast<std::uint32_t>(firstTexture + index)});
         renderer.uploadTexture(image.width, image.height, std::span<const Uint8>{image.pixels.data(), image.pixels.size()}, image.encoding, image.mips);
+    }
+
+    // A first start encodes every texture, which takes a while: say so, with the time, for measuring.
+    if (const double seconds = profilerSeconds() - cookStart; compress && seconds > 0.5) {
+        SDL_Log("%llu textures compressed or read from %s in %.1f s", static_cast<unsigned long long>(newTextures), textureCacheFolder, seconds);
     }
 }
 

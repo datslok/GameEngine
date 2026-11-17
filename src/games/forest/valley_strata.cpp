@@ -52,6 +52,7 @@ namespace {
         image.width = static_cast<std::uint32_t>(size);
         image.height = static_cast<std::uint32_t>(size);
         image.encoding = TextureEncoding::Linear;
+        image.storage = TextureStorage::Exact; // read as numbers that move the rock's beds and stains; small anyway
         image.pixels.resize(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4);
 
         for (int y = 0; y < size; ++y) {
@@ -136,6 +137,7 @@ ImageData strataImage(const std::vector<StrataBand>& bands, int texels) {
     image.width = static_cast<std::uint32_t>(texels);
     image.height = 1;
     image.encoding = TextureEncoding::Linear;
+    image.storage = TextureStorage::Exact; // a lookup table: compression would smear one bed's edge into the next
     image.pixels.assign(static_cast<std::size_t>(texels) * 4, 0);
     const float texelMetres = (valleyStrataTop - valleyStrataBottom) / static_cast<float>(texels);
 

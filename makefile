@@ -56,9 +56,9 @@ SOURCES := $(strip $(call rwildcard,src,*.cpp))
 MAIN_SOURCE := src/app/main.cpp
 # Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and Vulkan backends,
 # vk-bootstrap (Vulkan device set-up) and the Vulkan Memory Allocator, and in C, MikkTSpace (tangents for normal maps)
-# and volk (Vulkan function loading).
-EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp) $(wildcard external/vk-bootstrap/*.cpp) $(wildcard external/vma/*.cpp) $(wildcard external/meshoptimizer/*.cpp)
-EXTERNAL_C_SOURCES := $(wildcard external/mikktspace/*.c) $(wildcard external/volk/*.c)
+# and volk (Vulkan function loading); bc7enc's BC7 encoder (C) and decoder (C++) for texture compression.
+EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp) $(wildcard external/vk-bootstrap/*.cpp) $(wildcard external/vma/*.cpp) $(wildcard external/meshoptimizer/*.cpp)                     $(wildcard external/bc7enc/*.cpp)
+EXTERNAL_C_SOURCES := $(wildcard external/mikktspace/*.c) $(wildcard external/volk/*.c) $(wildcard external/bc7enc/*.c)
 ENGINE_SOURCES := $(filter-out $(MAIN_SOURCE),$(SOURCES)) $(EXTERNAL_SOURCES)
 TEST_SOURCES := $(wildcard tests/*.cpp)
 # The GPU tests (make gputest) are a program of their own, so make test keeps running without a GPU.
@@ -135,6 +135,10 @@ $(OBJECT_DIR)/src/render/gpu/sky_visibility_bake.o $(OBJECT_DIR)/src/physics/sta
 $(OBJECT_DIR)/src/core/blue_noise.o: CXXFLAGS += -O2
 # So is the forest's valley: a few million heights for its rings of ground and placing its pillars and islands, at every start.
 $(OBJECT_DIR)/src/games/forest/forest_terrain.o $(OBJECT_DIR)/src/games/forest/valley_shapes.o: CXXFLAGS += -O2
+# And BC7 encoding (core/block_compression): textures missing from the texture cache are encoded at start-up, a minute
+# or more unoptimised. The encoder is C, compiled with OPTIMISATION rather than CXXFLAGS.
+$(OBJECT_DIR)/external/bc7enc/bc7enc.o: OPTIMISATION := -O2
+$(OBJECT_DIR)/src/core/block_compression.o $(OBJECT_DIR)/external/bc7enc/bc7decomp.o: CXXFLAGS += -O2
 endif
 
 # ImGui's Vulkan backend calls Vulkan through volk, which it includes as <volk.h>.

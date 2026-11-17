@@ -48,6 +48,12 @@ namespace {
         assert(setup.registry.execute("set engine.render.materials.parallaxSelfShadows false").ok && !setup.settings.render.materials.parallaxSelfShadows);
         assert(setup.registry.execute("set engine.render.materials.parallaxSteps 16").ok && setup.settings.render.materials.parallaxSteps == 16);
         assert(setup.settings.render.materials.lightThroughLeaves);
+
+        // Texture compression, on by default, read as textures load: a start-up field, given at launch, not while running.
+        assert(setup.settings.textureCompression.compress && setup.settings.textureCompression.quality == 0);
+        const CommandReply compress = setup.registry.execute("set engine.textureCompression.compress false");
+        assert(!compress.ok && compress.text.find("start-up") != std::string::npos && setup.settings.textureCompression.compress);
+        assert(setup.registry.execute("set engine.textureCompression.quality 2").text.find("start-up") != std::string::npos);
         assert(setup.registry.execute("set engine.render.materials.lightThroughLeaves false").ok && !setup.settings.render.materials.lightThroughLeaves);
 
         assert(setup.registry.execute("set engine.clothOnGPU false").ok);

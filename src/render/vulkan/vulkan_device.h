@@ -74,6 +74,9 @@ public:
     // coloured shadow maps use: the tint multiplied, the glass depth's nearest kept. Without it they stay off.
     bool supportsIndependentBlending() const;
 
+    // Whether textures may be BC block-compressed (textureCompressionBC, on when the GPU has it).
+    bool supportsBlockCompression() const;
+
     // Whether the optional device extensions it was given are on (all of them; none when one is missing).
     bool hasOptionalExtensions() const;
 
@@ -137,6 +140,7 @@ private:
     bool rayQueries = false;
     bool dualSourceBlending = false;
     bool independentBlending = false;
+    bool blockCompression = false;
     bool fsrFeatures = false;
     bool optionalExtensions = false;
     std::uint32_t scratchAlignment = 1;

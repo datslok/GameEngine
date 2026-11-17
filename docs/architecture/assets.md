@@ -1,6 +1,6 @@
 # Assets
 
-Covers: `src/assets/asset_manager`, `src/assets/obj_loader`, `src/assets/gltf_loader`, `src/assets/image_loader`, `src/assets/cgltf.cpp`, `src/scene/asset_handles.h`, `src/scene/image_data.h`, `src/scene/model`
+Covers: `src/assets/asset_manager`, `src/assets/obj_loader`, `src/assets/gltf_loader`, `src/assets/image_loader`, `src/assets/cgltf.cpp`, `src/scene/asset_handles.h`, `src/scene/image_data.h`, `src/scene/model`, `src/assets/texture_cooking`, `src/core/block_compression`
 
 What the game loads or makes on the CPU, and how it reaches the GPU. Folder rules (UV origin, flips, caching keys, layering): `src/assets/CLAUDE.md`. Materials: [materials.md](materials.md). Meshes and their render format: [meshes.md](meshes.md).
 
@@ -63,16 +63,33 @@ Owns every CPU-side mesh, image and imported model. Append-only, so "new since l
 | deforming | its topology's `rest`, `uploadMesh(rest, true)` | `meshBounds` (replaced each frame) | none |
 | drawn-only | as it is | `indexedMeshBounds` | none |
 
-Textures: `uploadTexture(width, height, pixels, encoding, mips)`. GPU side: [meshes.md](meshes.md) (mesh buffers), Colour and textures below.
+Textures: new ones are cooked together, a texture a job, then uploaded in handle order: `uploadCompressedTexture` for a compressed one, else `uploadTexture(width, height, pixels, encoding, mips)`. GPU side: [meshes.md](meshes.md) (mesh buffers), Colour and textures below.
 
 ## Colour and textures on the GPU
 
-- `ImageData`: RGBA8 rows, `encoding`, optional CPU-built `mips` (`ImageLevel`s). In `scene/` so scene code can make images without `assets/`.
+- `ImageData`: RGBA8 rows, `encoding`, optional CPU-built `mips` (`ImageLevel`s), `storage` (`Compressible`, or `Exact` for a game's lookup tables: the forest's ground weights, strata, warp, streaks, variation). In `scene/` so scene code can make images without `assets/`. The CPU copy stays RGBA8 (games read it: impostor bakes, leaf clusters).
 - `surfaceTexture(encoding)` (`render/vulkan/vulkan_texture`): `R8G8B8A8_SRGB` for colour (the GPU decodes when sampling and when averaging mips), `R8G8B8A8_UNORM` for data.
 - `VulkanTexture`: level 0 copied in, smaller levels blitted from the one above (`mipLevelCount`, `render/gpu/mip_levels`), or copied in when built on the CPU.
+- Compressed (below): `compressedSurfaceFormat` gives `BC7_SRGB_BLOCK` or `BC7_UNORM_BLOCK`; every level copied in, no blits.
 - The surface sampler: trilinear, repeat, anisotropy up to 16 (or the GPU's limit), `maxLod` `VK_LOD_CLAMP_NONE` (0 would lock sampling to level 0).
 - A missing texture binds the white stand-in, `whiteTextureSlot` 0; a handle's bindless slot is `bindlessTextureSlot` (handle + 1). White multiplies colours and factors by 1.
 - The SDR swapchain is `B8G8R8A8_SRGB`, encoding on write. Linear light, sRGB bytes and the decode: [materials.md](materials.md), Colour.
+
+## Texture compression
+
+Research and choices: `docs/TEXTURECOMPRESSION.md` (BC7 for everything compressible, normal maps included, so Toksvig keeps reading the averaged length).
+
+| Step | Where | Does |
+|---|---|---|
+| Choose | `shouldCompress`, `bc7OptionsFor` | `Exact` stays RGBA8; sRGB colour perceptual weights, linear data plain |
+| Mips | `compressTexture`, `averagedMips` (`core/coverage_mips`) | the image's built mips (cut-outs) or each level halved on the CPU, sRGB as light, normals not renormalised |
+| Encode | `compressBc7` (`core/block_compression`, bc7enc in `external/bc7enc`) | a row of blocks a job; edge blocks repeat the last row and column; same blocks on any thread count |
+| Keep | `cookTexture`, `textureCacheKey`, `readCompressedTexture`, `writeCompressedTexture` | `build/texture_cache/<16 hex>.bc7`, keyed by FNV-1a of shape, encoding, texels, built mips, options and the file version; written to a temporary file and renamed; a missing, short or inconsistent file is encoded again; an unwritable folder is skipped |
+| Upload | `Application::prepareNewResources` | only when `engine.textureCompression.compress` and the GPU has `textureCompressionBC` (`VulkanDevice::supportsBlockCompression`); logs the time when over 0.5 s |
+
+- Settings (`TextureCompressionSettings`, start-up fields): `compress` (on), `quality` 0-4 (bc7enc's uber level, part of the key).
+- The file version (`fileVersion`, `texture_cooking.cpp`) goes up when the layout, the encoder or the mips change, so stale files are never found.
+- `decompressBc7` decodes as the GPU does, for tests.
 
 ## Loaders
 
@@ -89,4 +106,4 @@ Textures: `uploadTexture(width, height, pixels, encoding, mips)`. GPU side: [mes
 
 ## Tests
 
-`asset_manager_test`, `obj_loader_test`, `obj_uv_test`, `gltf_loader_test`, `gltf_attributes_test`, `gltf_texture_test`, `glb_texture_test`, `gltf_material_test`, `gltf_normal_map_test`, `texture_encoding_test`, `raw_image_png_test`, `stars_test`.
+`block_compression_test`, `texture_cooking_test`, `asset_manager_test`, `obj_loader_test`, `obj_uv_test`, `gltf_loader_test`, `gltf_attributes_test`, `gltf_texture_test`, `glb_texture_test`, `gltf_material_test`, `gltf_normal_map_test`, `texture_encoding_test`, `raw_image_png_test`, `stars_test`.

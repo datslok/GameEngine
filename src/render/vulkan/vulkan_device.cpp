@@ -230,6 +230,12 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     independent.independentBlend = VK_TRUE;
     independentBlending = physicalDevice.enable_features_if_present(independent);
 
+    // Optional: BC block-compressed textures (docs/TEXTURECOMPRESSION.md), a quarter of RGBA8's memory. Every desktop
+    // GPU has it; without it textures are uploaded uncompressed.
+    VkPhysicalDeviceFeatures blockCompressed{};
+    blockCompressed.textureCompressionBC = VK_TRUE;
+    blockCompression = physicalDevice.enable_features_if_present(blockCompressed);
+
     // Optional: hardware ray tracing through ray queries (any shader asks what a ray hits), with the acceleration
     // structures it searches. Without them everything ray-traced stays off.
     const std::vector<const char*> rayExtensions{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
@@ -421,6 +427,10 @@ bool VulkanDevice::supportsRayQueries() const {
 
 bool VulkanDevice::supportsDualSourceBlending() const {
     return dualSourceBlending;
+}
+
+bool VulkanDevice::supportsBlockCompression() const {
+    return blockCompression;
 }
 
 bool VulkanDevice::supportsIndependentBlending() const {

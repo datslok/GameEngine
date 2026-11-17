@@ -489,6 +489,7 @@ ImageData forestWeightsImage(int size, const GroundExtent& extent, JobSystem& jo
     image.width = static_cast<std::uint32_t>(size);
     image.height = static_cast<std::uint32_t>(size);
     image.encoding = TextureEncoding::Linear;
+    image.storage = TextureStorage::Exact; // four blend weights in one texel: compression would mix them
     image.pixels.resize(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4);
     const float texelMetres = 2.0f * extent.halfSize / static_cast<float>(size);
 

@@ -3,6 +3,7 @@
 #include "core/coverage_mips.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "scene/asset_handles.h"
+#include "scene/image_data.h"
 
 #include <cstdint>
 #include <span>
@@ -23,6 +24,9 @@ struct VulkanTextureDescription {
 // An RGBA image with 8 bits per channel for a surface: colour (sRGB, decoded to linear as it is sampled) or data (linear).
 VulkanTextureDescription surfaceTexture(TextureEncoding encoding);
 
+// The BC7 format for a surface's compressed texture: colour (sRGB) or data (linear), decoded as RGBA8 would be.
+VkFormat compressedSurfaceFormat(TextureEncoding encoding);
+
 /*
 * A texture in GPU memory, ready for fragment shaders to sample. A surface's smaller mip levels are made on the GPU, each
 * by a filtered copy (a blit) of the level above, as SDL_GPU made them, so distant surfaces read pre-averaged colours,
@@ -32,6 +36,9 @@ class VulkanTexture {
 public:
     VulkanTexture(const VulkanDevice& device, ImmediateCommands& uploads, std::uint32_t width, std::uint32_t height,
                   std::span<const std::uint8_t> texels, const VulkanTextureDescription& description, std::span<const ImageLevel> mips = {});
+
+    // A surface's texture already BC7-compressed, every level built (assets/texture_cooking.h), each copied in as it is.
+    VulkanTexture(const VulkanDevice& device, ImmediateCommands& uploads, const CompressedTexture& compressed);
 
     VkImageView getView() const;
     bool isSurface() const;
