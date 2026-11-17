@@ -14,7 +14,8 @@
 // One heap's numbers, as VMA reports them.
 struct HeapMemory {
     bool deviceLocal = false;      // memory on the graphics card itself (on an integrated GPU, system memory marked so)
-    std::uint64_t engineBytes = 0; // what the engine's allocator took from Vulkan
+    std::uint64_t engineBytes = 0; // what the engine's allocator took from Vulkan, in whole blocks (up to 256 MB each)
+    std::uint64_t inUseBytes = 0;  // what the engine's resources take of those blocks
     std::uint64_t usedBytes = 0;   // what the whole program uses (the engine's share without the driver's numbers)
     std::uint64_t budgetBytes = 0; // how much the driver lets the program use (VMA's estimate without them)
 };
@@ -24,6 +25,7 @@ struct VideoMemory {
     bool valid = false;
     bool driverReported = false; // whether used and budget come from the driver (VK_EXT_memory_budget)
     std::uint64_t engineBytes = 0;
+    std::uint64_t inUseBytes = 0;
     std::uint64_t usedBytes = 0;
     std::uint64_t budgetBytes = 0;
 };

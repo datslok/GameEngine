@@ -63,3 +63,5 @@
   - **Normals, measured on steep test bumps (about 7° a texel):** 1.3° off on average, 6° at worst, length within 0.034. Faint blockiness on close, glossy bumps is the risk the user accepted; BC5 with Toksvig baked into roughness is the way out.
   - **In the forest (laptop, start view):** 134 textures compressed, 155 MB of BC7 against 622 MB as RGBA8, so 466 MB saved. F4's ENGINE line fell only 2379 → 2123 MB: it counts VMA's blocks (256 MB each), so it moves in whole blocks. Frame time unchanged (GPU 26.5 ms both, MAIN 10.3 against 10.5 ms).
   - **Solid alpha can come back as 254:** bc7enc's mode 6 shares a last bit between colour and alpha. Harmless: cut-outs test against their cutoff, opaque surfaces ignore alpha.
+- `vram-in-use` (Nov 17 2026): F4's ENGINE figure counted VMA's blocks (up to 256 MB each), so texture compression's saving showed as 256 MB. It now shows `allocationBytes` (in use) beside the blocks (held).
+  - **Measured in the forest (laptop, start view):** in use 1841 MB compressed against 2311 MB without, 470 MB saved, as the cache's 466 MB predicted; held 2123 against 2379.

@@ -192,9 +192,9 @@ Then, from `Application`'s profilers (pale green, `profileDebugColour`):
 **Video memory** (`render/gpu/video_memory`): `summariseVideoMemory` adds up the device-local heaps only, so system memory the GPU can reach is left out and an integrated GPU's one heap counts.
 
 - Read at the start of each `drawScene` from `VulkanDevice::getHeapMemory` (VMA's heap budgets) after `startMemoryFrame` (makes VMA fetch the driver's figures again).
-- The engine's share: each heap's `blockBytes`, what VMA took from Vulkan.
+- The engine's share: each heap's `allocationBytes` (`inUseBytes`, what its resources take) and `blockBytes` (`engineBytes`, the blocks VMA took from Vulkan, up to 256 MB each, so it moves in steps and hides most changes; texture compression's 466 MB showed as 256).
 - Used and budget: the driver's for the whole process with `VK_EXT_memory_budget` (`reportsMemoryBudget`, `driverReported`), VMA's estimates without it.
-- Text: `VRAM used / budget MB  ENGINE n MB` (MB = 2^20 bytes), the engine's share alone without a driver budget, `VRAM -` before a measurement.
+- Text: `VRAM used / budget MB  ENGINE n MB IN USE, m HELD` (MB = 2^20 bytes), the engine's share alone without a driver budget, `VRAM -` before a measurement.
 
 ## Tests
 

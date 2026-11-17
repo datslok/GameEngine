@@ -77,7 +77,7 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
 // without probes.
 std::string probeStatsText(const ProbeStateCounts& counts);
 
-// The video memory line: "VRAM used / budget MB  ENGINE n MB" (megabytes of 2^20 bytes), or the engine's share alone
+// The video memory line: "VRAM used / budget MB  ENGINE n MB IN USE, m HELD" (megabytes of 2^20 bytes), or the engine's share alone
 // when the driver gives no budget, or "VRAM -" before anything was measured.
 std::string videoMemoryText(const VideoMemory& memory);
 
