@@ -508,7 +508,7 @@ private:
 
     // Every hanging mesh's vertices (render/gpu/wind.h, packHangingVertex), gathered as the meshes are uploaded and
     // copied to the GPU before the next frame that finds them changed; a stand-in bound until there are any.
-    std::vector<std::array<std::uint32_t, 2>> hangingRecords;
+    std::vector<std::array<std::uint32_t, 3>> hangingRecords;
     bool hangingChanged = false;
     VulkanBuffer hangingVertices;
     VulkanBuffer noHangingVertices;

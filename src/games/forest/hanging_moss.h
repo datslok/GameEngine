@@ -36,7 +36,7 @@ ImageData mossStrandImage(int width, int height, Pixel colour, std::uint32_t see
 * (v 1) at the top. Tangent across (+u), bitangent up (+v).
 */
 // Each corner hangs (scene/wind.h) from a fixed anchor, its arm armAbove (what its top already hangs by: a root tip's) plus
-// its depth below the top.
+// its depth below the top; it swings as a chain armAbove plus its length long.
 void appendMossClump(IndexedMesh& mesh, const Vec3& top, float length, float turnRadians, float armAbove = 0.0f);
 
 // A place moss can hang from: a point of a shape's surface and the level way out of the shape there.

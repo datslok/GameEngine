@@ -3,7 +3,7 @@
 
 /*
 * The wind force field's springs stepped one frame (render/gpu/wind.h): one invocation per cell of each cascade's
-* window and each category (a layer each). A cell still in last frame's window carries its spring on from last frame's
+* window and each of the field's springs (a layer each). A cell still in last frame's window carries its spring on from last frame's
 * image (the same texel: the window wraps round its texels); one new to the window, or every cell when last frame's
 * windows are unknown, starts at rest where the wind now holds it.
 */
@@ -22,16 +22,16 @@ layout(set = 0, binding = 2, rgba16f) uniform writeonly image2DArray current;
 void main() {
     ivec3 texel = ivec3(gl_GlobalInvocationID);
 
-    if (texel.x >= WIND_CELLS || texel.y >= WIND_CELLS || texel.z >= WIND_CASCADES * WIND_CATEGORIES) {
+    if (texel.x >= WIND_CELLS || texel.y >= WIND_CELLS || texel.z >= WIND_CASCADES * WIND_SPRINGS) {
         return;
     }
 
-    int cascade = texel.z / WIND_CATEGORIES;
-    int category = texel.z % WIND_CATEGORIES;
+    int cascade = texel.z / WIND_SPRINGS;
+    int springIndex = texel.z % WIND_SPRINGS;
     ivec4 window = field.windows[cascade];
     ivec2 cell = windCellOfTexel(texel.xy, window.xy);
     vec2 place = (vec2(cell) + 0.5) * field.cells[cascade].x;
-    vec4 spring = field.springs[category];
+    vec4 spring = field.springs[springIndex];
     vec2 velocity = windVelocity(field.wind.xy, field.wind.z, field.gusts, place, field.wind.w);
     vec2 target = windSpringTarget(velocity, spring.z);
 

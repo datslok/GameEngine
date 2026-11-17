@@ -46,5 +46,7 @@ void main() {
     } else if (function == GPU_TEST_WIND_FLUTTER) {
         vec4 rate = testInput(1);
         testOutput(0, vec4(windFlutterOffset(a.xyz, a.w, rate.xy, rate.z), 0.0));
+    } else if (function == GPU_TEST_WIND_CHAIN) {
+        testOutput(0, vec4(windChainShares(a.x, a.yzw), windChainHertz(a.x)));
     }
 }

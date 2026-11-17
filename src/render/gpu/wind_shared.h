@@ -14,6 +14,23 @@
 #define WIND_CATEGORY_GRASS 2
 #define WIND_CATEGORY_HANGING 3
 
+/*
+* The field's springs: the trees', plants' and grass's, then the hanging things' in three bands (short, medium, long),
+* since a hanging chain swings slower the longer it is; each hanging vertex blends the two bands round its own swing.
+* The hanging category's own sway reads the short band.
+*/
+#define WIND_HANGING_BANDS 3
+#define WIND_SPRINGS 6
+#define WIND_SPRING_HANGING_SHORT 3
+
+/*
+* A hanging chain's slowest swing (render/gpu/wind.h, windChainHertz): its period is WIND_CHAIN_PERIOD sqrt(L / g)
+* (2 pi over half the first zero of the Bessel function J0, 2.4048 / 2), its length floored at the shortest swing (m).
+*/
+#define WIND_GRAVITY 9.81
+#define WIND_CHAIN_PERIOD 5.2255
+#define WIND_SHORTEST_SWING 0.05
+
 // The field pass's workgroup side (an 8 x 8 square of cells, one layer).
 #define WIND_GROUP_SIDE 8
 

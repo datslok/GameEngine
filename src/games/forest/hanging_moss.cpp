@@ -123,7 +123,7 @@ void appendMossClump(IndexedMesh& mesh, const Vec3& top, float length, float tur
         mesh.vertices.push_back(MeshVertex{top - across * halfWidth, normal, Vec2{0.0f, 1.0f}, tangent});
 
         for (std::uint32_t added = corner; added < corner + 4; ++added) {
-            const HangingVertex hanging{windAnchorFixed, windAnchorFixed, 0.0f, armAbove + (top.y - mesh.vertices[added].position.y)};
+            const HangingVertex hanging{windAnchorFixed, windAnchorFixed, 0.0f, armAbove + (top.y - mesh.vertices[added].position.y), armAbove + length};
             appendHanging(mesh, added, &hanging);
         }
 

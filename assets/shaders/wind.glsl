@@ -11,7 +11,7 @@ struct WindField {
     vec4 wind;    // xy the direction (x, z), z the speed, w the time
     vec4 gusts;   // the gusts' strength and size, the turbulence's share and size
     vec4 step;    // x the frame's step, y 1 while the field is on
-    vec4 springs[WIND_CATEGORIES]; // frequency, damping, response
+    vec4 springs[WIND_SPRINGS]; // frequency, damping, response
     ivec4 windows[WIND_CASCADES];  // this frame's first cell (x, z), last frame's
     vec4 cells[WIND_CASCADES];     // a cell (m), 1 / the window's width (m)
     ivec4 flags;  // x 1 when last frame's windows are the ones the springs hold
@@ -171,6 +171,32 @@ vec3 windSwingOffset(float arm, vec3 place, float swing, float flutter, vec2 spr
     vec2 outwards = lean * reach;
     float rise = reach - sqrt(max(reach * reach - dot(outwards, outwards), 0.0));
     return vec3(outwards.x, rise, outwards.y) + windFlutterOffset(place, flutter * length(lean), flutterRate, seconds);
+}
+
+// A hanging chain of a length's slowest swing, Hz (windChainHertz).
+float windChainHertz(float swingLength) {
+    return sqrt(float(WIND_GRAVITY) / max(swingLength, float(WIND_SHORTEST_SWING))) / float(WIND_CHAIN_PERIOD);
+}
+
+// A strand's share of each hanging band, bands their frequencies falling (windChainShares).
+vec3 windChainShares(float swingLength, vec3 bands) {
+    float hertz = windChainHertz(swingLength);
+
+    if (hertz >= bands.x) {
+        return vec3(1.0, 0.0, 0.0);
+    }
+
+    if (hertz <= bands.z) {
+        return vec3(0.0, 0.0, 1.0);
+    }
+
+    if (hertz >= bands.y) {
+        float share = log(bands.x / hertz) / log(bands.x / bands.y);
+        return vec3(1.0 - share, share, 0.0);
+    }
+
+    float share = log(bands.y / hertz) / log(bands.y / bands.z);
+    return vec3(0.0, 1.0 - share, share);
 }
 
 // A hanging vertex's whole motion (windHangingOffset).
