@@ -3,7 +3,7 @@
 # A reminder, never a block: most commits (fixes, tuning) change nothing a doc describes.
 #
 # Which doc covers what: each docs/architecture/*.md may have a line "Covers: `src/x/`, `makefile`"; anything no file
-# claims belongs to docs/ARCHITECTURE.md (until phase 19's split ends). Changes are measured against HEAD with
+# claims is reported as uncovered, so a new folder gets a home. Changes are measured against HEAD with
 # untracked files included, since `git add -A && git commit` stages in the same command.
 
 $ErrorActionPreference = "Stop"
@@ -32,7 +32,7 @@ foreach ($doc in Get-ChildItem "docs/architecture" -Filter *.md -ErrorAction Sil
     }
 }
 
-# The doc owning a path: its longest covering prefix, else the old single reference.
+# The doc owning a path: its longest covering prefix, else none.
 function Find-Owner([string]$path) {
     $best = ""
 
@@ -46,7 +46,7 @@ function Find-Owner([string]$path) {
         return $owners[$best]
     }
 
-    return "docs/ARCHITECTURE.md"
+    return ""
 }
 
 $missing = [ordered]@{}
@@ -58,7 +58,7 @@ foreach ($path in $changed) {
 
     $doc = Find-Owner $path
 
-    if ($changed -contains $doc) {
+    if ($doc -and $changed -contains $doc) {
         continue
     }
 
@@ -78,7 +78,11 @@ if ($missing.Count -eq 0) {
 }
 
 $lines = foreach ($doc in $missing.Keys) {
-    ($missing[$doc] -join ", ") + " changed; " + $doc + " did not"
+    if ($doc) {
+        ($missing[$doc] -join ", ") + " changed; " + $doc + " did not"
+    } else {
+        ($missing[$doc] -join ", ") + " changed; no architecture file covers it (add it to one's Covers: line)"
+    }
 }
 
 $text = "Docs reminder: " + ($lines -join ". ") + ". If behaviour changed, rewrite its section (do not append) and commit that too."

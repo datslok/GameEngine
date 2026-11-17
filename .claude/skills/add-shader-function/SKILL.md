@@ -14,5 +14,5 @@ Rules: `.claude/rules/shader-mirror.md`. Example to copy: `dither.glsl` ↔ `cor
    - `tests/gpu/gpu_test_functions.h`: the next number under the library's `// <library>_test.comp` block (`GPU_TEST_<NAME>`).
    - `tests/gpu/shaders/<library>_test.comp`: a branch `if (function == GPU_TEST_<NAME>)` reading `testInput(i)`, writing `testOutput(i, ...)`.
    - `tests/gpu/<library>_gpu_test.cpp`: a case running it through `GpuFunctionRunner::run` and comparing against the mirror with `report.check(name, tolerance, expected, actual)`; tolerance as tight as rounding allows, with a comment when looser.
-5. **New library only:** create its `<library>_test.comp` (copy `dither_test.comp`), its `<library>_gpu_test.cpp` with a `gpuTest<Library>(runner, report)` entry, called from `tests/gpu/gpu_test_main.cpp`; list it in `docs/ARCHITECTURE.md`, "GPU tests and shader libraries".
+5. **New library only:** create its `<library>_test.comp` (copy `dither_test.comp`), its `<library>_gpu_test.cpp` with a `gpuTest<Library>(runner, report)` entry, called from `tests/gpu/gpu_test_main.cpp`; add it to `docs/architecture/testing.md`'s table of libraries.
 6. Build (`make`, `make release`). Run `make gputest` only if the user asks.

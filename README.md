@@ -543,7 +543,7 @@ tests/            Unit tests (one test function per file, registered in tests/te
   gpu/            The GPU test tier (make gputest): the runner, one test per shader library,
                   and their compute shaders in gpu/shaders
 docs/             ENGINE_GUIDE.md: how the engine works and why, for people learning it
-                  ARCHITECTURE.md: the detailed reference of every system (names, files, numbers)
+                  architecture/: how each system works, a file a system (listed in INDEX.md)
                   BUILDLOG.md: the history of finished roadmap items (when, why, measurements, dead ends)
                   ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
                   LUMEN.md: research notes on Lumen and its alternatives, and a plan for this engine

@@ -115,7 +115,7 @@ float sunBeyondCascades(vec3 normal, vec3 toLight) {
 // Past the cascades the sun counts as unshadowed, as beyond the shadow distance, except where the sky visibility grid
 // reaches: there the sky the point sees towards the sun stands in for its shadow (a closed room sees none of it). The
 // reflection probe's capture sees behind the camera, where the cascades do not reach, and without this lit the dark
-// rooms behind it in full sun; beyond the grid's reach the grid reads as open sky, so far ground stays sunlit.
+// rooms behind it in full sun; beyond the grid's reach the grid reads as an open field (skyOpenField), so far ground stays sunlit.
 float sunBeyondCascades(vec3 normal, vec3 toLight) {
     return skyVisibilityRead() ? skySeenAlong(skyVisibilityAt(relativePosition, normal, normal).visibility, toLight) : 1.0;
 }

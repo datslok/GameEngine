@@ -27,4 +27,4 @@ Folders not in the table (`cgltf/`, `imgui/`, `volk/` and the rest) are librarie
 
 None.
 
-Each system's design: `docs/ARCHITECTURE.md`.
+Each system's design: `docs/architecture/`, listed in `docs/INDEX.md`.

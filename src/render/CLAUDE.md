@@ -1,6 +1,6 @@
 # render/
 
-Design: `docs/ARCHITECTURE.md` (renderer, GPU scene, each pass). Vulkan specifics: `vulkan/CLAUDE.md`.
+Design: `docs/architecture/renderer.md` (the pass order, each pass's file). Vulkan specifics: `vulkan/CLAUDE.md`.
 
 - `render/gpu/` never calls the graphics API: records, packing and mirrored maths only, testable without a GPU.
 - `render/` takes a raw `SDL_Window*`; never includes `input/`, `platform/` or `assets/`.

@@ -1,5 +1,6 @@
 #include "core/hash.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <cstddef>
@@ -483,6 +484,52 @@ namespace {
         }
     }
 
+    // ---- Coverage ---------------------------------------------------------------------------------------------------
+
+    /*
+    * Every source and shader is claimed by an architecture file's "Covers:" line (a path or a prefix of one), so each
+    * has one place that says how it works, and tools/docs_reminder.ps1 knows which doc a change touches.
+    */
+    void checkCoverage(Problems& problems) {
+        std::vector<std::string> prefixes;
+
+        for (const fs::path& doc : filesIn("docs/architecture", ".md")) {
+            for (const std::string& line : splitLines(readText(doc))) {
+                if (line.starts_with("Covers:")) {
+                    for (const std::string& span : backticked(line)) {
+                        prefixes.push_back(span);
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        std::vector<std::string> claimable;
+
+        for (const fs::path& file : sourceTreeFiles()) {
+            if (file.extension() == ".h" || file.extension() == ".cpp") {
+                claimable.push_back(slashed(file));
+            }
+        }
+
+        for (const std::string_view extension : {".glsl", ".vert", ".frag", ".comp"}) {
+            for (const fs::path& shader : filesIn("assets/shaders", extension)) {
+                claimable.push_back(slashed(shader));
+            }
+        }
+
+        for (const std::string& file : claimable) {
+            const bool covered = std::ranges::any_of(prefixes, [&](const std::string& prefix) {
+                return file.starts_with(prefix);
+            });
+
+            if (!covered) {
+                problems.push_back(file + " is in no docs/architecture file's Covers: line");
+            }
+        }
+    }
+
     // ---- Repeated text ----------------------------------------------------------------------------------------------
 
     // A doc's prose as lowercase words: letters and digits, everything else a separator.
@@ -552,7 +599,7 @@ namespace {
 /*
 * Keeps the docs from growing needlessly (ROADMAP phase 19): the layers docs/LAYOUT.md states hold for every include,
 * instruction files stay within their budgets and line length, the paths the checked docs name exist, every doc is in
-* docs/INDEX.md, and no two checked docs repeat the same text.
+* docs/INDEX.md, every source and shader has an architecture file, and no two checked docs repeat the same text.
 */
 void testDocs() {
     Problems problems;
@@ -561,6 +608,7 @@ void testDocs() {
     checkLineLengths(problems);
     checkPaths(problems);
     checkIndex(problems);
+    checkCoverage(problems);
     checkRepeats(problems);
 
     for (const std::string& problem : problems) {

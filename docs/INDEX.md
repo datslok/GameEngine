@@ -9,14 +9,31 @@ Every doc, one line each. A doc missing here fails the docs test.
 | `README.md` | Pitch, features, install, build, controls (the packaged demo reads its `## Controls`) |
 | `ROADMAP.md` | Planned and done work by phase; the current phase; work order |
 | `docs/LAYOUT.md` | `src/` folders and their layers |
-| `docs/ARCHITECTURE.md` | How each system works now (being split into `docs/architecture/`) |
-| `docs/architecture/build.md` | Makefile, the two builds, shaders, dependencies, packaging |
-| `docs/architecture/engine-core.md` | The loop, ticks and their budget, determinism, interpolation, settings structs, jobs, entities, input, window |
 | `docs/BUILDLOG.md` | Why things were built, what was tried and measured; history by date |
 | `docs/ENGINE_GUIDE.md` | Prose guide for learning the engine (for a reader with a physics background) |
 | `docs/claude-md-migration.md` | Phase 19's audit of the old `CLAUDE.md`; deleted when phase 19 is done |
 | `tests/golden/README.md` | Golden reference images: layout per GPU and game |
 | `assets/stars/README.md` | The star catalogue's source |
+
+## Architecture: how each system works now
+
+Each file's `Covers:` line names the code it describes (the pre-commit reminder reads it).
+
+| Area | Docs |
+|---|---|
+| Build | `docs/architecture/build.md` (makefile, the two builds, shaders, dependencies, packaging) |
+| Engine | `docs/architecture/engine-core.md` (loop, ticks, determinism, jobs, entities, input), `docs/architecture/game-interface.md` (the `Game` hooks, the frame description, culling, debug drawing, render stats), `docs/architecture/settings-and-commands.md` (settings file, F5, presets, commands, launch options) |
+| Testing | `docs/architecture/testing.md` (golden images, GPU tests of shader libraries) |
+| Renderer | `docs/architecture/renderer.md` (pass order, `VulkanRenderer`), `docs/architecture/gpu-scene.md`, `docs/architecture/depth.md`, `docs/architecture/gpu-timing.md` |
+| Lights and shadows | `docs/architecture/lights.md`, `docs/architecture/clustered-shading.md`, `docs/architecture/lights-and-shadow-atlas.md`, `docs/architecture/sun-shadows.md` (cascades, contact shadows) |
+| Surfaces | `docs/architecture/shading.md` (BRDF, normal maps, clear coat), `docs/architecture/parallax-and-grounds.md`, `docs/architecture/glass.md` |
+| Image | `docs/architecture/anti-aliasing.md` (TAA, FSR, DLSS), `docs/architecture/image-pipeline.md` (eye adaptation, bloom, tone mapping, HDR), `docs/architecture/camera-effects.md` (camera finish, motion blur, depth of field) |
+| Indirect light | `docs/architecture/ambient-occlusion.md`, `docs/architecture/sky-visibility.md`, `docs/architecture/reflections.md`, `docs/architecture/reflection-probe.md`, `docs/architecture/planar-reflections.md`, `docs/architecture/mirrored-lights.md` |
+| Sky and air | `docs/architecture/sky.md`, `docs/architecture/sun-moon-stars.md`, `docs/architecture/fog.md` |
+| Ray tracing | `docs/architecture/ray-tracing.md`; light probes (on hold): `docs/architecture/ddgi.md`, `docs/architecture/ddgi-cascades.md`, `docs/architecture/ddgi-memory.md` |
+| Content | `docs/architecture/assets.md`, `docs/architecture/materials.md`, `docs/architecture/meshes.md`, `docs/architecture/level-of-detail.md` (levels, impostors, card thinning), `docs/architecture/terrain.md`, `docs/architecture/wind.md` |
+| Simulation | `docs/architecture/physics.md`, `docs/architecture/gameplay.md` (characters, cameras, control modes, the demo); cloth (parked): `docs/architecture/cloth.md`, `docs/architecture/cloth-solvers.md`, `docs/architecture/cloth-garments.md`, `docs/architecture/cloth-gpu.md` |
+| Games | `docs/architecture/games.md`, `docs/architecture/light-lab.md`, `docs/architecture/cloth-lab.md`, `docs/architecture/forest.md`, `docs/architecture/forest-rock.md`, `docs/architecture/forest-trees.md`, `docs/architecture/forest-plants.md` |
 
 ## Research (read before building)
 

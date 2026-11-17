@@ -1,6 +1,6 @@
 # engine/
 
-The loop and everything shared by all games. Never includes `games/`. Design: `docs/ARCHITECTURE.md` (Application, Settings, Commands, Main loop).
+The loop and everything shared by all games. Never includes `games/`. Design: `docs/architecture/engine-core.md`, `docs/architecture/game-interface.md`, `docs/architecture/settings-and-commands.md`.
 
 - Declare the game before the `Application` so it outlives the engine.
 - **Settings:** a field named once in its struct's `visit()` gets F5, `settings.cfg` and the defaults tests for free. `settings.cfg` holds only values changed from the defaults, each game's under its `title()`'s section, other games' kept on save.

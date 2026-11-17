@@ -8,7 +8,7 @@ Each phase ends with a **milestone**: something you can run and see. A phase is 
 
 Finished items are kept to one line, with their branch names so they can be found in `git log`.
 
-- How each works today is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- How each works today is in [docs/architecture/](docs/architecture/), listed in [docs/INDEX.md](docs/INDEX.md).
 - When it was built, why, and what was measured are in [docs/BUILDLOG.md](docs/BUILDLOG.md).
 
 **Principles**
@@ -349,12 +349,12 @@ Done before the rest of phase 18, at the user's request (Nov 17 2026). Starts fr
 - [x] Audit: every `CLAUDE.md` section bucketed (root, module, rule, skill, docs, check, delete) in `docs/claude-md-migration.md`, contradictions with the code flagged; approved by the user before anything moves
 - [x] Structure: module `CLAUDE.md` files, `.claude/rules/shader-mirror.md`, skills (add a test, a game, a shader library function, golden references), `docs/INDEX.md`, `docs/LAYOUT.md`
 - [x] Root `CLAUDE.md` rewritten: overview, build and test, hard rules, where to look, where new instructions go
-- [ ] `ARCHITECTURE.md` split per system and cut to how it works now
+- [x] `ARCHITECTURE.md` split per system and cut to how it works now (`docs-refactor`: 51 files, each checked against the code)
 - [ ] `README.md` cut to pitch, features a line each, install, build, controls, a pointer to the layout
 - [ ] `ENGINE_GUIDE.md` trimmed of repetition
 - [x] Memory deduplicated: project rules out of memory, into `CLAUDE.md` or rules
 - [x] Checks against needless growth (`testDocs`, `docs-refactor`): layers from `docs/LAYOUT.md`, budgets, line lengths, paths, the index, repeated 12-word runs, over the docs refactored so far
-- [ ] The docs report (`tests.exe --docs-report`, after the split): warnings for dates and measurements outside `BUILDLOG.md` and `ROADMAP.md` and for backticked names gone from `src/`; every `src/` folder covered by an architecture file
+- [ ] The docs report (`tests.exe --docs-report`, after the split): warnings for dates and measurements outside `BUILDLOG.md` and `ROADMAP.md` and for backticked names gone from `src/` (every source and shader having an architecture file is already a check in `testDocs`)
 - [x] A pre-commit reminder (`tools/docs_reminder.ps1`, a Claude Code hook in `.claude/settings.json`, `docs-refactor`): code changed but the architecture file covering it did not
 - [x] The docs-review skill, run at the end of each phase: finished phases in `ROADMAP.md` cut to their milestone and branches, memory deduplicated, misplaced items moved to their narrowest home
 - [x] The documentation workflow written down: a branch ticks its `ROADMAP.md` line, adds a `BUILDLOG.md` entry of at most 10 bullets, replaces its architecture section, adds a `README.md` line if players see it

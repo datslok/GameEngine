@@ -1,6 +1,6 @@
 # games/forest/
 
-The jungle valley showcase (`--game forest`, phase 18). Plan and status: `ROADMAP.md`. Design: `docs/ARCHITECTURE.md`, Games.
+The jungle valley showcase (`--game forest`, phase 18). Plan and status: `ROADMAP.md`. Design: `docs/architecture/forest.md` and the forest files it links.
 
 - Read before building: `docs/JUNGLE.md`, `docs/TREES.md`, `docs/VINES.md`, `docs/WIND.md`, `docs/LOD.md`, `docs/GROUNDCOVER.md`.
 - Judge looks and cost with the typical GPU setup on (`--typical-gpu`, `typical-gpu`); label measurements as the laptop's RTX 4070.

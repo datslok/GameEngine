@@ -1,6 +1,6 @@
 # Engine core
 
-Covers: `src/engine/application`, `src/engine/engine_settings`, `src/engine/state_hash`, `src/core/fixed_timestep`, `src/core/job_system`, `src/ecs/`, `src/input/`, `src/platform/window`, `src/platform/sdl_input`
+Covers: `src/engine/application`, `src/engine/engine_settings`, `src/engine/state_hash`, `src/core/fixed_timestep`, `src/core/job_system`, `src/ecs/`, `src/input/`, `src/platform/window`, `src/platform/sdl_input`, `src/core/`, `src/math/`, `src/scene/interpolation`, `assets/shaders/hash.glsl`
 
 The loop, its timing, threads, entities and input. Rules for working here: `src/engine/CLAUDE.md`, `src/ecs/CLAUDE.md`.
 
@@ -87,3 +87,21 @@ Same build + same commands → bit-identical state.
 - `Window` (`platform/`) owns SDL video: events into `Input`, quit, focus loss (releases all), click to capture (mouse look) or confine (MOBA), Escape releases, Alt+Enter fullscreen.
 - With F5 open, ImGui sees every event first, and keys and clicks it wants never reach `Input`.
 - Mouse motion is forwarded only while captured and dropped when capture or control mode changes.
+
+## Maths and core utilities
+
+Conventions (row-major `Mat4`, column vectors, right-handed, unit `Quat`s): root `CLAUDE.md`. Everything here depends on nothing above `math/`.
+
+| Header | What |
+|---|---|
+| `math/vec2.h`, `math/vec3.h`, `math/vec4.h`, `math/quat.h` | Defined in the header so they inline (`docs/architecture/build.md`) |
+| `math/mat4.h` | `transformPoint`, `transformDirection`, `affineInverse` (model matrices), general `inverse` (projections), `normalMatrix`, `Mat4::perspective` (OpenGL clip depth; the renderer converts) |
+| `math/transform.h` | `Transform` (`getMatrix` = T·R·S), `interpolate` (lerp, slerp the short way) |
+| `math/aabb.h`, `math/ray.h`, `math/frustum.h`, `math/closest_points.h`, `math/delaunay.h` | Bounds, rays, culling planes, segment and triangle distances, Bowyer-Watson triangulation |
+| `math/angles.h`, `math/smooth_step.h` | `fullTurnRadians`, `radiansFromDegrees`, `wrapAngle` (to -pi..pi); `smoothStep`, GLSL's smoothstep, for every C++ mirror |
+| `scene/interpolation.h` | `getRenderTransform` (Interpolation above) |
+| `core/hash.h`, `hash.glsl` | `Fnv1aHash` (change checks, the simulation hash), `mixBits` (before using a hash's bits as random numbers), `pcg3d` (GPU-friendly, mirrored) |
+| `core/profiler.h` | `Profiler`, `timeSection`: CPU sections averaged over `defaultProfileWindowSeconds` for F4 |
+| `core/half_float.h`, `core/raw_image.h`, `core/pixel.h` | Half floats, CPU images and their PNG packing, `Pixel` |
+| `core/build_info.h` | `isDebugBuild` (the makefile defines `ENGINE_DEBUG_BUILD` in debug builds) |
+| Others in `core/` | Each with its system's file: commands and settings visitor (`settings-and-commands.md`), dither (`image-pipeline.md`), blue noise (`ambient-occlusion.md`), coverage mips (`materials.md`), height maps (`parallax-and-grounds.md`), image comparison and float tolerance (`testing.md`) |

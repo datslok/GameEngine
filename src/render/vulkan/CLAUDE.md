@@ -1,6 +1,6 @@
 # render/vulkan/
 
-The engine's own Vulkan 1.3 renderer (volk, VMA, vk-bootstrap, dynamic rendering, synchronization2). Design: `docs/ARCHITECTURE.md`, VulkanRenderer.
+The engine's own Vulkan 1.3 renderer (volk, VMA, vk-bootstrap, dynamic rendering, synchronization2). Design: `docs/architecture/renderer.md`.
 
 - Every Vulkan call goes through volk (`-DVK_NO_PROTOTYPES`).
 - Barriers are written by hand per pass through `ImageState` (images) and `bufferBarrier` (buffers), each with a comment saying why.

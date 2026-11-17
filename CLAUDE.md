@@ -39,7 +39,7 @@ Makefile, flags, dependencies, packaging: `docs/architecture/build.md`.
 ## Where to look
 
 - `docs/INDEX.md`: every doc, and which to read before building what.
-- `docs/LAYOUT.md`: folders and layers. `docs/ARCHITECTURE.md`: how each system works; read a system's section before changing it.
+- `docs/LAYOUT.md`: folders and layers. `docs/architecture/`: how each system works, a file a system (listed in `docs/INDEX.md`); read a system's file before changing it.
 - Loaded on their own when you touch matching files: `src/<folder>/CLAUDE.md`, `tests/CLAUDE.md`, `.claude/rules/*.md`. Procedures: `.claude/skills/`.
 
 ## Where new information goes
@@ -49,7 +49,7 @@ Pick the narrowest home. One home per fact; elsewhere, link to it.
 | Kind | Home |
 |---|---|
 | Planned or done (one line an item, with its branch) | `ROADMAP.md` |
-| How it works now | `docs/ARCHITECTURE.md` (to become `docs/architecture/<system>.md`) |
+| How it works now | `docs/architecture/<system>.md` |
 | Why, what was tried and measured (at most 10 bullets a branch) | `docs/BUILDLOG.md` |
 | Research and sources | `docs/<TOPIC>.md`, listed in `docs/INDEX.md` |
 | Learning the engine (prose) | `docs/ENGINE_GUIDE.md`, at the end of a phase |
