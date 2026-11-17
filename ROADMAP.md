@@ -350,7 +350,7 @@ Done before the rest of phase 18, at the user's request (Nov 17 2026). Starts fr
 - [x] Structure: module `CLAUDE.md` files, `.claude/rules/shader-mirror.md`, skills (add a test, a game, a shader library function, golden references), `docs/INDEX.md`, `docs/LAYOUT.md`
 - [x] Root `CLAUDE.md` rewritten: overview, build and test, hard rules, where to look, where new instructions go
 - [x] `ARCHITECTURE.md` split per system and cut to how it works now (`docs-refactor`: 51 files, each checked against the code)
-- [ ] `README.md` cut to pitch, features a line each, install, build, controls, a pointer to the layout
+- [x] `README.md` cut to pitch, features a line each, install, build, controls, a pointer to the layout (68 KB to 12.5 KB, in the docs test)
 - [ ] `ENGINE_GUIDE.md` trimmed of repetition
 - [x] Memory deduplicated: project rules out of memory, into `CLAUDE.md` or rules
 - [x] Checks against needless growth (`testDocs`, `docs-refactor`): layers from `docs/LAYOUT.md`, budgets, line lengths, paths, the index, repeated 12-word runs, over the docs refactored so far

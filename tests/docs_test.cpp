@@ -25,6 +25,7 @@ namespace {
     constexpr std::uintmax_t rootClaudeBudget = 8 * 1024;
     constexpr std::uintmax_t folderRuleBudget = 4 * 1024;
     constexpr std::uintmax_t architectureFileBudget = 20 * 1024;
+    constexpr std::uintmax_t readmeBudget = 20 * 1024;
 
     // Longer than about four sentences is a wall of prose in a file Claude reads as rules. Table rows are exempt.
     constexpr std::size_t longestRuleLine = 400;
@@ -180,6 +181,7 @@ namespace {
     */
     std::vector<fs::path> checkedDocs() {
         std::vector<fs::path> docs = instructionFiles();
+        docs.push_back("README.md");
         docs.push_back("docs/INDEX.md");
         docs.push_back("docs/LAYOUT.md");
 
@@ -201,6 +203,7 @@ namespace {
 
     void checkBudgets(Problems& problems) {
         checkBudget("CLAUDE.md", rootClaudeBudget, problems);
+        checkBudget("README.md", readmeBudget, problems);
 
         for (const fs::path& file : folderRuleFiles()) {
             checkBudget(file, folderRuleBudget, problems);
