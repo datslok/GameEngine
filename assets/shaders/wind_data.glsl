@@ -9,16 +9,17 @@ layout(std430, set = 1, binding = 37) readonly buffer WindFieldRecord {
     WindField windField;
 };
 
-// Each texel a cell's springs, layer cascade * WIND_CATEGORIES + category: xy displacement, zw velocity. Sampled with
+// Each texel a cell's springs, layer cascade * WIND_SPRINGS + spring: xy displacement, zw velocity. Sampled with
 // wrapping and linear filtering, so a place reads its cell's spring at place / (cell * WIND_CELLS) whichever window
 // texel holds it (cell c's middle, (c + 0.5) cells along, at texel c's middle).
 layout(set = 1, binding = 38) uniform sampler2DArray windSprings;
 layout(set = 1, binding = 39) uniform sampler2DArray windPreviousSprings;
 
-// Every hanging mesh's vertices (render/gpu/wind.h, packHangingVertex): x the anchors (first in the low 16 bits),
-// y the share along and the arm as half floats; and the anchors they hang from.
+// Every hanging mesh's vertices (render/gpu/wind.h, packHangingVertex), three words each: the anchors (first in the
+// low 16 bits), the share along and the arm as half floats, the swing's length as a half float; and the anchors they
+// hang from.
 layout(std430, set = 1, binding = 40) readonly buffer HangingVertices {
-    uvec2 hangingVertices[];
+    uint hangingWords[];
 };
 
 layout(std430, set = 1, binding = 41) readonly buffer WindAnchors {
@@ -26,10 +27,11 @@ layout(std430, set = 1, binding = 41) readonly buffer WindAnchors {
 };
 
 /*
-* A category's spring at a place on the ground, this frame's or last frame's (in last frame's windows): the near
-* window's, passing into the far one's over its last cells (windWindowShare), nothing outside both.
+* One of the field's springs (a category's, or a hanging band's) at a place on the ground, this frame's or last frame's
+* (in last frame's windows): the near window's, passing into the far one's over its last cells (windWindowShare),
+* nothing outside both.
 */
-vec2 windSpringAt(vec2 place, int category, bool previous) {
+vec2 windSpringAt(vec2 place, int springIndex, bool previous) {
     vec2 spring = vec2(0.0);
     float left = 1.0;
 
@@ -38,7 +40,7 @@ vec2 windSpringAt(vec2 place, int category, bool previous) {
         float share = windWindowShare(place, previous ? window.zw : window.xy, windField.cells[cascade].x);
 
         if (share > 0.0) {
-            vec3 coordinate = vec3(place * windField.cells[cascade].y, float(cascade * WIND_CATEGORIES + category));
+            vec3 coordinate = vec3(place * windField.cells[cascade].y, float(cascade * WIND_SPRINGS + springIndex));
             vec2 value = previous ? textureLod(windPreviousSprings, coordinate, 0.0).xy : textureLod(windSprings, coordinate, 0.0).xy;
             spring += value * (share * left);
         }
@@ -77,6 +79,23 @@ vec3 windAnchorMotion(uint anchor, vec3 own, vec3 eye, float seconds, bool previ
     return windAnchorOffset(record, spring, fade, seconds);
 }
 
+// A hanging vertex's spring at a place: the hanging bands' springs blended by its swing's length (windChainShares), so
+// a long strand swings slower than a short one; bands it has no share of are not read.
+vec2 windChainSpringAt(vec2 place, float swingLength, bool previous) {
+    vec3 bands = vec3(windField.springs[WIND_SPRING_HANGING_SHORT].x, windField.springs[WIND_SPRING_HANGING_SHORT + 1].x,
+                      windField.springs[WIND_SPRING_HANGING_SHORT + 2].x);
+    vec3 shares = windChainShares(swingLength, bands);
+    vec2 spring = vec2(0.0);
+
+    for (int band = 0; band < WIND_HANGING_BANDS; ++band) {
+        if (shares[band] > 0.0) {
+            spring += shares[band] * windSpringAt(place, WIND_SPRING_HANGING_SHORT + band, previous);
+        }
+    }
+
+    return spring;
+}
+
 /*
 * Where the wind moves a vertex of an instance, this frame or last frame (previous: its springs and time, for the
 * velocity pass). model: the instance's world matrix, sway and scale its record's (GpuInstance::sway, uniformScale),
@@ -97,15 +116,17 @@ vec3 windSwayOfVertex(mat4 model, vec4 sway, float scale, uvec4 hanging, int ver
         return windOwnSway(model, sway, scale, position, world, eye, seconds, previous);
     }
 
-    uvec2 record = hangingVertices[hanging.x - 1u + uint(vertex)];
-    uint first = record.x & 0xffffu;
-    uint second = record.x >> 16u;
-    vec2 alongAndArm = unpackHalf2x16(record.y);
+    uint word = 3u * (hanging.x - 1u + uint(vertex));
+    uint anchors = hangingWords[word];
+    uint first = anchors & 0xffffu;
+    uint second = anchors >> 16u;
+    vec2 alongAndArm = unpackHalf2x16(hangingWords[word + 1u]);
+    float swingLength = unpackHalf2x16(hangingWords[word + 2u]).x;
     bool needsOwn = first == uint(WIND_ANCHOR_OWN) || second == uint(WIND_ANCHOR_OWN);
     vec3 own = needsOwn ? windOwnSway(model, sway, scale, position, world, eye, seconds, previous) : vec3(0.0);
     vec3 firstMotion = windAnchorMotion(first, own, eye, seconds, previous);
     vec3 secondMotion = windAnchorMotion(second, own, eye, seconds, previous);
-    vec2 spring = windSpringAt(world.xz, WIND_CATEGORY_HANGING, previous);
+    vec2 spring = windChainSpringAt(world.xz, swingLength, previous);
     float fade = windSwayFade(distance(world, eye), windField.sway.y, windField.sway.z);
     vec3 swing = windSwingOffset(alongAndArm.y, world, uintBitsToFloat(hanging.y), needsOwn ? 0.0 : sway.w, spring, fade,
                                  windField.flutters[WIND_CATEGORY_HANGING].xy, seconds);

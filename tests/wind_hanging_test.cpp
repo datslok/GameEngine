@@ -1,6 +1,7 @@
 #include "assets/asset_manager.h"
 #include "ecs/world.h"
 #include "games/forest/forest_game.h"
+#include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
 #include "games/forest/lianas.h"
 #include "input/input.h"
@@ -16,6 +17,7 @@
 #include <bit>
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -45,11 +47,12 @@ namespace {
         }
     }
 
-    // The record: anchors in two 16-bit halves, the share and arm as half floats.
+    // The record: anchors in two 16-bit halves, the share and arm as half floats, the swing's length as a half float.
     void testThePackedVertex() {
-        const std::array<std::uint32_t, 2> packed = packHangingVertex(HangingVertex{3, windAnchorFixed, 0.5f, 2.0f});
+        const std::array<std::uint32_t, 3> packed = packHangingVertex(HangingVertex{3, windAnchorFixed, 0.5f, 2.0f, 4.0f});
         assert((packed[0] & 0xffffu) == 3u && (packed[0] >> 16u) == windAnchorFixed);
         assert(packed[1] == 0x40003800u); // 2.0 high, 0.5 low, as GLSL's packHalf2x16
+        assert(packed[2] == 0x00004400u); // 4.0 low
         assert(windAnchorOwn == WIND_ANCHOR_OWN && windAnchorFixed == WIND_ANCHOR_FIXED);
     }
 
@@ -82,8 +85,11 @@ namespace {
         assert(assets.getDrawnMesh(handle).hanging.size() == 12 && assets.getDrawnMesh(handle).hanging[11] == HangingVertex{});
     }
 
-    // Hung from one anchor, each point's arm is its length along from the first; between two, its share along runs 0 to
-    // 1 and its arm is its sag below the chord, nothing at the ends and most in a loop's middle.
+    /*
+    * Hung from one anchor, each point's arm is its length along from the first and its swing's length the strand's
+    * whole length; between two, its share along runs 0 to 1, its arm is its sag below the chord, nothing at the ends and
+    * most in a loop's middle, and its swing's length the deepest sag (a sagging rope swings about its chord).
+    */
     void testHangingStrands() {
         HangingStrand down = straightDown(5);
         hangFrom(down, windAnchorFixed);
@@ -92,6 +98,7 @@ namespace {
         for (std::size_t point = 0; point < 5; ++point) {
             assert(down.hanging[point].first == windAnchorFixed && down.hanging[point].second == windAnchorFixed);
             assert(near(down.hanging[point].arm, static_cast<float>(point), 1e-5f));
+            assert(near(down.hanging[point].swingLength, 4.0f, 1e-5f));
         }
 
         HangingStrand loop = catenaryStrand(Vec3{0.0f, 30.0f, 0.0f}, Vec3{20.0f, 30.0f, 0.0f}, 24.0f, 0.05f);
@@ -113,6 +120,100 @@ namespace {
         }
 
         assert(near(deepest, 30.0f - loop.points[deepestPoint].y, 1e-3f) && deepestPoint > last / 4 && deepestPoint < 3 * last / 4);
+
+        for (const HangingVertex& entry : loop.hanging) {
+            assert(entry.swingLength == deepest);
+        }
+    }
+
+    // A moss clump swings as long as its foot hangs: the arm above its top and its own length.
+    void testMossSwingsItsLength() {
+        IndexedMesh moss;
+        appendMossClump(moss, Vec3{0.0f, 10.0f, 0.0f}, 2.0f, 0.3f, 6.0f);
+        assert(!moss.hanging.empty() && moss.hanging.size() == moss.vertices.size());
+
+        for (const HangingVertex& entry : moss.hanging) {
+            assert(near(entry.swingLength, 8.0f, 1e-5f));
+        }
+    }
+
+    // A hanging chain's slowest swing: 1 / 5.2255 sqrt(g / L) Hz, about 0.6 Hz for a metre, half as fast four times as long.
+    void testTheChainsFrequency() {
+        assert(near(windChainHertz(1.0f), std::sqrt(9.81f) / 5.2255f, 1e-5f));
+        assert(near(windChainHertz(4.0f), 0.5f * windChainHertz(1.0f), 1e-6f));
+        assert(windChainHertz(0.0f) > windChainHertz(0.1f) && std::isfinite(windChainHertz(0.0f)));
+    }
+
+    // The length of chain that swings at a frequency: g (1 / (5.2255 f))^2.
+    float swingingAt(float hertz) {
+        const float inverse = 1.0f / (5.2255f * hertz);
+        return 9.81f * inverse * inverse;
+    }
+
+    /*
+    * Each strand's share of the three hanging springs (short, medium, long; their hertz falling): all on a band whose
+    * hertz is its own, two neighbouring bands between them blended by log frequency (never the third), the shortest
+    * band past its hertz and the longest below; summing to 1, the long band's share growing with the length. The
+    * defaults: a metre's root mostly short, a 9 m vine mostly medium, a 50 m vine mostly long.
+    */
+    void testTheBandShares() {
+        const Vec3 bands{0.6f, 0.2f, 0.08f};
+        const Vec3 onMedium = windChainShares(swingingAt(0.2f), bands);
+        assert(near(onMedium.y, 1.0f, 1e-4f) && near(onMedium.x, 0.0f, 1e-4f) && near(onMedium.z, 0.0f, 1e-4f));
+        const Vec3 shortest = windChainShares(0.1f, bands);
+        assert(shortest.x == 1.0f && shortest.y == 0.0f && shortest.z == 0.0f);
+        const Vec3 longest = windChainShares(500.0f, bands);
+        assert(longest.z == 1.0f && longest.x == 0.0f && longest.y == 0.0f);
+
+        // Half way between the short and medium bands in log frequency: half each.
+        const Vec3 between = windChainShares(swingingAt(std::sqrt(0.6f * 0.2f)), bands);
+        assert(near(between.x, 0.5f, 1e-3f) && near(between.y, 0.5f, 1e-3f) && between.z == 0.0f);
+
+        float lastLong = 0.0f;
+        float lastShort = 1.0f;
+
+        for (float length = 0.2f; length < 200.0f; length *= 1.1f) {
+            const Vec3 shares = windChainShares(length, bands);
+            assert(near(shares.x + shares.y + shares.z, 1.0f, 1e-5f));
+            assert(shares.x >= 0.0f && shares.y >= 0.0f && shares.z >= 0.0f);
+            assert(shares.x == 0.0f || shares.z == 0.0f);
+            assert(shares.z >= lastLong - 1e-6f && shares.x <= lastShort + 1e-6f);
+            lastLong = shares.z;
+            lastShort = shares.x;
+        }
+
+        const WindSettings settings;
+        const Vec3 defaults = windHangingBands(settings);
+        assert(defaults.x > defaults.y && defaults.y > defaults.z);
+        assert(windChainShares(1.0f, defaults).x > 0.8f);
+        assert(windChainShares(9.0f, defaults).y > 0.8f);
+        assert(windChainShares(50.0f, defaults).z > 0.8f);
+    }
+
+    // The field holds the three hanging springs after the plants' and grass's, each with its own frequency; their
+    // frequencies must fall from the short to the long.
+    void testTheHangingSprings() {
+        const WindSettings settings;
+        static_assert(WIND_SPRINGS == WIND_CATEGORIES + WIND_HANGING_BANDS - 1 && WIND_SPRING_HANGING_SHORT == WIND_CATEGORY_HANGING);
+        const Vec3 bands = windHangingBands(settings);
+        assert(bands.x == settings.springs[WIND_SPRING_HANGING_SHORT].frequency && bands.z == settings.springs[WIND_SPRING_HANGING_SHORT + 2].frequency);
+        Wind wind;
+        const std::array<WindWindow, WIND_CASCADES> windows{};
+        const GpuWindField field = packWindField(&wind, settings, windows, windows, true, 1.0f, 0.1f);
+        assert(field.springs[WIND_SPRING_HANGING_SHORT + 2][0] == bands.z);
+        assert(field.springs[WIND_SPRING_HANGING_SHORT + 1][1] == settings.springs[WIND_SPRING_HANGING_SHORT + 1].damping);
+
+        WindSettings backwards = settings;
+        backwards.springs[WIND_SPRING_HANGING_SHORT + 2].frequency = 1.0f;
+        bool threw = false;
+
+        try {
+            validateWind(backwards);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+
+        assert(threw);
     }
 
     // A tube's rings and a vine's leaves carry the entry of the strand where they are built; a strand without entries adds none.
@@ -283,6 +384,10 @@ void testWindHanging() {
     testThePackedVertex();
     testTheEntriesStayAligned();
     testHangingStrands();
+    testMossSwingsItsLength();
+    testTheChainsFrequency();
+    testTheBandShares();
+    testTheHangingSprings();
     testTubesAndLeavesHang();
     testAnchorsMoveWithTheirTree();
     testTheSwing();

@@ -7,7 +7,7 @@
 namespace {
     // Displacements and velocities of a few tenths at most: well inside a half float's range and digits.
     constexpr VkFormat springFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-    constexpr std::uint32_t springLayers = static_cast<std::uint32_t>(WIND_CASCADES * WIND_CATEGORIES);
+    constexpr std::uint32_t springLayers = static_cast<std::uint32_t>(WIND_CASCADES * WIND_SPRINGS);
 
     VulkanImage springImage(const VulkanDevice& device) {
         ImageDescription description;

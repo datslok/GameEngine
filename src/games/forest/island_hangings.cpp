@@ -334,6 +334,11 @@ void hangFrom(HangingStrand& strand, std::uint16_t anchor) {
 
         strand.hanging.push_back(HangingVertex{anchor, anchor, 0.0f, travelled});
     }
+
+    // The whole strand swings as one chain its full length.
+    for (HangingVertex& entry : strand.hanging) {
+        entry.swingLength = travelled;
+    }
 }
 
 void hangBetween(HangingStrand& strand, std::uint16_t first, std::uint16_t second) {
@@ -352,12 +357,19 @@ void hangBetween(HangingStrand& strand, std::uint16_t first, std::uint16_t secon
     const Vec3 start = strand.points.front();
     const Vec3 chord = strand.points.back() - start;
     const float chordSquared = chord.lengthSquared();
+    float deepest = 0.0f;
 
     for (std::size_t point = 0; point < strand.points.size(); ++point) {
         const Vec3 offset = strand.points[point] - start;
         const float onChord = chordSquared > 0.0f ? std::clamp(offset.dot(chord) / chordSquared, 0.0f, 1.0f) : 0.0f;
         const float sag = (offset - chord * onChord).length();
+        deepest = std::max(deepest, sag);
         strand.hanging.push_back(HangingVertex{first, second, travelled.back() > 0.0f ? travelled[point] / travelled.back() : 0.0f, sag});
+    }
+
+    // The loop swings about its chord as one pendulum its deepest sag long.
+    for (HangingVertex& entry : strand.hanging) {
+        entry.swingLength = deepest;
     }
 }
 

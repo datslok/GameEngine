@@ -182,7 +182,7 @@ namespace {
     * last frame's window and its cell size; off without wind or with the setting off.
     */
     void testTheRecord() {
-        static_assert(sizeof(GpuWindField) == 272);
+        static_assert(sizeof(GpuWindField) == 304);
         WindSettings settings;
         Wind wind;
         wind.towardsDegrees = 90.0f;

@@ -65,13 +65,17 @@ inline constexpr std::uint16_t windAnchorOwn = 0xFFFE;
 * A vertex of something hanging (IndexedMesh::hanging, docs/WIND.md stage 3): the two anchors it hangs between (indices
 * into the frame's WindAnchors, or the codes above; the same twice for something hanging from one), its share of the
 * way from the first to the second (their motions blended by it), and its arm: how far it hangs below the line between
-* them, or below its one anchor (metres), which swings it on the hanging spring as a chain's links swing.
+* them, or below its one anchor (metres), which swings it on the hanging spring as a chain's links swing; and its swing's
+* length, the pendulum its strand swings as (metres): a strand hung from one anchor its whole length, one between two
+* its deepest sag (a sagging rope swinging about its chord is within about 8% of a chain its sag long), which sets how
+* slowly it swings.
 */
 struct HangingVertex {
     std::uint16_t first = windAnchorOwn;
     std::uint16_t second = windAnchorOwn;
     float along = 0.0f;
     float arm = 0.0f;
+    float swingLength = 0.0f;
 
     bool operator==(const HangingVertex&) const = default;
 };

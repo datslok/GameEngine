@@ -10,6 +10,13 @@
 
 namespace {
     constexpr const char* categoryNames[WIND_CATEGORIES] = {"Trees", "Plants", "Grass", "Hanging"};
+    constexpr const char* bandNames[WIND_HANGING_BANDS] = {"Short", "Medium", "Long"};
+
+    void visitSpring(WindSpring& spring, SettingsVisitor& visitor) {
+        visitor.field("Frequency", spring.frequency, {.min = 0.01f, .max = 20.0f, .sliderMax = 5.0f, .unit = "Hz"});
+        visitor.field("Damping", spring.damping, {.min = 0.0f, .max = 4.0f, .sliderMax = 1.5f});
+        visitor.field("Response", spring.response, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.1f});
+    }
 
     // A lattice point's value: its hash's top 24 bits over 2^24, exactly as the shader makes it.
     float latticeValue(int x, int y, int z) {
@@ -37,11 +44,18 @@ void visit(WindSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Far cell", settings.farCellMetres, {.min = 0.1f, .max = 1000.0f, .sliderMax = 64.0f, .unit = "m"});
 
     for (int category = 0; category < WIND_CATEGORIES; ++category) {
+        // The hanging category's springs are its three bands, each a group of its own.
         visitor.group(categoryNames[category], [&] {
-            WindSpring& spring = settings.springs[static_cast<std::size_t>(category)];
-            visitor.field("Frequency", spring.frequency, {.min = 0.01f, .max = 20.0f, .sliderMax = 5.0f, .unit = "Hz"});
-            visitor.field("Damping", spring.damping, {.min = 0.0f, .max = 4.0f, .sliderMax = 1.5f});
-            visitor.field("Response", spring.response, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.1f});
+            if (category == WIND_CATEGORY_HANGING) {
+                for (int band = 0; band < WIND_HANGING_BANDS; ++band) {
+                    visitor.group(bandNames[band], [&] {
+                        visitSpring(settings.springs[static_cast<std::size_t>(WIND_SPRING_HANGING_SHORT + band)], visitor);
+                    });
+                }
+            } else {
+                visitSpring(settings.springs[static_cast<std::size_t>(category)], visitor);
+            }
+
             WindFlutter& flutter = settings.flutters[static_cast<std::size_t>(category)];
             visitor.field("Flutter", flutter.hertz, {.min = 0.01f, .max = 20.0f, .sliderMax = 6.0f, .unit = "Hz"});
             visitor.field("Flutter wave", flutter.metres, {.min = 0.01f, .max = 1000.0f, .sliderMax = 20.0f, .unit = "m"});
@@ -74,6 +88,12 @@ void validateWind(const WindSettings& settings) {
         if (!(flutter.hertz > 0.0f) || !(flutter.metres > 0.0f)) {
             throw std::invalid_argument("A wind flutter needs hertz and metres above 0");
         }
+    }
+
+    const Vec3 bands = windHangingBands(settings);
+
+    if (!(bands.x > bands.y) || !(bands.y > bands.z)) {
+        throw std::invalid_argument("The hanging springs' frequencies must fall from the short band to the long");
     }
 }
 
@@ -167,10 +187,13 @@ GpuWindField packWindField(const Wind* wind, const WindSettings& settings, const
     field.step[0] = stepSeconds;
     field.step[1] = on ? 1.0f : 0.0f;
 
+    for (std::size_t spring = 0; spring < static_cast<std::size_t>(WIND_SPRINGS); ++spring) {
+        field.springs[spring][0] = settings.springs[spring].frequency;
+        field.springs[spring][1] = settings.springs[spring].damping;
+        field.springs[spring][2] = settings.springs[spring].response;
+    }
+
     for (std::size_t category = 0; category < static_cast<std::size_t>(WIND_CATEGORIES); ++category) {
-        field.springs[category][0] = settings.springs[category].frequency;
-        field.springs[category][1] = settings.springs[category].damping;
-        field.springs[category][2] = settings.springs[category].response;
         field.flutters[category][0] = settings.flutters[category].hertz;
         field.flutters[category][1] = settings.flutters[category].metres;
     }
@@ -272,9 +295,39 @@ std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSway
     return somethingSways ? mixBits(signature ^ mixBits(frame + 0x9e3779b97f4a7c15ull)) : signature;
 }
 
-std::array<std::uint32_t, 2> packHangingVertex(const HangingVertex& vertex) {
+std::array<std::uint32_t, 3> packHangingVertex(const HangingVertex& vertex) {
     return {static_cast<std::uint32_t>(vertex.first) | (static_cast<std::uint32_t>(vertex.second) << 16u),
-            static_cast<std::uint32_t>(floatToHalf(vertex.along)) | (static_cast<std::uint32_t>(floatToHalf(vertex.arm)) << 16u)};
+            static_cast<std::uint32_t>(floatToHalf(vertex.along)) | (static_cast<std::uint32_t>(floatToHalf(vertex.arm)) << 16u),
+            static_cast<std::uint32_t>(floatToHalf(vertex.swingLength))};
+}
+
+float windChainHertz(float swingLength) {
+    return std::sqrt(static_cast<float>(WIND_GRAVITY) / std::max(swingLength, static_cast<float>(WIND_SHORTEST_SWING))) / static_cast<float>(WIND_CHAIN_PERIOD);
+}
+
+Vec3 windHangingBands(const WindSettings& settings) {
+    return Vec3{settings.springs[WIND_SPRING_HANGING_SHORT].frequency, settings.springs[WIND_SPRING_HANGING_SHORT + 1].frequency,
+                settings.springs[WIND_SPRING_HANGING_SHORT + 2].frequency};
+}
+
+Vec3 windChainShares(float swingLength, const Vec3& bands) {
+    const float hertz = windChainHertz(swingLength);
+
+    if (hertz >= bands.x) {
+        return Vec3{1.0f, 0.0f, 0.0f};
+    }
+
+    if (hertz <= bands.z) {
+        return Vec3{0.0f, 0.0f, 1.0f};
+    }
+
+    if (hertz >= bands.y) {
+        const float share = std::log(bands.x / hertz) / std::log(bands.x / bands.y);
+        return Vec3{1.0f - share, share, 0.0f};
+    }
+
+    const float share = std::log(bands.y / hertz) / std::log(bands.y / bands.z);
+    return Vec3{0.0f, 1.0f - share, share};
 }
 
 GpuWindAnchor packWindAnchor(const WindAnchor& anchor) {

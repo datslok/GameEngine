@@ -38,7 +38,8 @@ struct WindFlutter {
 
 /*
 * The field (RenderSettings::wind, F5 Wind). The springs' frequencies from measurements (docs/WIND.md): trees sway about
-* 0.3-0.5 Hz, plants and grass faster, hanging lianas slower still (5.22 sqrt(L / g): 0.13 Hz for 20 m).
+* 0.3-0.5 Hz, plants and grass faster, hanging things as chains (5.2255 sqrt(L / g)): the short band at 0.6 Hz (a
+* chain about 1.1 m long), the medium at 0.2 Hz (9 m), the long at 0.08 Hz (56 m).
 */
 struct WindSettings {
     bool enabled = true;
@@ -47,12 +48,14 @@ struct WindSettings {
     float nearCellMetres = 2.0f;
     float farCellMetres = 16.0f;
 
-    // Each category's spring (trees, plants, grass, hanging things).
-    std::array<WindSpring, WIND_CATEGORIES> springs{{
+    // The field's springs (trees, plants, grass, then hanging things short, medium and long, their frequencies falling).
+    std::array<WindSpring, WIND_SPRINGS> springs{{
         {.frequency = 0.3f, .damping = 0.3f, .response = 0.01f},
         {.frequency = 1.0f, .damping = 0.4f, .response = 0.02f},
         {.frequency = 2.0f, .damping = 0.3f, .response = 0.03f},
-        {.frequency = 0.15f, .damping = 0.15f, .response = 0.02f},
+        {.frequency = 0.6f, .damping = 0.15f, .response = 0.02f},
+        {.frequency = 0.2f, .damping = 0.15f, .response = 0.02f},
+        {.frequency = 0.08f, .damping = 0.15f, .response = 0.02f},
     }};
 
     /*
@@ -85,7 +88,7 @@ void visit(WindSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a cell not above 0, a frequency not above 0 or a damping or response below 0, a sway
 // fade starting below 0 or ending no later than it starts, negative swaying shadow cascades, or a flutter's hertz or
-// metres not above 0.
+// metres not above 0, or hanging bands whose frequencies do not fall from the short to the long.
 void validateWind(const WindSettings& settings);
 
 // A category's flutter as the sway functions take it: hertz in x, metres in y.
@@ -149,7 +152,7 @@ struct GpuWindField {
     float wind[4];
     float gusts[4];
     float step[4];
-    float springs[WIND_CATEGORIES][4];
+    float springs[WIND_SPRINGS][4];
     std::int32_t windows[WIND_CASCADES][4];
     float cells[WIND_CASCADES][4];
     std::int32_t flags[4];
@@ -157,7 +160,7 @@ struct GpuWindField {
     float flutters[WIND_CATEGORIES][4];
 };
 
-static_assert(sizeof(GpuWindField) == 272, "GpuWindField must match wind.glsl's WindField");
+static_assert(sizeof(GpuWindField) == 304, "GpuWindField must match wind.glsl's WindField");
 
 // The record for a frame: off without wind or with the setting off. previousKnown: last frame's windows are the ones
 // its spring images hold.
@@ -219,10 +222,23 @@ std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSway
 
 /*
 * Hanging things (docs/WIND.md, stage 3). A hanging vertex as the shaders read it (scene set 1, binding 40, from the
-* hanging mesh's first entry on): x its anchors (first in the low 16 bits), y its share along and its arm as half floats
-* (GLSL's packHalf2x16).
+* hanging mesh's first entry on, three words each): its anchors (first in the low 16 bits), its share along and its arm
+* as half floats (GLSL's packHalf2x16), and its swing's length as a half float in the low 16 bits.
 */
-std::array<std::uint32_t, 2> packHangingVertex(const HangingVertex& vertex);
+std::array<std::uint32_t, 3> packHangingVertex(const HangingVertex& vertex);
+
+// A hanging chain of a length's slowest swing (Hz): sqrt(g / L) / WIND_CHAIN_PERIOD, L floored at WIND_SHORTEST_SWING.
+float windChainHertz(float swingLength);
+
+// The hanging bands' frequencies (short, medium, long) as windChainShares takes them.
+Vec3 windHangingBands(const WindSettings& settings);
+
+/*
+* A strand's share of each hanging band (short, medium, long): its chain's frequency (windChainHertz) between two
+* neighbouring bands' blends them by log frequency; above the short band all short, below the long all long. bands:
+* their frequencies, falling.
+*/
+Vec3 windChainShares(float swingLength, const Vec3& bands);
 
 // An anchor as the shaders read it (binding 41): foot (xyz, w its tree's height in its mesh's units), point (xyz, w the
 // tree's scale) and the tree's bend (x).

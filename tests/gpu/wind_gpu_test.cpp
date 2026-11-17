@@ -321,6 +321,35 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Strands from none to a 200 m vine's, against bands of every falling order. Inputs: the swing's length and the bands'
+    * frequencies. Outputs: the shares and the chain's frequency; logs and square roots within rounding.
+    */
+    void checkChain(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{109};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            const float shortBand = random.between(0.3f, 2.0f);
+            const float mediumBand = shortBand * random.between(0.1f, 0.9f);
+            inputs.push_back(gpuVec4(random.between(0.0f, 200.0f), shortBand, mediumBand, mediumBand * random.between(0.1f, 0.9f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_CHAIN, inputs, 1, 1);
+        const FloatTolerance tolerance{.absolute = 1e-4f, .relative = 1e-4f};
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4& input = inputs[i];
+            const Vec3 shares = windChainShares(input[0], Vec3{input[1], input[2], input[3]});
+            report.check("windChainShares", tolerance, shares.x, outputs[i][0]);
+            report.check("windChainShares", tolerance, shares.y, outputs[i][1]);
+            report.check("windChainShares", tolerance, shares.z, outputs[i][2]);
+            report.check("windChainHertz", tolerance, windChainHertz(input[0]), outputs[i][3]);
+        }
+    }
+}
+
 void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("wind.glsl");
     checkNoise(runner, report);
@@ -333,5 +362,6 @@ void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkAnchor(runner, report);
     checkSwing(runner, report);
     checkFlutter(runner, report);
+    checkChain(runner, report);
     checkHanging(runner, report);
 }
