@@ -21,7 +21,7 @@ Fixed views of each game, rendered and compared pixel by pixel, so a renderer ch
 | `clothlab` | `clothLabGoldenViews` | `stations` |
 | `forest` | `forestGoldenViews` | `rim`, `ring`, `wall`, `rim-dusk` |
 
-- `advanceToGoldenView(game, world, view, ticksPerSecond)`: prepare, `round(seconds × rate)` ticks through `runFixedUpdate`, then one `onUpdate` with an empty `Input`. Shared by the capture and `golden_views_test`, which checks every registered game's views: the pose holds without input, and two fresh builds reach the same `hashSimulationState` and camera.
+- `advanceToGoldenView(game, world, view, ticksPerSecond)`: prepare, `round(seconds × rate)` ticks through `runFixedUpdate`, then one `onUpdate` with an empty `Input`. Shared by the capture and `golden_views_test`: `testGoldenViews` (routine) checks every game's view names; `testGoldenViewScenes` (slow tests, run before a golden run) that each pose holds without input and two fresh builds reach the same `hashSimulationState` and camera.
 
 ### Capturing
 

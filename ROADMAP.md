@@ -393,6 +393,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] Far terrain following the camera, only if needed: the rough valley's fixed rings reach 20 km round the walk
 - [ ] Aerial perspective: the air between the camera and far scenery from the sky's own tables (Hillaire 2020's aerial perspective volume), so distant things turn blue by distance; the fog's grid near, this beyond it (only if the haze looks wrong later: the rough valley showed it already turns blue)
 - [ ] Golden views, tests, packaging with the downloaded assets, docs
+  - [x] The golden views' scene builds out of the routine suite (72 s of its 154), into the slow tests the golden skill runs first (`golden-views-slow`)
 
 **Milestone:** with the typical GPU setup, the scale is felt from the valley's rim (pillars, floating islands and the Monolith layered into kilometres of haze), and walking down through the jungle to the Monolith's foot looks lush and alive (wind in leaves and vines, light through the canopy, mist in the valley) by day and at dusk, at a frame rate a mid-range GPU holds (measured on the laptop's RTX 4070, 8 GB).
 

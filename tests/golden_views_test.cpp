@@ -166,9 +166,19 @@ namespace {
     }
 }
 
+// The checks that only ask each game for its views (milliseconds), in the routine suite: a bad name breaks the
+// reference folder.
 void testGoldenViews() {
     testViewsHaveUsableNames();
     testSomeViewIsHdr();
+}
+
+/*
+* The checks that build every view's scene (about 70 s in release, the forest's valley eight times), in the slow tests:
+* they only matter to a golden run, and the golden skill runs them first. The simulation's own determinism stays in the
+* routine suite (testDeterminism).
+*/
+void testGoldenViewScenes() {
     testViewsAreDeterministic();
     testLampFieldHasMoreLightsThanShadows();
     testAViewShowsAFastLightsBounce();
