@@ -50,6 +50,11 @@ struct ForestPalmSettings {
     int leafletPairs = 30;
     float leafletWidthShare = 0.12f;
 
+    // As a palm recedes its leaflets thin one by one into every palmKeepEvery-th pair (scene/card_thinning.h), the kept
+    // ones growing about their bases by share^-leafletGrowth: 0.25 makes them 1.4 times as big at a quarter of the pairs,
+    // half the cover; 0.5 would keep the cover but double them, longer than the fronds allow.
+    float leafletGrowth = 0.25f;
+
     // How far an average frond's rachis turns down from its base to its tip (degrees): the youngest fronds, near the
     // top, less, the oldest, round the outside, more.
     float droopDegrees = 70.0f;
@@ -65,6 +70,10 @@ struct ForestPalmSettings {
 };
 
 void visit(ForestPalmSettings& settings, SettingsVisitor& visitor);
+
+// A thinned palm keeps every this-many-th leaflet pair at its coarsest (scene/card_thinning.h), as the shadow's stand-in
+// keeps a quarter of them.
+inline constexpr int palmKeepEvery = 4;
 
 // The fixed parts of a palm's shape (docs/JUNGLE.md, Palms).
 inline constexpr float palmFrondLengthShare = 0.45f; // a frond's length, a share of the palm's height
@@ -100,6 +109,7 @@ struct PalmShape {
     float droopRadians = 1.2f;
     int leafletPairs = 30;
     float leafletWidthShare = 0.12f;
+    float leafletGrowth = 0.25f; // ForestPalmSettings::leafletGrowth
     std::uint32_t seed = 0;
 };
 
@@ -119,6 +129,11 @@ struct PalmDetail {
     int leafletSegments = 4;
     int rachisSides = 4;
     int stemSides = 6;
+
+    // Grown for card thinning (scene/card_thinning.h): the stem, the stalks and every palmKeepEvery-th pair's leaflets first,
+    // the other leaflets after, each vertex its card's record (a leaflet's base and rank; the stem and stalks their own
+    // places, so they never move). The same vertices as unthinned, reordered.
+    bool thinned = false;
 };
 
 /*
@@ -167,7 +182,18 @@ struct PinnateFrond {
     int leafletSegments = 4;
 };
 
-void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std::function<float()>& random);
+// Thinning a frond's leaflets as it is built (PalmDetail::thinned): every keepEvery-th pair's leaflets go to the mesh, the
+// others to removed, ranked past leastShare by their own random numbers (rankSeed, counted by leaflets); every vertex
+// gets its card's record.
+struct PinnateThinning {
+    IndexedMesh* removed = nullptr;
+    int keepEvery = 1;
+    float leastShare = 1.0f;
+    std::uint32_t rankSeed = 0;
+    std::uint64_t leaflets = 0;
+};
+
+void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std::function<float()>& random, PinnateThinning* thinning = nullptr);
 
 /*
 * One palm in its own frame, footed at the origin and up +y, at the shape's size before it is fitted to its height: its
@@ -178,8 +204,9 @@ void appendPinnateFrond(IndexedMesh& mesh, const PinnateFrond& frond, const std:
 */
 IndexedMesh growPalm(const PalmShape& shape, const PalmDetail& detail);
 
-// A palm's seen mesh, its coarser level and its shadow's stand-in (a quarter of the pairs), each with its error
-// (metres), all fitted to the shape's height together.
+// A palm's seen mesh (thinned leaflet by leaflet, PalmDetail::thinned), its coarser level (the kept leaflets, its first
+// vertices) and its shadow's stand-in (a quarter of the pairs), each with its error (metres), all fitted to the shape's
+// height together.
 struct PalmMeshes {
     IndexedMesh palm;
     IndexedMesh level;

@@ -12,6 +12,7 @@
 #include "test_levels.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <vector>
@@ -181,11 +182,64 @@ namespace {
         // Every leaflet's two halves on every frond, each half two triangles a segment but one in the last, to its point.
         const std::size_t leafletTriangles = static_cast<std::size_t>(shape.fronds * shape.leafletPairs * 2 * 2 * (2 * PalmDetail{}.leafletSegments - 1));
         assert(meshes.palm.indices.size() / 3 >= leafletTriangles);
-        assert(meshes.level.indices.size() < meshes.palm.indices.size() && meshes.shadow.indices.size() < meshes.level.indices.size());
-        assert(meshes.levelError > 0.0f && meshes.shadowError > meshes.levelError);
+        assert(meshes.level.indices.size() < meshes.palm.indices.size() && meshes.shadow.indices.size() < meshes.palm.indices.size());
+        assert(meshes.levelError > 0.0f && meshes.shadowError > 0.0f);
 
         const PalmMeshes again = growPalmMeshes(shape);
         assert(again.palm.vertices.size() == meshes.palm.vertices.size() && (again.palm.vertices.back().position - meshes.palm.vertices.back().position).lengthSquared() == 0.0f);
+    }
+
+    /*
+    * A palm thins leaflet by leaflet (scene/card_thinning.h, docs/LOD.md, Hiding the switches): grown thinned it holds
+    * exactly the full palm's vertices, only reordered, every palmKeepEvery-th pair's leaflets first with the stem and the
+    * stalks, so the kept leaflets stand where they stood; the rest after, each ranked past the least share. The stem and
+    * stalks are their own anchors, so they never move; each leaflet's vertices share its base. The coarser level is the
+    * kept part alone (thinnedLevel), its error the gap the dropped pairs leave, the fade's at the least share.
+    */
+    void testAPalmThinsLeafletByLeaflet() {
+        const ForestPalmSettings settings;
+        const PalmShape shape = palmVariantShape(settings, settings.variants / 2, 5);
+        const IndexedMesh whole = growPalm(shape, PalmDetail{});
+        const IndexedMesh thinned = growPalm(shape, PalmDetail{.thinned = true});
+        assert(whole.thinningCards.empty() && thinned.vertices.size() == whole.vertices.size() && thinned.indices.size() == whole.indices.size());
+
+        const auto sortedPositions = [](const IndexedMesh& mesh) {
+            std::vector<std::array<float, 3>> positions;
+
+            for (const MeshVertex& vertex : mesh.vertices) {
+                positions.push_back({vertex.position.x, vertex.position.y, vertex.position.z});
+            }
+
+            std::sort(positions.begin(), positions.end());
+            return positions;
+        };
+        assert(sortedPositions(thinned) == sortedPositions(whole));
+
+        const PalmMeshes meshes = growPalmMeshes(shape);
+        const CardThinning& thinning = meshes.palm.thinning;
+        assert(thinning.leastShare == 1.0f / static_cast<float>(palmKeepEvery) && thinning.growth == shape.leafletGrowth && thinning.cardSize > 0.0f);
+        assert(meshes.palm.thinningCards.size() == meshes.palm.vertices.size());
+        assert(near(meshes.levelError, thinningError(thinning, thinning.leastShare), 1e-6f));
+
+        const IndexedMesh level = thinnedLevel(meshes.palm);
+        assert(level.vertices.size() == meshes.level.vertices.size() && level.indices == meshes.level.indices);
+        assert(level.vertices.size() < meshes.palm.vertices.size() && level.vertices.size() > meshes.palm.vertices.size() / (2 * palmKeepEvery));
+        std::size_t stillVertices = 0;
+
+        for (std::size_t vertex = 0; vertex < meshes.palm.vertices.size(); ++vertex) {
+            const ThinningCard& card = meshes.palm.thinningCards[vertex];
+            const Vec3 fromAnchor = meshes.palm.vertices[vertex].position - card.anchor;
+            stillVertices += fromAnchor.lengthSquared() == 0.0f ? 1 : 0;
+
+            if (vertex < level.vertices.size()) {
+                assert(card.rank == 0.0f);
+            } else {
+                assert(card.rank >= thinning.leastShare + cardThinningBand - 1e-6f && card.rank <= 1.0f);
+            }
+        }
+
+        // The stem and the stalks: rings of vertices a frond, all their own anchors.
+        assert(stillVertices >= static_cast<std::size_t>(shape.fronds) * 8);
     }
 
     /*
@@ -321,7 +375,7 @@ namespace {
         ForestPalmSettings settings;
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 18 && counter.live == 0);
+        assert(counter.fields == 19 && counter.live == 0);
         assert(settings.shortest >= 1.5f && settings.tallest <= 6.0f && settings.shortest < settings.tallest);
         assert(settings.leastFronds <= settings.mostFronds && settings.variants >= 4);
         assert(settings.shadowCascades >= 1 && settings.shadowCascades <= 2);
@@ -352,12 +406,14 @@ namespace {
             assert(leaf.diffuseTransmission == ForestLeafLightSettings{}.share);
 
             const std::vector<MeshLevel>& levels = forest.assets.getMeshLevels().at(seen.parts.front().mesh.index);
-            assert(levels.size() == 3 && levels[1].mesh == shadow.parts.front().mesh && levels[1].errorMetres >= levels[0].errorMetres);
-            assert(!levels[2].mesh.isValid() && levels[2].errorMetres >= ForestPalmSettings{}.impostorErrorMetres);
+            // Thinned leaflet by leaflet into its kept leaflets (its own first vertices), then its card; the shadow's stand-in
+            // is never seen.
+            assert(levels.size() == 2 && levels[0].sharesVertices && levels[0].mesh != shadow.parts.front().mesh);
+            assert(!levels[1].mesh.isValid() && levels[1].errorMetres >= ForestPalmSettings{}.impostorErrorMetres && levels[1].errorMetres >= levels[0].errorMetres);
 
             const ModelRenderer& card = world.get<ModelRenderer>(game.getPalmImpostors()[palm]);
             const MeshLevelOptions& cardOptions = forest.assets.getMeshLevelOptions().at(card.parts.front().mesh.index);
-            assert(cardOptions.hiddenBelowError == levels[2].errorMetres && !card.castsShadows && isCutOut(card.parts.front().material));
+            assert(cardOptions.hiddenBelowError == levels[1].errorMetres && !card.castsShadows && isCutOut(card.parts.front().material));
             assert(card.parts.front().material.diffuseTransmission == leaf.diffuseTransmission);
 
             const Transform& pose = world.get<Transform>(palms[2 * palm]);
@@ -373,6 +429,7 @@ void testPalms() {
     testAFrondsSpine();
     testThePalmVariants();
     testAPalmIsGrown();
+    testAPalmThinsLeafletByLeaflet();
     testThePlantingGridKeepsTheUnderstorey();
     testThePalmsArePlaced();
     testTheLeafletsPictures();

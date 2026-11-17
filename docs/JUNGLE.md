@@ -149,7 +149,7 @@ Gathered on Nov 15, 2026, before the jungle patch's palms. No CC0 library has pa
 - **The frond's curve:** the rachis leaves the crown 40-70 degrees above level and bends down as a cantilever under its own weight does (Euler-Bernoulli: curvature = moment / stiffness). The moment grows as `(1 - s)^2` towards the base; a rachis tapering to 30% of its radius has a stiffness going as the radius^4, so the curvature goes as `(1 - s)^2 / (1 - 0.7 s)^4`, an arch bending most mid-frond (an untapered beam would bend most at its base). One droop number a frond, varied.
 - **Leaflets as geometry, cut to their outline:** 20-40 pairs a frond, nearly at right angles to the rachis, longest in the middle (a spindle outline), each a narrow strip folded into a V along its midrib and arching under its own weight. Opaque and double-sided, so no cut-out test and no overdraw from empty card area; light through leaves as the trees'.
 - **Texture:** our leaves (`Leaf001`, the leaf sets) are broad and net-veined, unlike a palm leaflet's parallel veins, so a strip of one would look wrong when stretched.
-- **Levels:** fewer leaflet pairs and segments for the far levels, then the impostor cards the trees and plants already use; shadows in the nearest cascades only, as the understorey's.
+- **Levels:** fewer leaflet pairs and segments for the far levels, then the impostor cards the trees and plants already use; shadows in the nearest cascades only, as the understorey's. Since `lod-pop-in` the leaflets thin one by one instead (`docs/LOD.md`, Hiding the switches).
 
 ## The plan for this engine
 
