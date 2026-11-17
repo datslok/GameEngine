@@ -27,6 +27,16 @@ struct WindSpring {
 };
 
 /*
+* How a category's leaves flutter: how often (Hz), and over how many metres their phase turns once (windPhase). Leaves
+* closer than about an eighth of that shiver nearly in step, so a long one keeps a frond or tuft moving together and
+* rolls across a meadow as a wave.
+*/
+struct WindFlutter {
+    float hertz = 3.0f;
+    float metres = 0.5f;
+};
+
+/*
 * The field (RenderSettings::wind, F5 Wind). The springs' frequencies from measurements (docs/WIND.md): trees sway about
 * 0.3-0.5 Hz, plants and grass faster, hanging lianas slower still (5.22 sqrt(L / g): 0.13 Hz for 20 m).
 */
@@ -43,6 +53,17 @@ struct WindSettings {
         {.frequency = 1.0f, .damping = 0.4f, .response = 0.02f},
         {.frequency = 2.0f, .damping = 0.3f, .response = 0.03f},
         {.frequency = 0.15f, .damping = 0.15f, .response = 0.02f},
+    }};
+
+    /*
+    * Each category's flutter. The trees' leaves and the hanging ivy shiver fast and each on its own; the lower layers
+    * (plants, grass and the floor's cover) slower and in step over a frond or tuft (the user, Nov 16 2026: too rippley).
+    */
+    std::array<WindFlutter, WIND_CATEGORIES> flutters{{
+        {.hertz = 3.0f, .metres = 0.5f},
+        {.hertz = 1.5f, .metres = 8.0f},
+        {.hertz = 1.2f, .metres = 8.0f},
+        {.hertz = 3.0f, .metres = 0.5f},
     }};
 
     // Arrows of the wind round the camera, as the debug lines draw them.
@@ -63,8 +84,12 @@ struct WindSettings {
 void visit(WindSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a cell not above 0, a frequency not above 0 or a damping or response below 0, a sway
-// fade starting below 0 or ending no later than it starts, or negative swaying shadow cascades.
+// fade starting below 0 or ending no later than it starts, negative swaying shadow cascades, or a flutter's hertz or
+// metres not above 0.
 void validateWind(const WindSettings& settings);
+
+// A category's flutter as the sway functions take it: hertz in x, metres in y.
+Vec2 windFlutterRate(const WindSettings& settings, int category);
 
 /*
 * Value noise in 3D: hashed lattice values (pcg3d, core/hash.h) between 0 and 1, blended smoothly (smoothstep) between
@@ -117,7 +142,8 @@ bool windCellInWindow(const WindCell& cell, const WindWindow& window);
 * time; gusts the gusts' strength and size and the turbulence's; step the frame's step and whether the field is on (1)
 * and its spring images are filled; each category's spring (frequency, damping, response); each cascade's window and
 * last frame's; each cascade's cell (metres, and 1 / its window's width); flags whether last frame's windows hold; sway
-* whether things sway (1, with the field on), where the sway's fade starts and ends (metres) and last frame's time.
+* whether things sway (1, with the field on), where the sway's fade starts and ends (metres) and last frame's time;
+* each category's flutter (hertz, metres).
 */
 struct GpuWindField {
     float wind[4];
@@ -128,9 +154,10 @@ struct GpuWindField {
     float cells[WIND_CASCADES][4];
     std::int32_t flags[4];
     float sway[4];
+    float flutters[WIND_CATEGORIES][4];
 };
 
-static_assert(sizeof(GpuWindField) == 208, "GpuWindField must match wind.glsl's WindField");
+static_assert(sizeof(GpuWindField) == 272, "GpuWindField must match wind.glsl's WindField");
 
 // The record for a frame: off without wind or with the setting off. previousKnown: last frame's windows are the ones
 // its spring images hold.
@@ -162,17 +189,23 @@ float windWindowShare(const Vec2& place, const WindWindow& window, float cellMet
 float windPhase(const Vec3& place, float metres);
 
 /*
+* A leaf's shiver (an offset, metres): three sines of the time at about rate's hertz (x), their phases from the place
+* turning once every rate's metres (y), each direction within amount.
+*/
+Vec3 windFlutterOffset(const Vec3& place, float amount, const Vec2& rate, float seconds);
+
+/*
 * Where the wind moves a vertex (an offset in the world, metres). fromFoot: the vertex from its foot, in the world (the
 * model's rotation and scale applied); modelHeight: its height in the mesh's own frame; place: where it is in the
 * world; sway: packSway's; scale: the model's scale; spring: its spring's displacement (a lean, radians, along the
-* world's x and z); fade: windSwayFade's; seconds: the field's time. The main bend leans it by the spring times the
-* bend, softened (windSoftLean) and faded, by h^2 / height and kept at its distance from the foot; its branches bob up and down by WIND_BRANCH_SHARE
-* of the lean times their distance from the trunk at WIND_BRANCH_HERTZ; its leaves flutter in three directions at
-* about WIND_FLUTTER_HERTZ by flutter times the lean. Both grow with height share to its full height, so a foot never
-* moves. Nothing for a still sway.
+* world's x and z); fade: windSwayFade's; flutterRate: its category's (windFlutterRate); seconds: the field's time. The
+* main bend leans it by the spring times the bend, softened (windSoftLean) and faded, by h^2 / height and kept at its
+* distance from the foot; its branches bob up and down by WIND_BRANCH_SHARE of the lean times their distance from the
+* trunk at WIND_BRANCH_HERTZ; its leaves flutter (windFlutterOffset) by flutter times the lean. Both grow with height
+* share to its full height, so a foot never moves. Nothing for a still sway.
 */
 Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, const Vec4& sway, float scale, const Vec2& spring, float fade,
-                    float seconds);
+                    const Vec2& flutterRate, float seconds);
 
 // Whether a draw sways this frame: it has a sway, and part of it is nearer the camera than the fade's end.
 bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadius, const Vec3& camera, const WindSettings& settings);
@@ -212,9 +245,9 @@ Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fad
 /*
 * A hanging vertex's own swing (an offset, metres): the hanging spring times swing, softened and faded, is a lean
 * (radians) the vertex swings out by over its arm, rising to keep its distance from where it hangs (a pendulum's arc);
-* and its leaves' flutter (flutter times the lean, as windSwayOffset's). Nothing with no arm and no flutter.
+* and its leaves' flutter (flutter times the lean at flutterRate, as windSwayOffset's). Nothing with no arm and no flutter.
 */
-Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, float seconds);
+Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, const Vec2& flutterRate, float seconds);
 
 // A hanging vertex's whole motion: its anchors' motions blended by its share along, plus its swing.
 Vec3 windHangingOffset(const Vec3& first, const Vec3& second, float along, const Vec3& swing);

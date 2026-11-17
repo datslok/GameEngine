@@ -16,6 +16,7 @@ struct WindField {
     vec4 cells[WIND_CASCADES];     // a cell (m), 1 / the window's width (m)
     ivec4 flags;  // x 1 when last frame's windows are the ones the springs hold
     vec4 sway;    // x 1 while things sway, y and z the fade's start and end (m), w last frame's time
+    vec4 flutters[WIND_CATEGORIES]; // each category's flutter: hertz, metres
 };
 
 // A lattice point's value: its hash's top 24 bits over 2^24 (windNoise's).
@@ -111,12 +112,20 @@ float windPhase(vec3 place, float metres) {
     return (place.x * 0.71 + place.y * 0.37 + place.z * 0.59) * (6.28318530718 / metres);
 }
 
+// A leaf's shiver within amount, at rate's hertz (x), its phase turning every rate's metres (y) (windFlutterOffset).
+vec3 windFlutterOffset(vec3 place, float amount, vec2 rate, float seconds) {
+    float turn = 6.28318530718 * rate.x * seconds;
+    float phase = windPhase(place, rate.y);
+    return vec3(sin(turn + phase), sin(1.3 * turn + 0.7 * phase + 2.0), sin(0.9 * turn + 1.3 * phase + 4.0)) * amount;
+}
+
 /*
 * Where the wind moves a vertex (windSwayOffset): fromFoot the vertex from its foot in the world, modelHeight its
 * height in the mesh's frame, place where it is, sway the instance's (category, height, bend, flutter), scale the
-* model's, spring its spring's lean, fade windSwayFade's, seconds the field's time.
+* model's, spring its spring's lean, fade windSwayFade's, flutterRate its category's (hertz, metres), seconds the
+* field's time.
 */
-vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, float scale, vec2 spring, float fade, float seconds) {
+vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, float scale, vec2 spring, float fade, vec2 flutterRate, float seconds) {
     if (sway.x < 0.0) {
         return vec3(0.0);
     }
@@ -136,11 +145,7 @@ vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, flo
     float branchTurn = 6.28318530718 * float(WIND_BRANCH_HERTZ) * seconds + windPhase(place, float(WIND_BRANCH_METRES));
     offset.y += float(WIND_BRANCH_SHARE) * amount * trunkDistance * grow * sin(branchTurn);
 
-    float flutter = sway.w * amount * grow;
-    float turn = 6.28318530718 * float(WIND_FLUTTER_HERTZ) * seconds;
-    float phase = windPhase(place, float(WIND_FLUTTER_METRES));
-    offset += vec3(sin(turn + phase), sin(1.3 * turn + 0.7 * phase + 2.0), sin(0.9 * turn + 1.3 * phase + 4.0)) * flutter;
-    return offset;
+    return offset + windFlutterOffset(place, sway.w * amount * grow, flutterRate, seconds);
 }
 
 // An anchor as the shaders read it. Must match GpuWindAnchor.
@@ -154,21 +159,18 @@ struct WindAnchorRecord {
 vec3 windAnchorOffset(WindAnchorRecord anchor, vec2 spring, float fade, float seconds) {
     float scale = anchor.point.w;
     vec4 sway = vec4(float(WIND_CATEGORY_TREES), anchor.foot.w, anchor.bend.x, 0.0);
+    // No flutter (the sway's w is 0), so any rate does.
     return windSwayOffset(anchor.point.xyz - anchor.foot.xyz, (anchor.point.y - anchor.foot.y) / max(scale, 1e-4), anchor.point.xyz, sway, scale, spring, fade,
-                          seconds);
+                          vec2(1.0), seconds);
 }
 
 // A hanging vertex's own swing and flutter (windSwingOffset).
-vec3 windSwingOffset(float arm, vec3 place, float swing, float flutter, vec2 spring, float fade, float seconds) {
+vec3 windSwingOffset(float arm, vec3 place, float swing, float flutter, vec2 spring, float fade, vec2 flutterRate, float seconds) {
     vec2 lean = windSoftLean(spring * swing) * fade;
     float reach = max(arm, 0.0);
     vec2 outwards = lean * reach;
     float rise = reach - sqrt(max(reach * reach - dot(outwards, outwards), 0.0));
-    float shiver = flutter * length(lean);
-    float turn = 6.28318530718 * float(WIND_FLUTTER_HERTZ) * seconds;
-    float phase = windPhase(place, float(WIND_FLUTTER_METRES));
-    vec3 flutterOffset = vec3(sin(turn + phase), sin(1.3 * turn + 0.7 * phase + 2.0), sin(0.9 * turn + 1.3 * phase + 4.0)) * shiver;
-    return vec3(outwards.x, rise, outwards.y) + flutterOffset;
+    return vec3(outwards.x, rise, outwards.y) + windFlutterOffset(place, flutter * length(lean), flutterRate, seconds);
 }
 
 // A hanging vertex's whole motion (windHangingOffset).

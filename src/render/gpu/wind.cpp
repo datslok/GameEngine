@@ -42,6 +42,9 @@ void visit(WindSettings& settings, SettingsVisitor& visitor) {
             visitor.field("Frequency", spring.frequency, {.min = 0.01f, .max = 20.0f, .sliderMax = 5.0f, .unit = "Hz"});
             visitor.field("Damping", spring.damping, {.min = 0.0f, .max = 4.0f, .sliderMax = 1.5f});
             visitor.field("Response", spring.response, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.1f});
+            WindFlutter& flutter = settings.flutters[static_cast<std::size_t>(category)];
+            visitor.field("Flutter", flutter.hertz, {.min = 0.01f, .max = 20.0f, .sliderMax = 6.0f, .unit = "Hz"});
+            visitor.field("Flutter wave", flutter.metres, {.min = 0.01f, .max = 1000.0f, .sliderMax = 20.0f, .unit = "m"});
         });
     }
 
@@ -66,6 +69,17 @@ void validateWind(const WindSettings& settings) {
     if (!(settings.swayFadeStart >= 0.0f) || !(settings.swayFadeEnd > settings.swayFadeStart) || settings.swayShadowCascades < 0) {
         throw std::invalid_argument("The sway's fade must end after it starts, from 0 m on, and its shadow cascades not be negative");
     }
+
+    for (const WindFlutter& flutter : settings.flutters) {
+        if (!(flutter.hertz > 0.0f) || !(flutter.metres > 0.0f)) {
+            throw std::invalid_argument("A wind flutter needs hertz and metres above 0");
+        }
+    }
+}
+
+Vec2 windFlutterRate(const WindSettings& settings, int category) {
+    const WindFlutter& flutter = settings.flutters[static_cast<std::size_t>(category)];
+    return Vec2{flutter.hertz, flutter.metres};
 }
 
 float windNoise(const Vec3& place) {
@@ -157,6 +171,8 @@ GpuWindField packWindField(const Wind* wind, const WindSettings& settings, const
         field.springs[category][0] = settings.springs[category].frequency;
         field.springs[category][1] = settings.springs[category].damping;
         field.springs[category][2] = settings.springs[category].response;
+        field.flutters[category][0] = settings.flutters[category].hertz;
+        field.flutters[category][1] = settings.flutters[category].metres;
     }
 
     const float cellMetres[WIND_CASCADES] = {settings.nearCellMetres, settings.farCellMetres};
@@ -209,13 +225,19 @@ float windPhase(const Vec3& place, float metres) {
     return (place.x * 0.71f + place.y * 0.37f + place.z * 0.59f) * (fullTurnRadians / metres);
 }
 
+Vec3 windFlutterOffset(const Vec3& place, float amount, const Vec2& rate, float seconds) {
+    const float turn = fullTurnRadians * rate.x * seconds;
+    const float phase = windPhase(place, rate.y);
+    return Vec3{std::sin(turn + phase), std::sin(1.3f * turn + 0.7f * phase + 2.0f), std::sin(0.9f * turn + 1.3f * phase + 4.0f)} * amount;
+}
+
 /*
 * The main bend first: the lean's offset at the vertex's height share u, h^2 / height (the cantilever's u^2 times the
 * height in metres), then the vertex pulled back to its distance from the foot, so a tree bends rather than stretches.
 * The branches' bob and the leaves' flutter after, both growing with u up to the top.
 */
 Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, const Vec4& sway, float scale, const Vec2& spring, float fade,
-                    float seconds) {
+                    const Vec2& flutterRate, float seconds) {
     if (sway.x < 0.0f) {
         return Vec3{0.0f, 0.0f, 0.0f};
     }
@@ -235,11 +257,7 @@ Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, 
     const float branchTurn = fullTurnRadians * static_cast<float>(WIND_BRANCH_HERTZ) * seconds + windPhase(place, static_cast<float>(WIND_BRANCH_METRES));
     offset.y += static_cast<float>(WIND_BRANCH_SHARE) * amount * trunkDistance * grow * std::sin(branchTurn);
 
-    const float flutter = sway.w * amount * grow;
-    const float turn = fullTurnRadians * static_cast<float>(WIND_FLUTTER_HERTZ) * seconds;
-    const float phase = windPhase(place, static_cast<float>(WIND_FLUTTER_METRES));
-    offset = offset + Vec3{std::sin(turn + phase), std::sin(1.3f * turn + 0.7f * phase + 2.0f), std::sin(0.9f * turn + 1.3f * phase + 4.0f)} * flutter;
-    return offset;
+    return offset + windFlutterOffset(place, sway.w * amount * grow, flutterRate, seconds);
 }
 
 bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadius, const Vec3& camera, const WindSettings& settings) {
@@ -270,19 +288,16 @@ Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fad
     const Vec3 point{anchor.point[0], anchor.point[1], anchor.point[2]};
     const float scale = anchor.point[3];
     const Vec4 sway{static_cast<float>(WIND_CATEGORY_TREES), anchor.foot[3], anchor.bend[0], 0.0f};
-    return windSwayOffset(point - foot, (point.y - foot.y) / std::max(scale, 1e-4f), point, sway, scale, spring, fade, seconds);
+    // No flutter (the sway's w is 0), so any rate does: one of a hertz and a metre.
+    return windSwayOffset(point - foot, (point.y - foot.y) / std::max(scale, 1e-4f), point, sway, scale, spring, fade, Vec2{1.0f, 1.0f}, seconds);
 }
 
-Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, float seconds) {
+Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, const Vec2& flutterRate, float seconds) {
     const Vec2 lean = windSoftLean(spring * swing) * fade;
     const float reach = std::max(arm, 0.0f);
     const Vec2 out = lean * reach;
     const float rise = reach - std::sqrt(std::max(reach * reach - out.lengthSquared(), 0.0f));
-    const float shiver = flutter * lean.length();
-    const float turn = fullTurnRadians * static_cast<float>(WIND_FLUTTER_HERTZ) * seconds;
-    const float phase = windPhase(place, static_cast<float>(WIND_FLUTTER_METRES));
-    const Vec3 flutterOffset = Vec3{std::sin(turn + phase), std::sin(1.3f * turn + 0.7f * phase + 2.0f), std::sin(0.9f * turn + 1.3f * phase + 4.0f)} * shiver;
-    return Vec3{out.x, rise, out.y} + flutterOffset;
+    return Vec3{out.x, rise, out.y} + windFlutterOffset(place, flutter * lean.length(), flutterRate, seconds);
 }
 
 Vec3 windHangingOffset(const Vec3& first, const Vec3& second, float along, const Vec3& swing) {

@@ -44,11 +44,9 @@
 #define WIND_BLEND_CELLS 8.0
 
 // Branches bob by this share of the lean times their distance from the trunk, this often (Hz), their phase changing
-// every so many metres; leaves flutter this often (Hz), their phase changing every so many metres.
+// every so many metres. (Leaves' flutter is each category's own, WindSettings::flutters.)
 #define WIND_BRANCH_SHARE 0.2
 #define WIND_BRANCH_HERTZ 0.9
 #define WIND_BRANCH_METRES 4.0
-#define WIND_FLUTTER_HERTZ 3.0
-#define WIND_FLUTTER_METRES 0.5
 
 #endif
