@@ -38,9 +38,11 @@ void attachFlatFaces(std::span<DrawItem> draws, const std::vector<std::vector<Fl
     }
 }
 
-void attachHangingEntries(std::span<DrawItem> draws, const std::vector<std::uint32_t>& entryByMesh) {
+void attachVertexEntries(std::span<DrawItem> draws, const std::vector<VertexEntries>& entriesByMesh) {
     for (DrawItem& draw : draws) {
-        draw.hangingEntry = draw.mesh.isValid() && draw.mesh.index < entryByMesh.size() ? entryByMesh[draw.mesh.index] : 0u;
+        const VertexEntries entries = draw.mesh.isValid() && draw.mesh.index < entriesByMesh.size() ? entriesByMesh[draw.mesh.index] : VertexEntries{};
+        draw.hangingEntry = entries.hanging;
+        draw.thinningEntry = entries.thinning;
     }
 }
 

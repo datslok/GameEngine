@@ -662,9 +662,40 @@ namespace {
         */
         assert(tree.leafLevel.vertices.size() == static_cast<std::size_t>(tree.leafLevelCardCount) * 4);
         assert(2 * tree.leafLevelCardCount <= tree.cardCount + 2 * (settings.clumps + 1) && tree.leafLevelCardCount > tree.shadowCardCount);
-        const float levelCover = cardArea(tree.leafLevel) / cardArea(tree.leaves);
-        assert(levelCover > 0.8f && levelCover < 1.25f);
         assert(tree.leafLevelError > 0.0f && tree.shadowLeafError > tree.leafLevelError);
+
+        /*
+        * The cards thin one by one on the way there (scene/card_thinning.h, docs/LOD.md, Hiding the switches): the kept
+        * cards first in the leaves, so the level is the leaves' first vertices and triangles, drawn by the vertex shaders
+        * grown as the fade left them; each vertex its card's stem and rank, rank 0 for the kept cards, the others' spread
+        * past the least share so all are gone there. The level's error is the fade's at the least share.
+        */
+        const CardThinning& thinning = tree.leaves.thinning;
+        assert(thinning.cardSize == settings.clusterSize && thinning.growth == settings.levelCardGrowth && thinning.leastShare == settings.levelCardShare);
+        assert(tree.leaves.thinningCards.size() == tree.leaves.vertices.size());
+        assert(near(tree.leafLevelError, thinningError(thinning, thinning.leastShare), 1e-6f));
+        assert(std::equal(tree.leafLevel.indices.begin(), tree.leafLevel.indices.end(), tree.leaves.indices.begin()));
+
+        for (std::size_t vertex = 0; vertex < tree.leaves.vertices.size(); ++vertex) {
+            const float rank = tree.leaves.thinningCards[vertex].rank;
+
+            if (vertex < tree.leafLevel.vertices.size()) {
+                const Vec3 kept = tree.leafLevel.vertices[vertex].position - tree.leaves.vertices[vertex].position;
+                assert(kept.x == 0.0f && kept.y == 0.0f && kept.z == 0.0f && rank == 0.0f);
+            } else {
+                assert(rank >= thinning.leastShare + cardThinningBand - 1e-6f && rank <= 1.0f);
+            }
+        }
+
+        IndexedMesh grown = tree.leafLevel;
+
+        for (std::size_t vertex = 0; vertex < grown.vertices.size(); ++vertex) {
+            grown.vertices[vertex].position = thinnedPosition(grown.vertices[vertex].position, tree.leaves.thinningCards[vertex],
+                                                              thinnedCardScale(thinning, 0.0f, thinning.leastShare));
+        }
+
+        const float levelCover = cardArea(grown) / cardArea(tree.leaves);
+        assert(levelCover > 0.8f && levelCover < 1.25f);
         assert(near(tree.shadowLeafError, settings.clusterSize * (settings.shadowCardScale - 1.0f), 1e-5f));
         assert(tree.barkLevel.indices.size() < tree.bark.indices.size() && tree.barkLevel.indices.size() > tree.shadowBark.indices.size());
         assert(tree.barkLevelError > 0.0f && tree.shadowBarkError >= tree.barkLevelError);
@@ -836,7 +867,7 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 29 && counter.live == 0);
+        assert(counter.fields == 30 && counter.live == 0);
         assert(settings.shadowBarkShare > 0.0f && settings.shadowBarkShare <= 0.2f);
 
         // Four times the first patch's crown cover (the user, Nov 14 2026): more trees, their crowns interlocking.
@@ -1005,6 +1036,8 @@ namespace {
             const std::vector<MeshLevel>& leafLevels = assets.getMeshLevels().at(world.get<ModelRenderer>(leaves).parts.front().mesh.index);
             assert(barkLevels.size() == 3 && barkLevels[1].mesh == shadows.parts[1].mesh && !barkLevels[2].mesh.isValid());
             assert(leafLevels.size() == 3 && leafLevels[1].mesh == shadows.parts[0].mesh && !leafLevels[2].mesh.isValid());
+            // The first level is the leaves' own first vertices, thinned by the same records; the shadow leaves are not.
+            assert(leafLevels[0].sharesVertices && !leafLevels[1].sharesVertices);
 
             // Past the last level the impostor takes over (scene/impostor.h): its card drawn only from the error the bark and
             // leaves end on, all three chosen by the tree's one box; a cut-out of its baked atlases, casting no shadow.

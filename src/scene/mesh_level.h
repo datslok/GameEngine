@@ -14,6 +14,10 @@
 struct MeshLevel {
     MeshHandle mesh;
     float errorMetres = 0.0f;
+
+    // Its vertices are the mesh's own first ones (meshPrefix), so the mesh's card thinning (scene/card_thinning.h) shapes
+    // it too: the cards the fade kept, grown as the fade left them.
+    bool sharesVertices = false;
 };
 
 /*

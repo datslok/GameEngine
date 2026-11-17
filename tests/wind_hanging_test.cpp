@@ -292,7 +292,7 @@ namespace {
         std::vector<DrawItem> draws(2);
         draws[0].mesh = MeshHandle{1};
         draws[1].mesh = MeshHandle{5};
-        attachHangingEntries(draws, {0u, 17u});
+        attachVertexEntries(draws, {VertexEntries{}, VertexEntries{.hanging = 17u}});
         assert(draws[0].hangingEntry == 17u && draws[1].hangingEntry == 0u);
 
         draws[0].sway = WindSway{.kind = SwayKind::Hanging, .swing = 0.4f};

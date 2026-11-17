@@ -793,6 +793,7 @@ void VulkanRenderer::createFixedTextures() {
     noProbeCascades = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeCascade), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noTerrainHeights = VulkanBuffer{device.getAllocator(), sizeof(GpuTerrainHeightsHeader), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noHangingVertices = VulkanBuffer{device.getAllocator(), sizeof(std::array<std::uint32_t, 3>), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    noThinningCards = VulkanBuffer{device.getAllocator(), sizeof(GpuThinningRecord), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
 
 /*
@@ -1456,10 +1457,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // What every view draws is settled before anything is recorded: the camera's visible draws and each changed shadow
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
     // Each view draws the levels of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass
-    // redraws the camera's with the same levels, so its depths match the main pass's.
+    // redraws the camera's with the same levels, so its depths match the main pass's. The camera's are chosen by the
+    // output's height, not the render's: the upscalers rebuild the output's detail from jittered frames, and chosen by
+    // the render's, DLSS Quality pulled every switch a third closer (docs/LOD.md, Hiding the switches).
     validateLevelOfDetail(settings.levelOfDetail);
     cpuClock.lap(CpuStage::Lights, profilerSeconds());
-    const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(sceneSize.height), camera.getVerticalFov(), settings.levelOfDetail);
+    const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
+    cameraThinning = thinningErrorPerMetre(cameraLevels);
     stats.drawnByLevel = levelsChosen(description.draws, visible, cameraLevels);
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible, 0, &cameraLevels);
     std::tie(stats.drawnTriangles, stats.drawnCutOutTriangles) = batchTriangles(mainDraws.batches);
@@ -1531,6 +1535,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero)));
             // A face is probeSize pixels across a quarter turn, so it draws coarser levels than the camera.
             const LevelView faceLevels = levelView(probeCycleOrigin, static_cast<float>(reflectionProbe->getSize()), 0.25f * fullTurnRadians, settings.levelOfDetail);
+            probeThinning = thinningErrorPerMetre(faceLevels);
             captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstCaptureEntry, &faceLevels);
             stats.probeTriangles += batchTriangles(captureDraws[static_cast<std::size_t>(face)].batches).first;
             firstCaptureEntry += static_cast<std::uint32_t>(captureDraws[static_cast<std::size_t>(face)].order.size());
@@ -1552,6 +1557,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         const Mat4 worldView = mirrorViewProjection * Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
         const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, planarFrustum(worldView, *mirror)));
         const LevelView mirrorLevels = levelView(cameraOrigin, static_cast<float>(mirrorSize.height), camera.getVerticalFov(), settings.levelOfDetail);
+        mirrorThinning = thinningErrorPerMetre(mirrorLevels);
         captureDraws[cubeFaceCount] = batchByMesh(description.draws, inView, firstCaptureEntry, &mirrorLevels);
     }
 
@@ -2010,7 +2016,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.upscaler = frameUpscaler;
     stats.renderScale = appliedRenderScale(settings.upscaling);
     stats.outputWidth = frameWidth;
-    stats.renderHeight = sceneSize.height;
+    stats.outputHeight = frameHeight;
     shownScene = finishedScene;
 
     // Depth of field (render/gpu/depth_of_field.h) on the finished picture, into a copy the passes below read instead,
@@ -2152,20 +2158,14 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     std::vector<std::uint32_t> drawList;
     drawList.reserve(mainDraws.order.size() + shadowDraws.drawList.size());
 
-    for (std::size_t index : mainDraws.order) {
-        drawList.push_back(static_cast<std::uint32_t>(index));
-    }
-
+    // The camera's, the velocity pass's and the captures' entries mark the instances drawn thinned (appendDrawList); the
+    // shadow tiles' never do, since their shaders thin nothing.
+    appendDrawList(drawList, mainDraws);
     drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
-
-    for (std::size_t index : motionDraws.order) {
-        drawList.push_back(static_cast<std::uint32_t>(index));
-    }
+    appendDrawList(drawList, motionDraws);
 
     for (const BatchedDraws& face : captureDraws) {
-        for (std::size_t index : face.order) {
-            drawList.push_back(static_cast<std::uint32_t>(index));
-        }
+        appendDrawList(drawList, face);
     }
 
     for (std::size_t index : transparent.order) {
@@ -2189,6 +2189,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.materialOptions[1] = settings.materials.parallaxSelfShadows ? 1.0f : 0.0f;
     frameData.materialOptions[2] = static_cast<float>(std::clamp(settings.materials.parallaxSteps, parallaxFewestSteps, parallaxMostSteps));
     frameData.materialOptions[3] = settings.materials.lightThroughLeaves ? 1.0f : 0.0f;
+    frameData.levelOptions[0] = cameraThinning;
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
     // (kept small: the shaders turn it into a float offset of the noise).
@@ -2238,7 +2239,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     }
 
     buffers.windAnchors.write(anchors);
-    updateHangingVertices();
+    updateVertexRecords(hangingRecords.data(), hangingRecords.size() * sizeof(hangingRecords.front()), hangingChanged, hangingVertices);
+    updateVertexRecords(thinningRecords.data(), thinningRecords.size() * sizeof(GpuThinningRecord), thinningChanged, thinningCards);
 
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -2269,6 +2271,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.skyLight = description.lighting.atmosphere ? atmosphere->describeSkyLight() : buffers.skyLight.describe();
     views.terrainHeights = VkDescriptorBufferInfo{uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get(), 0, VK_WHOLE_SIZE};
     views.hangingVertices = VkDescriptorBufferInfo{hangingRecords.empty() ? noHangingVertices.get() : hangingVertices.get(), 0, VK_WHOLE_SIZE};
+    views.thinningCards = VkDescriptorBufferInfo{thinningRecords.empty() ? noThinningCards.get() : thinningCards.get(), 0, VK_WHOLE_SIZE};
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
 
@@ -2910,7 +2913,7 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, const ProbeCaptureSte
         renderingOpen = true;
 
         bindCaptureScene(frame, layout, sceneSet, traceRays);
-        const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane) * fromCamera, noClipPlane());
+        const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane) * fromCamera, noClipPlane(), Vec3{}, probeThinning);
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
         stats.drawCalls += drawBatches(commands, captureDraws[static_cast<std::size_t>(face)].batches, capturing);
 
@@ -2957,7 +2960,7 @@ void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraw
     beginRendering(commands, {size.width, size.height}, &colour, &depthTarget);
     renderingOpen = true;
     bindCaptureScene(frame, layout, sceneSet, traceRays);
-    const GpuCaptureView view = packCaptureView(viewProjection, clipPlane, eye);
+    const GpuCaptureView view = packCaptureView(viewProjection, clipPlane, eye, mirrorThinning);
     vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
     stats.drawCalls += drawBatches(commands, draws.batches, capturing);
 
@@ -3410,7 +3413,7 @@ SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
 // Uploads wait for the GPU with their own command buffer, so they must happen between frames. A texture takes its slot
 // in the bindless array at once (slots in-flight frames do not read may change while they run).
 // With ray tracing, each mesh also gets its acceleration structure, numbered like the mesh.
-std::uint32_t VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
+VertexEntries VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
     if (recording) {
         throw std::logic_error("Upload meshes before beginning a frame");
     }
@@ -3425,38 +3428,47 @@ std::uint32_t VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming
         rayTracing->addMesh(uploads, *meshes.back());
     }
 
-    if (mesh.hanging.empty()) {
-        return 0;
-    }
+    VertexEntries entries;
 
     // Its entries follow every earlier hanging mesh's; copied to the GPU once before the next frame.
-    const std::uint32_t entry = static_cast<std::uint32_t>(hangingRecords.size()) + 1;
-    std::transform(mesh.hanging.begin(), mesh.hanging.end(), std::back_inserter(hangingRecords), packHangingVertex);
-    hangingChanged = true;
-    return entry;
+    if (!mesh.hanging.empty()) {
+        entries.hanging = static_cast<std::uint32_t>(hangingRecords.size()) + 1;
+        std::transform(mesh.hanging.begin(), mesh.hanging.end(), std::back_inserter(hangingRecords), packHangingVertex);
+        hangingChanged = true;
+    }
+
+    // Its header and a record a vertex likewise (packCardThinning).
+    const std::vector<GpuThinningRecord> thinning = packCardThinning(mesh);
+
+    if (!thinning.empty()) {
+        entries.thinning = static_cast<std::uint32_t>(thinningRecords.size()) + 1;
+        thinningRecords.insert(thinningRecords.end(), thinning.begin(), thinning.end());
+        thinningChanged = true;
+    }
+
+    return entries;
 }
 
 /*
-* The hanging vertices change only as meshes arrive (at start-up), so they live in GPU memory, copied there whole
-* through a staging buffer when new ones came; the frames in flight may still read the old buffer, so the GPU is waited
-* for first.
+* The per-vertex records (the hanging vertices, the thinned cards) change only as meshes arrive (at start-up), so they
+* live in GPU memory, copied there whole through a staging buffer when new ones came; the frames in flight may still
+* read the old buffer, so the GPU is waited for first.
 */
-void VulkanRenderer::updateHangingVertices() {
-    if (!hangingChanged) {
+void VulkanRenderer::updateVertexRecords(const void* records, VkDeviceSize bytes, bool& changed, VulkanBuffer& buffer) {
+    if (!changed) {
         return;
     }
 
-    const VkDeviceSize bytes = hangingRecords.size() * sizeof(hangingRecords.front());
     device.waitIdle();
-    hangingVertices = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
+    buffer = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
     VulkanBuffer staging{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
-    std::memcpy(staging.getMapped(), hangingRecords.data(), bytes);
+    std::memcpy(staging.getMapped(), records, bytes);
     staging.flush();
     uploads.run([&](VkCommandBuffer commands) {
         const VkBufferCopy copy{0, 0, bytes};
-        vkCmdCopyBuffer(commands, staging.get(), hangingVertices.get(), 1, &copy);
+        vkCmdCopyBuffer(commands, staging.get(), buffer.get(), 1, &copy);
     });
-    hangingChanged = false;
+    changed = false;
 }
 
 void VulkanRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips) {

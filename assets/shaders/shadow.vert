@@ -23,7 +23,7 @@ layout(push_constant) uniform ShadowView {
 out float gl_ClipDistance[1];
 
 void main() {
-    InstanceData instance = instances[drawList[gl_InstanceIndex]];
+    InstanceData instance = instances[drawnInstance(drawList[gl_InstanceIndex])];
 
     // A terrain patch is lifted onto the land as the camera's views lift it (morphed from the camera), so the shadow
     // falls from the surface that is seen.

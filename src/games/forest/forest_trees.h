@@ -213,6 +213,11 @@ struct ForestTreeSettings {
     float levelCardShare = 0.5f;
     float levelBarkShare = 0.3f;
 
+    // On the way to the leaves' level the cards it leaves out shrink away one by one while the rest grow, their sides by
+    // share^-levelCardGrowth (scene/card_thinning.h): 0.5 keeps the cover (Cook et al. 2007), less keeps the survivors
+    // smaller and the crown thinner far off, which people preferred for light thinning (Neubert et al. 2011).
+    float levelCardGrowth = 0.5f;
+
     // The impostor past them (scene/impostor.h, docs/LOD.md): the error, in metres, from which the tree is drawn as its
     // card (at least the shadow stand-ins'; 1.5 m switches about 580 m off at 1080 pixels and a 70 degree view, about
     // 90 m in the reflection probe's faces), and its atlas: frames a side over the hemisphere, texels a frame (8 x 128:
@@ -267,9 +272,19 @@ Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOu
 // makes the first of the same cards (a level of detail's, its survivors only grown).
 using ClusterOutlines = std::array<std::vector<Vec2>, 4>;
 
+// Which of each node's and clump's cards to make, from the first named up to cardsPerNode and fillCards (the cards a
+// thinned level leaves out, after the ones it keeps), and their card thinning records (scene/card_thinning.h): each
+// vertex its card's stem and a rank, 0 below leastShare (kept cards), else spread past it (removedCardRank).
+struct ClusterCardRun {
+    int firstNodeCard = 0;
+    int firstFillCard = 0;
+    bool thinned = false;     // appends to mesh.thinningCards
+    float leastShare = 1.0f;  // 1: every card made is kept (rank 0)
+};
+
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
                        const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
-                       const ClusterOutlines* outlines = nullptr, int nodeCardStride = 0);
+                       const ClusterOutlines* outlines = nullptr, int nodeCardStride = 0, const ClusterCardRun& run = {});
 
 // The fixed parts of a tree's shape. Leonardo's n of 2.5 keeps the limbs thick against the twigs (measured trees: 2-3).
 inline constexpr float leonardoExponent = 2.5f;

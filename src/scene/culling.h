@@ -18,8 +18,9 @@ void attachBoundingSpheres(std::span<DrawItem> draws, const std::vector<Aabb>& b
 // Give each draw its mesh's flat faces, from lists indexed like MeshHandle, which must outlive the frame.
 void attachFlatFaces(std::span<DrawItem> draws, const std::vector<std::vector<FlatFace>>& facesByMesh);
 
-// Each draw's mesh's hanging entry (DrawItem::hangingEntry), as the renderer gave them when the meshes were uploaded.
-void attachHangingEntries(std::span<DrawItem> draws, const std::vector<std::uint32_t>& entryByMesh);
+// Each draw's mesh's entries (DrawItem::hangingEntry, thinningEntry), as the renderer gave them when the meshes were
+// uploaded; none for a mesh past the table.
+void attachVertexEntries(std::span<DrawItem> draws, const std::vector<VertexEntries>& entriesByMesh);
 
 // The draws the camera can see (by index, in order).
 std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const Frustum& cameraFrustum);

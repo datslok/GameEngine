@@ -11,6 +11,7 @@
 #include "render/gpu/shadow_map.h"
 #include "scene/asset_handles.h"
 #include "scene/frame_description.h"
+#include "scene/indexed_mesh.h"
 #include "scene/level_of_detail.h"
 #include "scene/material.h"
 
@@ -46,10 +47,11 @@ struct GpuInstance {
     float handedness[4];    // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale), for lengths in model units
     std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: its kind (instance_shared.h)
     float sway[4];          // how it sways in the wind (render/gpu/wind.h, packSway): category (-1 still), height, bend, flutter
-    std::uint32_t hanging[4]; // x: one past its mesh's first hanging vertex (DrawItem::hangingEntry, 0 none), y: its swing's bits (WindSway::swing)
+    std::uint32_t hanging[4]; // x: one past its mesh's first hanging vertex (DrawItem::hangingEntry, 0 none), y: its swing's bits (WindSway::swing), z: one past its mesh's card thinning header (DrawItem::thinningEntry, 0 none)
+    float levelSphere[4];     // the sphere its level of detail is chosen by, in the world (DrawItem::levelBounds, else its bounds): xyz centre, w radius (below 0 unknown)
 };
 
-static_assert(sizeof(GpuInstance) == 192, "GpuInstance must match the shader's InstanceData struct");
+static_assert(sizeof(GpuInstance) == 208, "GpuInstance must match the shader's InstanceData struct");
 
 // A shadow tile's view, pushed before its draws: the view-projection (column-major, world space), the plane its draws
 // are clipped at (ShadowTile::clipPlane, world space; noClipPlane for all but an image light's), and where its light is
@@ -68,7 +70,7 @@ static_assert(sizeof(GpuShadowView) == 112, "GpuShadowView must match shadow.ver
 * A capture's view (a reflection probe cube face's, or a flat mirror's), pushed before its draws: the view-projection
 * (column-major, camera-relative) and the plane triangle.vert clips at (render/gpu/planar_reflection.h, planarClipPlane;
 * noClipPlane for the cube and for the passes that push it only because the shader names it), and the eye the capture
-* is seen from, measured from the camera (xyz; w unused): the camera itself for the cube, the camera reflected across
+* is seen from, measured from the camera (xyz; w its error allowed a metre away, for card thinning): the camera itself for the cube, the camera reflected across
 * the mirror for a mirror's picture (reflectAcrossPlane), which the capture's shading takes its view direction from. Seen
 * from the real camera instead, a wall facing the mirror with the camera behind it was looked up in the sky visibility
 * grid from its back (its lookup moved towards the camera, through the wall) and lit as open sky.
@@ -112,16 +114,18 @@ struct GpuFrameData {
     float contactShadowOptions[4]; // x: 1 when the main pass reads the sun's contact shadows (render/gpu/contact_shadows.h), y: 1 when it reads the local lights'
     std::int32_t contactLightSlots[4]; // the local lights with a contact shadow channel, by channel: a point light's slot, a spotlight's CONTACT_SPOT_SLOT_BASE past its slot, -1 none
     float materialOptions[4]; // parallax occlusion mapping (render/gpu/parallax.h): x 1 draws it, y 1 self-shadows from the sun, z the most steps; w 1 lets light through leaves (brdf.h, addDiffuseTransmission)
+    float levelOptions[4];    // x: the camera's error allowed a metre away, for card thinning (scene/card_thinning.h, thinningErrorPerMetre; 0 thins nothing)
 };
 
-static_assert(sizeof(GpuFrameData) == 416, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 432, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 
 GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane, const Vec4& lightPlace, bool sways = false);
 
-GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye = Vec3{});
+// thinningPerMetre: the capture's error allowed a metre away, for card thinning (thinningErrorPerMetre; 0 thins nothing).
+GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye = Vec3{}, float thinningPerMetre = 0.0f);
 
 GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin,
                            const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap, const ShadowSettings& shadows = {});
@@ -175,11 +179,34 @@ struct DrawBatch {
     bool doubleSided = false;
 };
 
-// The chosen draws grouped by mesh: order lists the draw indices in instance order, and each batch covers a run of them.
+// The chosen draws grouped by mesh: order lists the draw indices in instance order, and each batch covers a run of them;
+// thinned says, in the same order, which are drawn with their thinned mesh (DrawItem::thinningEntry, the mesh itself or
+// a level sharing its vertices), whose cards the vertex shaders thin.
 struct BatchedDraws {
     std::vector<std::size_t> order;
     std::vector<DrawBatch> batches;
+    std::vector<bool> thinned;
 };
+
+// A draw list entry: the instance's number, its top bit set where the view draws it thinned (instance_shared.h).
+inline constexpr std::uint32_t drawListThinnedBit = DRAW_LIST_THINNED_BIT;
+inline constexpr std::uint32_t drawListIndexMask = ~drawListThinnedBit;
+
+// Appends a view's draw list entries, in instance order.
+void appendDrawList(std::vector<std::uint32_t>& list, const BatchedDraws& batched);
+
+/*
+* The card thinning records (scene/card_thinning.h), std430: a thinned mesh's header (card size, growth, least share)
+* and then one record a vertex (its card's anchor and rank). Mirrored in card_thinning_data.glsl.
+*/
+struct GpuThinningRecord {
+    float values[4];
+};
+
+static_assert(sizeof(GpuThinningRecord) == 16, "GpuThinningRecord must match the shader's records");
+
+// A mesh's header and records, none for a mesh not thinned. Throws std::invalid_argument without one card a vertex.
+std::vector<GpuThinningRecord> packCardThinning(const IndexedMesh& mesh);
 
 /*
 * Group the chosen draws (indices into draws) by how they are drawn (plain, double-sided, cut-out, double-sided cut-out)

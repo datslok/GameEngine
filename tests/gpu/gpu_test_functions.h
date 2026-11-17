@@ -242,4 +242,8 @@
 #define GPU_TEST_WIND_FLUTTER 10
 #define GPU_TEST_WIND_CHAIN 11
 
+// card_thinning_test.comp
+#define GPU_TEST_THINNED_SHARE 0
+#define GPU_TEST_THINNED_CARD 1
+
 #endif

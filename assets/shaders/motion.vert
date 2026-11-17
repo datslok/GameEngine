@@ -12,6 +12,7 @@
 #include "instances.glsl"
 #include "terrain_data.glsl"
 #include "wind_data.glsl"
+#include "card_thinning_data.glsl"
 
 // Each instance's model matrix last frame (its current one when it did not move), as instances numbers them.
 layout(std430, set = 1, binding = 21) readonly buffer PreviousModels {
@@ -37,17 +38,22 @@ layout(location = 3) flat out uint materialIndex;
 invariant gl_Position;
 
 void main() {
-    uint instance = drawList[gl_InstanceIndex];
+    uint entry = drawList[gl_InstanceIndex];
+    uint instance = drawnInstance(entry);
+
+    // Thinned cards (card_thinning_data.glsl) shaped exactly as triangle.vert shapes them, now and last frame alike.
+    vec3 shaped = thinnedVertex(instances[instance], entry, gl_VertexIndex, position, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
+    vec3 previousShaped = thinnedVertex(instances[instance], entry, gl_VertexIndex, previousPosition, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
 
     // As triangle.vert does: the camera subtracted from the translation first (camera-relative rendering).
     mat4 model = instances[instance].model;
     model[3].xyz -= cameraOrigin.xyz;
     uint kind = instances[instance].material.w;
-    vec3 relativePosition = (model * vec4(position, 1.0)).xyz;
+    vec3 relativePosition = (model * vec4(shaped, 1.0)).xyz;
     relativePosition.y += groundLift(kind, relativePosition + cameraOrigin.xyz);
     float scale = instances[instance].handedness.y;
     vec4 sway = instances[instance].sway;
-    relativePosition += windSwayOfVertex(instances[instance].model, sway, scale, instances[instance].hanging, gl_VertexIndex, position, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    relativePosition += windSwayOfVertex(instances[instance].model, sway, scale, instances[instance].hanging, gl_VertexIndex, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
 
     // Last frame's sway from last frame's springs and time (the same fade: it changes too slowly to show).
@@ -55,9 +61,9 @@ void main() {
     mat4 beforeInWorld = before;
     before[3].xyz -= cameraOrigin.xyz;
     currentClip = view.current * vec4(relativePosition, 1.0);
-    vec3 previousRelative = (before * vec4(previousPosition, 1.0)).xyz;
+    vec3 previousRelative = (before * vec4(previousShaped, 1.0)).xyz;
     previousRelative.y += groundLift(kind, previousRelative + cameraOrigin.xyz);
-    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, instances[instance].hanging, gl_VertexIndex, previousPosition, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
+    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, instances[instance].hanging, gl_VertexIndex, previousShaped, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
     previousClip = view.previous * vec4(previousRelative, 1.0);
     textureUv = uv;
     materialIndex = instances[instance].material.x;

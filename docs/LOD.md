@@ -63,7 +63,7 @@ Measured in a hidden copy at the trees' start (the RTX 4070 Laptop, TAA, render 
 
 - **Screen size** (Unreal, `ComputeBoundsScreenSize`): 2 R / (d · 2 tan(fovY / 2)), the bounding sphere's diameter over the view's height; a narrower field of view raises it.
 - **Error in pixels** (Nanite, 3D tiles, meshoptimizer): e · H / (2 d tan(fovY / 2)), with e a level's error in metres; pick the coarsest level under a pixel budget (about 1 pixel for Nanite) **(the formula from general knowledge)**.
-- H is the **render** height (under DLSS or TAAU, not the output's), times a global bias.
+- H was first the **render** height (under DLSS or TAAU, not the output's); since `lod-pop-in` the output's (Hiding the switches, below).
 - Each view picks for itself: the reflection probe's small faces pick coarser levels on their own. Shadow cascades choose by the camera's distance, not the light's, so a tree's shadow matches the tree.
 - **Hysteresis:** no source gives a number; engines hide flicker with timed or ranged fades. A 5-10% dead band is common practice **(unverified)**.
 
@@ -152,3 +152,70 @@ Researched on Nov 15, 2026, after the camera's triangle count showed the ground'
 - **Its cost:** a terrain vertex path (heights from a texture, normals from differences at the level's spacing, the morph), mirrored on the CPU and tested like the other shader libraries; a CPU quadtree walk.
 - **Collision and rays keep the mesh:** the 2 m ring stays as the `StaticLevel` (never drawn), and as the sky visibility bake's and ray tracing's stand-in; CDLOD's level 0 at the same 2 m points matches it where the player stands.
 - **A first step with no new vertex path:** the near ring cut into 64 m chunks, each culled per view (about a third of the triangles in the camera's view, most chunks gone from the near cascades), which also become CDLOD's leaf nodes.
+
+## Hiding the switches (pop-in)
+
+Researched on Nov 17, 2026, after the user found the jumps between the trees' and plants' mesh levels "quite bad" (the impostor switches look fine). Several primary sources would not load (GDC Vault, Pixar's library, Epic's API pages); facts from secondary write-ups or memory are marked **(unverified)**.
+
+### What switches today
+
+Nothing fades: a draw takes its new level in one frame. The trees' steps, at pixel error 2 and a 70 degree view:
+
+| Step | What changes | Error | Rendered 1080 px (DLAA) | Rendered 720 px (DLSS Quality) |
+|---|---|---|---|---|
+| Full → level | half the leaf cards, each grown to twice the area; bark at 30% | 0.41 m | about 160 m | about 107 m |
+| → shadow stand-ins | a sixth of the cards at twice the size; bark at 10% | 1.0 m | about 385 m | about 257 m |
+| → impostor | the baked card | 1.5 m | about 580 m | about 385 m |
+
+- The levels are chosen by the **render** height, so DLSS or a smaller render scale pulls every switch about a third closer.
+- Shadow tiles choose their own levels (orthographic, by the tile's texels), so a tree's shadow switches at other moments than the tree.
+- The plants and palms step the same way (seen, coarser, shadow stand-in, card); the grass and floor cover halve, quarter, then end.
+
+### Dithered cross-fades
+
+Both levels drawn while fading, each keeping the pixels the other discards.
+
+- **Unity** (built-in pipeline): `clip(fade - mask * sign(fade))` against a 4 x 4 screen mask, the two levels given the fade with opposite signs, so their pixels are exact complements: no holes, no doubled pixels. URP offers Bayer or blue noise.
+- **Unity's timing:** distance-based (a share of each level's range; the manual's example 40%) or time-based (`LODGroup.crossFadeAnimationDuration`, global; 0.5 s by default **(unverified)**). Unity's caveat: time-based fades fade fewer objects at once, but show more when nothing moves.
+- **Unreal:** "Dithered LOD Transition" per material (every material of the mesh, or it fails); time-based, `lod.TemporalLag` 0.5 s: two view origins half a second apart, each choosing a level, a mesh drawn at both where they differ **(mechanism unverified)**. A per-pixel hash rather than a Bayer matrix **(unverified)**.
+- **Unreal's known problems:** foliage overdraw "significantly increased" while fading; a one-frame flash of the next level (UE-296133); instanced fades broken in 5.4 (UE-221257).
+- **CryEngine 2** (Mittring 2007, via a summary): a screen-space dissolve **in the early-Z pass**, every started fade finishing "within a defined small amount of time"; the same dissolve fades distant objects out and hides the impostor switch.
+- **Godot:** fades by alpha blending (the transparent path), and itself recommends dithered materials instead.
+
+**With TAA and upscalers:** a pattern turned each frame is averaged into a soft blend by TAA, FSR and DLSS (Unreal's "DitherTemporalAA" exists for this); a fixed pattern stays a visible screen door. Weak history can flicker or ghost.
+
+### Time, distance and hysteresis
+
+- **Distance-based:** still when the camera is still, but an object standing in the band stays dithered for good.
+- **Time-based:** every fade ends; a fade plays out while nothing moves, and only the few objects fading draw twice.
+- **How long:** Giegl & Wimmer (below) found "below one second" removes popping; Unity's and Unreal's 0.5 s.
+- **Hysteresis:** no engine publishes a number. Blender had a percentage, Godot margins in metres; about 10% of the switch metric is common practice **(unverified)**. Fast players need more than walking ones (DigitalRune).
+- **Simplygon's rules of thumb:** each zone starting at twice the last one's distance, half the triangles a step, about 1 pixel of error.
+
+### Shipped games
+
+- **Horizon Zero Dawn** (Sanders, GDC 2018, a transcript): **shadow popping "almost completely solved"** by giving each object a fixed shadow level per cascade, by distance band, not following the camera's choice. Nothing found on its mesh fades.
+- **Ghost of Tsushima grass** (GDC 2021, a summary, **unverified**): blades of 15 vertices near and 7 far, the vertices sliding so the near blade morphs into the far one at the switch; far away fewer blades about twice as wide; beyond, a texture.
+- **Far Cry (2004):** hard switches everywhere (TU Wien's popping examples). Far Cry 5 and 6, The Witcher 3, RDR2, The Last of Us Part II: nothing primary found.
+- **Nanite Foliage** (Unreal 5.7, experimental): no levels to switch; the error held under a pixel, far branches as voxel bricks. Far beyond this engine.
+
+### Fading parts inside one mesh
+
+- **SpeedTree's runtime:** one continuous level, 1 to -1. Each vertex stores its position and a *level position*, and the shader slides between them: small branches shrink onto their centre lines, and a share of the leaf cards "gradually shrunk away" while the rest grow, each card's own scale saying when. From 0 to -1 the tree fades into the billboard. Swapping unrelated meshes has "no smooth transition algorithm".
+- **Stochastic simplification** (Cook, Halstead, Planck & Ryu, Pixar 2007, through Neubert's account): leaves drawn in a fixed random order, the last ones pruned as the screen size falls, the survivors' **area grown by 1 / kept share**, contrast corrected. That the pruned ones shrink over a narrow band rather than vanish is **(unverified)**.
+- **Neubert, Pirk, Deussen & Dachsbacher 2011** (read): Cook's 1 / kept share is **too much for light pruning**. In their study (19 people, 5 trees) above 80% kept people preferred much smaller growth, the worst errors came at slight and moderate pruning, and the right growth differs by species (spruce barely needs any; beech more than 1 / kept share). This engine's leaf level is exactly Cook's rule at a half.
+- **Geomorphing** (Hoppe's progressive meshes): needs each vertex's partner in the next level; meshoptimizer's collapses give one. Shading still switches in one frame.
+
+### Unpopping (Giegl & Wimmer 2007)
+
+- Over the transition t: up to a half, the old level opaque with depth writes and the new one blended over it at 2t; after, the new one opaque and the old one blended away. One level is always opaque, so depth stays valid.
+- Artefacts: small silhouette mismatches, a jump in depth at the half, z-fighting (a small polygon offset).
+- Not for here: its blended level needs a transparent pass, which cut-out leaves and the EQUAL prepass do not suit.
+
+### What it means here
+
+1. **Leaf cards fade one by one** (SpeedTree, Cook): each card a fixed random rank; as the error grows the cards past the kept share shrink to nothing over a short band and the rest grow smoothly, so the crown never jumps. One number a card and a few vertex instructions; no extra draws, the prepass untouched. Less growth than 1 / kept share (Neubert), tuned by eye. Fits the leaves, which are most of the jump.
+2. **Dithered cross-fade, time-based, about 0.3-0.5 s,** for the bark and the step to the shadow stand-ins: both levels in the prepass and the main pass with complementary discards from one per-pixel noise turned each frame, so the EQUAL test still matches and TAA or DLSS blends it. Costs: fading draws drawn twice for half a second, bark on the cut-out pipeline meanwhile, each instance's fade in its record (`GpuInstance::hanging` has two free words).
+3. **Hysteresis and steadier shadows,** nearly free: a dead band of about 10% so a level does not flick back, and shadow levels following the camera's choice by distance (or fixed per cascade, as Horizon) rather than each tile's own.
+4. **Geomorphing the bark** (stored level positions from the simplifier's collapses), only if the dither's noise shows on trunks.
+5. **Choose by the output height,** not the render height, so DLSS does not pull the switches closer; or keep it and lower the pixel error. A one-line change either way.

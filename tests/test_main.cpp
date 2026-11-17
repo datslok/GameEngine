@@ -69,6 +69,7 @@ void testWindSway();
 void testWindHanging();
 void testSimplifyMesh();
 void testLevelOfDetail();
+void testCardThinning();
 void testTerrain();
 void testGroundFollow();
 void testImpostors();
@@ -372,6 +373,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testWindHanging", testWindHanging);
     runTest("testSimplifyMesh", testSimplifyMesh);
     runTest("testLevelOfDetail", testLevelOfDetail);
+    runTest("testCardThinning", testCardThinning);
     runTest("testTerrain", testTerrain);
     runTest("testGroundFollow", testGroundFollow);
     runTest("testImpostors", testImpostors);

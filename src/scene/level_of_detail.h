@@ -54,6 +54,10 @@ LevelView levelView(const Vec3& eye, float viewHeightPixels, float verticalFovRa
 // orthographic view, errorMetres times its pixels a metre, wherever it is.
 float errorInPixels(float errorMetres, float distance, const LevelView& view);
 
+// The error a view allows a metre away (pixelError / pixelsPerMetre), which card thinning spends (scene/card_thinning.h);
+// 0 for a view without levels, and for an orthographic one, which thins nothing.
+float thinningErrorPerMetre(const LevelView& view);
+
 // The level to draw distance metres away: 0 the mesh itself, k levels[k - 1], the coarsest whose error fits the budget.
 std::size_t chooseLevel(std::span<const MeshLevel> levels, float distance, const LevelView& view);
 

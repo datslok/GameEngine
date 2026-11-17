@@ -26,7 +26,7 @@ layout(push_constant) uniform ShadowView {
 out float gl_ClipDistance[1];
 
 void main() {
-    InstanceData instance = instances[drawList[gl_InstanceIndex]];
+    InstanceData instance = instances[drawnInstance(drawList[gl_InstanceIndex])];
     vec4 world = instance.model * vec4(position, 1.0);
     world.y += groundLift(instance.material.w, world.xyz);
 

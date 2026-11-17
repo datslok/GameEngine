@@ -31,6 +31,12 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     instance.sway[3] = sway.w;
     instance.hanging[0] = draw.hangingEntry;
     instance.hanging[1] = std::bit_cast<std::uint32_t>(draw.sway.swing);
+    instance.hanging[2] = draw.thinningEntry;
+    const BoundingSphere& choosing = draw.levelBounds.radius >= 0.0f ? draw.levelBounds : draw.bounds;
+    instance.levelSphere[0] = choosing.centre.x;
+    instance.levelSphere[1] = choosing.centre.y;
+    instance.levelSphere[2] = choosing.centre.z;
+    instance.levelSphere[3] = choosing.radius;
     return instance;
 }
 
@@ -50,7 +56,7 @@ GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane, cons
     return view;
 }
 
-GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye) {
+GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, float thinningPerMetre) {
     GpuCaptureView view{};
     writeColumnMajor(viewProjection, view.viewProjection);
     view.clipPlane[0] = clipPlane.x;
@@ -60,6 +66,7 @@ GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane
     view.eye[0] = eye.x;
     view.eye[1] = eye.y;
     view.eye[2] = eye.z;
+    view.eye[3] = thinningPerMetre;
     return view;
 }
 
@@ -207,6 +214,14 @@ const std::vector<GpuMaterial>& MaterialTable::getEntries() const {
 * Each chosen draw's mesh in this view is worked out once (a distance each), sorted with its draw, so the sort compares
 * plain numbers.
 */
+namespace {
+    // Drawn with its thinned mesh: the mesh itself, or a level sharing its first vertices, of a draw with thinning records.
+    bool drawnThinned(const DrawItem& draw, MeshHandle mesh) {
+        return draw.thinningEntry != 0 &&
+               (mesh == draw.mesh || std::any_of(draw.levels.begin(), draw.levels.end(), [mesh](const MeshLevel& level) { return level.mesh == mesh && level.sharesVertices; }));
+    }
+}
+
 BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance,
                          const LevelView* levels) {
     const auto style = [&draws](std::size_t index) {
@@ -218,6 +233,7 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
         int style = 0;
         std::uint32_t mesh = 0;
         std::size_t index = 0;
+        bool thinned = false;
     };
 
     std::vector<Keyed> keyed;
@@ -231,7 +247,7 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
             continue;
         }
 
-        keyed.push_back(Keyed{style(index), mesh.index, index});
+        keyed.push_back(Keyed{style(index), mesh.index, index, drawnThinned(draws[index], mesh)});
     }
 
     std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) {
@@ -240,6 +256,7 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
 
     BatchedDraws batched;
     batched.order.reserve(keyed.size());
+    batched.thinned.reserve(keyed.size());
 
     for (std::size_t position = 0; position < keyed.size(); ++position) {
         const DrawItem& draw = draws[keyed[position].index];
@@ -248,6 +265,7 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
         const bool doubleSided = draw.material.doubleSided;
         const DrawBatch* last = batched.batches.empty() ? nullptr : &batched.batches.back();
         batched.order.push_back(keyed[position].index);
+        batched.thinned.push_back(keyed[position].thinned);
 
         if (last == nullptr || last->mesh != mesh || last->cutOut != cutOut || last->doubleSided != doubleSided) {
             batched.batches.push_back(DrawBatch{mesh, firstInstance + static_cast<std::uint32_t>(position), 0, cutOut, doubleSided});
@@ -257,4 +275,31 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
     }
 
     return batched;
+}
+
+void appendDrawList(std::vector<std::uint32_t>& list, const BatchedDraws& batched) {
+    for (std::size_t position = 0; position < batched.order.size(); ++position) {
+        const std::uint32_t instance = static_cast<std::uint32_t>(batched.order[position]);
+        list.push_back(position < batched.thinned.size() && batched.thinned[position] ? instance | drawListThinnedBit : instance);
+    }
+}
+
+std::vector<GpuThinningRecord> packCardThinning(const IndexedMesh& mesh) {
+    if (mesh.thinningCards.empty()) {
+        return {};
+    }
+
+    if (mesh.thinningCards.size() != mesh.vertices.size()) {
+        throw std::invalid_argument("A thinned mesh needs one card record a vertex");
+    }
+
+    std::vector<GpuThinningRecord> records;
+    records.reserve(mesh.thinningCards.size() + 1);
+    records.push_back(GpuThinningRecord{{mesh.thinning.cardSize, mesh.thinning.growth, mesh.thinning.leastShare, 0.0f}});
+
+    for (const ThinningCard& card : mesh.thinningCards) {
+        records.push_back(GpuThinningRecord{{card.anchor.x, card.anchor.y, card.anchor.z, card.rank}});
+    }
+
+    return records;
 }
