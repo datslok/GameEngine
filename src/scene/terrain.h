@@ -97,8 +97,8 @@ TerrainNode terrainNodeAt(int level, const Vec2& corner, float size, bool half, 
 
 /*
 * The nodes to draw this frame (Strugar's selection): from the root down, a node out of its own level's reach is left to
-* its parent, which draws that quarter at its level; one wholly within the next finer level's reach is split; the rest
-* are drawn whole. Every place on the land lies in exactly one, and neighbours differ by a level at most.
+* its parent, which draws that quarter at its level; one the next finer level's range reaches at all (its nearest point)
+* is split; the rest are drawn whole. Every place on the land lies in exactly one, and neighbours differ by a level at most.
 */
 std::vector<TerrainNode> selectTerrainNodes(const Terrain& terrain, const Vec3& eye, const TerrainSettings& settings);
 

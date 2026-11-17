@@ -6,7 +6,7 @@ Each part records what the sources say and then **what it means here**. Facts ma
 
 ## The problem
 
-The sun's far shadow map (`ShadowKind::Far`, docs/ARCHITECTURE.md, The far shadow map) covers 5 km round the camera at 2.7 m texels on Ultra and holds every big caster: the valley's pillars, islands, the Monolith, the trees. A few hundred drifting rocks (2-20 m) move round the islands at up to about 6 m/s.
+The sun's far shadow map (`ShadowKind::Far`, docs/architecture/sun-shadows.md) covers 5 km round the camera at 2.7 m texels on Ultra and holds every big caster: the valley's pillars, islands, the Monolith, the trees. A few hundred drifting rocks (2-20 m) move round the islands at up to about 6 m/s.
 
 - Redrawing the whole map every frame cost 2.3 ms of 18.5 (the RTX 4070 Laptop).
 - So it was kept up to half a second while casters only moved (`farShadowRefreshSeconds`), and the rocks' shadows jumped about 3 m twice a second.

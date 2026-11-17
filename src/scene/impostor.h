@@ -1,6 +1,6 @@
 #pragma once
 
-#include "assets/image_loader.h"
+#include "scene/image_data.h"
 #include "core/job_system.h"
 #include "core/pixel.h"
 #include "math/vec2.h"

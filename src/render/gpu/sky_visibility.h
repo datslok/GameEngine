@@ -52,7 +52,7 @@ struct SkyVisibilitySettings {
     // The densest cascade's spacing (metres); each further one's is twice the last's.
     float spacing = 0.5f;
 
-    // How many cascades (1 to maxSkyVisibilityCascades); past the last, the sky is taken as open, as today.
+    // How many cascades (1 to maxSkyVisibilityCascades); past the last, the grid reads as an open field (skyOpenField).
     int cascades = 2;
 
     // The share of each cascade's reach over which it hands over to the next (or, the last, to the open field), 0..1;

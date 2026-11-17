@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(*git commit*)",
+            "command": "powershell -NoProfile -File tools/docs_reminder.ps1",
+            "timeout": 30,
+            "statusMessage": "Checking the docs"
+          }
+        ]
+      },
+      {
+        "matcher": "PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "PowerShell(*git commit*)",
+            "command": "powershell -NoProfile -File tools/docs_reminder.ps1",
+            "timeout": 30,
+            "statusMessage": "Checking the docs"
+          }
+        ]
+      }
+    ]
+  }
+}

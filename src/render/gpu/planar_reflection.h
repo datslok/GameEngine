@@ -41,8 +41,8 @@
 *
 * Rough mirrors read blurrier levels of the picture. That blur is the same everywhere, where true blur grows with the
 * distance from the mirror, so it stops at planarMaxRoughness. In the capture the mirror's objects are shaded as the
-* reflection probe's are, with the view from the camera: their matte light is right and their highlights are a little off,
-* and a mirror in the mirror shows only its stand-in.
+* reflection probe's are (every light, not the clusters' lists), seen from the camera reflected across the mirror, so
+* their highlights fall where the mirror shows them; a mirror in the mirror shows only its stand-in.
 *
 * This is the API-free part. isOnPlanarMirror and planarClipDistance are mirrored by assets/shaders/planar_reflection.glsl.
 */

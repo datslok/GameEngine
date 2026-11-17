@@ -8,7 +8,7 @@ Each phase ends with a **milestone**: something you can run and see. A phase is 
 
 Finished items are kept to one line, with their branch names so they can be found in `git log`.
 
-- How each works today is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- How each works today is in [docs/architecture/](docs/architecture/), listed in [docs/INDEX.md](docs/INDEX.md).
 - When it was built, why, and what was measured are in [docs/BUILDLOG.md](docs/BUILDLOG.md).
 
 **Principles**
@@ -20,7 +20,7 @@ Finished items are kept to one line, with their branch names so they can be foun
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising, and keep graphics features that cost a lot (ray tracing, GI quality) as settings that scale down to typical GPUs.
 
-**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 18 (a forest showcase), 19 (refactoring the docs and `CLAUDE.md`) and 17 (rendering), then 7 onwards, as the phases sit in this file.
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase) and 17 (rendering), then 7 onwards, as the phases sit in this file.
 
 ---
 
@@ -315,6 +315,22 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 
 ---
 
+## Phase 19: Documentation refactor (done, Nov 17 2026)
+
+The docs cut down and kept down, taken ahead of the forest at the user's request; started from an external reviewer's plan. The rules it set (one home per fact, budgets, the workflow) live in the root `CLAUDE.md`.
+
+**Items** (all on `docs-refactor`)
+
+- [x] The root `CLAUDE.md` rewritten (103 KB to under 6 KB); folder `CLAUDE.md` files, path rules, skills, `docs/INDEX.md`, `docs/LAYOUT.md`
+- [x] `docs/ARCHITECTURE.md` split into 51 files in `docs/architecture/`, each checked against the code
+- [x] `README.md` cut from 68 KB to 12.5 KB; the guide rewritten into 11 chapters in `docs/guide/`; the build log split into parts in `docs/buildlog/`
+- [x] Memory deduplicated: project rules out of memory
+- [x] The checks: `testDocs` in the routine suite, `tests.exe --docs-report` for the review, the pre-commit reminder (`tools/docs_reminder.ps1`), the `docs-review` skill
+
+**Milestone:** the root `CLAUDE.md` within 8 KB and readable in one sitting, every doc listed in `docs/INDEX.md`, the checks passing in the routine suite. Met Nov 17 2026.
+
+---
+
 ## Phase 18: A jungle valley showcase ← current
 
 A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a scale meant to be felt: a jungle valley kilometres across with mist lying in it, sandstone pillars hundreds of metres tall, islands of rock and forest floating above it, and colossal machines built by someone long gone, half reclaimed by the green. Realistic, not stylised: scanned CC0 plants, rocks and textures on generated pillars, islands, structures and trees, judged with the typical GPU setup on.
@@ -379,18 +395,6 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] Golden views, tests, packaging with the downloaded assets, docs
 
 **Milestone:** with the typical GPU setup, the scale is felt from the valley's rim (pillars, floating islands and the Monolith layered into kilometres of haze), and walking down through the jungle to the Monolith's foot looks lush and alive (wind in leaves and vines, light through the canopy, mist in the valley) by day and at dusk, at a frame rate a mid-range GPU holds (measured on the laptop's RTX 4070, 8 GB).
-
----
-
-## Phase 19: Refactoring the documentation and CLAUDE.md
-
-A pass over the docs once the forest is done (added Nov 17 2026), before phase 17: they have grown feature by feature and are due a reorganisation. The plan is made with the user first.
-
-**Items**
-- [ ] `CLAUDE.md`: refactored to the rules and essentials, with the detail it has gathered (every file, name and number) moved to the docs it belongs in
-- [ ] The documentation (`docs/ARCHITECTURE.md`, `docs/ENGINE_GUIDE.md`, `docs/BUILDLOG.md`, the research docs, `README.md`): refactored so each topic lives in one place, with nothing out of date
-
-**Milestone:** `CLAUDE.md` is short enough to read in full, and every doc is current and easy to find one's way around.
 
 ---
 
