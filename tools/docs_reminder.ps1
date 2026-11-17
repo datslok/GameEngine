@@ -52,7 +52,10 @@ function Find-Owner([string]$path) {
 $missing = [ordered]@{}
 
 foreach ($path in $changed) {
-    if (-not ($path.StartsWith("src/") -or $path -eq "makefile")) {
+    $isSource = $path.StartsWith("src/") -and $path -match "\.(h|cpp)$"
+    $isShader = $path.StartsWith("assets/shaders/") -and $path -match "\.(glsl|vert|frag|comp)$"
+
+    if (-not ($isSource -or $isShader -or $path -eq "makefile")) {
         continue
     }
 
