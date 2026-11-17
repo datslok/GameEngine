@@ -2,38 +2,7 @@
 
 The detailed reference for how each system is built today: names, files, numbers and the reasons behind them. `CLAUDE.md` holds the rules and a short summary and points here; `docs/ENGINE_GUIDE.md` explains the concepts for a human reader; `docs/BUILDLOG.md` keeps the history (when each part was built, what was measured then, what was tried and dropped). Read the section for a system before changing it, and keep it in sync in the branch that changes it.
 
-Live path: `main` picks a game from the game registry (`app/game_registry`: the demo, or another named with `--game`), makes it, then creates an `Application` (the engine). The `Application`:
-
-- drives the game through the `Game` hooks,
-- fills `Input` from the `Window`,
-- and draws the `World` with the renderer (`VulkanRenderer`, the engine's own Vulkan 1.3 renderer).
-
-## Settings
-
-Settings: every value a game, the debug UI or a player may tune lives in one settings struct owned by its system, read every frame unless noted, with defaults that are the engine's values. Fixed capacities (shader array sizes, atlas size, tile counts) stay compile-time constants.
-
-**The settings structs**
-
-- `EngineSettings` (`engine/engine_settings.h`) is owned by `Application` (constructor argument, `getSettings()`). Its fields:
-  - `ticksPerSecond` 120 and `maxFrameSeconds` 0.25, both read only at start-up;
-  - `maxTickSecondsPerFrame` (1/60 s, 0 = no budget), the tick budget, read every frame (see Application);
-  - `targetFPS` 120, 0 = unlimited;
-  - `presentMode`, applied when it changes;
-  - `framesInFlight` (2), applied when it changes;
-  - `workerThreads` (`automaticWorkerThreads`, -1: one per core but one; 0 runs everything on the main thread), read at start-up through `workerThreadCount` (see Job system);
-  - `gpuValidation`, read at start-up and passed to the renderer's constructor (Vulkan's validation layers when installed; MSYS2's, which the makefile points the loader at; see VulkanRenderer). It defaults to `isDebugBuild` from `core/build_info.h`, which the makefile sets by defining `ENGINE_DEBUG_BUILD` in debug builds only;
-  - `commandServer` (on) and `commandPort` (`defaultCommandPort`, 47613), read at start-up (see Commands);
-  - and `render`.
-- `RenderSettings` (`render/gpu/render_settings.h`) = `LightPrioritySettings lights` + `ShadowSettings shadows` + `BloomSettings bloom` + `ToneMappingSettings toneMapping` + `DisplaySettings display` + `GlobalIlluminationSettings globalIllumination` (render/gpu/ddgi.h; see Light probes), with `rayTracing`, the master switch for everything ray-traced (off by default; see Ray tracing). It is passed to `VulkanRenderer::render(frame, settings)` each frame.
-- Camera controllers each own a settings struct (`FreeFlyCameraSettings`, `FirstPersonCameraSettings`, `MobaCameraSettings`), passed to the constructor and editable through `getSettings()`.
-  - The look ones nest the shared `LookSettings`: `sensitivity`, `sprintMultiplier`.
-  - `sensitivity` is on Overwatch's scale (default 5, slider 1 to 50): `radiansPerCount` turns it into `sensitivity` x `overwatchDegreesPerCount` (0.0066 degrees) per mouse count. SDL's relative mouse mode reports raw counts, unscaled by Windows' pointer speed, as Overwatch reads them, so the same number turns the same angle for the same hand motion in both, sideways and up alike, at any field of view.
-
-**Reaching them**
-
-- Games cannot reach `EngineSettings` yet (it pulls in `render/` headers). `main` uses the defaults, and the saved settings file is loaded over them (see Debug UI and the settings file).
-- Every settings struct has a `visit(Settings&, SettingsVisitor&)` next to it, in its system's `.cpp` (`RenderSettings` in `render/gpu/render_settings.cpp`, `EngineSettings` in `engine/engine_settings.cpp`).
-- The demo's are reached through `Game::visitSettings`.
+Being split into `docs/architecture/` (phase 19); each system moves there with its section deleted here. Moved so far: `docs/architecture/build.md`, `docs/architecture/engine-core.md`.
 
 ## Debug UI and the settings file
 
@@ -376,48 +345,6 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
   - the depth measurement (its own layout with a sampled image; see Cascaded sun shadows);
   - and the light probes (the trace with a shared layout, the updates with a storage buffer and a storage image; see Light probes).
 
-## Job system
-
-`JobSystem` (`core/job_system`, plain C++ threads, tested in `job_system_test`) runs CPU work on every core (phase 7, `job-system`).
-
-- **Threads:** `defaultWorkerCount()` workers (one per core but one), made once and kept for the whole run; the thread that calls `parallelFor` works too, so `getThreadCount()` is the workers plus one. With 0 workers everything runs on the caller.
-- **`parallelFor(count, grain, work)`:** runs `work(index)` for every index in 0..count-1 and returns when all have finished.
-  - The range is halved until a piece holds at most `grain` indices; each upper half goes on the running thread's pile, and the thread goes on with the lower.
-  - With no workers, or a range of one piece, it runs at once on the caller.
-  - The work reaches the threads as a plain function pointer and context (`RangeFunction`), so a call does not allocate; the call's `RangeTask` lives on the caller's stack and counts the indices not yet finished.
-  - The first exception a piece throws is rethrown by `parallelFor` once every piece has finished; a grain of 0 throws `std::invalid_argument`.
-- **Work stealing:** each thread has a `Pile` (a deque behind a mutex, on its own cache lines). A thread takes its newest job (`take`: the back of its own pile), else the oldest of another pile (the front, usually the biggest half left).
-  - The thread waiting for a `parallelFor` runs jobs (anyone's) until its count reaches zero, so a `parallelFor` inside a job finishes.
-  - Workers with nothing to take sleep on a condition variable. A push counts its job (`queuedJobs`) before checking for sleepers (`sleepingWorkers`), and a worker counts itself before checking for jobs, so a wake-up is never lost; pushes skip the wake-up while no worker sleeps.
-  - Workers use their own piles; every other thread (the main thread, any thread outside the system) shares pile 0, so several may call `parallelFor` at once.
-- **Determinism:** results do not depend on the threads when each index writes only its own output. A sum adds fixed chunks, each in index order, then the chunks' totals in order (tested: the same bits on 1 and 8 threads, 20 runs).
-- **Owner:** `Application`, before the window and renderer (`jobs(workerThreadCount(settings))`). The renderer borrows it (`VulkanRenderer(window, jobs, validation, framesInFlight)`) for the BRDF table at start-up.
-
-## Application (the engine)
-
-`Application` (`engine/`) runs the main loop (fixed timestep, frame cap) for a borrowed `Game` (declare the game first so it outlives the engine). It owns the `Window`, the renderer (`VulkanRenderer`), `Input`, the `World` and the `AssetManager`.
-
-**Members, in order:**
-
-- the borrowed `game`;
-- `settings` and `defaultSettings` (initialised by `captureDefaultsAndLoad`, so the saved file is applied before the renderer reads `gpuValidation` and the timestep its rate);
-- `jobs`, the job system, which the renderer borrows;
-- `window`, then `renderer`: members are destroyed in reverse order, so the renderer goes before the window it draws into, and the GPU device outlives every uploaded mesh;
-- `input`, `world`, `assets`, ...;
-- `debugUi` (after the window and renderer, so it is destroyed first).
-
-**Starting:** the constructor runs the game's `onInit`, then `waitForPipelines`: the loading screen until every pipeline the renderer asked for is built (see VulkanRenderer, Pipelines on every core). The command server starts after it, so a `--send` waits until the game is ready.
-
-**Each frame:**
-
-- First the commands (`runCommands`, see Commands), before the frame's time is measured; a paused simulation (`ticksThisFrame`) runs no ticks and draws at alpha 1.
-- After the events, `updateDebugUi` handles F5 and builds the UI before `game.onInput`, so a changed setting applies that frame. Its draw data goes to `render` and on to `VulkanRenderer::render`.
-- While the UI is open the mouse is freed (`applyMouseMode` asks for mouse look only when the game wants it and the UI is closed).
-- Before each frame it uploads every mesh and texture the `AssetManager` gained since the last frame (the ones past the renderer's counts), so games can load and spawn at any time.
-- It applies `game.wantsMouseLook()` to the window only when it changes (re-applying would undo Escape).
-- **The tick budget:** the ticks `FixedTimestep::advance` asks for run while `fitsTickBudget(ticksRun, secondsSpent, maxTickSecondsPerFrame)` allows: the first always, another only if one more of the frame's average tick still fits. The rest are dropped (already out of the accumulator, so alpha is unchanged and nothing is owed). Without it a tick slower than real time spirals to `maxFrameSeconds`' 30 ticks a frame (3 fps with the cloth lab's big sheet); with it the game runs in slow motion at a usable frame rate, while cheap ticks still catch up after a hitch. Only how many ticks a frame runs depends on the clock, never what a tick does, so determinism is untouched.
-- **The GPU's share** (`gpu-tick-budget`): a GPU cloth tick only queues work, costing the CPU almost nothing, yet the frame lasts as long as the GPU takes, so the CPU's clock alone let an overloaded GPU stretch the frames: with four coarse levels, 8 ms a tick on the GPU (just under the 8.3 it simulates) grew frames until the 4 ms of drawing was shared among about 12 ticks (8 n + 4 = 8.3 n), 100 ms frames. So while `clothOnGpu` is on, each tick run is also charged `gpuClothTickEstimate` (`fitsTickBudget(ticksRun, cpuSeconds, gpuSecondsPerTick, budget)`): the renderer reports how many cloth ticks the frame it timed ran (`RenderStats::clothTicks`, beside `gpu`), and `gpuClothTickSeconds` (`engine/gpu_cloth`) divides that frame's `GpuPass::Cloth` time by them, keeping the old estimate for a frame not timed or with no ticks. The same case now runs two ticks a frame, about 20 ms frames, the cloth in slow motion. The estimate is a frame or two late and includes the cloth's once-a-frame work (shaping, the copy back), so it errs towards dropping a tick (tested with a model of the loop in `fixed_timestep_test`).
-
 ## The Game interface, debug drawing, culling and render stats
 
 ### The Game interface
@@ -554,15 +481,6 @@ The land drawn as a quadtree of patches round the camera (CDLOD, Strugar 2010; `
 - Always run ticks through `runFixedUpdate`, which saves previous transforms first; tests use it too.
 - `DemoGame` (`games/demo/`) holds the player controls (camera, control modes, body), the player and marker entities, and all demo input rules.
 - `LightLabGame` (`games/lightlab/`) is the second game (see Games and the light lab).
-
-## Window
-
-`Window` (`platform/`) owns SDL video and the `SDL_Window`. It reports raw facts only; game rules live in game code.
-
-- It handles event polling into `Input`, quit, focus loss (releases everything), click to capture (mouse look) or confine (MOBA cursor), Escape to release, Alt+Enter fullscreen.
-- While the debug UI has started (ImGui's SDL backend is running), every event goes to `ImGui_ImplSDL3_ProcessEvent` first, releases included.
-- While it is open (`setDebugUiOpen`), key presses and mouse button presses ImGui wants (`WantCaptureKeyboard`, `WantCaptureMouse`, read once per frame) do not reach `Input`, and a click it takes neither captures nor confines the mouse.
-- After the events it records the cursor position, window size, keyboard focus, mouse capture and cursor confinement into `Input`, so games read those facts from `Input` instead of the window.
 
 ## The renderer, shadows and light priority
 
@@ -3222,100 +3140,6 @@ Meshes whose vertices move every tick while their triangles and UVs stay the sam
 
 **Ray tracing:** a deforming mesh has a bottom-level structure per slot (`MeshStructure::slotStructures`, built with `PREFER_FAST_BUILD`, not compacted, one scratch buffer each), slot 0 built at upload. `rebuildDeformedMeshes`, recorded before each top-level build, rebuilds the current slot's structure when its version is newer than the one it was built from, after a barrier for the reused scratch; a barrier then makes it readable by the top-level build and ray queries. `packInstances` and the mesh table use the current slot's structure and vertices (`currentStructure`, `currentVertices`).
 
-## Input
-
-`Input` is a once-per-frame snapshot with no SDL dependency.
-
-- **Keys:** `isKeyHeld`, `wasKeyPressed`, `wasKeyReleased` take an engine `Key` (`key.h`, physical US-layout positions), plus accumulated `getMouseDelta`.
-- **Mouse buttons** (`MouseButton`) work like keys, and each press is also recorded as a `MouseButtonPress` with the exact event position (window pixels) and timestamp (ns, `SDL_GetTicksNS` clock).
-  - Use `getLastMouseButtonPress` for clicks, `getCursorPosition`/`isCursorInWindow`/`getWindowSize` for continuous things.
-- **Filling it:** through `pressKey`/`releaseKey`/`pressMouseButton`/`releaseMouseButton`/`addMouseMotion`/`setCursor`/`setWindowSize`.
-  - `sdl_input` is the only SDL-to-engine translation (`keyFromScancode`, `mouseButtonFromSdl`, `applySdlEvent`, which also drops key repeat).
-  - `Window::processEvents(input)` resets and fills it.
-- Mouse motion is only forwarded while the mouse is captured, and is discarded when capture or control mode changes.
-- Game code reads keys from `Input` as `Key` values, never SDL scancodes or `SDL_GetKeyboardState`.
-
-## Entities and components
-
-Entities and components (`ecs/`): an `Entity` is an index plus a generation (handles to destroyed entities go stale even after their slot is reused; `Entity{}` is never alive and means "none").
-
-- `World` creates/destroys entities and stores one `ComponentStorage<T>` (sparse set: packed `components`, owning `entities`, and a `sparse` index) per component type.
-- Components are plain structs; systems are free functions run with `world.each<A, B>([](Entity, A&, B&) { ... })`, which walks the first type's packed array, so list the rarest component first.
-
-**Changes during a walk:**
-
-- Inside `each`, `destroy` and `remove<T>` are deferred:
-  - the `World` counts running walks (`activeWalks`, also per storage in `ComponentStorageBase::activeWalks`; they nest, and the const `each` counts too);
-  - and queues them as type-erased `PendingChange`s, applied in order by `applyPendingIfIdle` when the outermost walk ends (also when a system throws, so the world never stays locked);
-  - until then the entity and its components stay visible.
-- `create` is always immediate.
-- `add<T>` throws `std::logic_error` while a walk over `T` runs; `addLater<T>` adds at once outside a walk and queues inside one (skipped if the entity is dead by then).
-- A queued destroy of a dead entity is a no-op.
-- Tests: `deferred_changes_test`.
-
-## Components today
-
-Components today (`ModelRenderer` also has `castsShadows` and `isStatic`):
-
-- `Transform` (`math/`):
-  - `position`;
-  - `rotation` as a unit `Quat` (`math/quat`, x y z w as glTF; `a * b` turns by b first, then a, like matrices; Euler angles only describe poses, through `Quat::fromEulerAngles`, x first, then y, then z);
-  - `scale`;
-  - `getMatrix` is translation times rotation times scale, written out directly.
-- `PreviousTransform`.
-- `scene/`: `ModelRenderer`, `DirectionalLight`, `PointLight`, `SpotLight`, `AmbientLight` and `SkyBackground`.
-- `gameplay/`: `Spinner`, `Firefly`, `CharacterMovement`, `FirstPersonBody` and `Grenade`.
-- `physics/`: `Collider`, `CharacterController` and `Particle`.
-
-**`ModelRenderer`** is a list of `RenderPart`s (mesh, material, `localTransform` with the model's normalization folded in) plus `visible`; a multi-part model is one entity.
-
-- Parts hold a `MeshHandle` and a `Material`, so the component is small and copyable.
-- Build with `assets.makeModelRenderer(model, normalization)` or `makeMeshRenderer(meshHandle, material)`.
-
-## Main loop
-
-Main loop: `FixedTimestep` (120 Hz and frame time clamped to 0.25 s by default, from `EngineSettings`) turns real frame time into a whole number of ticks plus an interpolation `alpha`.
-
-Each frame:
-
-1. `game.onInput` turns input into commands;
-2. `runFixedUpdate` runs zero or more ticks;
-3. `game.onUpdate` moves the camera;
-4. then `render(alpha)`.
-
-Never read `Input` inside a tick; key/click edges are handled once per frame and reach the simulation as commands. Mouse look and camera movement are per frame, not per tick.
-
-## Each tick
-
-Each tick: `savePreviousTransforms` (engine), then `DemoGame::onFixedUpdate` runs, in that order:
-
-1. `updateCharacters`
-2. `updateFirstPersonBodies`
-3. `updateSpinners`
-4. `updateFireflies`
-5. `moveParticles`
-6. `updateGrenades`
-
-- Spinners and fireflies compute their pose from the total simulation time, so no error builds up.
-- A `Spinner` keeps Euler `initialAngles` and per-axis `speed` and sets the whole rotation with `Quat::fromEulerAngles`.
-- `DemoGame` keeps `latestSimulationSeconds` so lamps created between ticks start mid-flight.
-
-### Determinism
-
-Determinism: the same build given the same commands reaches a bit-identical state.
-
-- `hashSimulationState(world)` (`engine/state_hash`) hashes every component ticks change field by field with `Fnv1aHash` (`core/hash.h`, shared with `shadowCasterSignature`): Transform, PreviousTransform, CharacterController, CharacterMovement with `MoveToController::getTarget` and `yaw`, FirstPersonBody, Particle, Grenade.
-- `determinism_test` plays a scripted demo (walking, jumps, grenades, the lamp field, MOBA right-click) in two worlds and compares the hash every frame, plus a third world one grenade throw short that must differ.
-- The same for the light lab (walking with the sun's clock running, jumps, a drop in from the free camera; the one-jump-short world is compared before the drop, which puts every run's body in the same place).
-- A new component that ticks change must be added to the hash.
-
-### Interpolation
-
-- Interpolation: only entities that move continuously get a `PreviousTransform`.
-- `getRenderTransform(world, entity, alpha)` blends it with `Transform` (`interpolate` lerps position and scale and `slerp`s the rotation, the short way round), and entities without one are drawn at their `Transform`.
-- Things that teleport (the destination marker) therefore have no `PreviousTransform`.
-- Create moving entities with `PreviousTransform` equal to their starting `Transform`.
-
 ## Cameras
 
 Cameras: `Camera` (`scene/`) is a plain lens: position, forward, up, vertical FOV, aspect, near/far. View and projection matrices are built on request, so `setVerticalFov` works (aim-down-sights zoom). It has no movement logic.
@@ -3328,6 +3152,8 @@ Controllers in `gameplay/camera/` move it, each a concrete class with no shared 
 - `MobaCameraController`: fixed-angle offset; follows an optional target, otherwise edge-pans while the cursor is confined.
 
 Look controllers store yaw/pitch as `ViewAngles` (spherical coordinates, yaw 0 = -Z, positive yaw turns right, pitch clamped to 89 degrees) and pause while the mouse is not captured. `takeOver(camera)` continues from the camera's current direction.
+
+- `LookSettings` (`sensitivity`, `sprintMultiplier`) is nested in each look controller's settings. `sensitivity` is on Overwatch's scale (default 5, slider 1 to 50): `radiansPerCount` turns it into `sensitivity` x `overwatchDegreesPerCount` (0.0066 degrees) per mouse count. SDL's relative mouse mode reports raw counts, unscaled by Windows' pointer speed, as Overwatch reads them, so the same number turns the same angle for the same hand motion in both, at any field of view.
 
 ## Control modes and the demo
 

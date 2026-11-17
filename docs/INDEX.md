@@ -11,6 +11,7 @@ Every doc, one line each. A doc missing here fails the docs test.
 | `docs/LAYOUT.md` | `src/` folders and their layers |
 | `docs/ARCHITECTURE.md` | How each system works now (being split into `docs/architecture/`) |
 | `docs/architecture/build.md` | Makefile, the two builds, shaders, dependencies, packaging |
+| `docs/architecture/engine-core.md` | The loop, ticks and their budget, determinism, interpolation, settings structs, jobs, entities, input, window |
 | `docs/BUILDLOG.md` | Why things were built, what was tried and measured; history by date |
 | `docs/ENGINE_GUIDE.md` | Prose guide for learning the engine (for a reader with a physics background) |
 | `docs/claude-md-migration.md` | Phase 19's audit of the old `CLAUDE.md`; deleted when phase 19 is done |
