@@ -395,7 +395,14 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [ ] Two-phase culling: last frame's visible drawn first, the rest tested against their pyramid, survivors drawn by indirect draws (`occlusion-culling`). Not worth it now (measured: about 2% of the GPU frame); again if a scene hides more triangles
   - [ ] Only if the numbers ask: shadow casters culled by what the camera sees (receiver masks), solid stand-ins for dense crowns
   - [x] The camera's CPU work measured in parts (FRUSTUM, LEVELS, BATCH, MOVING on F4; `camera-timing`); CPU-side occlusion by readback dropped for GPU-driven drawing (the user, Nov 18 2026)
-- [ ] GPU-driven drawing (the user, Nov 18 2026: to fill the whole valley and build larger worlds): the GPU culls, chooses levels and batches every view into indirect draws, the CPU only coarse regions; research and a staged plan first (Decima, RedLynx, Unreal's GPU Scene, niagara) in `docs/research/GPUDRIVEN.md`
+- [ ] GPU-driven drawing (the user, Nov 18 2026: to fill the whole valley and build larger worlds): the GPU culls, chooses levels and batches every view into indirect draws, the CPU only coarse regions; research and a staged plan first (Decima, RedLynx, Unreal's GPU Scene, niagara) in `docs/research/GPUDRIVEN.md`. The user's choices (Nov 18 2026): the CPU path deleted after stage 5; F4's counts a frame or two late; the shared mesh buffer late; worlds as big as possible (the space simulator of phase 13), so the chunks stage is required
+  - [ ] 1. Indirect draws: each batch drawn by `vkCmdDrawIndexedIndirect` from a command the CPU writes, nothing else changed (`indirect-draws`)
+  - [ ] 2. Lasting culling records and a level table on the GPU; level and frustum maths in shader libraries with C++ mirrors (`cull-records`)
+  - [ ] 3. The camera's and velocity pass's lists built on the GPU behind a setting, `cull-compare` against the CPU's (`gpu-cull-camera`)
+  - [ ] 4. Reflection probe faces and the mirror as GPU views (`gpu-cull-captures`)
+  - [ ] 5. Shadow tiles as GPU views, the cache redrawn on announced changes; then the CPU path deleted (`gpu-cull-shadows`)
+  - [ ] 6. One shared mesh buffer, a multi-draw per pipeline state (`mesh-megabuffer`)
+  - [ ] 7. Chunks of instances culled first, coarse CPU cells for streaming worlds (`scene-chunks`, required for phase 13)
 - [x] Texture compression (moved from phase 12's asset cooking): BC7 for every texture, normal maps too (x, y and z kept for Toksvig), a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB; mips on the CPU, `bc7enc`, a disk cache in `build/texture_cache`, `engine.textureCompression` settings; a game's lookup textures stay exact (`texture-compression`, research in `docs/research/TEXTURECOMPRESSION.md`)
 - [x] Video memory in use on F4: the bytes the engine's resources take (VMA's allocation bytes) beside the blocks it holds, which move in 256 MB steps and hid most of texture compression's 466 MB saving (`vram-in-use`)
 - [ ] Far terrain following the camera, only if needed: the rough valley's fixed rings reach 20 km round the walk

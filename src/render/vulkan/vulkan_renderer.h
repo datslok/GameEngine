@@ -41,6 +41,7 @@
 #include "render/vulkan/vulkan_ddgi.h"
 #include "render/vulkan/vulkan_debug_lines.h"
 #include "render/vulkan/vulkan_depth_range.h"
+#include "render/vulkan/vulkan_indirect_commands.h"
 #include "render/vulkan/vulkan_occlusion_culling.h"
 #include "render/vulkan/vulkan_device.h"
 #include "render/vulkan/vulkan_memory.h"
@@ -228,6 +229,7 @@ private:
         OwnedHandle<VkSemaphore> imageAcquired;
         std::unique_ptr<FrameDescriptors> descriptors;
         std::unique_ptr<FrameUniforms> uniforms;
+        std::unique_ptr<VulkanIndirectCommands> indirect; // the batches' indirect draw commands
         std::unique_ptr<SceneBuffers> scene; // the GPU scene: instances, materials, lights, shadow tiles and casters
 
         // GPU timestamps around each pass (none without timestamp support): how many this frame's commands have
