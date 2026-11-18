@@ -35,15 +35,17 @@ A component: `parts` (`RenderPart`: mesh, material, local transform) moved by th
 
 | Flag | Effect |
 |---|---|
-| `visible` | Off: no draws built |
+| `isVisible()` | Off: no draws built |
 | `castsShadows` | Blocks light in shadow maps |
 | `shadowOnly` | Drawn into shadow maps only; no camera view, no ray: a cheap stand-in caster |
 | `shadowCascades` | Casts into the sun's nearest n cascades only (0 all) |
 | `isStatic` | Part of the level: probes and the sky bake treat it as solid |
 | `hidden` | Drawn by no view, no shadow, no ray, but still static level (the forest's walked-on ground) |
-| `still` | Never moves or changes: draws kept between frames (below). Independent of `isStatic` |
+| `isStill()` | Never moves or changes: draws kept between frames (below). Independent of `isStatic` |
 | `followsGround` | Lifted onto the terrain by the vertex shaders |
 | `sway` | `WindSway`: how the vertex shaders bend it |
+
+Shown and still are private: chosen before joining a world by `withVisible` and `withStill` (callable only on a value about to be moved in), then changed only by `setRenderVisible(world, entity, on)` and `setRenderStill`, which announce a change (`markRenderChanged`). So the still draws never walk the renderers to find them.
 
 ## `FrameDescription`
 
@@ -96,15 +98,15 @@ After `renderer.render`, `giveBackStillDraws` returns the list. Golden captures 
 
 - `update(world, alpha, jobs)` returns the kept draws first; `buildFrame` puts them at the front (`stillDraws` slots) and builds the moving draws after. `giveBack` hands the list (and its memory) back once drawn.
 - **Laid out by cell** (`scene/world_cells`, GPU-driven drawing's stage 7a): the ground cut into `CellSettings::size` squares (128 m, `engine.cells.*`), keyed by 64-bit column and row (`worldCellOf`, from the entity's transform). Each cell a block of slots (`cellBlockSlots`: its draws plus `spareShare` 0.25, at least `fewestSlots` 64, in whole chunks of `chunkSlots` 64, so a slot's chunk is slot / 64 for the GPU's chunk culling, `gpu-driven.md`), cells by key, a cell's entities in Morton order (`cellMortonCode`: x and z across the cell, 16 bits each, interleaved; sorted again on every rebuild of the cell, so runs of slots and chunks stay close on the ground); spare slots hold `emptyDrawSlot()` (no mesh, hidden, no shadow, unknown bounds), which every view, ray and list passes over (`isEmptyDrawSlot`). Blocks come from `SlotBlocks`: first free run that fits, else the end.
-- **A cell rebuilt** when a still entity joins or leaves it (added, destroyed, hidden or shown, no longer still, an announced move into another cell) or one of its entities changes part count: only that cell's block. A cell outgrowing its block moves, its old block emptied; both are in `builtStillDraws`. The slot count only grows between full layouts; the built ranges cover every new slot. Finding entities that left walks the cells only when some went missing.
-- **Laid out whole** on the first frame, when a frame was not given back, with other cell settings, or after `invalidate` (the engine calls it when `AssetManager::getLevelsVersion` changes, since draws hold spans of the levels; and while `keepStillDraws` is off).
+- **Only changes looked at:** the world's change logs (`engine-core.md`) for `ModelRenderer`, `Transform` and `DeformingMesh`, plus the entities marked `RenderChanged`, each once in entity order. Each entry has a kind (none, kept, moving); an entity whose kind changed joins or leaves a cell or the moving list. `update` returns the moving renderers' storage places, sorted (the order a walk gives), and `buildFrame` builds only those. Cost: the changes plus the moving entities, not the world.
+- **A cell rebuilt** when a still entity joins or leaves it (added, destroyed, hidden or shown, stilled or not, Transform or deforming mesh gained or lost, an announced move into another cell) or an announced change alters its part count: only that cell's block. A cell outgrowing its block moves, its old block emptied; both are in `builtStillDraws`. The slot count only grows between full layouts; the built ranges cover every new slot.
+- **Laid out whole** (one walk over every renderer, the logs turned on) when the world was not logging (the first frame, or after `stopLogging`, which the engine calls while `keepStillDraws` is off), when a frame was not given back, with other cell settings, or after `invalidate` (the engine calls it when `AssetManager::getLevelsVersion` changes, since draws hold spans of the levels).
 - **Rebuilt in place:** an entity marked by `markRenderChanged` (a one-frame `RenderChanged` component; once per entity inside a walk) that stays in its cell. `builtStillDraws` lists the rebuilt ranges, sorted and joined (`joinDrawRanges`).
 - `FrameDescription::stillChunkSlots` carries the chunk size to the renderer; `stillCells`, `stillEmptySlots` feed F4's `CELLS n  SLOTS m  UPLOADED k KB` line (with the renderer's copied bytes); DRAWN/CULLED leave the empty slots out.
-- Still walks every renderer each frame to find additions (about 0.7 ms in the forest): announced additions are on `ROADMAP.md`.
 - An entity with a `DeformingMesh` is never kept.
 - A still draw's `previousModel` is its own matrix: an announced move is a jump (no motion blur or smear).
 - Each update has a `version` naming the previous one, so the renderer knows whether only `builtStillDraws` changed.
-- Debug builds: `verify` checks 256 kept entities a frame (taking turns) and throws `std::logic_error` on one that moved unannounced.
+- Debug builds: `verify` checks 256 kept entities a frame (taking turns) and throws `std::logic_error` on one that moved or changed part count unannounced, or is no longer still and shown (its renderer replaced whole).
 - `EngineSettings::keepStillDraws` (on, `engine.keepStillDraws`) switches it off for measuring.
 
 ## Culling

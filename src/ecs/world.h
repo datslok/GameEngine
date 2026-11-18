@@ -126,6 +126,35 @@ public:
     }
 
     /*
+    * A type's change log, for code that keeps something built from the components between frames (the still draws,
+    * scene/still_draws.h): while on, every entity given the component or losing it (removed, or destroyed) is recorded
+    * in order, so that code looks at what changed instead of walking every component. Values changed in place are not
+    * recorded. Turning it off drops what it held.
+    */
+    template <typename Component>
+    void logChanges(bool on) {
+        if (on) {
+            getOrCreateStorage<Component>().logging = true;
+        } else if (ComponentStorage<Component>* storage = findStorage<Component>()) {
+            storage->logging = false;
+            storage->logged = {};
+        }
+    }
+
+    template <typename Component>
+    bool isLoggingChanges() const {
+        const ComponentStorage<Component>* storage = findStorage<Component>();
+        return storage != nullptr && storage->logging;
+    }
+
+    // The entities recorded since the last call (an entity may appear more than once), the log left empty.
+    template <typename Component>
+    std::vector<Entity> takeChanges() {
+        ComponentStorage<Component>* storage = findStorage<Component>();
+        return storage != nullptr ? std::exchange(storage->logged, {}) : std::vector<Entity>{};
+    }
+
+    /*
     * Run a system: call function(entity, first, rest...) for every entity that has all the listed components.
     * Example: world.each<Transform, Spinner>([](Entity entity, Transform& transform, Spinner& spinner) { ... });
     * It walks the packed array of the first type and skips entities missing any of the others, so list the rarest component first.

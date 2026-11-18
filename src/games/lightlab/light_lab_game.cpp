@@ -810,9 +810,8 @@ void LightLabGame::updateDaylight(World& world) {
     world.get<Transform>(sunDisc) = skyObjectPose(camera.getPosition(), towardsSun, sunDiscDistanceShare * camera.getFarPlane(),
                                                   discAngularRadius);
 
-    ModelRenderer& disc = world.get<ModelRenderer>(sunDisc);
-    disc.visible = !sunSettings.atmosphere && daylight.sun.intensity > 0.0f && discAngularRadius > 0.0f;
-    disc.parts[0].material.emissive = discRadiance(daylight.sun.colour * daylight.sun.intensity, discAngularRadius);
+    setRenderVisible(world, sunDisc, !sunSettings.atmosphere && daylight.sun.intensity > 0.0f && discAngularRadius > 0.0f);
+    world.get<ModelRenderer>(sunDisc).parts[0].material.emissive = discRadiance(daylight.sun.colour * daylight.sun.intensity, discAngularRadius);
 }
 
 Entity LightLabGame::getSunDisc() const {

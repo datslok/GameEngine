@@ -49,7 +49,7 @@ Pick the narrowest home. One home per fact; elsewhere, link to it.
 
 | Kind | Home |
 |---|---|
-| Planned or done (one line an item, with its branch) | `ROADMAP.md` |
+| Planned or done: a tick, a short line and its branch; how, numbers and findings go in the build log | `ROADMAP.md` |
 | How it works now | `docs/architecture/<system>.md` |
 | Why, what was tried and measured (at most 10 bullets a branch) | the current phase's last part in `docs/buildlog/` (listed in `docs/BUILDLOG.md`) |
 | Research and sources | `docs/research/<TOPIC>.md`, listed in `docs/INDEX.md` |

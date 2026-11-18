@@ -445,8 +445,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // It glows instead of reflecting light, so it is the same yellow day or night. It will become a HUD ring in phase 9.
     const Material yellow = glowMaterial(Vec3{1.0f, 0.71f, 0.022f});
 
-    ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
-    markerRenderer.visible = false;
+    ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow).withVisible(false);
 
     // Slightly above the ground to avoid overlapping surfaces.
     Transform markerPlacement;
@@ -611,7 +610,7 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
         debug.line(position, position + light.direction.normalized() * beamLength, light.colour);
     });
 
-    if (world.isAlive(player) && world.get<ModelRenderer>(destinationMarker).visible) {
+    if (world.isAlive(player) && world.get<ModelRenderer>(destinationMarker).isVisible()) {
         const Vec3 from = getRenderTransform(world, player, alpha).position;
         debug.line(from, world.get<Transform>(destinationMarker).position, Vec3{1.0f, 0.71f, 0.022f});
     }
@@ -751,7 +750,7 @@ void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationS
 
     // Simulation continues when the cursor is released or focus is lost.
     if (world.isAlive(player) && !world.get<CharacterMovement>(player).isMoving()) {
-        world.get<ModelRenderer>(destinationMarker).visible = false;
+        setRenderVisible(world, destinationMarker, false);
     }
 }
 
@@ -835,7 +834,7 @@ void DemoGame::dropMobaOrders(World& world) {
     if (world.isAlive(player)) {
         world.get<CharacterMovement>(player).stop();
     }
-    world.get<ModelRenderer>(destinationMarker).visible = false;
+    setRenderVisible(world, destinationMarker, false);
 }
 
 /*
@@ -886,7 +885,7 @@ void DemoGame::updatePlayerCommands(World& world, const Input& input) {
 
     // The marker has no PreviousTransform, so it jumps straight to the new spot, just above the surface so it is not hidden in it.
     world.get<Transform>(destinationMarker).position = point + Vec3{0.0f, markerLift, 0.0f};
-    world.get<ModelRenderer>(destinationMarker).visible = true;
+    setRenderVisible(world, destinationMarker, true);
 }
 
 /*

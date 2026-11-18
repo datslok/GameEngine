@@ -33,8 +33,7 @@ namespace {
 
     // An entity with parts meshes, numbered from mesh, still or moving.
     Entity addModel(World& world, std::uint32_t mesh, int parts, bool still, const Transform& transform) {
-        ModelRenderer renderer;
-        renderer.still = still;
+        ModelRenderer renderer = ModelRenderer{}.withStill(still);
 
         for (int part = 0; part < parts; ++part) {
             Material material;
@@ -224,9 +223,10 @@ namespace {
     }
 
     /*
-    * What the kept draws notice by themselves: a still entity added or destroyed, hidden or shown, no longer still,
-    * given more parts, or moving a deforming mesh (always built: its shape changes); and a frame not given back, or
-    * kept draws let go (the assets' levels changed). Each time, the frame matches one from scratch.
+    * What the kept draws follow: a still entity added or destroyed (the world's change log), hidden or shown, no longer
+    * still (announced by their setters), given more parts (announced), or moving a deforming mesh (always built: its
+    * shape changes); and a frame not given back, or kept draws let go (the assets' levels changed). Each time, the
+    * frame matches one from scratch.
     */
     void testTheKeptDrawsFollowTheWorld() {
         World world;
@@ -245,18 +245,32 @@ namespace {
         world.destroy(b);
         assertMatchesScratch(world, still, history, scratchHistory);
 
-        world.get<ModelRenderer>(a).visible = false;
+        setRenderVisible(world, a, false);
+        assert(!world.get<ModelRenderer>(a).isVisible() && world.has<RenderChanged>(a));
         assertMatchesScratch(world, still, history, scratchHistory);
-        world.get<ModelRenderer>(a).visible = true;
+        setRenderVisible(world, a, true);
         assertMatchesScratch(world, still, history, scratchHistory);
 
         // No longer still: it is built every frame, among the moving draws (its meshes renumbered so the sort agrees).
-        ModelRenderer& unstill = world.get<ModelRenderer>(c);
-        unstill.still = false;
-        unstill.parts[0].mesh = MeshHandle{7};
+        setRenderStill(world, c, false);
+        assert(!world.get<ModelRenderer>(c).isStill() && world.has<RenderChanged>(c));
+        world.get<ModelRenderer>(c).parts[0].mesh = MeshHandle{7};
         assertMatchesScratch(world, still, history, scratchHistory);
 
+        // Setting what it already is announces nothing.
+        setRenderStill(world, c, false);
+        setRenderVisible(world, a, true);
+        assert(!world.has<RenderChanged>(c) && !world.has<RenderChanged>(a));
+
         world.get<ModelRenderer>(a).parts.push_back(RenderPart{MeshHandle{firstStillMesh + 5}, Material{}, Mat4::identity()});
+        markRenderChanged(world, a);
+        assertMatchesScratch(world, still, history, scratchHistory);
+
+        // A Transform taken away and given back: drawn neither way, then kept again.
+        const Transform aPlace = world.get<Transform>(a);
+        world.remove<Transform>(a);
+        assertMatchesScratch(world, still, history, scratchHistory);
+        world.add(a, aPlace);
         assertMatchesScratch(world, still, history, scratchHistory);
 
         // A deforming mesh is never kept, still or not.
@@ -266,6 +280,11 @@ namespace {
         assert(std::none_of(withShape.draws.begin(), withShape.draws.begin() + static_cast<std::ptrdiff_t>(withShape.stillDraws),
                             [](const DrawItem& draw) { return draw.mesh == MeshHandle{8}; }));
         still.giveBack(std::move(withShape.draws));
+        assertMatchesScratch(world, still, history, scratchHistory);
+
+        // Its deforming mesh taken away: kept from then on (its meshes renumbered so the sort agrees).
+        world.remove<DeformingMesh>(deforming);
+        world.get<ModelRenderer>(deforming).parts[0].mesh = MeshHandle{firstStillMesh + 40};
         assertMatchesScratch(world, still, history, scratchHistory);
 
         // A frame not given back: the next lays them all out again (packed afresh, so perhaps in fewer slots).
@@ -283,6 +302,129 @@ namespace {
         assert(builtCount(afterInvalidate) == afterInvalidate.stillDraws);
         still.giveBack(std::move(afterInvalidate.draws));
         assertMatchesScratch(world, still, history, scratchHistory);
+
+        // The world's logs stopped (kept draws turned off): what they missed is not trusted, the next frame lays
+        // everything out afresh and logs again.
+        still.stopLogging(world);
+        assert(!world.isLoggingChanges<ModelRenderer>() && !world.isLoggingChanges<Transform>() && !world.isLoggingChanges<DeformingMesh>());
+        addModel(world, firstStillMesh + 50, 1, true, placedAt(7.0f, 0.0f, 0.0f));
+        FrameDescription afterStop = buildFrame(world, testCamera(), 0.0f, &history, serialJobs(), 0, &still);
+        assert(builtCount(afterStop) == afterStop.stillDraws && world.isLoggingChanges<ModelRenderer>());
+        still.giveBack(std::move(afterStop.draws));
+        assertMatchesScratch(world, still, history, scratchHistory);
+    }
+
+    /*
+    * Many random changes, a few a frame, each frame matched against one from scratch: entities added still or moving,
+    * destroyed, hidden or shown, made still or moving, their Transform or deforming mesh taken away or given back,
+    * moved (still ones announced, across cells too) and given parts (announced). A still entity's meshes are numbered
+    * from firstStillMesh only while it is kept (still and not deforming), so the comparison's sort agrees.
+    */
+    void testRandomChangesMatchScratch() {
+        World world;
+        StillDraws still;
+        MotionHistory history;
+        MotionHistory scratchHistory;
+        std::vector<Entity> entities;
+        std::uint32_t seed = 12345;
+        std::uint32_t nextMesh = 0;
+
+        const auto random = [&](std::uint32_t below) {
+            seed = seed * 1664525u + 1013904223u;
+            return (seed >> 8) % below;
+        };
+        const auto place = [&]() {
+            return placedAt(static_cast<float>(random(600)), 0.0f, static_cast<float>(random(300)));
+        };
+        // Numbers its meshes as kept (each entity its own run of ten from firstStillMesh) or not (from 1, below it).
+        const auto renumber = [&](Entity entity, std::uint32_t run) {
+            ModelRenderer& renderer = world.get<ModelRenderer>(entity);
+            const bool kept = renderer.isStill() && !world.has<DeformingMesh>(entity);
+
+            for (std::size_t part = 0; part < renderer.parts.size(); ++part) {
+                renderer.parts[part].mesh = MeshHandle{(kept ? firstStillMesh + run * 10 : 1) + static_cast<std::uint32_t>(part)};
+            }
+        };
+        std::vector<std::uint32_t> runs;
+
+        for (int frame = 0; frame < 120; ++frame) {
+            const std::uint32_t changes = random(5);
+
+            for (std::uint32_t change = 0; change < changes; ++change) {
+                const std::uint32_t kind = entities.empty() ? 0 : random(10);
+
+                if (kind <= 1) {
+                    const std::uint32_t run = ++nextMesh;
+                    const Entity entity = addModel(world, 0, 1 + static_cast<int>(random(3)), kind == 0, place());
+                    entities.push_back(entity);
+                    runs.push_back(run);
+                    renumber(entity, run);
+                    continue;
+                }
+
+                const std::size_t pick = random(static_cast<std::uint32_t>(entities.size()));
+                const Entity entity = entities[pick];                ModelRenderer& renderer = world.get<ModelRenderer>(entity);
+
+                if (kind == 2) {
+                    world.destroy(entity);
+                    entities.erase(entities.begin() + static_cast<std::ptrdiff_t>(pick));
+                    runs.erase(runs.begin() + static_cast<std::ptrdiff_t>(pick));
+                } else if (kind == 3) {
+                    setRenderVisible(world, entity, !renderer.isVisible());
+                } else if (kind == 4) {
+                    setRenderStill(world, entity, !renderer.isStill());
+                    renumber(entity, runs[pick]);
+                } else if (kind == 5) {
+                    if (world.has<Transform>(entity)) {
+                        world.remove<Transform>(entity);
+                    } else {
+                        world.add(entity, place());
+                    }
+                } else if (kind == 6) {
+                    if (world.has<DeformingMesh>(entity)) {
+                        world.remove<DeformingMesh>(entity);
+                    } else {
+                        world.add(entity, DeformingMesh{renderer.parts[0].mesh, {}, {}});
+                    }
+                    renumber(entity, runs[pick]);
+                } else if (kind <= 8) {
+                    if (world.has<Transform>(entity)) {
+                        world.get<Transform>(entity) = place();
+                        markRenderChanged(world, entity);
+                    }
+                } else if (renderer.parts.size() < 10) {
+                    renderer.parts.push_back(RenderPart{MeshHandle{}, Material{}, Mat4::translation(0.0f, 2.0f, 0.0f)});
+                    renumber(entity, runs[pick]);
+                    markRenderChanged(world, entity);
+                }
+            }
+
+            assertMatchesScratch(world, still, history, scratchHistory);
+        }
+    }
+
+    /*
+    * The debug builds' check also catches parts added to a still entity without markRenderChanged: the kept draws
+    * would never see them.
+    */
+    void testUnannouncedPartsAreCaught() {
+        World world;
+        const Entity entity = addModel(world, firstStillMesh, 1, true, placedAt(2.0f, 0.0f, 0.0f));
+        StillDraws still = tightStillDraws();
+        MotionHistory history;
+        FrameDescription frame = buildFrame(world, testCamera(), 0.0f, &history, serialJobs(), 0, &still);
+        still.giveBack(std::move(frame.draws));
+
+        world.get<ModelRenderer>(entity).parts.push_back(RenderPart{MeshHandle{firstStillMesh + 1}, Material{}, Mat4::identity()});
+        bool caught = false;
+
+        try {
+            still.verify(world, 100);
+        } catch (const std::logic_error&) {
+            caught = true;
+        }
+
+        assert(caught);
     }
 
     // Built on many cores, the kept frame is the same as on one.
@@ -454,8 +596,9 @@ namespace {
         assert((builtRanges(inPlace) == Ranges{{64, 1}}) && inPlace.draws[64].material.roughness == 0.7f);
         still.giveBack(std::move(inPlace.draws));
 
-        // Given another part: its cell's block.
+        // Given another part, announced: its cell's block.
         world.get<ModelRenderer>(a).parts.push_back(RenderPart{MeshHandle{firstStillMesh + 5}, Material{}, Mat4::identity()});
+        markRenderChanged(world, a);
         FrameDescription reshaped = nextFrame();
         assert((builtRanges(reshaped) == Ranges{{0, 64}}));
         still.giveBack(std::move(reshaped.draws));
@@ -568,4 +711,6 @@ void testStillDraws() {
     testTheKeptDrawsFollowTheWorld();
     testKeptDrawsOnManyCores();
     testAnUnannouncedMoveIsCaught();
+    testUnannouncedPartsAreCaught();
+    testRandomChangesMatchScratch();
 }

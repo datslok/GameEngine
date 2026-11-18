@@ -197,7 +197,7 @@ namespace {
 
         for (const Entity entity : climbers) {
             const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.still && renderer.shadowCascades == climberShadowCascades);
+            assert(renderer.isStill() && renderer.shadowCascades == climberShadowCascades);
             assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
         }
 

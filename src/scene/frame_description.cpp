@@ -106,8 +106,8 @@ std::vector<DrawRange> joinDrawRanges(std::vector<DrawRange> ranges) {
 }
 
 /*
-* With kept draws, the still entities' come first from them (StillDraws::update) and only the others are counted and
-* built here, after them.
+* With kept draws, the still entities' come first from them (StillDraws::update) and only the moving ones it names are
+* counted and built here, after them, so nothing walks every renderer; without, every renderer is walked.
 */
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history, JobSystem& jobs, std::size_t laterDraws,
                             StillDraws* still) {
@@ -131,7 +131,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
         const std::vector<Entity>& entities = renderers->getEntities();
         const std::vector<ModelRenderer>& components = renderers->getComponents();
         const ComponentStorage<Transform>* transforms = world.storageOf<Transform>();
-        std::vector<std::uint8_t> kept;
+        std::vector<std::size_t> places;
         std::size_t stillCount = 0;
 
         if (still != nullptr) {
@@ -144,17 +144,22 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             frame.stillCells = still->getCellCount();
             frame.stillChunkSlots = still->getChunkSlots();
             frame.stillEmptySlots = update.count - std::min(update.count, still->getFilledCount());
-            kept = std::move(update.kept);
+            places = std::move(update.moving);
             stillCount = update.count;
+        } else {
+            for (std::size_t index = 0; index < entities.size(); ++index) {
+                if (components[index].isVisible() && transforms != nullptr && transforms->contains(entities[index])) {
+                    places.push_back(index);
+                }
+            }
         }
 
-        std::vector<std::size_t> firstDraw(entities.size() + 1, stillCount);
+        std::vector<std::size_t> firstDraw(places.size() + 1, stillCount);
         std::size_t slots = 0;
 
-        for (std::size_t index = 0; index < entities.size(); ++index) {
-            const bool drawn = (kept.empty() || kept[index] == 0) && components[index].visible && transforms != nullptr && transforms->contains(entities[index]);
-            firstDraw[index + 1] = firstDraw[index] + (drawn ? components[index].parts.size() : 0);
-            slots = std::max<std::size_t>(slots, entities[index].index + 1);
+        for (std::size_t built = 0; built < places.size(); ++built) {
+            firstDraw[built + 1] = firstDraw[built] + components[places[built]].parts.size();
+            slots = std::max<std::size_t>(slots, entities[places[built]].index + 1);
         }
 
         frame.draws.reserve(firstDraw.back() + laterDraws);
@@ -166,13 +171,10 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
 
         constexpr std::size_t entitiesPerPiece = 256;
         const World& reading = world;
-        jobs.parallelFor(entities.size(), entitiesPerPiece, [&](std::size_t index) {
-            if (firstDraw[index + 1] == firstDraw[index]) {
-                return;
-            }
-
+        jobs.parallelFor(places.size(), entitiesPerPiece, [&](std::size_t built) {
+            const std::size_t index = places[built];
             buildEntityDraws(reading, entities[index], components[index], alpha, history,
-                             std::span<DrawItem>{frame.draws}.subspan(firstDraw[index], components[index].parts.size()));
+                             std::span<DrawItem>{frame.draws}.subspan(firstDraw[built], components[index].parts.size()));
         });
     }
 

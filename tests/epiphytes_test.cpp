@@ -274,7 +274,7 @@ namespace {
 
         for (const Entity entity : epiphytes) {
             const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.still && renderer.shadowCascades == epiphyteShadowCascades);
+            assert(renderer.isStill() && renderer.shadowCascades == epiphyteShadowCascades);
             assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
         }
 

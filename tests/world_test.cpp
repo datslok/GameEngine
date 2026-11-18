@@ -182,4 +182,51 @@ void testWorld() {
         });
         assert(sum == 10.0f);
     }
+
+    /*
+    * A type's change log: once asked for, every entity that gains or loses the component is recorded in order (removes
+    * and destroys queued inside a walk when they are applied), handed over and cleared by takeChanges; other types and
+    * a type not logging record nothing, and stopping the log drops what it held.
+    */
+    {
+        World world;
+        const Entity before = world.create();
+        world.add(before, Position{1.0f});
+        assert(!world.isLoggingChanges<Position>() && world.takeChanges<Position>().empty());
+
+        world.logChanges<Position>(true);
+        assert(world.isLoggingChanges<Position>() && world.takeChanges<Position>().empty());
+
+        const Entity added = world.create();
+        world.add(added, Position{2.0f});
+        world.add(added, Velocity{1.0f});
+        world.remove<Position>(before);
+        assert((world.takeChanges<Position>() == std::vector<Entity>{added, before}));
+        assert(world.takeChanges<Position>().empty() && world.takeChanges<Velocity>().empty());
+
+        world.each<Position>([&](Entity entity, Position&) {
+            world.destroy(entity);
+            assert(world.takeChanges<Position>().empty()); // queued until the walk ends
+        });
+        assert((world.takeChanges<Position>() == std::vector<Entity>{added}));
+
+        // Destroying an entity without the component records nothing; a component added later is recorded.
+        world.destroy(before);
+        const Entity later = world.create();
+        world.addLater(later, Position{3.0f});
+        assert((world.takeChanges<Position>() == std::vector<Entity>{later}));
+
+        world.remove<Position>(later);
+        world.logChanges<Position>(false);
+        assert(!world.isLoggingChanges<Position>() && world.takeChanges<Position>().empty());
+        world.add(later, Position{4.0f});
+        assert(world.takeChanges<Position>().empty());
+
+        // A type never added can be logged before its first component.
+        World fresh;
+        fresh.logChanges<Charge>(true);
+        const Entity charged = fresh.create();
+        fresh.add(charged, Charge{1.0f});
+        assert((fresh.takeChanges<Charge>() == std::vector<Entity>{charged}));
+    }
 }

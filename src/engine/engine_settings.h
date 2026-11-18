@@ -58,7 +58,7 @@ struct EngineSettings {
     // GPU, those a few frames old, so it jumps a little).
     bool clothOnGpu = true;
 
-    // Keep still objects' draws from frame to frame (ModelRenderer::still, scene/still_draws.h), building only what moves;
+    // Keep still objects' draws from frame to frame (ModelRenderer::isStill, scene/still_draws.h), building only what moves;
     // off builds every draw every frame, as before (for measuring). Read every frame.
     bool keepStillDraws = true;
 
