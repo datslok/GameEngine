@@ -3,6 +3,7 @@
 #include "games/forest/forest_game.h"
 #include "games/forest/forest_ground.h"
 #include "games/forest/forest_terrain.h"
+#include "games/forest/forest_trees.h"
 #include "games/forest/valley_shapes.h"
 #include "games/forest/valley_strata.h"
 #include "physics/static_level.h"
@@ -10,6 +11,7 @@
 #include "scene/atmosphere.h"
 #include "scene/fog.h"
 #include "scene/light.h"
+#include "scene/lighting.h"
 #include "math/transform.h"
 #include "scene/model_renderer.h"
 #include "scene/indexed_mesh.h"
@@ -995,6 +997,39 @@ namespace {
         assert(forest.world.has<Fog>(forest.game.getAir()));
         assert(forest.world.get<DirectionalLight>(forest.game.getSun()).direction.y > 0.0f);
     }
+
+    /*
+    * Two layers of mist: the valley's thin haze, and a dense pool on the floor whose top and soft edge stay under the
+    * canopy trees' forks (docs/research/FOGLAYERS.md), each a Fog the frame's lighting collects, the haze first. The
+    * floor's switch takes only the pool away; the mist's takes both.
+    */
+    void testTheMistHasAFloorLayer() {
+        Forest forest;
+        Input input;
+        const ForestMistSettings& settings = forest.game.getMistSettings();
+        assert(settings.enabled && settings.floorEnabled);
+        assert(settings.fog.shape == FogShape::Exponential && settings.floor.shape == FogShape::Pooled);
+        assert(settings.floor.baseHeight + settings.floor.scaleHeight < ForestTreeSettings{}.forkHeight);
+        assert(settings.floor.density >= 0.02f && settings.floor.density <= 0.05f);
+
+        std::vector<Fog> layers = collectLighting(forest.world, 1.0f).fogLayers;
+        assert(layers.size() == 2 && layers[0].shape == FogShape::Exponential && layers[1].shape == FogShape::Pooled);
+        assert(layers[1].density == settings.floor.density);
+
+        forest.game.getMistSettings().floor.density = 0.04f;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(collectLighting(forest.world, 1.0f).fogLayers.at(1).density == 0.04f);
+
+        forest.game.getMistSettings().floorEnabled = false;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        layers = collectLighting(forest.world, 1.0f).fogLayers;
+        assert(layers.size() == 1 && layers[0].shape == FogShape::Exponential);
+
+        forest.game.getMistSettings().floorEnabled = true;
+        forest.game.getMistSettings().enabled = false;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(collectLighting(forest.world, 1.0f).fogLayers.empty());
+    }
 }
 
 void testForest() {
@@ -1023,5 +1058,6 @@ void testForest() {
     testThePillarsAreMadeOfTheStrata();
     testViewsHaveACommand();
     testSettingsApplyEachFrame();
+    testTheMistHasAFloorLayer();
     testTheValleyIsStill();
 }

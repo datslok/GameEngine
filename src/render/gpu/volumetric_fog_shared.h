@@ -21,6 +21,16 @@
 // The most samples of the sun's shadow each pixel takes along the fog past the grid (FogSettings::farShadowSteps).
 #define FOG_MAX_FAR_SHADOW_STEPS 64
 
+// The most layers of fog the frame holds (Fog components, adding); the shaders keep each layer's share in one vec4, so 4.
+#define FOG_MAX_LAYERS 4
+
+// A layer's shape as the frame's record holds it (FogShape): 0 exponential, this pooled.
+#define FOG_SHAPE_POOLED 1.0
+
+// Newton's steps placing a far shadow sample through several layers (fogMediaFarSampleDistance), from a first guess
+// exact for even fog: each about doubles the digits, and a step leaving the bracket halves it instead.
+#define FOG_FAR_SAMPLE_NEWTON_STEPS 8
+
 // The froxels' sample points move round their middles over this many frames (Halton points), which last frame's light
 // carried along averages into a smooth grid.
 #define FOG_JITTER_FRAMES 16

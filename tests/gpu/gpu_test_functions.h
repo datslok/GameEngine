@@ -158,6 +158,7 @@
 #define GPU_TEST_FOG_MEDIUM 0
 #define GPU_TEST_FOG_GRID 1
 #define GPU_TEST_FOG_LIGHT 2
+#define GPU_TEST_FOG_MEDIA 3
 
 // contact_shadows_test.comp
 #define GPU_TEST_CONTACT_SHADOWS 0

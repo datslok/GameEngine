@@ -16,6 +16,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -41,11 +42,45 @@ namespace {
         return Camera{Vec3{3.0f, 1.7f, -2.0f}, Vec3{3.0f, 0.5f, -40.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 16.0f / 9.0f, 0.1f, 500.0f};
     }
 
+    // The optical depth of any medium along a ray by fine steps, summed in doubles (thousands of float additions would
+    // lose the digits being checked): density(height, distance along the ray).
+    template<typename Density>
+    double summedDepth(const Density& density, float originHeight, float directionY, double start, double end, int steps = 20000) {
+        double summed = 0.0;
+        const double step = (end - start) / steps;
+
+        for (int i = 0; i < steps; ++i) {
+            const double along = start + (i + 0.5) * step;
+            summed += density(originHeight + directionY * static_cast<float>(along), static_cast<float>(along)) * step;
+        }
+
+        return summed;
+    }
+
+    // The forest's two layers as the tests use them: a thin haze over kilometres and a dense pool of mist topping out at 12 m.
+    std::vector<Fog> hazeAndPool() {
+        Fog haze;
+        haze.density = 0.002f;
+        haze.scaleHeight = 300.0f;
+        haze.albedo = Vec3{0.9f, 0.95f, 1.0f};
+        haze.anisotropy = 0.5f;
+        haze.maxDistance = 20000.0f;
+        Fog pool;
+        pool.shape = FogShape::Pooled;
+        pool.density = 0.03f;
+        pool.baseHeight = 12.0f;
+        pool.scaleHeight = 4.0f;
+        pool.albedo = Vec3{1.0f, 1.0f, 1.0f};
+        pool.anisotropy = 0.7f;
+        pool.maxDistance = 2000.0f;
+        return {haze, pool};
+    }
+
     void testSettings() {
         const FogSettings defaults;
         assert(defaults.enabled && defaults.range == 100.0f && defaults.historyWeight == 0.9f && defaults.probeLight);
         assert(defaults.gridWidth == 160 && defaults.gridHeight == 90 && defaults.slices == 64);
-        assert(defaults.farShadowSteps == 16);
+        assert(defaults.farShadowSteps == 16 && defaults.sunThroughFog);
         validateFog(defaults);
 
         FogSettings wrong;
@@ -80,6 +115,16 @@ namespace {
         assert(near(fogDensity(fog, 2.0f), 0.05f, 1e-7f));
         assert(near(fogDensity(fog, 10.0f), 0.05f / std::exp(1.0f), 1e-6f));
         assert(fogDensity(fog, 0.0f) > 0.05f);
+
+        // Pooled: the density throughout below its top (the base height), falling by e every scale height above it.
+        Fog pool;
+        pool.shape = FogShape::Pooled;
+        pool.density = 0.03f;
+        pool.baseHeight = 12.0f;
+        pool.scaleHeight = 4.0f;
+        assert(fogDensity(pool, -50.0f) == 0.03f && fogDensity(pool, 0.0f) == 0.03f && fogDensity(pool, 12.0f) == 0.03f);
+        assert(near(fogDensity(pool, 16.0f), 0.03f / std::exp(1.0f), 1e-7f));
+        assert(fogDensity(pool, 100000.0f) == 0.0f);
     }
 
     /*
@@ -114,6 +159,116 @@ namespace {
         assert(fogOpticalDepth(fog, 1.0f, 0.3f, 10.0f, 10.0f) == 0.0f);
         const float downwards = fogOpticalDepth(fog, 1.0f, -1.0f, 0.0f, 100000.0f);
         assert(std::isfinite(downwards) && downwards > 1000.0f);
+    }
+
+    /*
+    * A pooled layer's optical depth in closed form: a straight ray crosses its top at most once, so the part below is
+    * the density times its length and the part above the exponential's form from its lower end. The same as fine sums
+    * for rays rising out of it, falling into it, level inside and above it, wholly above and wholly below; from far
+    * above, straight down through it, finite: the density times the depth below the top plus the density times the
+    * scale height above.
+    */
+    void testPooledOpticalDepth() {
+        Fog pool;
+        pool.shape = FogShape::Pooled;
+        pool.density = 0.03f;
+        pool.baseHeight = 12.0f;
+        pool.scaleHeight = 4.0f;
+        const auto density = [&](float height, float) {
+            return fogDensity(pool, height);
+        };
+
+        struct Ray {
+            float originHeight;
+            float directionY;
+            float start;
+            float end;
+        };
+
+        for (const Ray& ray : {Ray{2.0f, 0.2f, 1.0f, 150.0f}, Ray{40.0f, -0.3f, 0.0f, 200.0f}, Ray{5.0f, 0.0f, 3.0f, 90.0f}, Ray{15.0f, 0.0f, 0.0f, 60.0f},
+                               Ray{20.0f, 0.05f, 10.0f, 400.0f}, Ray{1.0f, -0.4f, 0.0f, 50.0f}, Ray{11.0f, 1e-5f, 0.0f, 300.0f}, Ray{13.0f, -1e-5f, 0.0f, 300.0f}}) {
+            const float expected = static_cast<float>(summedDepth(density, ray.originHeight, ray.directionY, ray.start, ray.end, 200000));
+            const float depth = fogOpticalDepth(pool, ray.originHeight, ray.directionY, ray.start, ray.end);
+            assert(near(depth, expected, 1e-4f * expected + 1e-6f));
+        }
+
+        assert(near(fogOpticalDepth(pool, 5.0f, 0.0f, 0.0f, 100.0f), 3.0f, 1e-5f));
+        assert(fogOpticalDepth(pool, 5.0f, 0.3f, 10.0f, 10.0f) == 0.0f);
+        const float fromHigh = fogOpticalDepth(pool, 10000.0f, -1.0f, 0.0f, 10010.0f);
+        assert(std::isfinite(fromHigh) && near(fromHigh, 0.03f * 22.0f + 0.03f * 4.0f, 1e-4f)); // down to -10 m: 22 m below the top
+    }
+
+    /*
+    * Several layers at once add: the densities and the optical depths are the layers' sums, each layer only out to its
+    * own farthest distance along a ray. Each layer's share of a point's extinction (or a stretch's optical depth) weighs
+    * its albedo and phase function in the light the mix scatters, so the shares add to 1, and one layer alone is
+    * fogInScattering through its albedo.
+    */
+    void testLayersAdd() {
+        const std::vector<Fog> layers = hazeAndPool();
+        const Fog& haze = layers[0];
+        const Fog& pool = layers[1];
+
+        assert(near(fogMediaDensity(layers, 5.0f, 10.0f), fogDensity(haze, 5.0f) + fogDensity(pool, 5.0f), 1e-7f));
+        assert(near(fogMediaDensity(layers, 5.0f, 3000.0f), fogDensity(haze, 5.0f), 1e-7f));
+        assert(fogMediaDensity(layers, 5.0f, 30000.0f) == 0.0f);
+        assert(fogMediaDensity(std::span<const Fog>{}, 5.0f, 10.0f) == 0.0f);
+
+        const float depth = fogMediaOpticalDepth(layers, 3.0f, 0.01f, 100.0f, 5000.0f);
+        const float expected = fogOpticalDepth(haze, 3.0f, 0.01f, 100.0f, 5000.0f) + fogOpticalDepth(pool, 3.0f, 0.01f, 100.0f, 2000.0f);
+        assert(near(depth, expected, 1e-5f * expected));
+        assert(near(fogMediaOpticalDepth(layers, 3.0f, 0.01f, 2500.0f, 5000.0f), fogOpticalDepth(haze, 3.0f, 0.01f, 2500.0f, 5000.0f), 1e-6f));
+        assert(fogMediaOpticalDepth(layers, 3.0f, 0.01f, 400.0f, 100.0f) == 0.0f);
+
+        const FogLayerShares shares = fogMediaShares(layers, 5.0f, 10.0f);
+        const float total = fogMediaDensity(layers, 5.0f, 10.0f);
+        assert(near(shares[0], fogDensity(haze, 5.0f) / total, 1e-6f) && near(shares[1], fogDensity(pool, 5.0f) / total, 1e-6f));
+        assert(shares[2] == 0.0f && shares[3] == 0.0f);
+        const FogLayerShares far = fogMediaShares(layers, 5.0f, 3000.0f);
+        assert(near(far[0], 1.0f, 1e-6f) && far[1] == 0.0f);
+        const FogLayerShares none = fogMediaShares(layers, 5.0f, 30000.0f);
+        assert(none[0] == 0.0f && none[1] == 0.0f);
+
+        const FogLayerShares stretch = fogMediaStretchShares(layers, 3.0f, 0.01f, 100.0f, 5000.0f);
+        assert(near(stretch[0] + stretch[1], 1.0f, 1e-6f));
+        assert(near(stretch[1], fogOpticalDepth(pool, 3.0f, 0.01f, 100.0f, 2000.0f) / depth, 1e-5f));
+
+        const Vec3 irradiance{2.0f, 3.0f, 4.0f};
+        const Vec3 toLight = Vec3{0.3f, 0.8f, 0.2f}.normalized();
+        const Vec3 view = Vec3{0.0f, 0.1f, -1.0f}.normalized();
+        const Vec3 mixed = fogMediaInScattering(layers, shares, irradiance, toLight, view);
+        const Vec3 byHand = fogInScattering(irradiance, toLight, view, haze.anisotropy) * haze.albedo * shares[0] +
+                            fogInScattering(irradiance, toLight, view, pool.anisotropy) * pool.albedo * shares[1];
+        assert(nearVec(mixed, byHand, 1e-5f));
+        const FogLayerShares onlyHaze{1.0f, 0.0f, 0.0f, 0.0f};
+        assert(nearVec(fogMediaInScattering(layers, onlyHaze, irradiance, toLight, view), fogInScattering(irradiance, toLight, view, 0.5f) * haze.albedo, 1e-6f));
+        assert(nearVec(fogMediaAmbient(layers, shares, irradiance), irradiance * (haze.albedo * shares[0] + pool.albedo * shares[1]), 1e-6f));
+    }
+
+    /*
+    * The sun's light dimmed by the fog on its way down to a point: exp(-optical depth) from the point towards the sun,
+    * out to each layer's farthest distance. Straight up from an exponential layer's base, its density times its scale
+    * height; from inside the pool straight up, the depth below the top plus the scale height above; at a slant, fine
+    * sums; a low sun under the pool nearly gone; without fog none dimmed.
+    */
+    void testSunThroughFog() {
+        const std::vector<Fog> layers = hazeAndPool();
+        const Fog& haze = layers[0];
+        const Fog& pool = layers[1];
+
+        assert(fogSunTransmittance(std::span<const Fog>{}, 5.0f, 0.5f) == 1.0f);
+        assert(near(fogSunTransmittance(std::span<const Fog>{&haze, 1}, 0.0f, 1.0f), std::exp(-0.002f * 300.0f), 1e-4f));
+        assert(near(fogSunTransmittance(std::span<const Fog>{&pool, 1}, 2.0f, 1.0f), std::exp(-(0.03f * 10.0f + 0.03f * 4.0f)), 1e-5f));
+
+        const float slant = 0.4f;
+        const auto density = [&](float height, float along) {
+            return (along <= haze.maxDistance ? fogDensity(haze, height) : 0.0f) + (along <= pool.maxDistance ? fogDensity(pool, height) : 0.0f);
+        };
+        const float expected = static_cast<float>(summedDepth(density, 2.0f, slant, 0.0, 20000.0, 400000));
+        assert(near(-std::log(fogSunTransmittance(layers, 2.0f, slant)), expected, 1e-3f * expected));
+
+        assert(fogSunTransmittance(layers, 2.0f, 0.05f) < 0.01f);
+        assert(fogSunTransmittance(layers, 2.0f, slant) < fogSunTransmittance(layers, 30.0f, slant));
     }
 
     // The slices: from the camera to the grid's range, thin near the camera where a metre covers much of the screen.
@@ -527,12 +682,18 @@ namespace {
         Fog fog;
         fog.density = 0.01f;
         const Vec3 source{0.6f, 0.7f, 0.8f};
-        const FogIntegration across = fogBeyondGrid(fog, source, fog.baseHeight, 0.0f, 100.0f, 400.0f);
+        const std::span<const Fog> one{&fog, 1};
+        const FogIntegration across = fogBeyondGrid(one, source, fog.baseHeight, 0.0f, 100.0f, 400.0f);
         assert(near(across.transmittance, std::exp(-3.0f), 1e-5f));
         assert(nearVec(across.light, source * (1.0f - std::exp(-3.0f)), 1e-5f));
 
-        const FogIntegration none = fogBeyondGrid(fog, source, 0.0f, 0.0f, 100.0f, 80.0f);
+        const FogIntegration none = fogBeyondGrid(one, source, 0.0f, 0.0f, 100.0f, 80.0f);
         assert(none.transmittance == 1.0f && none.light.x == 0.0f);
+
+        // Two layers: let through as their summed depth allows.
+        const std::vector<Fog> layers = hazeAndPool();
+        const FogIntegration both = fogBeyondGrid(layers, source, 3.0f, 0.0f, 100.0f, 400.0f);
+        assert(near(both.transmittance, std::exp(-fogMediaOpticalDepth(layers, 3.0f, 0.0f, 100.0f, 400.0f)), 1e-6f));
     }
 
     /*
@@ -570,6 +731,48 @@ namespace {
         clear.density = 0.0f;
         assert(near(fogFarSampleDistance(clear, 0.0f, 0.2f, 100.0f, 300.0f, 0.25f), 150.0f, 1e-3f));
         assert(fogFarSampleDistance(fog, 0.0f, 0.2f, 300.0f, 100.0f, 0.5f) == 300.0f);
+    }
+
+    /*
+    * The far samples through several layers, whose summed optical depth has no closed inverse: Newton's steps on it
+    * (bracketed, halving when a step leaves the bracket) reach the wanted depth on rays level in the pool, rising out of
+    * it, falling into it from above and passing the pool's farthest distance. One exponential layer alone keeps the
+    * closed form, the same to the bit.
+    */
+    void testFarShadowSamplesThroughLayers() {
+        const std::vector<Fog> layers = hazeAndPool();
+
+        struct Ray {
+            float originHeight;
+            float directionY;
+            float start;
+            float end;
+        };
+
+        for (const Ray& ray : {Ray{3.0f, 0.0f, 100.0f, 4000.0f}, Ray{3.0f, 0.05f, 100.0f, 6000.0f}, Ray{60.0f, -0.08f, 100.0f, 3000.0f},
+                               Ray{8.0f, 0.002f, 1500.0f, 5000.0f}, Ray{2.0f, -0.01f, 100.0f, 150.0f}}) {
+            const float total = fogMediaOpticalDepth(layers, ray.originHeight, ray.directionY, ray.start, ray.end);
+            float last = ray.start;
+
+            for (float share : {0.0f, 0.05f, 0.25f, 0.5f, 0.75f, 0.9f, 0.99f}) {
+                const float distance = fogMediaFarSampleDistance(layers, ray.originHeight, ray.directionY, ray.start, ray.end, share);
+                assert(distance >= ray.start && distance <= ray.end && distance >= last);
+                last = distance;
+                const float wanted = -std::log(1.0f - share * (1.0f - std::exp(-total)));
+                const float reached = fogMediaOpticalDepth(layers, ray.originHeight, ray.directionY, ray.start, distance);
+                assert(near(reached, wanted, 2e-3f * wanted + 1e-5f));
+            }
+        }
+
+        const Fog& haze = layers[0];
+
+        for (float share : {0.1f, 0.6f}) {
+            assert(fogMediaFarSampleDistance(std::span<const Fog>{&haze, 1}, 20.0f, 0.1f, 100.0f, 4000.0f, share) ==
+                   fogFarSampleDistance(haze, 20.0f, 0.1f, 100.0f, 4000.0f, share));
+        }
+
+        assert(fogMediaFarSampleDistance(layers, 3.0f, 0.0f, 300.0f, 100.0f, 0.5f) == 300.0f);
+        assert(near(fogMediaFarSampleDistance(std::span<const Fog>{}, 3.0f, 0.0f, 100.0f, 300.0f, 0.25f), 150.0f, 1e-3f));
     }
 
     /*
@@ -634,42 +837,58 @@ namespace {
         fog.anisotropy = 0.5f;
         fog.albedo = Vec3{0.9f, 0.8f, 0.7f};
 
-        const GpuFog none = packFog(nullptr, settings, viewProjection, viewProjection, true, true, 0, 500.0f);
-        assert(none.options[0] == 0.0f);
+        const std::span<const Fog> one{&fog, 1};
+
+        const GpuFog none = packFog(std::span<const Fog>{}, settings, viewProjection, viewProjection, true, true, 0, 500.0f);
+        assert(none.options[0] == 0.0f && none.media.extent[0] == 0.0f);
         FogSettings off;
         off.enabled = false;
-        assert(packFog(&fog, off, viewProjection, viewProjection, true, true, 0, 500.0f).options[0] == 0.0f);
+        assert(packFog(one, off, viewProjection, viewProjection, true, true, 0, 500.0f).options[0] == 0.0f);
 
-        const GpuFog packed = packFog(&fog, settings, viewProjection, viewProjection, true, true, 3, 500.0f);
-        assert(packed.options[0] == 1.0f && packed.options[1] == settings.historyWeight && packed.options[2] == 1.0f);
+        const GpuFog packed = packFog(one, settings, viewProjection, viewProjection, true, true, 3, 500.0f);
+        assert(packed.options[0] == 1.0f && packed.options[1] == settings.historyWeight && packed.options[2] == 1.0f && packed.options[3] == 1.0f);
         assert(packed.grid[0] == 160.0f && packed.grid[1] == 90.0f && packed.grid[2] == 64.0f && packed.grid[3] == 100.0f);
-        assert(packed.medium[0] == 0.03f && packed.medium[3] == 0.5f && packed.albedo[2] == 0.7f && packed.albedo[3] == fog.maxDistance);
+        assert(packed.media.layer[0][0] == 0.03f && packed.media.layer[0][3] == 0.5f && packed.media.albedo[0][2] == 0.7f);
+        assert(packed.media.albedo[0][3] == fog.maxDistance && packed.media.shape[0] == 0.0f);
+        assert(packed.media.extent[0] == 1.0f && packed.media.extent[1] == fog.maxDistance);
         assert(nearVec(Vec3{packed.jitter[0], packed.jitter[1], packed.jitter[2]}, fogJitter(3), 0.0f));
-        assert(packFog(&fog, settings, viewProjection, viewProjection, false, true, 3, 500.0f).options[1] == 0.0f);
-        assert(packFog(&fog, settings, viewProjection, viewProjection, true, true, 3, 60.0f).grid[3] == 60.0f);
-        assert(packFog(&fog, settings, viewProjection, viewProjection, true, false, 3, 500.0f).options[2] == 0.0f);
+        assert(packFog(one, settings, viewProjection, viewProjection, false, true, 3, 500.0f).options[1] == 0.0f);
+        assert(packFog(one, settings, viewProjection, viewProjection, true, true, 3, 60.0f).grid[3] == 60.0f);
+        assert(packFog(one, settings, viewProjection, viewProjection, true, false, 3, 500.0f).options[2] == 0.0f);
         FogSettings noProbeLight;
         noProbeLight.probeLight = false;
-        assert(packFog(&fog, noProbeLight, viewProjection, viewProjection, true, true, 3, 500.0f).options[2] == 0.0f);
+        assert(packFog(one, noProbeLight, viewProjection, viewProjection, true, true, 3, 500.0f).options[2] == 0.0f);
+        FogSettings sunUndimmed;
+        sunUndimmed.sunThroughFog = false;
+        assert(packFog(one, sunUndimmed, viewProjection, viewProjection, true, true, 3, 500.0f).options[3] == 0.0f);
+
+        // Layers: each its medium, albedo and farthest distance and its shape; the farthest of them; past FOG_MAX_LAYERS ignored.
+        std::vector<Fog> many = hazeAndPool();
+        many.insert(many.end(), 4, fog);
+        const GpuFogMedia media = packFog(many, settings, viewProjection, viewProjection, true, true, 3, 500.0f).media;
+        assert(media.extent[0] == static_cast<float>(FOG_MAX_LAYERS) && media.extent[1] == 20000.0f);
+        assert(media.shape[0] == 0.0f && media.shape[1] == 1.0f && media.layer[1][1] == 12.0f && media.layer[1][2] == 4.0f);
+        assert(media.albedo[1][3] == 2000.0f && media.layer[3][0] == 0.03f);
         // The picture pass: the render size, the far shadow's steps and the frame, which turns each pixel's samples.
         const GpuFogPicturePass picture = packFogPicturePass(viewProjection, RenderSize{1920, 1080}, 16, 5);
         assert(picture.size[0] == 1920.0f && picture.size[1] == 1080.0f && picture.size[2] == 16.0f && picture.size[3] == 5.0f);
     }
 
-    // A Fog component reaches the frame's lighting (the first, if several).
+    // Every Fog component reaches the frame's lighting, in the world's order (the renderer reads the first FOG_MAX_LAYERS).
     void testCollected() {
         const Fog defaults;
         assert(defaults.density == 0.02f && defaults.scaleHeight == 10.0f && defaults.anisotropy == 0.6f);
+        assert(defaults.shape == FogShape::Exponential);
 
         World world;
-        assert(!collectLighting(world, 1.0f).fog.has_value());
+        assert(collectLighting(world, 1.0f).fogLayers.empty());
 
         Fog thick;
         thick.density = 0.2f;
         world.add(world.create(), thick);
         world.add(world.create(), Fog{});
         const FrameLighting lighting = collectLighting(world, 1.0f);
-        assert(lighting.fog.has_value() && lighting.fog->density == 0.2f);
+        assert(lighting.fogLayers.size() == 2 && lighting.fogLayers[0].density == 0.2f && lighting.fogLayers[1].density == 0.02f);
     }
 }
 
@@ -677,6 +896,9 @@ void testVolumetricFog() {
     testSettings();
     testDensity();
     testOpticalDepth();
+    testPooledOpticalDepth();
+    testLayersAdd();
+    testSunThroughFog();
     testSlices();
     testVolumeCoordinates();
     testJitter();
@@ -692,6 +914,7 @@ void testVolumetricFog() {
     testFogToASurface();
     testBeyondTheGrid();
     testFarShadowSamples();
+    testFarShadowSamplesThroughLayers();
     testFarShadowShare();
     testProbeAirWeight();
     testPacking();

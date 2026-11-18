@@ -869,21 +869,21 @@ namespace {
         assert(settings.enabled);
         assert(settings.fog.density > 0.0f && settings.fog.density <= 0.02f && settings.fog.baseHeight == 0.0f);
 
-        const std::optional<Fog> fog = collectLighting(lab.world, 1.0f).fog;
-        assert(fog.has_value() && fog->density == settings.fog.density && fog->scaleHeight == settings.fog.scaleHeight);
+        const std::vector<Fog> fog = collectLighting(lab.world, 1.0f).fogLayers;
+        assert(fog.size() == 1 && fog[0].density == settings.fog.density && fog[0].scaleHeight == settings.fog.scaleHeight);
 
         const Input noInput;
         lab.game.getMistSettings().fog.density = 0.005f;
         lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
-        assert(collectLighting(lab.world, 1.0f).fog->density == 0.005f);
+        assert(collectLighting(lab.world, 1.0f).fogLayers.at(0).density == 0.005f);
 
         lab.game.getMistSettings().enabled = false;
         lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
-        assert(!collectLighting(lab.world, 1.0f).fog.has_value());
+        assert(collectLighting(lab.world, 1.0f).fogLayers.empty());
 
         lab.game.getMistSettings().enabled = true;
         lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
-        assert(collectLighting(lab.world, 1.0f).fog.has_value());
+        assert(collectLighting(lab.world, 1.0f).fogLayers.size() == 1);
     }
 
     // The clock runs at its speed, wraps round midnight, and stands still at speed 0.

@@ -28,10 +28,24 @@ namespace {
         return fog;
     }
 
+    // A random layer: thin or thick, low or high, either shape, near or far reaching.
+    Fog randomLayer(CaseRandom& random, int i) {
+        Fog fog;
+        fog.density = random.between(0.0f, 0.2f);
+        fog.baseHeight = random.between(-10.0f, 30.0f);
+        fog.scaleHeight = random.between(1.0f, 100.0f);
+        fog.anisotropy = random.between(-0.9f, 0.9f);
+        fog.albedo = Vec3{random.between(0.0f, 1.0f), random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)};
+        fog.maxDistance = random.between(50.0f, 3000.0f);
+        fog.shape = i % 2 == 0 ? FogShape::Exponential : FogShape::Pooled;
+        return fog;
+    }
+
     /*
-    * Thin and thick fog, low and high bases, rays level, rising, falling and nearly level, short and long, ending before
-    * they start. Inputs per case: (density, base height, scale height, anisotropy), (origin height, direction y, start,
-    * end), (source, height), (the far shadow sample's share, 0, 0, 0).
+    * One layer of either shape: thin and thick fog, low and high bases, rays level, rising, falling and nearly level,
+    * short and long, ending before they start. Inputs per case: (density, base height, scale height, anisotropy), (origin
+    * height, direction y, start, end), (0, 0, 0, height), (the far shadow sample's share, shape, 0, 0); the far sample is
+    * the exponential's closed form.
     */
     void checkMedium(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{211};
@@ -42,23 +56,90 @@ namespace {
             const float directionY = i % 5 == 0 ? random.between(-1e-4f, 1e-4f) : random.between(-1.0f, 1.0f);
             inputs.push_back(GpuVec4{random.between(0.0f, 0.2f), random.between(-10.0f, 30.0f), random.between(1.0f, 100.0f), random.between(-0.9f, 0.9f)});
             inputs.push_back(GpuVec4{random.between(-5.0f, 40.0f), directionY, start, start + random.between(-10.0f, 600.0f)});
-            inputs.push_back(gpuVec4(Vec3{random.between(0.0f, 4.0f), random.between(0.0f, 4.0f), random.between(0.0f, 4.0f)}, random.between(-20.0f, 80.0f)));
-            inputs.push_back(GpuVec4{random.between(0.0f, 1.0f), 0.0f, 0.0f, 0.0f});
+            inputs.push_back(GpuVec4{0.0f, 0.0f, 0.0f, random.between(-20.0f, 80.0f)});
+            inputs.push_back(GpuVec4{random.between(0.0f, 1.0f), i % 3 == 0 ? static_cast<float>(FOG_SHAPE_POOLED) : 0.0f, 0.0f, 0.0f});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_MEDIUM, inputs, 4, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_MEDIUM, inputs, 4, 1);
 
-        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
             const GpuVec4* in = &inputs[i * 4];
-            const GpuVec4* out = &outputs[i * 2];
-            const Fog fog = fogFrom(in[0]);
-            const FogIntegration beyond = fogBeyondGrid(fog, vec3From(in[2]), in[1][0], in[1][1], in[1][2], in[1][3]);
+            const GpuVec4* out = &outputs[i];
+            Fog fog = fogFrom(in[0]);
+            fog.shape = in[3][1] == static_cast<float>(FOG_SHAPE_POOLED) ? FogShape::Pooled : FogShape::Exponential;
+            Fog exponential = fogFrom(in[0]);
 
             report.check("fogDensity", transcendentalTolerance, fogDensity(fog, in[2][3]), out[0][0]);
             report.check("fogOpticalDepth", transcendentalTolerance, fogOpticalDepth(fog, in[1][0], in[1][1], in[1][2], in[1][3]), out[0][1]);
+            report.check("fogFarSampleDistance", transcendentalTolerance, fogFarSampleDistance(exponential, in[1][0], in[1][1], in[1][2], in[1][3], in[3][0]),
+                         out[0][2]);
+        }
+    }
+
+    /*
+    * One to FOG_MAX_LAYERS layers of both shapes through their packed rows (so the packing's order is the shader's), points
+    * near and past their farthest distances, rays every way, the sun every way. Inputs per case: GpuFogMedia's ten rows,
+    * (origin height, direction y, start, end), (source, height), (the far sample's share, distance along the view, the
+    * way to the light's y, 0), (to the light, 0), (view direction, 0).
+    */
+    void checkMedia(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{214};
+        std::vector<GpuVec4> inputs;
+        std::vector<std::vector<Fog>> cases;
+
+        for (int i = 0; i < 256; ++i) {
+            std::vector<Fog>& layers = cases.emplace_back();
+
+            for (int layer = 0; layer < 1 + i % FOG_MAX_LAYERS; ++layer) {
+                layers.push_back(randomLayer(random, i + layer));
+            }
+
+            const GpuFogMedia media = packFogMedia(layers);
+
+            for (const float* row : {media.layer[0], media.layer[1], media.layer[2], media.layer[3], media.albedo[0], media.albedo[1], media.albedo[2],
+                                     media.albedo[3], media.shape, media.extent}) {
+                inputs.push_back(GpuVec4{row[0], row[1], row[2], row[3]});
+            }
+
+            const float start = random.between(0.0f, 200.0f);
+            const float directionY = i % 5 == 0 ? random.between(-1e-4f, 1e-4f) : random.between(-1.0f, 1.0f);
+            inputs.push_back(GpuVec4{random.between(-5.0f, 40.0f), directionY, start, start + random.between(-10.0f, 2000.0f)});
+            inputs.push_back(gpuVec4(Vec3{random.between(0.0f, 4.0f), random.between(0.0f, 4.0f), random.between(0.0f, 4.0f)}, random.between(-20.0f, 80.0f)));
+            const Vec3 toLight = random.direction();
+            inputs.push_back(GpuVec4{random.between(0.0f, 1.0f), random.between(0.0f, 3500.0f), toLight.y, 0.0f});
+            inputs.push_back(gpuVec4(toLight, 0.0f));
+            inputs.push_back(gpuVec4(random.direction(), 0.0f));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_MEDIA, inputs, 15, 6);
+        // Newton's steps compare the GPU's depths with the CPU's: a little looser than one function.
+        const FloatTolerance newtonTolerance{.absolute = 1e-3f, .relative = 1e-3f};
+
+        for (std::size_t i = 0; i < outputs.size() / 6; ++i) {
+            const GpuVec4* in = &inputs[i * 15];
+            const GpuVec4* out = &outputs[i * 6];
+            const std::vector<Fog>& layers = cases[i];
+            const GpuVec4& ray = in[10];
+            const Vec3 source = vec3From(in[11]);
+            const float height = in[11][3];
+            const GpuVec4& extra = in[12];
+            const FogIntegration beyond = fogBeyondGrid(layers, source, ray[0], ray[1], ray[2], ray[3]);
+            const FogLayerShares shares = fogMediaShares(layers, height, extra[1]);
+            const FogLayerShares stretch = fogMediaStretchShares(layers, ray[0], ray[1], ray[2], ray[3]);
+
+            report.check("fogMediaDensity", transcendentalTolerance, fogMediaDensity(layers, height, extra[1]), out[0][0]);
+            report.check("fogMediaOpticalDepth", transcendentalTolerance, fogMediaOpticalDepth(layers, ray[0], ray[1], ray[2], ray[3]), out[0][1]);
             report.check("fogBeyondGrid", transcendentalTolerance, beyond.transmittance, out[0][2]);
+            report.check("fogMediaFarSampleDistance", newtonTolerance, fogMediaFarSampleDistance(layers, ray[0], ray[1], ray[2], ray[3], extra[0]), out[0][3]);
             report.check("fogBeyondGrid", transcendentalTolerance, beyond.light, vec3From(out[1]));
-            report.check("fogFarSampleDistance", transcendentalTolerance, fogFarSampleDistance(fog, in[1][0], in[1][1], in[1][2], in[1][3], in[3][0]), out[1][3]);
+            report.check("fogSunTransmittance", transcendentalTolerance, fogSunTransmittance(layers, height, extra[2]), out[1][3]);
+            report.check("fogMediaShares", transcendentalTolerance, Vec3{shares[0], shares[1], shares[2]}, vec3From(out[2]));
+            report.check("fogMediaShares", transcendentalTolerance, shares[3], out[2][3]);
+            report.check("fogMediaStretchShares", transcendentalTolerance, Vec3{stretch[0], stretch[1], stretch[2]}, vec3From(out[3]));
+            report.check("fogMediaStretchShares", transcendentalTolerance, stretch[3], out[3][3]);
+            report.check("fogMediaInScattering", transcendentalTolerance, fogMediaInScattering(layers, shares, source, vec3From(in[13]), vec3From(in[14])),
+                         vec3From(out[4]));
+            report.check("fogMediaAmbient", transcendentalTolerance, fogMediaAmbient(layers, shares, source), vec3From(out[5]));
         }
     }
 
@@ -185,6 +266,7 @@ namespace {
 void gpuTestVolumetricFog(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("volumetric_fog.glsl");
     checkMedium(runner, report);
+    checkMedia(runner, report);
     checkGrid(runner, report);
     checkLight(runner, report);
 }

@@ -17,14 +17,41 @@ void main() {
     }
 
     if (function == GPU_TEST_FOG_MEDIUM) {
-        // Inputs: (density, base height, scale height, anisotropy), (origin height, direction y, start, end), (source, height),
-        // (the far shadow sample's share, 0, 0, 0).
+        // Inputs: (density, base height, scale height, anisotropy), (origin height, direction y, start, end), (0, 0, 0,
+        // height), (the far shadow sample's share, shape, 0, 0).
         vec4 medium = testInput(0);
         vec4 ray = testInput(1);
-        vec4 source = testInput(2);
-        FogIntegration beyond = fogBeyondGrid(medium, source.rgb, ray.x, ray.y, ray.z, ray.w);
-        testOutput(0, vec4(fogDensity(medium, source.w), fogOpticalDepth(medium, ray.x, ray.y, ray.z, ray.w), beyond.transmittance, 0.0));
-        testOutput(1, vec4(beyond.light, fogFarSampleDistance(medium, ray.x, ray.y, ray.z, ray.w, testInput(3).x)));
+        float height = testInput(2).w;
+        vec4 extra = testInput(3);
+        testOutput(0, vec4(fogDensity(medium, extra.y, height), fogOpticalDepth(medium, extra.y, ray.x, ray.y, ray.z, ray.w),
+                           fogFarSampleDistance(medium, ray.x, ray.y, ray.z, ray.w, extra.x), 0.0));
+    } else if (function == GPU_TEST_FOG_MEDIA) {
+        // Inputs: the packed layers (GpuFogMedia's ten rows), (origin height, direction y, start, end), (source, height),
+        // (the far shadow sample's share, distance along the view, the way to the light's y, 0), (to the light, 0),
+        // (view direction, 0).
+        FogMedia media;
+
+        for (int i = 0; i < FOG_MAX_LAYERS; ++i) {
+            media.layer[i] = testInput(i);
+            media.albedo[i] = testInput(FOG_MAX_LAYERS + i);
+        }
+
+        media.shape = testInput(8);
+        media.extent = testInput(9);
+        vec4 ray = testInput(10);
+        vec4 source = testInput(11);
+        vec4 extra = testInput(12);
+        vec3 toLight = testInput(13).xyz;
+        vec3 view = testInput(14).xyz;
+        FogIntegration beyond = fogBeyondGrid(media, source.rgb, ray.x, ray.y, ray.z, ray.w);
+        vec4 shares = fogMediaShares(media, source.w, extra.y);
+        testOutput(0, vec4(fogMediaDensity(media, source.w, extra.y), fogMediaOpticalDepth(media, ray.x, ray.y, ray.z, ray.w), beyond.transmittance,
+                           fogMediaFarSampleDistance(media, ray.x, ray.y, ray.z, ray.w, extra.x)));
+        testOutput(1, vec4(beyond.light, fogSunTransmittance(media, source.w, extra.z)));
+        testOutput(2, shares);
+        testOutput(3, fogMediaStretchShares(media, ray.x, ray.y, ray.z, ray.w));
+        testOutput(4, vec4(fogMediaInScattering(media, shares, source.rgb, toLight, view), 0.0));
+        testOutput(5, vec4(fogMediaAmbient(media, shares, source.rgb), 0.0));
     } else if (function == GPU_TEST_FOG_GRID) {
         // Inputs: the view-projection's columns, its inverse's columns, (point, range), (coordinate, slices), (forward,
         // history weight), (froxel, 0), (grid size, 0).

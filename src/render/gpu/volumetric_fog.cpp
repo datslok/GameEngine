@@ -25,6 +25,42 @@ namespace {
 
         return (1.0f - std::exp(-x)) / x;
     }
+
+    // The layers that count: no more than the frame holds.
+    std::size_t layerCount(std::span<const Fog> layers) {
+        return std::min(layers.size(), static_cast<std::size_t>(FOG_MAX_LAYERS));
+    }
+
+    /*
+    * A pooled layer's depth along a ray from start to end (end past start). Below its top the density is constant;
+    * above it, the exponential from the part's lower end, where it is densest: its integral is that density times the
+    * length times exponentialShare of the exponent's whole change, which never overflows, however high the ray starts.
+    */
+    float pooledOpticalDepth(const Fog& fog, float originHeight, float directionY, float start, float end) {
+        if (directionY == 0.0f) {
+            return fogDensity(fog, originHeight) * (end - start);
+        }
+
+        const float crossing = (fog.baseHeight - originHeight) / directionY;
+        const bool rising = directionY > 0.0f;
+        const float belowStart = rising ? start : std::max(start, crossing);
+        const float belowEnd = rising ? std::min(end, crossing) : end;
+        const float aboveStart = rising ? std::max(start, crossing) : start;
+        const float aboveEnd = rising ? end : std::min(end, crossing);
+        float depth = 0.0f;
+
+        if (belowEnd > belowStart) {
+            depth += fog.density * (belowEnd - belowStart);
+        }
+
+        if (aboveEnd > aboveStart) {
+            const float length = aboveEnd - aboveStart;
+            const float lowest = originHeight + directionY * (rising ? aboveStart : aboveEnd);
+            depth += fogDensity(fog, lowest) * length * exponentialShare(std::abs(directionY) / fog.scaleHeight * length);
+        }
+
+        return depth;
+    }
 }
 
 void visit(FogSettings& settings, SettingsVisitor& visitor) {
@@ -37,6 +73,7 @@ void visit(FogSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Fog history", settings.historyWeight, {.min = 0.0f, .max = static_cast<float>(FOG_MAX_HISTORY_WEIGHT)});
     visitor.field("Fog lit by probes", settings.probeLight);
     visitor.field("Fog far shadow steps", settings.farShadowSteps, {.min = 0, .max = FOG_MAX_FAR_SHADOW_STEPS, .sliderMax = 32});
+    visitor.field("Fog dims the sun", settings.sunThroughFog);
 }
 
 // Written so not a number fails too.
@@ -63,25 +100,115 @@ void validateFog(const FogSettings& settings) {
     }
 }
 
-// The exponent is capped, so far below the base the density stays a float.
+// The exponent is capped, so far below the base the density stays a float; a pool's never grows past its density.
 float fogDensity(const Fog& fog, float height) {
+    if (fog.shape == FogShape::Pooled) {
+        return fog.density * std::exp(-std::max(height - fog.baseHeight, 0.0f) / fog.scaleHeight);
+    }
+
     return fog.density * std::exp(std::min((fog.baseHeight - height) / fog.scaleHeight, maxExponent));
 }
 
 /*
-* Along the ray the height is originHeight + directionY t, so the density is the density at start times exp(-k (t -
-* start)) with k = directionY / scaleHeight, whose integral to end is the start's density times the length times
-* exponentialShare(k x length). Looking down, k is negative and the density grows along the ray; capping k x length keeps
-* it a float.
+* Exponential: along the ray the height is originHeight + directionY t, so the density is the density at start times
+* exp(-k (t - start)) with k = directionY / scaleHeight, whose integral to end is the start's density times the length
+* times exponentialShare(k x length). Looking down, k is negative and the density grows along the ray; capping k x
+* length keeps it a float.
 */
 float fogOpticalDepth(const Fog& fog, float originHeight, float directionY, float start, float end) {
     if (!(end > start)) {
         return 0.0f;
     }
 
+    if (fog.shape == FogShape::Pooled) {
+        return pooledOpticalDepth(fog, originHeight, directionY, start, end);
+    }
+
     const float length = end - start;
     const float change = std::max(directionY / fog.scaleHeight * length, -maxExponent);
     return fogDensity(fog, originHeight + directionY * start) * length * exponentialShare(change);
+}
+
+float fogMediaDensity(std::span<const Fog> layers, float height, float distance) {
+    float density = 0.0f;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        density += distance <= layers[i].maxDistance ? fogDensity(layers[i], height) : 0.0f;
+    }
+
+    return density;
+}
+
+float fogMediaOpticalDepth(std::span<const Fog> layers, float originHeight, float directionY, float start, float end) {
+    float depth = 0.0f;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        depth += fogOpticalDepth(layers[i], originHeight, directionY, start, std::min(end, layers[i].maxDistance));
+    }
+
+    return depth;
+}
+
+FogLayerShares fogMediaShares(std::span<const Fog> layers, float height, float distance) {
+    FogLayerShares shares{};
+    float total = 0.0f;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        shares[i] = distance <= layers[i].maxDistance ? fogDensity(layers[i], height) : 0.0f;
+        total += shares[i];
+    }
+
+    for (float& share : shares) {
+        share = total > 0.0f ? share / total : 0.0f;
+    }
+
+    return shares;
+}
+
+FogLayerShares fogMediaStretchShares(std::span<const Fog> layers, float originHeight, float directionY, float start, float end) {
+    FogLayerShares shares{};
+    float total = 0.0f;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        shares[i] = fogOpticalDepth(layers[i], originHeight, directionY, start, std::min(end, layers[i].maxDistance));
+        total += shares[i];
+    }
+
+    for (float& share : shares) {
+        share = total > 0.0f ? share / total : 0.0f;
+    }
+
+    return shares;
+}
+
+Vec3 fogMediaInScattering(std::span<const Fog> layers, const FogLayerShares& shares, const Vec3& irradiance, const Vec3& toLight, const Vec3& viewDirection) {
+    Vec3 light;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        light = light + fogInScattering(irradiance, toLight, viewDirection, layers[i].anisotropy) * layers[i].albedo * shares[i];
+    }
+
+    return light;
+}
+
+Vec3 fogMediaAmbient(std::span<const Fog> layers, const FogLayerShares& shares, const Vec3& ambient) {
+    Vec3 albedo;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        albedo = albedo + layers[i].albedo * shares[i];
+    }
+
+    return ambient * albedo;
+}
+
+float fogSunTransmittance(std::span<const Fog> layers, float height, float toLightY) {
+    float depth = 0.0f;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        depth += fogOpticalDepth(layers[i], height, toLightY, 0.0f, layers[i].maxDistance);
+    }
+
+    return std::exp(-depth);
 }
 
 // Even in log(depth + sliceStart): depth = s ((1 + range / s)^slice - 1).
@@ -243,8 +370,8 @@ std::vector<FogIntegration> integrateFogColumn(std::span<const Vec4> lighting, f
     return column;
 }
 
-FogIntegration fogBeyondGrid(const Fog& fog, const Vec3& source, float originHeight, float directionY, float start, float end) {
-    const float depth = fogOpticalDepth(fog, originHeight, directionY, start, end);
+FogIntegration fogBeyondGrid(std::span<const Fog> layers, const Vec3& source, float originHeight, float directionY, float start, float end) {
+    const float depth = fogMediaOpticalDepth(layers, originHeight, directionY, start, end);
     return FogIntegration{source * oneMinusExp(depth), std::exp(-depth)};
 }
 
@@ -275,11 +402,88 @@ float fogFarSampleDistance(const Fog& fog, float originHeight, float directionY,
     return std::clamp(start + depth / density * stretch, start, end);
 }
 
-GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
+/*
+* The depth to reach is the closed form's, as for one layer; the depth from start to a distance rises with the summed
+* density there, so Newton's step is the shortfall over the density. The first guess is exact for even fog. A step
+* landing on the depth ends it.
+*/
+float fogMediaFarSampleDistance(std::span<const Fog> layers, float originHeight, float directionY, float start, float end, float share) {
+    if (layerCount(layers) == 1 && layers[0].shape == FogShape::Exponential) {
+        return fogFarSampleDistance(layers[0], originHeight, directionY, start, std::min(end, layers[0].maxDistance), share);
+    }
+
+    if (!(end > start)) {
+        return start;
+    }
+
+    const float total = fogMediaOpticalDepth(layers, originHeight, directionY, start, end);
+
+    if (!(total > 0.0f)) {
+        return start + share * (end - start);
+    }
+
+    const float depth = -std::log(1.0f - share * oneMinusExp(total));
+
+    if (!(depth < total)) {
+        return end;
+    }
+
+    const float first = fogMediaDensity(layers, originHeight + directionY * start, start);
+    float low = start;
+    float high = end;
+    float distance = first > 0.0f ? std::min(start + depth / first, end) : 0.5f * (start + end);
+
+    for (int step = 0; step < FOG_FAR_SAMPLE_NEWTON_STEPS; ++step) {
+        const float error = fogMediaOpticalDepth(layers, originHeight, directionY, start, distance) - depth;
+
+        if (error == 0.0f) {
+            break;
+        }
+
+        if (error > 0.0f) {
+            high = distance;
+        } else {
+            low = distance;
+        }
+
+        // A step onto the bracket's edge is taken: near the answer rounding lands it there, and halving instead threw a
+        // right first guess away towards the far end.
+        const float density = fogMediaDensity(layers, originHeight + directionY * distance, distance);
+        const float next = density > 0.0f ? distance - error / density : low - 1.0f;
+        distance = next >= low && next <= high ? next : 0.5f * (low + high);
+    }
+
+    return std::clamp(distance, start, end);
+}
+
+GpuFogMedia packFogMedia(std::span<const Fog> layers) {
+    GpuFogMedia media{};
+    float farthest = 0.0f;
+
+    for (std::size_t i = 0; i < layerCount(layers); ++i) {
+        const Fog& fog = layers[i];
+        media.layer[i][0] = fog.density;
+        media.layer[i][1] = fog.baseHeight;
+        media.layer[i][2] = fog.scaleHeight;
+        media.layer[i][3] = fog.anisotropy;
+        media.albedo[i][0] = fog.albedo.x;
+        media.albedo[i][1] = fog.albedo.y;
+        media.albedo[i][2] = fog.albedo.z;
+        media.albedo[i][3] = fog.maxDistance;
+        media.shape[i] = fog.shape == FogShape::Pooled ? static_cast<float>(FOG_SHAPE_POOLED) : 0.0f;
+        farthest = std::max(farthest, fog.maxDistance);
+    }
+
+    media.extent[0] = static_cast<float>(layerCount(layers));
+    media.extent[1] = farthest;
+    return media;
+}
+
+GpuFog packFog(std::span<const Fog> layers, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
                bool probesRead, std::uint64_t frame, float cameraFar) {
     GpuFog packed{};
 
-    if (fog == nullptr || !settings.enabled) {
+    if (layers.empty() || !settings.enabled) {
         return packed;
     }
 
@@ -292,19 +496,12 @@ GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProj
     packed.grid[2] = static_cast<float>(settings.slices);
     packed.grid[3] = std::min(settings.range, cameraFar);
 
-    packed.medium[0] = fog->density;
-    packed.medium[1] = fog->baseHeight;
-    packed.medium[2] = fog->scaleHeight;
-    packed.medium[3] = fog->anisotropy;
-
-    packed.albedo[0] = fog->albedo.x;
-    packed.albedo[1] = fog->albedo.y;
-    packed.albedo[2] = fog->albedo.z;
-    packed.albedo[3] = fog->maxDistance;
+    packed.media = packFogMedia(layers);
 
     packed.options[0] = 1.0f;
     packed.options[1] = historyUsable ? settings.historyWeight : 0.0f;
     packed.options[2] = settings.probeLight && probesRead ? 1.0f : 0.0f;
+    packed.options[3] = settings.sunThroughFog ? 1.0f : 0.0f;
 
     const Vec3 jitter = fogJitter(frame);
     packed.jitter[0] = jitter.x;

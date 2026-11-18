@@ -7,7 +7,8 @@
 * at a point moved round the froxel's middle by this frame's jitter, turned by the froxel's own turn (neighbours sample
 * different places at once). The light is the directional lights' (each with its cascades' shadow), the point and spot
 * lights its cluster lists (each with its shadow), and the light from all around (the probes', or the flat ambient as
-* much as the air sees the sky), through the albedo. Last frame's grid, read where the froxel's middle was then (with
+* much as the air sees the sky), through each layer's albedo and phase function weighed by its share of the
+* extinction there; the directional lights dimmed by the fog above the froxel (fogSunThrough). Last frame's grid, read where the froxel's middle was then (with
 * the camera still its own texel, nothing of its neighbours), keeps the history weight's share, so the frames' samples
 * average into a smooth grid.
 */
@@ -37,7 +38,7 @@ layout(set = 2, binding = 0) uniform sampler3D history;                // last f
 layout(set = 2, binding = 1, rgba16f) uniform writeonly image3D lighting; // rgb the scattered light, a the extinction
 
 // One point light's light scattered towards the eye at a point in the air; nothing beyond its range.
-vec3 pointLightInAir(int i, vec3 position, vec3 viewDirection) {
+vec3 pointLightInAir(int i, vec3 position, vec3 viewDirection, vec4 shares) {
     vec3 offset = points[i].positionRange.xyz - position;
     float range = points[i].positionRange.w;
     float distance = length(offset);
@@ -54,11 +55,11 @@ vec3 pointLightInAir(int i, vec3 position, vec3 viewDirection) {
         irradiance *= mix(vec3(1.0), lit, points[i].shadowStrength);
     }
 
-    return fogInScattering(irradiance, offset / distance, viewDirection, frameFog.medium.w);
+    return fogMediaInScattering(frameFog.media, shares, irradiance, offset / distance, viewDirection);
 }
 
 // One spotlight's: as a point light's, and nothing outside its cone.
-vec3 spotLightInAir(int i, vec3 position, vec3 viewDirection) {
+vec3 spotLightInAir(int i, vec3 position, vec3 viewDirection, vec4 shares) {
     vec3 offset = spots[i].positionRange.xyz - position;
     float range = spots[i].positionRange.w;
     float distance = length(offset);
@@ -104,7 +105,7 @@ vec3 spotLightInAir(int i, vec3 position, vec3 viewDirection) {
         irradiance *= mix(vec3(1.0), shadowTap(tile, position), spots[i].shadowStrength);
     }
 
-    return fogInScattering(irradiance, toLight, viewDirection, frameFog.medium.w);
+    return fogMediaInScattering(frameFog.media, shares, irradiance, toLight, viewDirection);
 }
 
 void main() {
@@ -119,10 +120,13 @@ void main() {
     vec3 coordinate = fogFroxelCoordinate(froxel, size, fogFroxelJitter(frameFog.jitter.xyz, froxel));
     vec3 position = fogVolumePoint(coordinate, frameFog.inverseViewProjection, viewForward.xyz, range);
     vec3 viewDirection = normalize(fogVolumePoint(vec3(coordinate.xy, 1.0), frameFog.inverseViewProjection, viewForward.xyz, range));
+    float height = position.y + cameraOrigin.y;
+    float distance = length(position);
+    vec4 shares = fogMediaShares(frameFog.media, height, distance);
     vec3 light = vec3(0.0);
 
     for (int i = 0; i < counts.x; ++i) {
-        vec3 irradiance = directional[i].radiance.rgb;
+        vec3 irradiance = directional[i].radiance.rgb * fogSunThrough(height, directional[i].toLight.xyz);
         int tile = directional[i].shadowTile;
 
         if (tile >= 0) {
@@ -130,7 +134,7 @@ void main() {
                                          directional[i].farShadowTile, directional[i].distantOccluderReach);
         }
 
-        light += fogInScattering(irradiance, directional[i].toLight.xyz, viewDirection, frameFog.medium.w);
+        light += fogMediaInScattering(frameFog.media, shares, irradiance, directional[i].toLight.xyz, viewDirection);
     }
 
     if (shadingOptions.x != 0) {
@@ -144,7 +148,7 @@ void main() {
             while (bits != 0u) {
                 int bit = findLSB(bits);
                 bits &= bits - 1u;
-                light += pointLightInAir(word * 32 + bit, position, viewDirection);
+                light += pointLightInAir(word * 32 + bit, position, viewDirection, shares);
             }
         }
 
@@ -154,23 +158,24 @@ void main() {
             while (bits != 0u) {
                 int bit = findLSB(bits);
                 bits &= bits - 1u;
-                light += spotLightInAir(word * 32 + bit, position, viewDirection);
+                light += spotLightInAir(word * 32 + bit, position, viewDirection, shares);
             }
         }
     } else {
         for (int i = 0; i < counts.y; ++i) {
-            light += pointLightInAir(i, position, viewDirection);
+            light += pointLightInAir(i, position, viewDirection, shares);
         }
 
         for (int i = 0; i < counts.z; ++i) {
-            light += spotLightInAir(i, position, viewDirection);
+            light += spotLightInAir(i, position, viewDirection, shares);
         }
     }
 
     // Without probes, the flat ambient as much as the air there sees the sky (the sky visibility grid, open while unread).
-    light += frameFog.options.z > 0.5 ? probeAmbientInAir(position) : flatAmbient() * skyVisibilityInAirAt(position);
+    vec3 ambient = frameFog.options.z > 0.5 ? probeAmbientInAir(position) : flatAmbient() * skyVisibilityInAirAt(position);
+    light += fogMediaAmbient(frameFog.media, shares, ambient);
 
-    vec4 froxelLight = vec4(light * frameFog.albedo.rgb, fogDensity(frameFog.medium, position.y + cameraOrigin.y));
+    vec4 froxelLight = vec4(light, fogMediaDensity(frameFog.media, height, distance));
     vec3 previous = fogHistoryCoordinate(froxel, size, frameFog.inverseViewProjection, frameFog.previousViewProjection, viewForward.xyz, range);
     float kept = fogHistoryWeight(previous, frameFog.options.y);
 

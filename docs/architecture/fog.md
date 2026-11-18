@@ -14,8 +14,21 @@ S: light arriving at s from each light, times the phase function and its shadow 
 
 ## Inputs
 
-- **`Fog` component** (`scene/fog.h`; the first in the world goes into `FrameLighting::fog`): `density` (extinction per metre at `baseHeight`; 3 / density ≈ visibility), `scaleHeight` (falls by e per scale height up, grows below; `fogDensity`, exponent capped at `FOG_MAX_EXPONENT`), `albedo` per colour, `anisotropy` (Henyey-Greenstein g, `henyeyGreensteinPhase` shared with the sky), `maxDistance` (no fog beyond along a ray, so the sky shows).
-- **`FogSettings`** (`RenderSettings::fog`, F5 Fog, `validateFog`; meanings in `render/gpu/volumetric_fog.h`): `enabled` (off on Low), `range` (100 m, never past the far plane), `gridWidth`/`gridHeight`/`slices` (160 × 90 × 64; presets lower; changing them remakes the grid after a GPU wait), `historyWeight` (0.9), `probeLight`, `farShadowSteps` (16).
+- **`Fog` components**, one layer each (`scene/fog.h`; every one goes into `FrameLighting::fogLayers` in the world's order, the first `FOG_MAX_LAYERS` (4) count): `density` (extinction per metre at `baseHeight`; 3 / density ≈ visibility), `shape`, `scaleHeight`, `albedo` per colour, `anisotropy` (Henyey-Greenstein g, `henyeyGreensteinPhase` shared with the sky), `maxDistance` (none of the layer beyond it along a ray, so the sky shows).
+- **Shapes** (`fogDensity`): `Exponential` falls by e per scale height above the base, grows below (exponent capped at `FOG_MAX_EXPONENT`); `Pooled` is even up to `baseHeight` (its top) and falls by e per scale height above (its soft edge): mist pooled under the canopy.
+- **`FogSettings`** (`RenderSettings::fog`, F5 Fog, `validateFog`; meanings in `render/gpu/volumetric_fog.h`): `enabled` (off on Low), `range` (100 m, never past the far plane), `gridWidth`/`gridHeight`/`slices` (160 × 90 × 64; presets lower; changing them remakes the grid after a GPU wait), `historyWeight` (0.9), `probeLight`, `farShadowSteps` (16), `sunThroughFog` (on).
+
+## Layers
+
+Layers add (research: `docs/research/FOGLAYERS.md`); each reaches to its `maxDistance` along a view ray.
+
+| Function | What |
+|---|---|
+| `fogMediaDensity`, `fogMediaOpticalDepth` | Sums of the layers' `fogDensity` and `fogOpticalDepth` |
+| `fogOpticalDepth` (pooled) | A straight ray crosses the top at most once: the density × the length below, plus the exponential's form above taken from that part's lower end (finite from any height) |
+| `fogMediaShares`, `fogMediaStretchShares` | Each layer's share of a point's extinction or a stretch's optical depth (a `vec4`, so `FOG_MAX_LAYERS` is 4) |
+| `fogMediaInScattering`, `fogMediaAmbient` | A light's or the ambient's scattered light: each layer's albedo and phase function weighed by its share |
+| `fogSunTransmittance` | exp(−depth) from a point towards a directional light, each layer to its `maxDistance`; read through `fogSunThrough` (1 with `sunThroughFog` off). Lights the fog only: surfaces under it get the undimmed sun |
 
 ## The grid
 
@@ -25,7 +38,7 @@ Froxels shaped like the view through the unjittered camera (`motionViewProjectio
 - Slices even in log(depth + `FOG_SLICE_START`) (`fogSliceDepth`, `fogDepthSlice`): about 7 cm deep at the camera, 7 m at 100 m for 64 slices, as a froxel's width grows with distance.
 - Froxel (x, y, k)'s middle is ((x, y, k) + 0.5) / size.
 
-**`GpuFog`** (272 bytes, std430, `SceneBuffers::fog`, set 1 binding 27, `packFog`): the grid's camera, its inverse, last frame's taking this frame's points (`previousRelativeViewProjection`), grid size and range, the medium, albedo with `maxDistance` in w, options (x on; y history weight, 0 with no usable history; z read probes), the jitter. All zeros without fog. Binding 28: the integrated grid (`VulkanFog::sampledVolume`; a 1 × 1 × 1 clear stand-in without fog).
+**`GpuFog`** (400 bytes, std430, `SceneBuffers::fog`, set 1 binding 27, `packFog`): the grid's camera, its inverse, last frame's taking this frame's points (`previousRelativeViewProjection`), grid size and range, options (x on; y history weight, 0 with no usable history; z read probes; w dim the sun), the jitter, and **`GpuFogMedia`** (160 bytes, `packFogMedia`; GLSL `FogMedia`): per layer (density, base height, scale height, anisotropy) and (albedo, `maxDistance`), the shapes (0 or `FOG_SHAPE_POOLED`), extent (x layer count, y the farthest `maxDistance`). All zeros without fog. Binding 28: the integrated grid (`VulkanFog::sampledVolume`; a 1 × 1 × 1 clear stand-in without fog).
 
 ## The passes
 
@@ -45,10 +58,10 @@ The shadow atlas goes to `DepthComputeRead` for the lighting pass and back.
 
 **Its light:**
 
-- Directional lights: `sunShadowInAir` (`scene_fog_shadows.glsl`): the finest cascade holding the point (biased towards the light), one hardware-filtered `shadowTap`, with the far shadow map's distant blockers added; lit past every cascade.
+- Directional lights: `sunShadowInAir` (`scene_fog_shadows.glsl`): the finest cascade holding the point (biased towards the light), one hardware-filtered `shadowTap`, with the far shadow map's distant blockers added; lit past every cascade. Dimmed by the fog above (`fogSunThrough`).
 - Point and spot lights from the froxel's cluster lists (`clusterOfPixel`; all lights with clustered shading off): `distanceFalloff`, `spotCone`, one comparison against the light's tile. An image light (a lamp seen in a flat mirror) lights only air in front of its window, shadowed by its source's map at the crossing.
 - From all around: with probes in the frame (`packFog`'s `probesRead`, `options.z`), `probeAmbientInAir` (`scene_probes.glsl`: cascades densest first, 8 corners weighted by `probeAirWeight`, read up and down); else the flat ambient times the sky visibility grid's air share (`skyVisibilityInAirAt`), so closed rooms are not lit as outdoors.
-- Times the albedo; alpha holds the extinction at the point's height.
+- Each light through `fogMediaInScattering`, the light from all around through `fogMediaAmbient`, with the layers' shares at the point; alpha holds `fogMediaDensity`.
 
 **History:** last frame's grid read where the froxel's middle was (`fogHistoryCoordinate`, filtered; with a still camera exactly its own texel, so no neighbour mixing that would make sunbeam edges shimmer), keeping `fogHistoryWeight`'s share (0 outside last frame's grid). Kept only when last frame drew fog with the same grid and range (`VulkanFog::prepare`). Two lighting grids take turns.
 
@@ -65,14 +78,14 @@ Each column front to back, slice length = depth step × the column's stretch (1 
 `fogAlongView` (`scene_fog.glsl`; the picture pass uses `fogAlongViewShadowed`):
 
 - **Near the surface:** never the slice the point is in, whose jittered sample may lie behind the surface (sunlit air past a wall streaked it). The grid is read up to one slice before the point (`fogSliceRead`, half a texel back, fading to none inside the first half slice); over the last stretch a medium (`FogMedium`, `fogSliceMedium`) slides from two slices before to one before as the point crosses its slice (`mixFogMedium`, `fogThroughMedium`, `fogSurfaceRead`). Continuous across slice boundaries, exact where slices are alike.
-- **Past the grid** (range / cosine to the view axis, up to `maxDistance`): `fogBeyondGrid`, the height fog's closed form (`fogOpticalDepth`, series near level, capped looking down), lit by the directional lights and the flat ambient (`fogBeyondSource`; the ambient at the open field's air share `SKY_OPEN_FIELD_OPEN` while the sky visibility grid or probes light the nearer air, so the two meet), joined by `fogFollow`.
+- **Past the grid** (range / cosine to the view axis, up to the farthest `maxDistance`): `fogBeyondGrid`, the layers' closed form (`fogMediaOpticalDepth`), lit by the directional lights and the flat ambient (`fogBeyondSource`: the layers weighed by `fogMediaStretchShares`, the sun dimmed by the fog above the stretch's start; the ambient at the open field's air share `SKY_OPEN_FIELD_OPEN` while the sky visibility grid or probes light the nearer air, so the two meet), joined by `fogFollow`. Exact for layers of the same albedo and phase; otherwise the mix is the stretch's average.
 
 ### The far fog in shadow
 
-Picture pass only (`fogBeyondSourceShadowed`): each shadowed directional light's share is dimmed by the share of that stretch's light it reaches.
+Picture pass only (`fogBeyondSourceShadowed`): the stretch's source is the mean of its source at `farShadowSteps` samples (none: `fogBeyondSource`).
 
-- **Samples of equal light** (`fogFarSampleDistance`): the stretch scatters 1 − e^−total in all, so share u sits at optical depth −ln(1 − u(1 − e^−total)), turned into metres by the closed form's inverse. `farShadowSteps` samples at (k + turn) / steps; even spacing in metres would over-count the thin far fog.
-- Each sample: `sunShadowInAir`, as for the grid; the far shadow map (`ShadowSettings::farShadowDistance`) reaches kilometres.
+- **Samples of equal light** (`fogMediaFarSampleDistance`): the stretch scatters 1 − e^−total in all, so share u sits at optical depth −ln(1 − u(1 − e^−total)). One exponential layer: the closed form's inverse (`fogFarSampleDistance`). Several: `FOG_FAR_SAMPLE_NEWTON_STEPS` (8) Newton steps on the depth (slope: the density), bracketed, halving when a step leaves the bracket, from the guess exact for even fog. Samples at (k + turn) / steps; even spacing in metres would over-count the thin far fog.
+- Each sample: the layers' shares there; each directional light's `sunShadowInAir`, as for the grid, and `fogSunThrough`; the far shadow map (`ShadowSettings::farShadowDistance`) reaches kilometres.
 - `turn` = `interleavedGradientNoise` of pixel and `taaFrame`; the anti-aliasing after averages it.
 - Glass and the AO gather still see the far fog unshadowed.
 
@@ -97,9 +110,11 @@ Drawn over a picture already fogged to the surface behind, so `scene_surface.gls
 - Lights without shadow maps light the fog through walls.
 - No sun shadow past the last cascade (the far map).
 - Refracting glass reads the fogged picture and adds the front fog for its covered share: that part counted twice.
-- The fog does not dim light on its way to a froxel.
+- Only directional lights are dimmed by the fog on their way; point and spot lights are not, and surfaces under dense fog get the undimmed sun.
+- Without far shadow samples (glass, AO, `farShadowSteps` 0) the far fog's sun is dimmed as at the stretch's start.
+- No local fog volumes or drifting noise yet (ROADMAP, layers of fog).
 - The reflection probe's capture and probe rays see no fog.
 
 ## Tests
 
-`volumetric_fog_test` (settings, medium, closed form against fine sums, slices and grid coordinates both ways, jitter and per-froxel turns, history coordinates, phase furnace, slab and column, slice read and surface medium, past the grid, far shadow samples, glass, packing), `quality_preset_test`, `gpu_timing_test`, `light_lab_test` (the mist); `volumetric_fog_gpu_test`, `ddgi_sampling_gpu_test` (`probeAirWeight`).
+`volumetric_fog_test` (settings, medium, closed form against fine sums for both shapes, layers adding, sun through the fog, Newton's far samples, slices and grid coordinates both ways, jitter and per-froxel turns, history coordinates, phase furnace, slab and column, slice read and surface medium, past the grid, far shadow samples, glass, packing), `quality_preset_test`, `gpu_timing_test`, `light_lab_test` (the mist), `forest_test` (the floor mist); `volumetric_fog_gpu_test` (one layer of each shape, packed layers), `ddgi_sampling_gpu_test` (`probeAirWeight`).

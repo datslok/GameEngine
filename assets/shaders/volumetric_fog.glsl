@@ -12,9 +12,13 @@
 #include "atmosphere.glsl"
 #include "hash.glsl"
 
-// The medium as the frame's fog record holds it: x the density at the base height, y the base height, z the scale
-// height, w the anisotropy.
-float fogDensity(vec4 medium, float height) {
+// A layer as the frame's fog record holds it: medium x the density at the base height, y the base height (a pool's
+// top), z the scale height (a pool's soft edge), w the anisotropy; shape 0 exponential or FOG_SHAPE_POOLED.
+float fogDensity(vec4 medium, float shape, float height) {
+    if (shape == float(FOG_SHAPE_POOLED)) {
+        return medium.x * exp(-max(height - medium.y, 0.0) / medium.z);
+    }
+
     return medium.x * exp(min((medium.y - height) / medium.z, float(FOG_MAX_EXPONENT)));
 }
 
@@ -27,14 +31,111 @@ float fogExponentialShare(float x) {
     return (1.0 - exp(-x)) / x;
 }
 
-float fogOpticalDepth(vec4 medium, float originHeight, float directionY, float start, float end) {
+// A pooled layer's depth from start to end (end past start): constant below the top, the exponential above it from
+// that part's lower, densest end.
+float fogPooledOpticalDepth(vec4 medium, float originHeight, float directionY, float start, float end) {
+    if (directionY == 0.0) {
+        return fogDensity(medium, float(FOG_SHAPE_POOLED), originHeight) * (end - start);
+    }
+
+    float crossing = (medium.y - originHeight) / directionY;
+    bool rising = directionY > 0.0;
+    float belowStart = rising ? start : max(start, crossing);
+    float belowEnd = rising ? min(end, crossing) : end;
+    float aboveStart = rising ? max(start, crossing) : start;
+    float aboveEnd = rising ? end : min(end, crossing);
+    float depth = 0.0;
+
+    if (belowEnd > belowStart) {
+        depth += medium.x * (belowEnd - belowStart);
+    }
+
+    if (aboveEnd > aboveStart) {
+        float rayLength = aboveEnd - aboveStart;
+        float lowest = originHeight + directionY * (rising ? aboveStart : aboveEnd);
+        depth += fogDensity(medium, float(FOG_SHAPE_POOLED), lowest) * rayLength * fogExponentialShare(abs(directionY) / medium.z * rayLength);
+    }
+
+    return depth;
+}
+
+float fogOpticalDepth(vec4 medium, float shape, float originHeight, float directionY, float start, float end) {
     if (!(end > start)) {
         return 0.0;
     }
 
+    if (shape == float(FOG_SHAPE_POOLED)) {
+        return fogPooledOpticalDepth(medium, originHeight, directionY, start, end);
+    }
+
     float rayLength = end - start;
     float change = max(directionY / medium.z * rayLength, -float(FOG_MAX_EXPONENT));
-    return fogDensity(medium, originHeight + directionY * start) * rayLength * fogExponentialShare(change);
+    return fogDensity(medium, 0.0, originHeight + directionY * start) * rayLength * fogExponentialShare(change);
+}
+
+// The layers (render/gpu/volumetric_fog.h's GpuFogMedia): per layer its medium and (albedo, farthest distance), the
+// shapes, and the extent (x the layer count, y the farthest distance).
+struct FogMedia {
+    vec4 layer[FOG_MAX_LAYERS];
+    vec4 albedo[FOG_MAX_LAYERS];
+    vec4 shape;
+    vec4 extent;
+};
+
+int fogLayerCount(FogMedia media) {
+    return int(media.extent.x);
+}
+
+float fogMediaDensity(FogMedia media, float height, float distance) {
+    float density = 0.0;
+
+    for (int i = 0; i < fogLayerCount(media); ++i) {
+        density += distance <= media.albedo[i].w ? fogDensity(media.layer[i], media.shape[i], height) : 0.0;
+    }
+
+    return density;
+}
+
+float fogMediaOpticalDepth(FogMedia media, float originHeight, float directionY, float start, float end) {
+    float depth = 0.0;
+
+    for (int i = 0; i < fogLayerCount(media); ++i) {
+        depth += fogOpticalDepth(media.layer[i], media.shape[i], originHeight, directionY, start, min(end, media.albedo[i].w));
+    }
+
+    return depth;
+}
+
+vec4 fogMediaShares(FogMedia media, float height, float distance) {
+    vec4 shares = vec4(0.0);
+
+    for (int i = 0; i < fogLayerCount(media); ++i) {
+        shares[i] = distance <= media.albedo[i].w ? fogDensity(media.layer[i], media.shape[i], height) : 0.0;
+    }
+
+    float total = shares.x + shares.y + shares.z + shares.w;
+    return total > 0.0 ? shares / total : vec4(0.0);
+}
+
+vec4 fogMediaStretchShares(FogMedia media, float originHeight, float directionY, float start, float end) {
+    vec4 shares = vec4(0.0);
+
+    for (int i = 0; i < fogLayerCount(media); ++i) {
+        shares[i] = fogOpticalDepth(media.layer[i], media.shape[i], originHeight, directionY, start, min(end, media.albedo[i].w));
+    }
+
+    float total = shares.x + shares.y + shares.z + shares.w;
+    return total > 0.0 ? shares / total : vec4(0.0);
+}
+
+float fogSunTransmittance(FogMedia media, float height, float toLightY) {
+    float depth = 0.0;
+
+    for (int i = 0; i < fogLayerCount(media); ++i) {
+        depth += fogOpticalDepth(media.layer[i], media.shape[i], height, toLightY, 0.0, media.albedo[i].w);
+    }
+
+    return exp(-depth);
 }
 
 float fogSliceDepth(float slice, float range) {
@@ -75,6 +176,26 @@ vec3 fogHistoryCoordinate(ivec3 froxel, ivec3 size, mat4 inverseViewProjection, 
 
 vec3 fogInScattering(vec3 irradiance, vec3 toLight, vec3 viewDirection, float anisotropy) {
     return irradiance * (ATMOSPHERE_PI * henyeyGreensteinPhase(anisotropy, dot(viewDirection, toLight)));
+}
+
+vec3 fogMediaInScattering(FogMedia media, vec4 shares, vec3 irradiance, vec3 toLight, vec3 viewDirection) {
+    vec3 light = vec3(0.0);
+
+    for (int i = 0; i < fogLayerCount(media); ++i) {
+        light += fogInScattering(irradiance, toLight, viewDirection, media.layer[i].w) * media.albedo[i].rgb * shares[i];
+    }
+
+    return light;
+}
+
+vec3 fogMediaAmbient(FogMedia media, vec4 shares, vec3 ambient) {
+    vec3 albedo = vec3(0.0);
+
+    for (int i = 0; i < fogLayerCount(media); ++i) {
+        albedo += media.albedo[i].rgb * shares[i];
+    }
+
+    return ambient * albedo;
 }
 
 vec3 fogAmbient(vec3 irradianceUp, vec3 irradianceDown) {
@@ -170,19 +291,20 @@ float fogHistoryWeight(vec3 previousCoordinate, float weight) {
     return inside ? weight : 0.0;
 }
 
-FogIntegration fogBeyondGrid(vec4 medium, vec3 source, float originHeight, float directionY, float start, float end) {
-    float depth = fogOpticalDepth(medium, originHeight, directionY, start, end);
+FogIntegration fogBeyondGrid(FogMedia media, vec3 source, float originHeight, float directionY, float start, float end) {
+    float depth = fogMediaOpticalDepth(media, originHeight, directionY, start, end);
     return FogIntegration(source * oneMinusExp(depth), exp(-depth));
 }
 
+// One exponential layer's.
 float fogFarSampleDistance(vec4 medium, float originHeight, float directionY, float start, float end, float share) {
     if (!(end > start)) {
         return start;
     }
 
     float rayLength = end - start;
-    float total = fogOpticalDepth(medium, originHeight, directionY, start, end);
-    float density = fogDensity(medium, originHeight + directionY * start);
+    float total = fogOpticalDepth(medium, 0.0, originHeight, directionY, start, end);
+    float density = fogDensity(medium, 0.0, originHeight + directionY * start);
 
     if (!(total > 0.0) || !(density > 0.0)) {
         return start + share * rayLength;
@@ -197,6 +319,53 @@ float fogFarSampleDistance(vec4 medium, float originHeight, float directionY, fl
     float x = directionY / medium.z * depth / density;
     float stretch = abs(x) < 1e-3 ? 1.0 + x * (0.5 + x / 3.0) : -log(max(1.0 - x, 1e-30)) / x;
     return clamp(start + depth / density * stretch, start, end);
+}
+
+float fogMediaFarSampleDistance(FogMedia media, float originHeight, float directionY, float start, float end, float share) {
+    if (fogLayerCount(media) == 1 && media.shape.x != float(FOG_SHAPE_POOLED)) {
+        return fogFarSampleDistance(media.layer[0], originHeight, directionY, start, min(end, media.albedo[0].w), share);
+    }
+
+    if (!(end > start)) {
+        return start;
+    }
+
+    float total = fogMediaOpticalDepth(media, originHeight, directionY, start, end);
+
+    if (!(total > 0.0)) {
+        return start + share * (end - start);
+    }
+
+    float depth = -log(1.0 - share * oneMinusExp(total));
+
+    if (!(depth < total)) {
+        return end;
+    }
+
+    float first = fogMediaDensity(media, originHeight + directionY * start, start);
+    float low = start;
+    float high = end;
+    float distance = first > 0.0 ? min(start + depth / first, end) : 0.5 * (start + end);
+
+    for (int step = 0; step < FOG_FAR_SAMPLE_NEWTON_STEPS; ++step) {
+        float error = fogMediaOpticalDepth(media, originHeight, directionY, start, distance) - depth;
+
+        if (error == 0.0) {
+            break;
+        }
+
+        if (error > 0.0) {
+            high = distance;
+        } else {
+            low = distance;
+        }
+
+        float density = fogMediaDensity(media, originHeight + directionY * distance, distance);
+        float next = density > 0.0 ? distance - error / density : low - 1.0;
+        distance = next >= low && next <= high ? next : 0.5 * (low + high);
+    }
+
+    return clamp(distance, start, end);
 }
 
 #endif
