@@ -12,6 +12,7 @@
 #include "test_jobs.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <stdexcept>
 #include <vector>
@@ -64,6 +65,7 @@ namespace {
         CellSettings settings;
         settings.spareShare = 0.0f;
         settings.fewestSlots = 1;
+        settings.chunkSlots = 1;
         return settings;
     }
 
@@ -469,6 +471,7 @@ namespace {
         CellSettings small;
         small.spareShare = 0.0f;
         small.fewestSlots = 2;
+        small.chunkSlots = 1;
         World world;
         addModel(world, firstStillMesh, 2, true, placedAt(1.0f, 0.0f, 0.0f));
         addModel(world, firstStillMesh + 10, 1, true, placedAt(200.0f, 0.0f, 0.0f));
@@ -496,6 +499,36 @@ namespace {
         still.giveBack(std::move(reused.draws));
         assertMatchesScratch(world, still, history, scratchHistory);
         assert(still.getCellCount() == 3);
+    }
+
+    /*
+    * A cell's objects lie in Morton order (cellMortonCode) whatever order they came in, on a full layout and on every
+    * rebuild of the cell: one added later takes its place among them.
+    */
+    void testACellIsInMortonOrder() {
+        World world;
+        addModel(world, firstStillMesh + 40, 1, true, placedAt(100.0f, 0.0f, 100.0f));
+        addModel(world, firstStillMesh + 10, 1, true, placedAt(10.0f, 0.0f, 10.0f));
+        addModel(world, firstStillMesh + 30, 1, true, placedAt(10.0f, 0.0f, 100.0f));
+        addModel(world, firstStillMesh + 20, 1, true, placedAt(100.0f, 0.0f, 10.0f));
+        StillDraws still;
+        MotionHistory history;
+        FrameDescription first = buildFrame(world, testCamera(), 0.0f, &history, serialJobs(), 0, &still);
+
+        for (std::uint32_t slot = 0; slot < 4; ++slot) {
+            assert(first.draws[slot].mesh == MeshHandle{firstStillMesh + 10 * (slot + 1)});
+        }
+
+        still.giveBack(std::move(first.draws));
+        addModel(world, firstStillMesh + 15, 1, true, placedAt(50.0f, 0.0f, 50.0f));
+        FrameDescription added = buildFrame(world, testCamera(), 0.0f, &history, serialJobs(), 0, &still);
+        const std::array<std::uint32_t, 5> expected{10, 15, 20, 30, 40};
+
+        for (std::size_t slot = 0; slot < expected.size(); ++slot) {
+            assert(added.draws[slot].mesh == MeshHandle{firstStillMesh + expected[slot]});
+        }
+
+        still.giveBack(std::move(added.draws));
     }
 
     // Other cell settings lay every still draw out again; the same settings again change nothing.
@@ -528,6 +561,7 @@ void testStillDraws() {
     testAChangeRebuildsOnlyItsCells();
     testACellOutgrowingItsBlockMoves();
     testNewCellSettingsLayEverythingOut();
+    testACellIsInMortonOrder();
     testNamingLevelsChangesTheVersion();
     testStillDrawsAreKept();
     testAnnouncedChangesAreBuilt();

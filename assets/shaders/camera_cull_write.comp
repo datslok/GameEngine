@@ -2,9 +2,10 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* The GPU culling, pass 3 of 4 (render/vulkan/vulkan_camera_culling.h): each flagged candidate writes its draw list
-* entry at its place (its block's first place plus its offset), with its thinned bit; each group writes its indirect
-* commands from the places at its two ends. One invocation a candidate or group, whichever are more, and view (the
+* The GPU culling's write pass (render/vulkan/vulkan_camera_culling.h): each flagged visible candidate writes its draw
+* list entry at its place (its block's first place plus its offset), with its thinned bit; each group writes its
+* indirect commands from the places at its two ends (its first segment's first visible candidate, and past its last
+* segment's). Dispatched indirectly, one invocation a visible candidate or group, whichever are more, and view (the
 * dispatch's y), in that view's slices and draw list regions.
 */
 #include "render/gpu/instance_shared.h"
@@ -49,22 +50,42 @@ layout(std430, set = 0, binding = 8) writeonly buffer MotionCommands {
     DrawCommand motionCommands[];
 };
 
-// A candidate's place in both of the view's lists; past the last candidate, the totals.
-uvec2 placeOf(CameraCull view, uint candidate) {
-    return candidate >= view.candidates ? blockFirst[view.slices.y + view.blocks]
-                                        : blockFirst[view.slices.y + candidate / CAMERA_CULL_GROUP_SIZE] + offsets[view.slices.x + candidate];
+layout(std430, set = 0, binding = 9) readonly buffer SegmentOffsets {
+    uvec2 segmentOffsets[];
+};
+
+layout(std430, set = 0, binding = 10) readonly buffer SegmentBlockFirst {
+    uvec2 segmentBlockFirst[];
+};
+
+layout(std430, set = 0, binding = 11) readonly buffer Work {
+    CullViewWork work[];
+};
+
+// A visible candidate's place in both of the view's lists; past the last, the totals.
+uvec2 placeOf(CameraCull view, CullViewWork viewWork, uint visible) {
+    return visible >= viewWork.visibleCandidates ? blockFirst[view.slices.y + viewWork.candidateBlocks]
+                                                 : blockFirst[view.slices.y + visible / CAMERA_CULL_GROUP_SIZE] + offsets[view.slices.x + visible];
+}
+
+// A segment's first place among the visible candidates; past the last segment, their total.
+uint segmentStart(CameraCull view, uint segment) {
+    return segment >= view.segments ? segmentBlockFirst[view.segmentSlices.y + view.segmentBlocks].x
+                                    : segmentBlockFirst[view.segmentSlices.y + segment / CAMERA_CULL_GROUP_SIZE].x + segmentOffsets[view.segmentSlices.x + segment].x;
 }
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
     CameraCull view = views[gl_WorkGroupID.y];
+    CullViewWork viewWork = work[view.view];
 
-    if (index < view.candidates) {
-        uint candidateFlags = flags[view.slices.x + index];
+    if (index < viewWork.visibleCandidates) {
+        uint packedFlags = flags[view.slices.x + index];
+        uint candidateFlags = packedFlags & ((1u << CAMERA_CULL_FLAG_BITS) - 1u);
 
         if (candidateFlags != 0u) {
-            uvec2 place = placeOf(view, index);
-            uint entry = candidates[index].draw | ((candidateFlags & CAMERA_CULL_THINNED) != 0u ? DRAW_LIST_THINNED_BIT : 0u);
+            uvec2 place = placeOf(view, viewWork, index);
+            uint entry = candidates[packedFlags >> CAMERA_CULL_FLAG_BITS].draw | ((candidateFlags & CAMERA_CULL_THINNED) != 0u ? DRAW_LIST_THINNED_BIT : 0u);
 
             if ((candidateFlags & CAMERA_CULL_DRAWN) != 0u) {
                 drawList[view.mainBase + place.x] = entry;
@@ -78,8 +99,8 @@ void main() {
 
     if (index < view.groups) {
         CullGroup group = groups[index];
-        uvec2 start = placeOf(view, group.firstCandidate);
-        uvec2 end = placeOf(view, group.firstCandidate + group.candidates);
+        uvec2 start = placeOf(view, viewWork, segmentStart(view, group.firstSegment));
+        uvec2 end = placeOf(view, viewWork, segmentStart(view, group.firstSegment + group.segments));
         uint command = view.slices.z + index;
         mainCommands[command] = DrawCommand(group.indexCount, end.x - start.x, group.firstIndex, group.vertexOffset, view.mainBase + start.x);
         motionCommands[command] = DrawCommand(group.indexCount, end.y - start.y, group.firstIndex, group.vertexOffset, view.motionBase + start.y);

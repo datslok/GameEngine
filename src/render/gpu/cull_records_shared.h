@@ -22,6 +22,19 @@
 #define CULL_NO_MESH 4294967295u
 #define CULL_NO_SLOT -1
 
+// A chunk's flags (GpuCullChunk::flags, GPU-driven drawing's stage 7b): what its members may be drawn by.
+#define CULL_CHUNK_SEEN 1u   // a member a camera view may take (not shadow-only, hidden or transparent)
+#define CULL_CHUNK_CASTS 2u  // a member a shadow view may take (casts shadows, not hidden or transparent)
+#define CULL_CHUNK_ALWAYS 4u // a member of unknown size: the chunk is never culled as one
+
+// A segment of moving draws: in no chunk, its draws always tested one by one.
+#define CULL_NO_CHUNK 4294967295u
+
+// A chunk's box is its members' spheres' box grown by this many metres and this share of its farthest coordinate, so
+// rounding can never cull a chunk holding a draw the draw's own test would keep.
+#define CULL_CHUNK_MARGIN 0.01
+#define CULL_CHUNK_RELATIVE_MARGIN 0.00001
+
 // GpuLevelView::flags.
 #define CULL_LEVELS_ENABLED 1u
 #define CULL_LEVELS_IMPOSTORS 2u

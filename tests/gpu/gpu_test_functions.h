@@ -249,5 +249,6 @@
 // cull_records_test.comp
 #define GPU_TEST_CULL_DRAW 0
 #define GPU_TEST_CAMERA_CANDIDATE 1
+#define GPU_TEST_CHUNK_IN_VIEW 2
 
 #endif

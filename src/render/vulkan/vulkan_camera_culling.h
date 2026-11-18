@@ -32,8 +32,10 @@ struct PassDraws {
 };
 
 /*
-* The views' lists built on the GPU (render/gpu/camera_culling.h): four compute passes (camera_cull_flags,
-* camera_cull_scan, camera_cull_write, camera_cull_compact), each one dispatch over every view (the camera first, then
+* The views' lists built on the GPU (render/gpu/camera_culling.h): the segment passes (camera_cull_segments,
+* camera_cull_segment_scan, camera_cull_segment_list: chunks tested, visible candidates found), then camera_cull_flags
+* (indirect, over the visible candidates), camera_cull_scan, camera_cull_write (indirect) and camera_cull_compact, each
+* one dispatch over every view (the camera first, then
 * the probe faces and the mirror drawn this frame: the dispatch's second dimension), write each view's region of the
 * frame's draw list (and the camera's velocity region), one indirect command a group for each, and each list's commands
 * packed style by style with their counts, for one vkCmdDrawIndexedIndirectCount a style (the shared mesh buffer,
@@ -89,7 +91,13 @@ private:
         VulkanBuffer views;
         VulkanBuffer order;
 
-        // GPU memory: the passes' working buffers and the commands, a slice a view.
+        // GPU memory: the passes' working buffers and the commands, a slice a view; each view's work, each batch's
+        // indirect dispatches.
+        VulkanBuffer segmentOffsets;
+        VulkanBuffer segmentBlockSums;
+        VulkanBuffer visibleSegments;
+        VulkanBuffer work;
+        VulkanBuffer dispatches;
         VulkanBuffer flags;
         VulkanBuffer offsets;
         VulkanBuffer blockSums;
@@ -114,14 +122,20 @@ private:
     void upload(VkCommandBuffer commands, std::uint32_t frameIndex, const CameraCullFrame& table, std::span<const GpuCameraCull> views);
 
     const VulkanDevice& device;
+    std::unique_ptr<ComputePipeline> segmentPass;
+    std::unique_ptr<ComputePipeline> segmentScanPass;
+    std::unique_ptr<ComputePipeline> segmentListPass;
     std::unique_ptr<ComputePipeline> flagPass;
     std::unique_ptr<ComputePipeline> scanPass;
     std::unique_ptr<ComputePipeline> writePass;
     std::unique_ptr<ComputePipeline> compactPass;
     std::vector<PerFrame> frames;
 
-    // Every draw's record and every candidate, kept; the still part's generation they hold (0: none).
+    // Every draw's record, the still chunks, every candidate and segment, kept; the still part's generation they hold
+    // (0: none).
     std::unique_ptr<VulkanLastingBuffer> records;
+    std::unique_ptr<VulkanLastingBuffer> chunks;
     std::unique_ptr<VulkanLastingBuffer> candidates;
+    std::unique_ptr<VulkanLastingBuffer> segments;
     std::uint64_t heldGeneration = 0;
 };

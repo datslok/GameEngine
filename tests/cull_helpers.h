@@ -1,11 +1,14 @@
 #pragma once
 
 #include "math/mat4.h"
+#include "render/gpu/camera_culling.h"
 #include "render/gpu/cull_records.h"
+#include "scene/camera.h"
 #include "scene/frame_description.h"
 #include "scene/mesh_level.h"
 
 #include <cstdint>
+#include <functional>
 #include <random>
 #include <vector>
 
@@ -84,4 +87,48 @@ inline std::vector<GpuMeshLevels> packCullSceneLevels(const CullScene& scene) {
     }
 
     return tables;
+}
+
+/*
+* Both ways the passes can read a scene: every draw in flat groups (as moving draws are, one segment a group, no chunk),
+* and every draw still in a kept table of chunks of chunkSlots draws (CameraCullTable), whose segments are culled by
+* chunk first. Filled in place: the chunked frame points into the table.
+*/
+struct CullSceneTables {
+    std::vector<GpuCullRecord> records;
+    std::vector<GpuMeshLevels> levels;
+    CullGroups flat;
+    CullDrawOrder flatOrder;
+    CameraCullTable table;
+    CameraCullFrame chunked;
+    CameraCullFrame::Joined joined;
+
+    CullTables flatTables() const {
+        return CullTables{records, levels, {}, flat.groups, flat.segments, flat.candidates};
+    }
+
+    CullTables chunkedTables() const {
+        return chunked.tables(joined);
+    }
+};
+
+inline void buildCullSceneTables(CullSceneTables& out, const CullScene& scene, const std::function<MeshPlacement(MeshHandle)>& placement,
+                                 std::size_t chunkSlots = 16) {
+    out.levels = packCullSceneLevels(scene);
+    out.records.clear();
+
+    for (const DrawItem& draw : scene.draws) {
+        out.records.push_back(packCullRecord(draw));
+    }
+
+    out.flat = buildCullGroups(scene.draws, 0, scene.draws.size(), placement);
+    out.flatOrder = cullDrawOrder(out.flat.styles);
+    FrameDescription frame{.camera = Camera{Vec3{0.0f, 1.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f}};
+    frame.draws = scene.draws;
+    frame.stillDraws = scene.draws.size();
+    frame.stillVersion = 1;
+    frame.stillChunkSlots = chunkSlots;
+    out.chunked = out.table.update(frame, placement, [](MeshHandle) { return false; });
+    out.chunked.meshLevels = out.levels;
+    out.joined = out.chunked.join();
 }

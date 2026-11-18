@@ -12,6 +12,9 @@
 #define CAMERA_CULL_MOVING 2u
 #define CAMERA_CULL_THINNED 4u
 
+// The flags pass keeps a visible candidate's place in the candidate list above its flags' bits.
+#define CAMERA_CULL_FLAG_BITS 3u
+
 // GpuCameraCull::flags: the velocity pass's list is built (temporal anti-aliasing on; for a shadow tile, the casters
 // that moved in the second list, kept apart from the still ones); things sway this frame; a shadow tile (shadowTakes).
 #define CAMERA_CULL_MOTION 1u
@@ -38,5 +41,13 @@
 #define CAMERA_CULL_SLICE_BLOCKS 1
 #define CAMERA_CULL_SLICE_COMMANDS 2
 #define CAMERA_CULL_SLICE_PLACES 3
+
+// GpuCameraCull::segmentSlices (GPU-driven drawing's stage 7b): where the view's part starts of the segments' offsets
+// and visible list (by segment), and of their block sums (the totals after them), by its place in its batch.
+#define CAMERA_CULL_SEGMENT_SLICE_OFFSETS 0
+#define CAMERA_CULL_SEGMENT_SLICE_BLOCKS 1
+
+// Words of the indirect dispatches a batch of views takes: the flags pass's (x y z), then the write pass's.
+#define CAMERA_CULL_DISPATCH_WORDS 6
 
 #endif

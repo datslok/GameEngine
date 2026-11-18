@@ -175,6 +175,9 @@ struct FrameDescription {
     std::size_t stillCells = 0;
     std::size_t stillEmptySlots = 0;
 
+    // Slots a chunk of the still draws holds (CellSettings::chunkSlots): chunk = slot / stillChunkSlots, blocks whole chunks.
+    std::size_t stillChunkSlots = 64;
+
     // Where the action is: when there are more lights than the renderer can use, the brightest ones here win.
     // The camera's position unless the game names a better point (a MOBA camera floats far above the ground it shows).
     Vec3 lightFocus{0.0f, 0.0f, 0.0f};

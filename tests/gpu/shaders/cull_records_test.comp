@@ -13,6 +13,26 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_CHUNK_IN_VIEW) {
+        // Inputs: the chunk's minimum (w its flags), its maximum, the frustum's six planes, the reach, (the view's flags).
+        // Output: (chunkInView, boxInFrustum).
+        CullChunk chunk;
+        chunk.minimum = testInput(0).xyz;
+        chunk.flags = uint(testInput(0).w);
+        chunk.maximum = testInput(1).xyz;
+        chunk.unused = 0u;
+        CameraCull view;
+
+        for (int plane = 0; plane < 6; ++plane) {
+            view.frustum.planes[plane] = testInput(2 + uint(plane));
+        }
+
+        view.reach = testInput(8);
+        view.flags = uint(testInput(9).x);
+        testOutput(0, vec4(chunkInView(chunk, view) ? 1.0 : 0.0, boxInFrustum(view.frustum, chunk.minimum, chunk.maximum) ? 1.0 : 0.0, 0.0, 0.0));
+        return;
+    }
+
     if (function == GPU_TEST_CULL_DRAW || function == GPU_TEST_CAMERA_CANDIDATE) {
         // Inputs: the record's bounds and level sphere, (flags, hidden below error, levels, shares vertices), the four
         // slots' meshes (-1: none), their errors, the view's eye and pixels a metre, (pixel error, view flags), then the
@@ -80,8 +100,9 @@ void main() {
         cull.reach = testInput(14);
         cull.smallestCaster = testInput(15).x;
         cull.cascade = int(testInput(15).y);
-        cull.unused0 = 0u;
-        cull.unused1 = 0u;
+        cull.segments = 0u;
+        cull.segmentBlocks = 0u;
+        cull.segmentSlices = uvec4(0u);
         testOutput(0, vec4(float(cameraCandidateFlags(record, levels, cull, uint(camera.y))), swayReaches(record.bounds, view.eye.xyz, camera.z) ? 1.0 : 0.0,
                            shadowTakes(record, cull) ? 1.0 : 0.0, 0.0));
     }

@@ -2,9 +2,10 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* The GPU culling, pass 2 of 4 (render/vulkan/vulkan_camera_culling.h): one workgroup a view (the dispatch's y) turns
-* the blocks' totals into each block's first place (an exclusive prefix sum), a workgroup's worth of blocks at a time
-* carried on, and writes the grand totals after the last block and into the counts.
+* The GPU culling's scan (render/vulkan/vulkan_camera_culling.h): one workgroup a view (the dispatch's y) turns the
+* flags pass's blocks' totals (the view's visible candidates' workgroups, from its work) into each block's first place
+* (an exclusive prefix sum), a workgroup's worth of blocks at a time carried on, and writes the grand totals after the
+* last block and into the counts.
 */
 #include "camera_culling.glsl"
 
@@ -24,18 +25,23 @@ layout(std430, set = 0, binding = 2) buffer Counts {
     uint counts[];
 };
 
+layout(std430, set = 0, binding = 3) readonly buffer Work {
+    CullViewWork work[];
+};
+
 shared uvec2 sums[CAMERA_CULL_GROUP_SIZE];
 
 void main() {
     uint local = gl_LocalInvocationIndex;
     CameraCull view = views[gl_WorkGroupID.y];
     uint slice = view.slices.y;
+    uint blocks = work[view.view].candidateBlocks;
     uvec2 carried = uvec2(0u);
 
     // The loop's bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
-    for (uint first = 0u; first < view.blocks; first += CAMERA_CULL_GROUP_SIZE) {
+    for (uint first = 0u; first < blocks; first += CAMERA_CULL_GROUP_SIZE) {
         uint block = first + local;
-        uvec2 value = block < view.blocks ? blockSums[slice + block] : uvec2(0u);
+        uvec2 value = block < blocks ? blockSums[slice + block] : uvec2(0u);
         sums[local] = value;
         barrier();
 
@@ -46,7 +52,7 @@ void main() {
             barrier();
         }
 
-        if (block < view.blocks) {
+        if (block < blocks) {
             blockSums[slice + block] = carried + sums[local] - value;
         }
 
@@ -55,7 +61,7 @@ void main() {
     }
 
     if (local == 0u) {
-        blockSums[slice + view.blocks] = carried;
+        blockSums[slice + blocks] = carried;
         counts[view.view * CAMERA_CULL_COUNTS + CAMERA_CULL_COUNT_DRAWN] = carried.x;
         counts[view.view * CAMERA_CULL_COUNTS + CAMERA_CULL_COUNT_MOVING] = carried.y;
     }

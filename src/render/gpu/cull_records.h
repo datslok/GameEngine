@@ -65,6 +65,26 @@ struct GpuFrustum {
 static_assert(sizeof(GpuFrustum) == 96, "GpuFrustum must match culling.glsl's");
 
 GpuCullRecord packCullRecord(const DrawItem& draw);
+
+inline constexpr std::uint32_t cullNoChunk = CULL_NO_CHUNK;
+
+/*
+* A chunk of still draws (GPU-driven drawing's stage 7b: slots slot / chunkSlots, scene/still_draws.h), tested once a
+* view before its draws: the box round its members' spheres, grown by the margin, and CULL_CHUNK_* flags. Must match
+* camera_culling.glsl's CullChunk.
+*/
+struct GpuCullChunk {
+    float minimum[3] = {0.0f, 0.0f, 0.0f};
+    std::uint32_t flags = 0;
+    float maximum[3] = {0.0f, 0.0f, 0.0f};
+    std::uint32_t unused = 0;
+};
+
+static_assert(sizeof(GpuCullChunk) == 32, "GpuCullChunk must match camera_culling.glsl's CullChunk");
+
+// The chunk of these draws' records: draws with a mesh and not transparent (the only candidates) count; empty slots and
+// glass are left out. None counting: no flags (no view takes it).
+GpuCullChunk packCullChunk(std::span<const GpuCullRecord> members);
 GpuMeshLevels packMeshLevels(MeshHandle mesh, std::span<const MeshLevel> levels);
 GpuLevelView packLevelView(const LevelView& view);
 GpuFrustum packFrustum(const Frustum& frustum);

@@ -49,12 +49,17 @@ namespace {
 VulkanCameraCulling::VulkanCameraCulling(const VulkanDevice& device, std::uint32_t framesInFlight):
     device(device)
 {
-    flagPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_flags.comp.spv", 8));
-    scanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_scan.comp.spv", 3));
-    writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_write.comp.spv", 9));
+    segmentPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_segments.comp.spv", 5));
+    segmentScanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_segment_scan.comp.spv", 4));
+    segmentListPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_segment_list.comp.spv", 4));
+    flagPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_flags.comp.spv", 11));
+    scanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_scan.comp.spv", 4));
+    writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_write.comp.spv", 12));
     compactPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_compact.comp.spv", 8));
     records = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullRecord));
+    chunks = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullChunk));
     candidates = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullCandidate));
+    segments = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullSegment));
     setFramesInFlight(framesInFlight);
 }
 
@@ -64,34 +69,48 @@ void VulkanCameraCulling::setFramesInFlight(std::uint32_t count) {
 }
 
 /*
-* The kept records and candidates: the still part as held (the same generation), its repacked records (the next
-* generation: candidates change only when the still part was built afresh), or all of it (another generation, or a
-* buffer made afresh); the moving draws' after it every frame. The levels, groups, views and drawing order are the
-* frame in flight's own, written whole.
+* The kept records, chunks, candidates and segments: the still part as held (the same generation), what the next
+* generation repacked (records, chunks and candidates by range, the segments whole when they changed), or all of it
+* (another generation, or a buffer made afresh); the moving draws' after it every frame. The levels, groups, views and
+* drawing order are the frame in flight's own, written whole.
 */
 void VulkanCameraCulling::upload(VkCommandBuffer commands, std::uint32_t frameIndex, const CameraCullFrame& table, std::span<const GpuCameraCull> views) {
     PerFrame& frame = frames.at(frameIndex);
-    const std::size_t stillRecords = table.stillRecords.size();
-    const std::size_t stillCandidates = table.stillCandidates.size();
     const bool held = heldGeneration != 0 && table.stillGeneration == heldGeneration;
     const bool follows = heldGeneration != 0 && table.stillGeneration == heldGeneration + 1;
-    const std::vector<DrawRange> everyRecord{DrawRange{0, stillRecords}};
-    const std::vector<DrawRange> everyCandidate{DrawRange{0, stillCandidates}};
 
+    // A still part's ranges this frame: none when held, the repacked ones when following, else every one.
+    const auto stillRanges = [&](bool fresh, std::size_t count, const std::vector<DrawRange>& repacked) {
+        return fresh || !(held || follows) ? std::vector<DrawRange>{DrawRange{0, count}} : held ? std::vector<DrawRange>{} : repacked;
+    };
+
+    const std::size_t stillRecords = table.stillRecords.size();
     std::vector<LastingWrite> recordWrites;
     const bool freshRecords = records->reserve(stillRecords + table.movingRecords.size());
-    const std::vector<DrawRange> recordRanges = freshRecords || !(held || follows) ? everyRecord : held ? std::vector<DrawRange>{} : table.stillRepacked;
-    appendLastingWrites(recordWrites, recordRanges, table.stillRecords, 0);
+    appendLastingWrites(recordWrites, stillRanges(freshRecords, stillRecords, table.stillRepacked), table.stillRecords, 0);
     appendLastingWrites(recordWrites, {DrawRange{0, table.movingRecords.size()}}, std::span<const GpuCullRecord>{table.movingRecords}, stillRecords);
     records->write(commands, frameIndex, recordWrites);
 
+    std::vector<LastingWrite> chunkWrites;
+    const bool freshChunks = chunks->reserve(table.stillChunks.size());
+    appendLastingWrites(chunkWrites, stillRanges(freshChunks, table.stillChunks.size(), table.chunksRepacked), table.stillChunks, 0);
+    chunks->write(commands, frameIndex, chunkWrites);
+
+    const std::size_t stillCandidates = table.stillCandidates.size();
     std::vector<LastingWrite> candidateWrites;
     const bool freshCandidates = candidates->reserve(stillCandidates + table.movingCandidates.size());
-    const bool candidatesKept = !freshCandidates && (held || (follows && !table.stillRebuilt));
-    appendLastingWrites(candidateWrites, candidatesKept ? std::vector<DrawRange>{} : everyCandidate, table.stillCandidates, 0);
+    appendLastingWrites(candidateWrites, stillRanges(freshCandidates, stillCandidates, table.candidatesRepacked), table.stillCandidates, 0);
     appendLastingWrites(candidateWrites, {DrawRange{0, table.movingCandidates.size()}}, std::span<const GpuCullCandidate>{table.movingCandidates},
                         stillCandidates);
     candidates->write(commands, frameIndex, candidateWrites);
+
+    const std::size_t stillSegments = table.stillSegments.size();
+    const std::vector<DrawRange> segmentsChanged = table.segmentsChanged ? std::vector<DrawRange>{DrawRange{0, stillSegments}} : std::vector<DrawRange>{};
+    std::vector<LastingWrite> segmentWrites;
+    const bool freshSegments = segments->reserve(stillSegments + table.movingSegments.size());
+    appendLastingWrites(segmentWrites, stillRanges(freshSegments, stillSegments, segmentsChanged), table.stillSegments, 0);
+    appendLastingWrites(segmentWrites, {DrawRange{0, table.movingSegments.size()}}, std::span<const GpuCullSegment>{table.movingSegments}, stillSegments);
+    segments->write(commands, frameIndex, segmentWrites);
     heldGeneration = table.stillGeneration;
 
     ensureBuffer(device, frame.levels, table.meshLevels.size() * sizeof(GpuMeshLevels), storage, BufferMemory::Upload);
@@ -109,7 +128,7 @@ void VulkanCameraCulling::upload(VkCommandBuffer commands, std::uint32_t frameIn
 }
 
 std::size_t VulkanCameraCulling::getCopiedBytes() const {
-    return records->getCopiedBytes() + candidates->getCopiedBytes();
+    return records->getCopiedBytes() + chunks->getCopiedBytes() + candidates->getCopiedBytes() + segments->getCopiedBytes();
 }
 
 
@@ -117,12 +136,24 @@ std::size_t VulkanCameraCulling::getCopiedBytes() const {
 // a multiple of every device's storage buffer offset alignment (at most 256 bytes).
 static_assert((cullScratchViews * sizeof(GpuCameraCull)) % 256 == 0, "A batch of views must start at an aligned offset");
 
+namespace {
+    // Each batch's indirect dispatches start this many bytes after the one before's: an offset every device allows for
+    // a storage buffer.
+    constexpr VkDeviceSize dispatchStride = 256;
+    static_assert(CAMERA_CULL_DISPATCH_WORDS * sizeof(std::uint32_t) <= dispatchStride, "A batch's dispatches fit their stride");
+
+    constexpr BufferUse indirectRead{VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT};
+}
+
 /*
-* The counts cleared, then the passes: flags, scan and writes in batches of cullScratchViews views (the dispatch's second
-* dimension), each batch reusing the flags, offsets and block sums once the batch before has written its lists; then the
-* packing over every view at once. Each pass waits for the one before's writes. The working buffers and the commands are
-* the frame in flight's own, last used by its previous frame, whose fence has passed. Afterwards the lists are read by
-* the vertex shaders and the commands by the indirect draws, and both copied for the CPU.
+* The counts cleared and every batch's indirect dispatches started (the flags pass's at none, the write pass's at the
+* groups' workgroups), then for each batch of cullScratchViews views (the dispatch's second dimension), reusing the
+* scratch buffers once the batch before has written its lists: the segment pass (each segment's chunk tested), the
+* segment scan (each view's visible candidates, raising the batch's dispatches), the visible segment list, then the
+* flags pass over the visible candidates only (indirect), the scan, and the writes (indirect); then the packing over
+* every view at once. Each pass waits for the one before's writes. The working buffers and the commands are the frame in
+* flight's own, last used by its previous frame, whose fence has passed. Afterwards the lists are read by the vertex
+* shaders and the commands by the indirect draws, and both copied for the CPU.
 */
 void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, const CameraCullFrame& table,
                                std::span<const GpuCameraCull> asked, VkBuffer drawList, bool readLists) {
@@ -132,23 +163,32 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
 
     PerFrame& frame = frames.at(frameIndex);
     const std::uint32_t candidateCount = static_cast<std::uint32_t>(table.stillCandidates.size() + table.movingCandidates.size());
+    const std::uint32_t segmentCount = static_cast<std::uint32_t>(table.stillSegments.size() + table.movingSegments.size());
     const std::uint32_t groupCount = static_cast<std::uint32_t>(table.groups.size());
     const std::uint32_t entriesEach = static_cast<std::uint32_t>(table.stillRecords.size() + table.movingRecords.size());
     const std::uint32_t viewCount = static_cast<std::uint32_t>(asked.size());
+    const std::uint32_t batches = (viewCount + static_cast<std::uint32_t>(cullScratchViews) - 1) / static_cast<std::uint32_t>(cullScratchViews);
     std::vector<GpuCameraCull> views(asked.begin(), asked.end());
 
     for (std::uint32_t view = 0; view < viewCount; ++view) {
-        placeCullView(views[view], view, candidateCount, table.drawOrder);
+        placeCullView(views[view], view, candidateCount, segmentCount, table.drawOrder);
     }
 
-    const std::uint32_t blocks = views[0].blocks;
+    const std::uint32_t segmentBlocks = views[0].segmentBlocks;
+    const std::uint32_t groupBlocks = (groupCount + cameraCullGroupSize - 1) / cameraCullGroupSize;
     upload(commands, frameIndex, table, views);
 
-    const CullViewSizes sizes = cullViewSizes(viewCount, candidateCount, table.drawOrder);
+    const CullViewSizes sizes = cullViewSizes(viewCount, candidateCount, segmentCount, table.drawOrder);
     const VkBufferUsageFlags commandUsage = storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     const VkDeviceSize commandBytes = static_cast<VkDeviceSize>(sizes.commands) * sizeof(GpuDrawCommand);
     const VkDeviceSize countBytes = static_cast<VkDeviceSize>(viewCount) * sizeof(GpuCameraCullCounts);
     const VkBufferUsageFlags drawUsage = storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+    ensureBuffer(device, frame.segmentOffsets, static_cast<VkDeviceSize>(sizes.segments) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device, frame.visibleSegments, static_cast<VkDeviceSize>(sizes.segments) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device, frame.segmentBlockSums, static_cast<VkDeviceSize>(sizes.segmentBlocks) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device, frame.work, static_cast<VkDeviceSize>(viewCount) * sizeof(GpuCullViewWork), storage, BufferMemory::Gpu);
+    ensureBuffer(device, frame.dispatches, static_cast<VkDeviceSize>(batches) * dispatchStride, storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                 BufferMemory::Gpu);
     ensureBuffer(device, frame.flags, static_cast<VkDeviceSize>(sizes.flags) * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     ensureBuffer(device, frame.offsets, static_cast<VkDeviceSize>(sizes.flags) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     ensureBuffer(device, frame.blockSums, static_cast<VkDeviceSize>(sizes.blocks) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
@@ -167,52 +207,112 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
     vkCmdFillBuffer(commands, frame.counts.get(), 0, VK_WHOLE_SIZE, 0);
     bufferBarrier(commands, frame.counts.get(), transferWrite, computeReadWrite);
 
-    const std::uint32_t writers = std::max(candidateCount, groupCount);
+    // Every batch's dispatches started: the flags pass at no workgroups, the write pass at the groups', each y the batch's
+    // views; the segment scan raises them. Their previous frame's reads finished long ago (its fence).
+    std::vector<std::uint32_t> dispatchWords(static_cast<std::size_t>(batches) * dispatchStride / sizeof(std::uint32_t), 0);
 
-    for (std::uint32_t first = 0; first < viewCount; first += static_cast<std::uint32_t>(cullScratchViews)) {
+    for (std::uint32_t batch = 0; batch < batches; ++batch) {
+        const std::uint32_t inBatch = std::min(viewCount - batch * static_cast<std::uint32_t>(cullScratchViews), static_cast<std::uint32_t>(cullScratchViews));
+        std::uint32_t* words = dispatchWords.data() + batch * dispatchStride / sizeof(std::uint32_t);
+        words[0] = 0;
+        words[1] = inBatch;
+        words[2] = 1;
+        words[3] = groupBlocks;
+        words[4] = inBatch;
+        words[5] = 1;
+    }
+
+    bufferBarrier(commands, frame.dispatches.get(), indirectRead, transferWrite);
+    vkCmdUpdateBuffer(commands, frame.dispatches.get(), 0, dispatchWords.size() * sizeof(std::uint32_t), dispatchWords.data());
+    bufferBarrier(commands, frame.dispatches.get(), transferWrite, computeReadWrite);
+
+    for (std::uint32_t batchIndex = 0; batchIndex < batches; ++batchIndex) {
+        const std::uint32_t first = batchIndex * static_cast<std::uint32_t>(cullScratchViews);
         const std::uint32_t batch = std::min(viewCount - first, static_cast<std::uint32_t>(cullScratchViews));
+        const VkDeviceSize dispatchOffset = static_cast<VkDeviceSize>(batchIndex) * dispatchStride;
         ComputeBinding batchViews = storageBufferBinding(frame.views.get());
         batchViews.buffer.offset = static_cast<VkDeviceSize>(first) * sizeof(GpuCameraCull);
         batchViews.buffer.range = static_cast<VkDeviceSize>(batch) * sizeof(GpuCameraCull);
+        ComputeBinding batchDispatches = storageBufferBinding(frame.dispatches.get());
+        batchDispatches.buffer.offset = dispatchOffset;
+        batchDispatches.buffer.range = CAMERA_CULL_DISPATCH_WORDS * sizeof(std::uint32_t);
 
-        // The batch before's writes have read the scratch buffers this batch's flags overwrite.
+        // The batch before's passes have read the scratch buffers this batch overwrites.
         if (first > 0) {
-            for (VkBuffer buffer : {frame.flags.get(), frame.offsets.get(), frame.blockSums.get()}) {
+            for (VkBuffer buffer : {frame.segmentOffsets.get(), frame.segmentBlockSums.get(), frame.visibleSegments.get(), frame.flags.get(), frame.offsets.get(),
+                                    frame.blockSums.get()}) {
                 bufferBarrier(commands, buffer, computeReadWrite, computeReadWrite);
             }
         }
 
-        if (blocks > 0) {
-            const std::array<ComputeBinding, 8> bindings{
-                storageBufferBinding(records->get()),        storageBufferBinding(frame.levels.get()), storageBufferBinding(candidates->get()),
-                batchViews,                                  storageBufferBinding(frame.flags.get()),  storageBufferBinding(frame.offsets.get()),
-                storageBufferBinding(frame.blockSums.get()), storageBufferBinding(frame.counts.get()),
+        // The segments: each one's chunk tested, then summed in blocks.
+        if (segmentBlocks > 0) {
+            const std::array<ComputeBinding, 5> segmentBindings{
+                batchViews, storageBufferBinding(chunks->get()), storageBufferBinding(segments->get()), storageBufferBinding(frame.segmentOffsets.get()),
+                storageBufferBinding(frame.segmentBlockSums.get()),
             };
-            bindComputeSet(commands, device.getDevice(), descriptors, *flagPass, bindings);
-            vkCmdDispatch(commands, blocks, batch, 1);
+            bindComputeSet(commands, device.getDevice(), descriptors, *segmentPass, segmentBindings);
+            vkCmdDispatch(commands, segmentBlocks, batch, 1);
         }
 
-        // The flags pass's block totals and level counts before the scan sums them; its flags and offsets wait for pass 3.
+        for (VkBuffer buffer : {frame.segmentBlockSums.get(), frame.segmentOffsets.get()}) {
+            bufferBarrier(commands, buffer, computeWrite, computeReadWrite);
+        }
+
+        // The segment scan: the blocks' first places, each view's work, the batch's dispatches raised.
+        const std::array<ComputeBinding, 4> segmentScanBindings{batchViews, storageBufferBinding(frame.segmentBlockSums.get()),
+                                                                storageBufferBinding(frame.work.get()), batchDispatches};
+        bindComputeSet(commands, device.getDevice(), descriptors, *segmentScanPass, segmentScanBindings);
+        vkCmdDispatch(commands, 1, batch, 1);
+
+        bufferBarrier(commands, frame.segmentBlockSums.get(), computeWrite, computeReadWrite);
+        bufferBarrier(commands, frame.work.get(), computeWrite, computeReadWrite);
+        bufferBarrier(commands, frame.dispatches.get(), computeReadWrite,
+                      {VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+
+        // The visible segments listed in order.
+        if (segmentBlocks > 0) {
+            const std::array<ComputeBinding, 4> listBindings{batchViews, storageBufferBinding(frame.segmentOffsets.get()),
+                                                             storageBufferBinding(frame.segmentBlockSums.get()), storageBufferBinding(frame.visibleSegments.get())};
+            bindComputeSet(commands, device.getDevice(), descriptors, *segmentListPass, listBindings);
+            vkCmdDispatch(commands, segmentBlocks, batch, 1);
+        }
+
+        bufferBarrier(commands, frame.visibleSegments.get(), computeWrite, computeReadWrite);
+
+        // The visible candidates' flags (indirect: the batch's most visible candidates' workgroups).
+        const std::array<ComputeBinding, 11> flagBindings{
+            storageBufferBinding(records->get()),        storageBufferBinding(frame.levels.get()),      storageBufferBinding(candidates->get()),
+            batchViews,                                  storageBufferBinding(frame.flags.get()),       storageBufferBinding(frame.offsets.get()),
+            storageBufferBinding(frame.blockSums.get()), storageBufferBinding(frame.counts.get()),      storageBufferBinding(segments->get()),
+            storageBufferBinding(frame.visibleSegments.get()), storageBufferBinding(frame.work.get()),
+        };
+        bindComputeSet(commands, device.getDevice(), descriptors, *flagPass, flagBindings);
+        vkCmdDispatchIndirect(commands, frame.dispatches.get(), dispatchOffset);
+
+        // The flags pass's block totals and level counts before the scan sums them; its flags and offsets wait for the writes.
         for (VkBuffer buffer : {frame.blockSums.get(), frame.counts.get(), frame.flags.get(), frame.offsets.get()}) {
             bufferBarrier(commands, buffer, computeWrite, computeReadWrite);
         }
 
-        const std::array<ComputeBinding, 3> scanBindings{batchViews, storageBufferBinding(frame.blockSums.get()), storageBufferBinding(frame.counts.get())};
+        const std::array<ComputeBinding, 4> scanBindings{batchViews, storageBufferBinding(frame.blockSums.get()), storageBufferBinding(frame.counts.get()),
+                                                         storageBufferBinding(frame.work.get())};
         bindComputeSet(commands, device.getDevice(), descriptors, *scanPass, scanBindings);
         vkCmdDispatch(commands, 1, batch, 1);
 
         // The blocks' first places before the writes read them.
         bufferBarrier(commands, frame.blockSums.get(), computeWrite, computeReadWrite);
 
-        if (writers > 0) {
-            const std::array<ComputeBinding, 9> writeBindings{
-                batchViews,                                storageBufferBinding(candidates->get()),      storageBufferBinding(frame.flags.get()),
-                storageBufferBinding(frame.offsets.get()), storageBufferBinding(frame.blockSums.get()),  storageBufferBinding(frame.groups.get()),
-                storageBufferBinding(drawList),            storageBufferBinding(frame.mainCommands.get()), storageBufferBinding(frame.motionCommands.get()),
-            };
-            bindComputeSet(commands, device.getDevice(), descriptors, *writePass, writeBindings);
-            vkCmdDispatch(commands, (writers + cameraCullGroupSize - 1) / cameraCullGroupSize, batch, 1);
-        }
+        // The writes (indirect: the visible candidates' or the groups' workgroups, whichever are more).
+        const std::array<ComputeBinding, 12> writeBindings{
+            batchViews,                                     storageBufferBinding(candidates->get()),         storageBufferBinding(frame.flags.get()),
+            storageBufferBinding(frame.offsets.get()),      storageBufferBinding(frame.blockSums.get()),     storageBufferBinding(frame.groups.get()),
+            storageBufferBinding(drawList),                 storageBufferBinding(frame.mainCommands.get()),  storageBufferBinding(frame.motionCommands.get()),
+            storageBufferBinding(frame.segmentOffsets.get()), storageBufferBinding(frame.segmentBlockSums.get()), storageBufferBinding(frame.work.get()),
+        };
+        bindComputeSet(commands, device.getDevice(), descriptors, *writePass, writeBindings);
+        vkCmdDispatchIndirect(commands, frame.dispatches.get(), dispatchOffset + 3 * sizeof(std::uint32_t));
     }
 
     // The lists for the scene's vertex shaders (and the copy below); the commands for the packing, the indirect draws of

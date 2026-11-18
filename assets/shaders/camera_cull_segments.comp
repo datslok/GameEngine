@@ -1,0 +1,71 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The GPU culling's segment pass (GPU-driven drawing's stage 7b, render/vulkan/vulkan_camera_culling.h): one invocation a
+* segment (a group's candidates in one chunk) and view (the dispatch's y) tests the segment's chunk (chunkInView; moving
+* draws' segments always pass), then the workgroup sums what passed (an exclusive prefix sum in shared memory): x its
+* candidates, y one a segment. Each segment's offset within its block and the block's totals go to the view's slices,
+* for the segment scan.
+*/
+#include "camera_culling.glsl"
+
+layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Views {
+    CameraCull views[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer Chunks {
+    CullChunk chunks[];
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer Segments {
+    CullSegment segments[];
+};
+
+// Each segment's offset within its block: x among the visible candidates, y among the visible segments.
+layout(std430, set = 0, binding = 3) writeonly buffer SegmentOffsets {
+    uvec2 segmentOffsets[];
+};
+
+// Each block's totals, summed in place by the segment scan.
+layout(std430, set = 0, binding = 4) writeonly buffer SegmentBlockSums {
+    uvec2 segmentBlockSums[];
+};
+
+shared uvec2 sums[CAMERA_CULL_GROUP_SIZE];
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    uint segmentIndex = gl_GlobalInvocationID.x;
+    CameraCull view = views[gl_WorkGroupID.y];
+    uvec2 value = uvec2(0u);
+
+    if (segmentIndex < view.segments) {
+        CullSegment segment = segments[segmentIndex];
+
+        if (segment.chunk == CULL_NO_CHUNK || chunkInView(chunks[segment.chunk], view)) {
+            value = uvec2(segment.candidates, 1u);
+        }
+    }
+
+    sums[local] = value;
+    barrier();
+
+    // Each step adds the sum from offset places before: after log2(size) steps, every place holds its inclusive sum.
+    for (uint offset = 1u; offset < CAMERA_CULL_GROUP_SIZE; offset *= 2u) {
+        uvec2 before = local >= offset ? sums[local - offset] : uvec2(0u);
+        barrier();
+        sums[local] += before;
+        barrier();
+    }
+
+    if (segmentIndex < view.segments) {
+        segmentOffsets[view.segmentSlices.x + segmentIndex] = sums[local] - value;
+    }
+
+    if (local == CAMERA_CULL_GROUP_SIZE - 1) {
+        segmentBlockSums[view.segmentSlices.y + gl_WorkGroupID.x] = sums[local];
+    }
+}

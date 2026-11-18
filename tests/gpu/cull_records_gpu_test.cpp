@@ -175,6 +175,67 @@ namespace {
         }
     }
 
+    /*
+    * Whether a box's test lands within a centimetre of a plane or of the light's reach, where rounding may go either way:
+    * those cases are left out.
+    */
+    bool chunkNearAnEdge(const GpuCullChunk& chunk, const GpuCameraCull& view) {
+        constexpr float edge = 0.01f;
+
+        for (const auto& plane : view.frustum.planes) {
+            const float x = plane[0] >= 0.0f ? chunk.maximum[0] : chunk.minimum[0];
+            const float y = plane[1] >= 0.0f ? chunk.maximum[1] : chunk.minimum[1];
+            const float z = plane[2] >= 0.0f ? chunk.maximum[2] : chunk.minimum[2];
+
+            if (std::abs(plane[0] * x + plane[1] * y + plane[2] * z + plane[3]) < edge) {
+                return true;
+            }
+        }
+
+        float distanceSquared = 0.0f;
+
+        for (int axis = 0; axis < 3; ++axis) {
+            const float gap = view.reach[axis] - std::clamp(view.reach[axis], chunk.minimum[axis], chunk.maximum[axis]);
+            distanceSquared += gap * gap;
+        }
+
+        return view.reach[3] >= 0.0f && std::abs(std::sqrt(distanceSquared) - view.reach[3]) < edge;
+    }
+
+    // A chunk round each case's record (with its flags), against the C++ mirror's chunkInView and boxInFrustum.
+    void checkChunks(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const std::vector<Case> cases = randomCases();
+        std::vector<GpuVec4> inputs;
+        std::vector<GpuCullChunk> chunks;
+
+        for (const Case& c : cases) {
+            const GpuCullChunk chunk = packCullChunk(std::span<const GpuCullRecord>{&c.record, 1});
+            chunks.push_back(chunk);
+            inputs.push_back(GpuVec4{chunk.minimum[0], chunk.minimum[1], chunk.minimum[2], static_cast<float>(chunk.flags)});
+            inputs.push_back(GpuVec4{chunk.maximum[0], chunk.maximum[1], chunk.maximum[2], 0.0f});
+
+            for (const auto& plane : c.frustum.planes) {
+                inputs.push_back(GpuVec4{plane[0], plane[1], plane[2], plane[3]});
+            }
+
+            inputs.push_back(GpuVec4{c.reach[0], c.reach[1], c.reach[2], c.reach[3]});
+            inputs.push_back(gpuVec4(static_cast<float>(c.cameraFlags)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CHUNK_IN_VIEW, inputs, 10, 1);
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            const GpuCameraCull view = cameraOf(cases[i]);
+
+            if (chunkNearAnEdge(chunks[i], view)) {
+                continue;
+            }
+
+            report.check("chunkInView", exactTolerance, chunkInView(chunks[i], view) ? 1.0f : 0.0f, outputs[i][0]);
+            report.check("boxInFrustum", exactTolerance, boxInFrustum(view.frustum, chunks[i].minimum, chunks[i].maximum) ? 1.0f : 0.0f, outputs[i][1]);
+        }
+    }
+
     // The slot chosen, whether thinned, the sphere test and the camera's choice, against the C++ mirror, case by case.
     void checkDraws(GpuFunctionRunner& runner, GpuCheckReport& report) {
         const std::vector<Case> cases = randomCases();
@@ -206,4 +267,5 @@ void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkDraws(runner, report);
     report.section("camera_culling.glsl");
     checkCandidates(runner, report);
+    checkChunks(runner, report);
 }

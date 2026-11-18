@@ -27,18 +27,53 @@ namespace {
     }
 
     // A block holds the draws and their spare share, never fewer than the fewest.
+    // A block holds the draws and their spare share, never fewer than the fewest, in whole chunks (so chunk = slot / 64).
     void testBlockSlots() {
         const CellSettings settings;
+        assert(settings.chunkSlots == 64);
         assert(cellBlockSlots(0, settings) == 64);
         assert(cellBlockSlots(10, settings) == 64);
-        assert(cellBlockSlots(100, settings) == 125);
-        assert(cellBlockSlots(1000, settings) == 1250);
+        assert(cellBlockSlots(100, settings) == 128);
+        assert(cellBlockSlots(1000, settings) == 1280);
 
         CellSettings tight;
         tight.spareShare = 0.0f;
         tight.fewestSlots = 1;
+        tight.chunkSlots = 1;
         assert(cellBlockSlots(7, tight) == 7);
         assert(cellBlockSlots(0, tight) == 1);
+
+        tight.chunkSlots = 8;
+        assert(cellBlockSlots(7, tight) == 8);
+        assert(cellBlockSlots(9, tight) == 16);
+    }
+
+    /*
+    * Morton order inside a cell: the place's x and z within the cell, 16 bits each, bits interleaved (x's in the even
+    * places), so places near each other get numbers near each other and runs of slots stay close together on the ground.
+    */
+    void testMortonCodes() {
+        assert(interleaveBits(0, 0) == 0);
+        assert(interleaveBits(1, 0) == 1);
+        assert(interleaveBits(0, 1) == 2);
+        assert(interleaveBits(3, 3) == 15);
+        assert(interleaveBits(0xFFFF, 0) == 0x55555555u);
+        assert(interleaveBits(0, 0xFFFF) == 0xAAAAAAAAu);
+
+        const CellKey cell{2, -1};
+        assert(cellMortonCode(Vec3{256.0f, 0.0f, -128.0f}, cell, 128.0f) == 0);
+        assert(cellMortonCode(Vec3{383.99f, 50.0f, -0.01f}, cell, 128.0f) > 0xFFF00000u);
+
+        // Points outside the cell are held to its edges.
+        assert(cellMortonCode(Vec3{0.0f, 0.0f, -200.0f}, cell, 128.0f) == 0);
+        assert(cellMortonCode(Vec3{500.0f, 0.0f, 10.0f}, cell, 128.0f) == 0xFFFFFFFFu);
+
+        // The quarter nearer the origin first: the cell's four quarters in Z order.
+        const std::uint32_t nearCorner = cellMortonCode(Vec3{260.0f, 0.0f, -120.0f}, cell, 128.0f);
+        const std::uint32_t eastQuarter = cellMortonCode(Vec3{330.0f, 0.0f, -120.0f}, cell, 128.0f);
+        const std::uint32_t southQuarter = cellMortonCode(Vec3{260.0f, 0.0f, -50.0f}, cell, 128.0f);
+        const std::uint32_t farQuarter = cellMortonCode(Vec3{330.0f, 0.0f, -50.0f}, cell, 128.0f);
+        assert(nearCorner < eastQuarter && eastQuarter < southQuarter && southQuarter < farQuarter);
     }
 
     // Runs taken first fit, lowest first, else at the end; given back runs join neighbours; free runs at the end leave it.
@@ -107,5 +142,6 @@ void testWorldCells() {
     testTheReadoutShowsCells();
     testCellKeys();
     testBlockSlots();
+    testMortonCodes();
     testSlotBlocks();
 }
