@@ -132,7 +132,7 @@ Mirrored in `ddgi.glsl`; tested in `ddgi_test` and `ddgi_gpu_test` (`GPU_TEST_PR
 - Rays against `RAY_MASK_SOLID`, reach `DDGI_RAY_REACH`:
   - **miss:** the sky (`FrameLighting::background`) at full reach;
   - **back face:** no light, minus its distance;
-  - **front face:** emissive plus `matteColour` (none for metals; probes average gloss away) x irradiance = directional lights by shadow ray (from `DDGI_SHADOW_RAY_OFFSET`, 1 cm, out) + the brightest `lightsPerHit` point and spot lights by shadow ray (fast ones into the fast sum) + last frame's probes (`probeAmbient`, diffuse) x `bounceEnergy`, still into still and fast into fast: one more bounce a frame.
+  - **front face:** emissive plus `matteColour` (none for metals; probes average gloss away) x irradiance = directional lights (dimmed by the fog above, `fogSunThrough`) by shadow ray (from `DDGI_SHADOW_RAY_OFFSET`, 1 cm, out) + the brightest `lightsPerHit` point and spot lights by shadow ray (fast ones into the fast sum) + last frame's probes (`probeAmbient`, diffuse) x `bounceEnergy`, still into still and fast into fast: one more bounce a frame.
 - Shadow rays, not the shadow atlas, which covers only the view.
 
 **Update** (`ddgi_update.glsl`; bindings 0-2 ray buffers, 3 turns, 4 traced list, 5 restarts, 6 states, 7 cascades, 8 seeds, 9+ atlases):
