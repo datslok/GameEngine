@@ -353,7 +353,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
 - [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`): ground-following patches (`ground-cover-patches`), meadow grass (`meadow-grass`), the forest floor (`forest-floor-cover`)
 - [ ] The structures, half reclaimed, in a stealth-alien look (research and direction in `docs/research/STRUCTURES.md`)
-  - [ ] 1. Faceted slabs: the Monolith as five slabs, the Ring as 20 segments, needle spires, a strut, matte coating with facets' own tones (`structure-slabs`)
+  - [x] 1. Faceted slabs: the Monolith as five slabs, the Ring as 20 segments, needle spires, a strut, matte coating with facets' own tones (`structure-slabs`)
   - [ ] 2. Weathering: moss on shoulders, streaks, panel and sawtooth seams, vines from ledges, ground contact (`structure-weathering`)
   - [ ] 3. Straight light lines: emissive strips at least a pixel wide, pulsing by the tick, the Ring's pulse riding its travelling wave (`structure-lines`)
   - [ ] 4. The research camp: generated modules, dome, mast, pad and floodlights, CC0 props, warm spot lights (`research-camp`)
