@@ -64,7 +64,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 7 | Wind [WIND] | the wind field runs | wind (`render/gpu/wind`) |
 | 8 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
 | 9 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
-| 10 | Fog [FOG] | frame has a `Fog` and fog is on | `fog.md` |
+| 10 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |
 | 11 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
 | 12 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
 | 13-16 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
