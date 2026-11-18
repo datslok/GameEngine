@@ -110,3 +110,4 @@
 - `cpu-culling-removed` (Nov 18 2026): GPU-driven drawing's stage 5b: the CPU culling path deleted (the `passes.gpuCulling` setting with it), F4's HIDDEN and its occlusion module deleted (the user's choice; the research stays in `docs/research/OCCLUSION.md`, the pyramid's farthest mode in the reflections' code).
   - **cull-compare kept:** the CPU's lists are built only when it asks (`cpuReferenceLists`), from the culling functions the tests use as the reference.
   - **The draw list without zeros:** laid out as the GPU's regions (counted only) and the CPU's runs (`DrawListLayout`), so only glass's entries are written; the regions held stale entries nothing read.
+  - **Measured (laptop, hidden copy, before → after):** PACK 3.55 → 2.84 ms (rim), 3.61 → 2.94 (Ring), 3.71 → 2.95 (wall); SHADOWS 0.24 → 0.12. The CPU now waits 5.6-13.7 ms a frame for the GPU.
