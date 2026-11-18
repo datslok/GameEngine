@@ -41,7 +41,6 @@ int main() {
             gpuTestImpostor(runner, report);
             gpuTestWind(runner, report);
             gpuTestCardThinning(runner, report);
-            gpuTestOcclusionCulling(runner, report);
             gpuTestCullRecords(runner, report);
             gpuTestCameraFinish(runner, report);
             gpuTestMotionBlur(runner, report);

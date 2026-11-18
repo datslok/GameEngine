@@ -538,31 +538,24 @@ namespace {
         assert(nearACameraEdge(record, table, packCameraCull(frustum, view, true, true, 99.0f)));
     }
 
-    // On by default (compared in the valley, faster there); switchable while the game runs as passes.gpuCulling.
+    // GPU culling is the only way, so there is no setting for it: an old settings line is warned about.
     void testSetting() {
-        assert(RenderSettings{}.gpuCulling);
-
         RenderSettings settings;
         const SettingsWalk walk = [&settings](SettingsVisitor& visitor) { visit(settings, visitor); };
         const std::vector<std::string> warnings = applySettings({{"passes.gpuCulling", "false"}}, walk, StartupFields::Keep);
-        assert(warnings.empty());
-        assert(!settings.gpuCulling);
+        assert(warnings.size() == 1);
     }
 
-    // cull-compare refuses without GPU culling; with it, each call asks for a comparison and shows the last one.
+    // Each cull-compare call asks for a comparison and shows the last one; it takes no arguments.
     void testCompareCommand() {
-        RenderSettings settings;
-        settings.gpuCulling = false;
         CommandRegistry registry;
         int asked = 0;
         std::string last;
-        addCullCompareCommand(registry, settings, [&]() {
+        addCullCompareCommand(registry, [&]() {
             ++asked;
             return last;
         });
 
-        assert(!registry.execute("cull-compare").ok && asked == 0);
-        settings.gpuCulling = true;
         assert(!registry.execute("cull-compare now").ok && asked == 0);
 
         const CommandReply first = registry.execute("cull-compare");

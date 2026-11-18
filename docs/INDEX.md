@@ -23,7 +23,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | Build | `docs/architecture/build.md` (makefile, the two builds, shaders, dependencies, packaging) |
 | Engine | `docs/architecture/engine-core.md` (loop, ticks, determinism, jobs, entities, input), `docs/architecture/game-interface.md` (the `Game` hooks, the frame description, culling, debug drawing, render stats), `docs/architecture/settings-and-commands.md` (settings file, F5, presets, commands, launch options) |
 | Testing | `docs/architecture/testing.md` (golden images, GPU tests of shader libraries) |
-| Renderer | `docs/architecture/renderer.md` (pass order, `VulkanRenderer`), `docs/architecture/gpu-scene.md`, `docs/architecture/depth.md`, `docs/architecture/occlusion-culling.md`, `docs/architecture/gpu-driven.md`, `docs/architecture/gpu-timing.md` |
+| Renderer | `docs/architecture/renderer.md` (pass order, `VulkanRenderer`), `docs/architecture/gpu-scene.md`, `docs/architecture/depth.md`, `docs/architecture/gpu-driven.md`, `docs/architecture/gpu-timing.md` |
 | Lights and shadows | `docs/architecture/lights.md`, `docs/architecture/clustered-shading.md`, `docs/architecture/lights-and-shadow-atlas.md`, `docs/architecture/sun-shadows.md` (cascades, contact shadows) |
 | Surfaces | `docs/architecture/shading.md` (BRDF, normal maps, clear coat), `docs/architecture/parallax-and-grounds.md`, `docs/architecture/glass.md` |
 | Image | `docs/architecture/anti-aliasing.md` (TAA, FSR, DLSS), `docs/architecture/image-pipeline.md` (eye adaptation, bloom, tone mapping, HDR), `docs/architecture/camera-effects.md` (camera finish, motion blur, depth of field) |

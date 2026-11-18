@@ -17,7 +17,7 @@ class VulkanDevice;
 /*
 * A pyramid of the depth image at the render size (depth_pyramid.comp): level 0 the depth itself, each level above the
 * nearest or the farthest of the 2x2 texels below it (DepthReduction, render/gpu/screen_reflections.h). The reflections'
-* march keeps the nearest; occlusion culling the farthest (render/gpu/occlusion_culling.h).
+* march keeps the nearest; the farthest is for testing what a depth hides (occlusion culling, docs/research/OCCLUSION.md).
 */
 class VulkanDepthPyramid {
 public:

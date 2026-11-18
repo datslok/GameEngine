@@ -4,8 +4,8 @@
 /*
 * One level of a depth pyramid (render/gpu/screen_reflections.h), one invocation per texel: level 0 copies the depth
 * image, each level above keeps the nearest or the farthest depth of the 2x2 texels below it (3 at the far edge of an odd
-* level, so every texel has a cell above it). The reflections' march reads the nearest to skip empty space; occlusion
-* culling reads the farthest (render/gpu/occlusion_culling.h).
+* level, so every texel has a cell above it). The reflections' march reads the nearest to skip empty space; the farthest
+* is for testing what a depth hides (occlusion culling, docs/research/OCCLUSION.md).
 */
 #include "screen_reflections.glsl"
 

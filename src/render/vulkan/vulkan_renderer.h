@@ -42,7 +42,6 @@
 #include "render/vulkan/vulkan_debug_lines.h"
 #include "render/vulkan/vulkan_depth_range.h"
 #include "render/vulkan/vulkan_indirect_commands.h"
-#include "render/vulkan/vulkan_occlusion_culling.h"
 #include "render/vulkan/vulkan_device.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "render/vulkan/vulkan_mesh.h"
@@ -407,12 +406,7 @@ private:
     // The same for a flat mirror's own cascades (shadow_map.h, MirrorShadowView), from its picture's depths.
     std::unique_ptr<VulkanDepthRange> mirrorDepthRange;
 
-    // Occlusion culling's first stage (render/gpu/occlusion_culling.h): the pyramid and count after the prepass, and the
-    // last count read back, for the readout.
-    std::unique_ptr<VulkanOcclusionCulling> occlusionCulling;
-    std::optional<OcclusionCounts> lastOcclusionCounts;
-
-    // The camera's lists built on the GPU (render/gpu/camera_culling.h, passes.gpuCulling): the still draws' tables kept
+    // Every view's lists built on the GPU (render/gpu/camera_culling.h): the still draws' tables kept
     // between frames, the passes, and what each frame in flight culled with (its groups' styles, for the triangles; the
     // CPU's lists and the records, for a comparison asked for).
     // A comparison: each list compared (its view, whether its second list, its name, the CPU's list) and every view's record.
@@ -648,35 +642,28 @@ private:
     void finishGpuTimings(FrameContext& frame);
 
     BloomComposite drawScene(FrameContext& frame, const FrameDescription& description, const RenderSettings& settings, ImDrawData* ui);
-    // The shadow tiles to redraw this frame, each with its casters batched by mesh, and the shadow part of the draw list:
-    // each caster's instance number, one tile after another, following the main pass's part.
-    // With coloured shadow maps a redrawn tile's glass is drawn too, into its square of the maps, after the solid casters
-    // (its entries following theirs in the draw list); tileGlass says, for every tile of the plan, whether its square
-    // holds glass, for the records the shaders read (markTileGlass).
-    // A tile to draw. For a tile keeping its movers apart (separateMovers): casters and glass are its still ones, drawn
-    // into the still copy only when redrawn (still); restore, the patches copied back from the still copy (the whole tile
-    // after a redraw); moving, drawn over them every frame.
+    // The shadow tiles to redraw this frame (render/gpu/shadow_culling.h), each a view of the GPU culling. With coloured
+    // shadow maps a redrawn tile's glass is drawn too, into its square of the maps, after the solid casters (its entries
+    // the CPU's, in the draw list); tileGlass says, for every tile of the plan, whether its square holds glass, for the
+    // records the shaders read (markTileGlass).
+    // A tile to draw: its casters (all, or the still ones of a tile keeping its movers apart, drawn into the still copy
+    // only when redrawn: still) and its moved ones, from its view's two lists; glass; restore, the patches copied back
+    // from the still copy (the whole tile after a redraw).
     struct ShadowTileDraw {
         const ShadowTile* tile = nullptr;
-        BatchedDraws casters;
         BatchedDraws glass;
         std::uint64_t signature = 0;
         bool still = true;
-        BatchedDraws moving;
         std::vector<ShadowPatch> restore;
         bool sways = false; // its casters drawn swaying in the wind (tileSways)
-
-        // While the GPU culls: its still (or all) casters and its moved ones, from its view's two lists.
-        bool gpu = false;
         PassDraws casterDraws;
         PassDraws moverDraws;
     };
 
-    // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches). views: while the GPU culls,
-    // each drawn tile's view (in tiles' order), its lists' regions in drawList left for the GPU.
+    // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches). views: each drawn tile's view
+    // (in tiles' order), its lists' regions reserved in the frame's draw list.
     struct ShadowDraws {
         std::vector<ShadowTileDraw> tiles;
-        std::vector<std::uint32_t> drawList;
         std::vector<bool> tileGlass;
         std::vector<ShadowPatch> nextMoverPatches;
         std::vector<GpuCameraCull> views;
@@ -686,19 +673,13 @@ private:
     void ensureStillShadow(std::uint32_t size);
 
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
-    // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
-    // captureDraws: each capture's draws (the probe faces, then the mirror), following the velocity pass's in the draw
-    // list (none without a capture); while the GPU culls, gpuCaptureLists regions of gpuListEntries entries in their place.
-    // gpuListEntries: while the GPU culls the camera, the room left for its camera and velocity lists (each that many
-    // entries, written by VulkanCameraCulling), in place of mainDraws' and motionDraws'; 0 without.
-    // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
+    // rays' hits may need (empty without probes). drawList: the frame's draw list laid out (the GPU's regions and the
+    // CPU's runs). mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
     // reads the mirrored light pass's images when there are any. occlusion: the main pass reads ambient occlusion, the
     // blurred image when occlusionBlurred, else the accumulated one when occlusionAccumulates; gathersLight: it holds bounce light, in place of the bounce fit. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
     // frameFog: the fog's record (off without fog).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
-                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws, std::size_t gpuListEntries,
-                               std::span<const BatchedDraws> captureDraws, std::size_t gpuCaptureLists, const SortedTransparentDraws& transparent,
-                               const RenderSettings& settings,
+                               const DrawListLayout& drawList, const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
                                const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
                                bool occlusionAccumulates, bool gathersLight,
@@ -718,14 +699,23 @@ private:
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
     void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
     // colouredShadows: the frame draws the coloured shadow maps, so each tile's glass is found and drawn too. sway: the
-    // wind's settings while things sway this frame (render/gpu/wind.h), else null: tiles that sway redraw while their casters do.
-    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry,
-                                   bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway);
-    // The same while the GPU culls (render/gpu/shadow_culling.h): which tiles are drawn decided from the changes the table
-    // reports, each drawn tile a view whose lists get listEntries entries each.
-    ShadowDraws prepareGpuShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry,
-                                      bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway,
-                                      const CameraCullFrame& table, std::size_t listEntries);
+    // wind's settings while things sway this frame (render/gpu/wind.h), else null. Which tiles are drawn is decided from
+    // the changes the table reports (render/gpu/shadow_culling.h); each drawn tile is a view whose lists get room for
+    // every draw in drawList, its glass entries appended there.
+    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, DrawListLayout& drawList, bool colouredShadows,
+                                   const LevelOfDetailSettings& levelSettings, const WindSettings* sway, const CameraCullFrame& table);
+
+    // A capture drawn this frame: which (a probe face, or cubeFaceCount the mirror) and its view.
+    struct CaptureCull {
+        int capture = 0;
+        CaptureCullView view;
+    };
+
+    // For cull-compare, the CPU's own lists of every view culled this frame (views as culled: the camera, the captures,
+    // then the shadow tiles drawn), from the CPU's culling functions.
+    CullCompare cpuReferenceLists(const FrameDescription& description, const CameraCullFrame& table, const std::vector<GpuCameraCull>& views,
+                                  const Frustum& cameraFrustum, const LevelView& cameraLevels, bool motion, const WindSettings* sway,
+                                  const std::vector<CaptureCull>& captures, const ShadowDraws& shadowDraws, const LevelOfDetailSettings& levelSettings) const;
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawGlassShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/gpu_scene.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
@@ -114,6 +115,10 @@ public:
     void write(std::span<const Element> first, std::span<const Element> second) {
         writeParts(first.data(), first.size_bytes(), second.data(), second.size_bytes());
     }
+
+    // A frame's draw list: room for all of it (growing first if needed), only its CPU runs written (DrawListLayout), the
+    // rest left for the GPU.
+    void writeRuns(const DrawListLayout& layout);
 
     // The whole buffer, for a descriptor (shaders read only as many elements as the frame says there are).
     VkDescriptorBufferInfo describe() const;

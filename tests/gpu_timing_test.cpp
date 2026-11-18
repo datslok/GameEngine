@@ -109,13 +109,11 @@ void testGpuTiming() {
         assert(std::string(gpuPassName(GpuPass::MirroredLights)) == "MIRROR");
     }
 
-    // Occlusion culling's pyramid and test read the prepass's depth right after it. Ambient occlusion in five parts, each timed apart: last frame's picture's pyramid (built first while AO gathers
+    // Ambient occlusion in five parts, each timed apart: last frame's picture's pyramid (built first while AO gathers
     // light from it), the pass itself (with its half-size depths), the history it blends into, the denoiser, and the
     // upsample to the render's size at half resolution.
     {
-        assert(static_cast<int>(GpuPass::DepthPrepass) + 1 == static_cast<int>(GpuPass::Occlusion));
-        assert(static_cast<int>(GpuPass::Occlusion) + 1 == static_cast<int>(GpuPass::ColourPyramid));
-        assert(std::string(gpuPassName(GpuPass::Occlusion)) == "OCCLUSION");
+        assert(static_cast<int>(GpuPass::DepthPrepass) + 1 == static_cast<int>(GpuPass::ColourPyramid));
         assert(static_cast<int>(GpuPass::ColourPyramid) + 1 == static_cast<int>(GpuPass::AmbientOcclusion));
         assert(static_cast<int>(GpuPass::AmbientOcclusion) + 1 == static_cast<int>(GpuPass::AoHistory));
         assert(static_cast<int>(GpuPass::AoHistory) + 1 == static_cast<int>(GpuPass::AoDenoise));
@@ -146,7 +144,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 11, 8, 4, 1, 2, 40, 17, 25, 8, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 11, 8, 4, 1, 2, 40, 17, 25, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -162,7 +160,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1393 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1385 * nanosecondsPerTick * 1e-9));
         // Ambient occlusion's parts, each between its own stamps, add up to what its one line used to read.
         assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid), 4 * nanosecondsPerTick * 1e-9));
         assert(nearlyEqual(timings.seconds(GpuPass::AmbientOcclusion), 16 * nanosecondsPerTick * 1e-9));

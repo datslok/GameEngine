@@ -18,6 +18,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -194,6 +195,34 @@ inline constexpr std::uint32_t drawListIndexMask = ~drawListThinnedBit;
 
 // Appends a view's draw list entries, in instance order.
 void appendDrawList(std::vector<std::uint32_t>& list, const BatchedDraws& batched);
+
+/*
+* A frame's draw list as the CPU lays it out (docs/architecture/gpu-driven.md): regions the GPU culling writes are only
+* counted (reserve), the CPU's own entries (glass, its shadows) kept in runs at their places (append), runs side by side
+* joined. Writing the runs alone leaves the GPU's regions unwritten, which nothing reads before the GPU fills them.
+*/
+class DrawListLayout {
+public:
+    struct Run {
+        std::uint32_t first = 0;
+        std::vector<std::uint32_t> entries;
+    };
+
+    // Room for entries the GPU writes; returns their first place.
+    std::uint32_t reserve(std::size_t entries);
+
+    // The CPU's entries next; returns their first place.
+    std::uint32_t append(std::span<const std::uint32_t> entries);
+
+    // Every place, the GPU's regions included.
+    std::uint32_t size() const;
+
+    const std::vector<Run>& getRuns() const;
+
+private:
+    std::uint32_t entries = 0;
+    std::vector<Run> runs;
+};
 
 /*
 * The card thinning records (scene/card_thinning.h), std430: a thinned mesh's header (card size, growth, least share)

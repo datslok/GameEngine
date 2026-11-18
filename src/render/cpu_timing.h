@@ -12,13 +12,10 @@ enum class CpuStage {
     SkyBake,    // the sky visibility grid's CPU bake before the frame begins
     Wait,       // waiting for the frame in flight's GPU work and the swapchain's image
     Setup,      // the rest: the cloth, the camera, lights ranked, probes, fog, the frame's images
-    Frustum,    // what the camera draws, in four parts: the frustum test over every draw (and the opaque ones kept),
-    Levels,     // the levels of detail chosen, counted for the readout,
-    Batch,      // the camera's draws batched by mesh (each level chosen again) and their triangles counted,
-    Moving,     // the moving and swaying draws found among them and batched for the velocity pass
+    Frustum,    // what the camera's CPU part tests: the glass and the mirror's candidates (the GPU culls the rest)
     Lights,     // lights packed, the mirror chosen, the shadow tiles planned
-    Shadows,    // each shadow tile's casters: culled, levels chosen, batched
-    Captures,   // the reflection probe's faces and the flat mirror's view: culled, levels chosen, batched
+    Shadows,    // which shadow tiles to draw, from the changes announced (the GPU finds their casters)
+    Captures,   // the reflection probe's faces and the flat mirror's view placed (the GPU culls them)
     Lines,      // the debug lines written into the frame's upload memory
     Pack,       // the scene's buffers written: instances, materials, lights, draw lists
     Record,     // the passes' commands recorded

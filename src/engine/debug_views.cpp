@@ -14,18 +14,6 @@
 
 namespace {
     const Vec3 boundingBoxColour{1.0f, 0.75f, 0.0f};
-
-    // A part of a whole as a whole percentage, 0 of nothing (PCT: the readout's stroke font has no percent sign).
-    std::string percentOf(std::size_t part, std::size_t whole) {
-        return std::to_string(whole == 0 ? 0 : part * 100 / whole) + " PCT";
-    }
-
-    // What the prepass's depth would hide of the camera's draws (render/gpu/occlusion_culling.h): draws, then triangles.
-    std::string occlusionText(const OcclusionCounts& counts) {
-        return "HIDDEN " + std::to_string(counts.hidden) + " OF " + std::to_string(counts.tested) + " " + percentOf(counts.hidden, counts.tested) +
-               "  TRIS " + std::to_string(counts.hiddenTriangles / 1000) + "K OF " + std::to_string(counts.testedTriangles / 1000) + "K " +
-               percentOf(counts.hiddenTriangles, counts.testedTriangles);
-    }
 }
 
 /*
@@ -48,9 +36,8 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 }
 
 /*
-* Seven lines of text, in the same colour as the bounding boxes: the camera's view (and a line of how many of its draws drew each level
-* of detail, the meshes themselves first, and the thousands of triangles drawn: all, the cut-outs', the probe's; while
-* occlusion is measured, a line of how many of those draws and triangles the prepass's depth would hide), all shadow views together (each
+* Eight lines of text, in the same colour as the bounding boxes: the camera's view (and a line of how many of its draws drew each level
+* of detail, the meshes themselves first, and the thousands of triangles drawn: all, the cut-outs', the probe's), all shadow views together (each
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
 * tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
@@ -78,14 +65,8 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed) +
                                (stats.imageLights > 0 ? "  IN MIRRORS " + std::to_string(stats.imageLights) : std::string{});
 
-    std::vector<std::string> lines{camera, detail};
-
-    if (stats.occlusion) {
-        lines.push_back(occlusionText(*stats.occlusion));
-    }
-
-    lines.insert(lines.end(), {shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory),
-                               exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)});
+    std::vector<std::string> lines{camera, detail, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory),
+                                   exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)};
     return lines;
 }
 

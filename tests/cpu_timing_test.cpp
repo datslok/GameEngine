@@ -27,14 +27,11 @@ namespace {
         assert(!clock.finish().valid);
     }
 
-    // What the camera draws, in four parts in the frame's order, so the readout shows where its CPU time goes: the frustum
-    // test over every draw, the levels counted, the main batch, the moving draws and their batch.
+    // The camera's CPU part (the glass and the mirror's candidates; the GPU culls the rest) between the setup and the lights.
     void testTheCameraInParts() {
         assert(static_cast<int>(CpuStage::Setup) + 1 == static_cast<int>(CpuStage::Frustum));
-        assert(static_cast<int>(CpuStage::Frustum) + 1 == static_cast<int>(CpuStage::Levels));
-        assert(static_cast<int>(CpuStage::Levels) + 1 == static_cast<int>(CpuStage::Batch));
-        assert(static_cast<int>(CpuStage::Batch) + 1 == static_cast<int>(CpuStage::Moving));
-        assert(std::string(cpuStageName(CpuStage::Frustum)) == "FRUSTUM" && std::string(cpuStageName(CpuStage::Moving)) == "MOVING");
+        assert(static_cast<int>(CpuStage::Frustum) + 1 == static_cast<int>(CpuStage::Lights));
+        assert(std::string(cpuStageName(CpuStage::Frustum)) == "FRUSTUM");
     }
 
     // Every stage has its own short upper-case name for the readout.
