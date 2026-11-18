@@ -56,7 +56,7 @@ Same build + same commands → bit-identical state.
 
 ## Settings structs
 
-- `EngineSettings` (`engine/engine_settings.h`, owned by `Application`): loop timing, presentation, threads, validation, cloth on GPU, still draws, the command server, and `RenderSettings render`. Each field's meaning and when it is read: the header.
+- `EngineSettings` (`engine/engine_settings.h`, owned by `Application`): loop timing, presentation, threads, validation, cloth on GPU, still draws and their cells (`CellSettings`), the command server, and `RenderSettings render`. Each field's meaning and when it is read: the header.
 - `RenderSettings` (`render/gpu/render_settings.h`): lights, shadows, bloom, tone mapping, display, global illumination and the rest, with `rayTracing` the master switch; passed to `VulkanRenderer::render` each frame.
 - Camera controllers own theirs (`gameplay/camera/`).
 - Each has `visit(settings, SettingsVisitor&)` beside it; F5, `settings.cfg` and commands walk that one list (Settings and commands).

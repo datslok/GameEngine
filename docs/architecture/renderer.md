@@ -45,7 +45,7 @@ Everything every view draws is settled before any command is recorded, so the sc
 5. `packLighting`, `planShadows`, `holdStaggeredCascades`, `attachShadows`; coloured shadow maps made if glass needs them.
 6. The frame's draw list laid out (`DrawListLayout`): the camera's region, `prepareShadowDraws` (which tiles to draw, their regions), the velocity pass's region, the reflection probe's faces' and the mirror's, then transparent draws sorted far to near.
 7. Probe cascades, mirrored light pairs, ambient occlusion, contact shadows, fog, wind and sky visibility readied before the scene set is written.
-8. `writeScene`, debug line vertices and shadow tile data straight into upload memory (no copy passes).
+8. `writeScene`, debug line vertices and shadow tile data straight into upload memory; the lasting records (instances, materials, last-frame matrices) copied into GPU memory where they changed (`gpu-scene.md`).
 
 Draw list order (one buffer): main pass, shadow tiles, velocity pass, probe faces, mirror view, transparent. The main and velocity regions, each probe face's and the mirror's, and each drawn shadow tile's hold every draw, written by the CULL pass (`gpu-driven.md`); the CPU writes only glass's entries.
 
