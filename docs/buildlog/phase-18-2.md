@@ -100,3 +100,4 @@
   - **Nothing new to keep:** candidates, groups and drawing order are the same for every view; only the frustum and levels differ, so each view only adds slices of the working buffers (`placeCullView`).
   - **One view-maker for both paths:** `probeFaceCullView` and `mirrorCullView` give the CPU's lists and the GPU's records the same frustum and levels; tested against `batchByMesh` per face and for mirrors.
   - **Cost of room:** a capture's region holds every draw, so the CPU writes about 0.2 MB more zeros a frame for each capture drawn (one face and the mirror at most by default).
+  - **Measured (laptop, hidden copy, GPU culling off → on):** CAPTURES 0.89 → 0.00 ms (rim), 1.25 → 0.00 (Ring), 1.54 → 0.00 (wall); GPU CULL 0.09-0.13 ms for the camera and its captures together (0.08-0.11 for the camera alone in stage 3); CUBE unchanged (0.4-0.6 ms).
