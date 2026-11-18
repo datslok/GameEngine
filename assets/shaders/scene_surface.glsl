@@ -13,6 +13,7 @@
 #include "normal_mapping.glsl"
 #include "parallax.glsl"
 #include "ground_layers.glsl"
+#include "facet_variation.glsl"
 #include "impostor.glsl"
 #include "lighting.glsl"
 #include "mirrored_light.glsl"
@@ -1124,6 +1125,13 @@ void main() {
             projectedWorldNormal = frameAxes * bumped;
             projectedBump = dot(projectedWorldNormal, projectedWorldNormal) > 0.0;
         }
+    }
+
+    // A faceted shape's facet: its own tone and roughness from the two numbers its corners share (facet_variation.glsl),
+    // after any blended layers, so moss and stains vary with the facet too.
+    if (material.facetVariation.x > 0.0 || material.facetVariation.y > 0.0) {
+        albedo.rgb *= facetToneScale(textureUv, material.facetVariation.x);
+        roughness = max(facetRoughness(roughness, textureUv, material.facetVariation.y), BRDF_SMALLEST_ROUGHNESS);
     }
 #ifdef TRANSPARENT
     // Glass's transmission, its texture's red channel times the factor.

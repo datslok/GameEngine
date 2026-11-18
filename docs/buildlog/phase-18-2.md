@@ -146,3 +146,13 @@
   - **Model kept at M:** K is 25-40% cheaper but trailed at the flashlight beam's edge (the user's eye, Oct 23 2026).
   - **One table:** the modes' factors moved to `upscaling.h` (`upscalingModeFactors`, `upscalingModeScale` constexpr) so the default names Quality instead of repeating 0.67.
   - **Not measured:** the gain waits for the GPU frame's measurements.
+
+- `structure-slabs` (Nov 18 2026): the structures in a stealth-alien look, stage 1 of 8 (research and the user's direction in `docs/research/STRUCTURES.md`, concept sheets v1-v4): the Monolith as five faceted slabs and a strut, the Ring as 20 segments, ten needle spires, one matte coating whose facets keep their own tone
+  - **Direction:** the user moved the sketches from plated human towers to more alien, then a stealth language (flat facets, sharp chamfers, straight light lines), then several slabs rather than one spire.
+  - **One loft for every shape:** sections of equal size, flat triangles, vertices shared, so a closed-and-facing-out test (each edge walked once each way, positive volume) covers slabs, segments and the strut alike.
+  - **Moss from the shape:** the shoulder steps in a quarter over 3 m, so its facets' upward part lands in the rock's moss range (0.55-0.9) and stage 2 needs no painting.
+  - **Facets' own tones by numbers in the mesh (option A, the user's choice):** two random numbers in each triangle's texture coordinate, read by `facet_variation.glsl` (mirrored, CPU and GPU tested) after any blended layers; chosen over hashing the normal in the shader, which would shimmer on the floating crown and give parallel facets one tone. `GpuMaterial` 272 to 288 bytes.
+  - **More facets after the first look:** rhombus sections read as plain blocks in the screenshots (two facets a side); hexagon sections (three a side) and a front ridge zigzagging between extra bands broke the lit faces into triangles. Shaded faces still read as one dark tone until stage 2's seams and moss.
+  - **Ring ends on radial planes:** square-cut ends of straight segments overlapped on the inner side (18 degrees apart); cutting each corner line on the radial plane a gap short keeps them apart.
+  - **Coating:** linear albedo 0.04 (charcoal, Unreal's table 0.02-0.05, never 0), roughness 0.65, not metallic; F0 0.04.
+  - **Not covered:** reflection probe and ray-traced hit shading read no facet variation (`ray_scene.glsl`), so reflections show one tone a material.

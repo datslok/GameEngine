@@ -1,6 +1,6 @@
 # Materials
 
-Covers: `src/scene/material.h`, `src/core/coverage_mips`, `src/core/srgb`, `src/render/gpu/alpha_mask`, `assets/shaders/alpha_mask.glsl`, `assets/shaders/cut_out_fragment.glsl`, `assets/shaders/cut_out.frag`, `assets/shaders/cut_out_prepass.frag`
+Covers: `src/scene/material.h`, `src/core/coverage_mips`, `src/core/srgb`, `src/render/gpu/alpha_mask`, `src/render/gpu/facet_variation`, `assets/shaders/facet_variation.glsl`, `assets/shaders/alpha_mask.glsl`, `assets/shaders/cut_out_fragment.glsl`, `assets/shaders/cut_out.frag`, `assets/shaders/cut_out_prepass.frag`
 
 What a surface is made of, from file to `Material`, and how cut-outs keep their holes. How materials are shaded: [shading.md](shading.md) (BRDF, normal maps, clear coat), [parallax-and-grounds.md](parallax-and-grounds.md) (height maps, ground layers). Glass and blended surfaces drawn: [glass.md](glass.md). Loading and texture caching: [assets.md](assets.md).
 
@@ -23,6 +23,7 @@ What a surface is made of, from file to `Material`, and how cut-outs keep their 
 | Glow | `emissive` (linear, may exceed 1), `emissiveTexture` (sRGB, multiplying it) | black |
 | Alpha | `alphaMode` (`Opaque`, `Mask`, `Blend`), `alphaCutoff`, `opacity`, `doubleSided`, `backKeepsNormal` | Opaque, 0.5, 1, false |
 | Leaves | `diffuseTransmission`, `diffuseTransmissionTint` | 0 |
+| Faceted shapes | `facetTone` (a share), `facetRoughness`: each triangle's texture coordinate read as its facet's two random numbers (`render/gpu/facet_variation.h`, applied after any blended layers) | 0 |
 | Thin glass | `transmission`, `transmissionTexture` (red) | 0 |
 | Thick glass | `thickness` (model units), `thicknessTexture` (green), `attenuationColour`, `attenuationDistance`, `ior` | 0, infinite, 1.5 |
 | Clear coat | `clearCoat` (red texture), `clearCoatRoughness` (green texture), `clearCoatNormalTexture`, `clearCoatNormalScale` | 0, 0, 1 |

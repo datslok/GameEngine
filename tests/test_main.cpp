@@ -58,6 +58,8 @@ void testHeightMap();
 void testTypicalGpu();
 void testGroundLayers();
 void testForest();
+void testForestStructures();
+void testFacetVariation();
 void testIslandHangings();
 void testHangingMoss();
 void testDriftingRocks();
@@ -383,6 +385,8 @@ const RoutineTest routineTests[] = {
     {"testPlayerControls", testPlayerControls},
     {"testLightLab", testLightLab},
     {"testForest", testForest},
+    {"testForestStructures", testForestStructures},
+    {"testFacetVariation", testFacetVariation},
     {"testIslandHangings", testIslandHangings},
     {"testHangingMoss", testHangingMoss},
     {"testDriftingRocks", testDriftingRocks},

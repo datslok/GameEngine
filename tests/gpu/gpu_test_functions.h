@@ -246,6 +246,10 @@
 #define GPU_TEST_THINNED_SHARE 0
 #define GPU_TEST_THINNED_CARD 1
 
+// facet_variation_test.comp
+#define GPU_TEST_FACET_TONE 0
+#define GPU_TEST_FACET_ROUGHNESS 1
+
 // cull_records_test.comp
 #define GPU_TEST_CULL_DRAW 0
 #define GPU_TEST_CAMERA_CANDIDATE 1

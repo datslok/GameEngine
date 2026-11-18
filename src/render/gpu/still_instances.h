@@ -12,7 +12,7 @@
 /*
 * The still draws' GPU records kept from frame to frame (docs/research/PERSISTENTSCENE.md, stage 2): their instances, last-frame
 * matrices (their own) and a material table holding their materials, packed once and repacked only where the frame
-* built still draws again (FrameDescription::builtStillDraws). Packing every draw's 272-byte material and normal matrix
+* built still draws again (FrameDescription::builtStillDraws). Packing every draw's 288-byte material and normal matrix
 * every frame cost the forest's 35,000 objects about 10 ms of CPU.
 *
 * builtStillDraws is all that changed only when the frame follows the last one packed (stillPreviousVersion), so a frame

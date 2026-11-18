@@ -67,7 +67,7 @@ Measure first: per-pass GPU times (F4) at the rim, the Ring and the wall, then e
 | # | Lever | Gain (guessed) | Effort | Cost grows with |
 |---|---|---|---|---|
 | 1 | Render scale and DLSS model: a 0.67-0.77 scale (Quality/Balanced), K beside M compared by eye | AA 3.7 → ~1.5-2.5; MAIN by the pixels | settings only | pixels |
-| 2 | Per-view budgets: the probe and far cascades without small plants and grass (a class mask and minimum size a view), opaque stand-ins for leaves in far cascades and the probe | most of CUBE; shadow passes 30-60% | low-medium | what each view sees |
+| 2 | Per-view budgets: the probe and far cascades without small plants and grass (a class mask and minimum size a view), opaque stand-ins or a third, coarser leaf mesh (`SHADOWCACHE.md`) for leaves in far cascades and the probe; shadows while turning measured first (0.23 ms standing after `gpu-cull-shadows`) | most of CUBE; shadow passes 30-60% | low-medium | what each view sees |
 | 3 | Foliage density by distance with area kept (fewer, wider plants and cards), tighter cards trimmed to the leaf outline | 15-30% of PREPASS + MAIN | medium | pixels covered |
 | 4 | Shading LOD: a cheap far material variant (no normal map, specular or parallax) | 1-3 ms in a forest | medium | pixels |
 | 5 | VRS image on the main pass from contrast and motion | 10-20% of MAIN | medium | pixels |

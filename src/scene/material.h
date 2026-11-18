@@ -91,6 +91,13 @@ struct Material {
     float diffuseTransmission = 0.0f;
     Vec3 diffuseTransmissionTint{1.0f, 1.0f, 1.0f};
 
+    // Each flat facet's own tone and roughness (render/gpu/facet_variation.h), for faceted meshes that give every corner
+    // of a triangle the same texture coordinate, two random numbers 0..1 (games/forest/structures): the first lightens or
+    // darkens the albedo by up to facetTone (a share, 0.12 = 12 %), the second moves the roughness by up to
+    // facetRoughness. 0 for every other material, whose texture coordinates mean something else.
+    float facetTone = 0.0f;
+    float facetRoughness = 0.0f;
+
     // Thin glass (KHR_materials_transmission): the share of the light from behind that passes through the non-metal part
     // (0..1), tinted by the colour, less what its surface reflects; its texture's red channel (linear) multiplies it.
     // A transmitting material is drawn after the opaque scene, blended over it (render/gpu/transparency.h).

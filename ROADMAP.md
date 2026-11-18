@@ -350,13 +350,17 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] The terrain's ground materials packed once a run (`ground-material-runs`)
   - [x] Still entities announced, not searched for (`still-announced`)
 - [x] Cheaper forest shadows (`understorey-shadow-cascades`)
-- [ ] Coarser leaves in the far cascades (`docs/research/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
 - [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`): ground-following patches (`ground-cover-patches`), meadow grass (`meadow-grass`), the forest floor (`forest-floor-cover`)
-- [ ] The structures, half reclaimed
-  - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons; the Ring: 400 m across, on edge, sunk to its waist; far towers in the haze
-  - Searchlights sweeping the land (the user, Nov 14 2026): shadowed spot lights near, and beams kilometres long through the height fog by its closed form along the cone
-  - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, vines hanging hundreds of metres
+- [ ] The structures, half reclaimed, in a stealth-alien look (research and direction in `docs/research/STRUCTURES.md`)
+  - [ ] 1. Faceted slabs: the Monolith as five slabs, the Ring as 20 segments, needle spires, a strut, matte coating with facets' own tones (`structure-slabs`)
+  - [ ] 2. Weathering: moss on shoulders, streaks, panel and sawtooth seams, vines from ledges, ground contact (`structure-weathering`)
+  - [ ] 3. Straight light lines: emissive strips at least a pixel wide, pulsing by the tick, the Ring's pulse riding its travelling wave (`structure-lines`)
+  - [ ] 4. The research camp: generated modules, dome, mast, pad and floodlights, CC0 props, warm spot lights (`research-camp`)
+  - [ ] 5. Floating parts: the crown over the tallest slab, and the Ring's segments bobbing in a wave travelling clockwise round it (`floating-crown`)
+  - [ ] 6. The gas giant: an analytic body in the sky with ring, shadows and a dim light at night (`gas-giant`)
+  - [ ] 7. Lines near the camera as tube lights (`line-lights`)
+  - [ ] 8. Searchlight beams kilometres long through the height fog, shadowed (`searchlight-beams`)
 - [ ] Wind (research in `docs/research/WIND.md`); left: its shadow cache cost measured
   - [x] The wind field (`wind-field`), swaying plants (`wind-sway`), hanging things (`wind-hanging`), follow-ups (`wind-flutter`, `wind-chain-swing`)
 - [ ] Level of detail (research in `docs/research/LOD.md`): by error in pixels (`tree-lod`), shadows from the same levels (`shadow-lod`), the terrain's CDLOD (`terrain-lod`)
@@ -382,7 +386,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [x] Texture compression: BC7 everywhere (`texture-compression`; research in `docs/research/TEXTURECOMPRESSION.md`)
 - [x] Video memory in use on F4 (`vram-in-use`)
 - [x] DLSS Quality by default (`dlss-quality-default`)
-- [ ] The GPU-bound frame (later, the user's choice Nov 18 2026): each pass measured, then the levers in `docs/research/WORLDSCALE.md`
+- [ ] The GPU-bound frame (later, the user's choice Nov 18 2026): each pass measured (shadows while turning too), then the levers in `docs/research/WORLDSCALE.md`, coarser leaves in the far cascades among them (`docs/research/SHADOWCACHE.md`)
 - [ ] Far terrain following the camera, only if needed
 - [ ] Aerial perspective from the sky's tables, only if the haze looks wrong
 - [ ] Golden views, tests, packaging with the downloaded assets, docs

@@ -478,23 +478,12 @@ namespace {
 
         assert(near(lowest, -islandDepth * 60.0f, 1e-3f) && highest > 0.0f && highest < 0.15f * 60.0f);
 
-        const float tube = 0.06f;
-        const Mesh ring = ringMesh(tube, 48, 12);
-        assert(ring.triangles.size() == static_cast<std::size_t>(2 * 48 * 12));
-
-        for (const Triangle& triangle : ring.triangles) {
-            const Vec3 middle = centroid(ring, triangle);
-            const Vec3 onCircle = Vec3{middle.x, middle.y, 0.0f}.normalized();
-            const Vec3 normal = faceNormal(ring.vertices[triangle.first], ring.vertices[triangle.second], ring.vertices[triangle.third]);
-            assert(normal.dot(middle - onCircle) > 0.0f);
-            assert(near((middle - onCircle).length(), tube, 0.01f));
-        }
     }
 
     /*
     * The pillars and islands: as many as asked, the same every run, spaced apart, at their sizes, clear of the path,
-    * the Ring, the clearing and the start; the islands above the pillars under them. The Monolith stands on the clearing
-    * and its bridge reaches its pillar.
+    * the Ring, the clearing and the start; the islands above the pillars under them. The Monolith's pillar is
+    * tall enough for its strut (forest_structures_test has the rest).
     */
     void testShapesArePlacedApartAndClearOfTheWalk() {
         const ValleyLayout layout{};
@@ -540,21 +529,8 @@ namespace {
         }
 
         const float level = 3.0f;
-        const std::vector<ValleyBox> monolith = monolithBoxes(level);
-        float top = 0.0f;
-
-        for (const ValleyBox& box : monolith) {
-            top = std::max(top, box.centre.y + box.halfSize.y);
-        }
-
-        assert(near(monolith.front().centre.y + monolith.front().halfSize.y, level + 600.0f, 1e-3f));
-        assert(monolith.front().centre.y - monolith.front().halfSize.y < level);
-        assert(near(monolith.front().centre.z + monolith.front().halfSize.z, forestMonolithPlace.y, 1e-3f));
-        assert(top > level + 700.0f);
-
         const PillarPlacement bridgePillar = monolithPillar(level);
         assert(bridgePillar.foot.y + bridgePillar.height > level + 340.0f);
-        assert(farTowerBoxes().size() >= 10);
     }
 
     /*
@@ -726,7 +702,8 @@ namespace {
         assert(sample.tangent.w == -1.0f && sample.tangent.x > 0.5f);
 
         assert(forest.game.getPillars().size() == 41 && forest.game.getIslands().size() == 8);
-        assert(near(forest.world.get<Transform>(forest.game.getRing()).scale.x, forestRingRadius, 1e-3f));
+        const Transform& ringPlace = forest.world.get<Transform>(forest.game.getRing());
+        assert(near(ringPlace.position.x, forestRingPlace.x, 1e-3f) && near(ringPlace.position.z, forestRingPlace.y, 1e-3f) && ringPlace.scale.x == 1.0f);
         assert(!forest.game.getMonolith().empty());
 
         for (const Entity part : forest.game.getMonolith()) {
@@ -740,8 +717,9 @@ namespace {
         assert(down && near(down->hit.point.y, forestHeight(x, z), 0.05f));
 
         const float level = forestHeight(forestClearingCentre.x, forestClearingCentre.y);
-        const std::optional<LevelHit> ahead = raycast(forest.game.getLevel(), Ray{Vec3{20.0f, level + 50.0f, -300.0f}, Vec3{0.0f, 0.0f, -1.0f}});
-        assert(ahead && near(ahead->hit.point.z, forestMonolithPlace.y, 0.05f));
+        // Beside the tallest slab's front ridge (it zigzags), so the facet there stands a little behind the ridge's line.
+        const std::optional<LevelHit> ahead = raycast(forest.game.getLevel(), Ray{Vec3{-13.0f, level + 50.0f, -300.0f}, Vec3{0.0f, 0.0f, -1.0f}});
+        assert(ahead && ahead->hit.point.z < forestMonolithPlace.y + 0.01f && ahead->hit.point.z > forestMonolithPlace.y - 3.0f);
 
         const DirectionalLight& sun = forest.world.get<DirectionalLight>(forest.game.getSun());
         assert(sun.castsShadows && sun.intensity > 0.0f && sun.direction.y < 0.0f);
