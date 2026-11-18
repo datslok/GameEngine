@@ -26,7 +26,7 @@ The light components games place, how a frame gathers them and how the shaders r
 
 ## Each frame
 
-1. `buildFrame` → `collectLighting(world, alpha)` (`scene/lighting`) fills `FrameLighting`: ambient and background summed, point and spot positions interpolated like meshes (`PlacedPointLight`, `PlacedSpotLight`, which also carry the entity and the seat and shadow fades); the first `ProbeCascades`, `Atmosphere`, `StarrySky` and `Fog`; the frame's probe events.
+1. `buildFrame` → `collectLighting(world, alpha)` (`scene/lighting`) fills `FrameLighting`: ambient and background summed, point and spot positions interpolated like meshes (`PlacedPointLight`, `PlacedSpotLight`, which also carry the entity and the seat and shadow fades); the first `ProbeCascades`, `Atmosphere` and `StarrySky`; every `Fog` (its layers, in the world's order); the frame's probe events.
 2. `VulkanRenderer::drawScene`: `prioritizeLights`, then `packLighting(lighting, cameraPosition)` → `GpuLights`.
 3. `packLighting` drops what `canBeDrawn` refuses (a zero direction, a range that is not positive) and what is past the limits (`selectDrawableLights`; a light's place in its list is its slot, which shadow planning relies on), precomputes the cone cosines (inner clamped to outer), and measures positions from the camera, so the viewer is the shaders' origin.
 4. Shadows join later (`attachShadows`, `render/gpu/shadow_map`).

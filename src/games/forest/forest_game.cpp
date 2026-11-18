@@ -213,6 +213,10 @@ void visit(ForestSunSettings& settings, SettingsVisitor& visitor) {
 void visit(ForestMistSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Mist", settings.enabled);
     visit(settings.fog, visitor);
+    visitor.group("Floor mist", [&] {
+        visitor.field("Floor mist", settings.floorEnabled);
+        visit(settings.floor, visitor);
+    });
 }
 
 void visit(ForestGroundSettings& settings, SettingsVisitor& visitor) {
@@ -278,6 +282,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     sun = world.create();
     world.add(sun, DirectionalLight{});
     air = world.create();
+    floorMist = world.create();
     probes = world.create();
     world.add(probes, ProbeCascades{});
 
@@ -1163,15 +1168,20 @@ void ForestGame::updateDaylight(World& world) {
         world.add(air, atmosphere);
     }
 
-    if (mistSettings.enabled) {
-        if (world.has<Fog>(air)) {
-            world.get<Fog>(air) = mistSettings.fog;
-        } else {
-            world.add(air, mistSettings.fog);
+    // Each layer of mist on its own entity, there while switched on.
+    const auto placeFog = [&world](Entity entity, bool on, const Fog& fog) {
+        if (on) {
+            if (world.has<Fog>(entity)) {
+                world.get<Fog>(entity) = fog;
+            } else {
+                world.add(entity, fog);
+            }
+        } else if (world.has<Fog>(entity)) {
+            world.remove<Fog>(entity);
         }
-    } else if (world.has<Fog>(air)) {
-        world.remove<Fog>(air);
-    }
+    };
+    placeFog(air, mistSettings.enabled, mistSettings.fog);
+    placeFog(floorMist, mistSettings.enabled && mistSettings.floorEnabled, mistSettings.floor);
 
     // The wind over the valley (scene/wind.h), on the air entity too.
     if (world.has<Wind>(air)) {

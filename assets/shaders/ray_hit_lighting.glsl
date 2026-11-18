@@ -9,6 +9,9 @@
 // matteColour, for the hit's matte colour.
 #include "brdf.glsl"
 
+// The sun's light through the fog above a hit (fogSunThrough), as surfaces get it.
+#include "scene_fog_data.glsl"
+
 // The point lights, then the spotlights, whose light may reach the probes' rays' hits: x numbers into the light buffers,
 // y 1 for a fast light (render/gpu/ddgi_sampling.h, GpuProbeHitLight).
 layout(std430, set = 1, binding = 14) readonly buffer ProbeHitLights {
@@ -90,7 +93,7 @@ RayHitLight lightAtRayHit(vec3 hit, vec3 normal, vec3 direction, float bounce) {
         float facing = dot(normal, toLight);
 
         if (facing > 0.0) {
-            irradiance += directional[i].radiance.rgb * facing * lightThrough(shadowFrom, toLight, DDGI_RAY_REACH);
+            irradiance += directional[i].radiance.rgb * fogSunThrough(hit.y, toLight) * facing * lightThrough(shadowFrom, toLight, DDGI_RAY_REACH);
         }
     }
 

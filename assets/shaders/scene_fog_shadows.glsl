@@ -29,35 +29,42 @@ vec3 sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight, in
 }
 
 /*
-* The light the fog over a stretch past the grid scatters towards the eye per unit of optical depth, each directional
-* light's dimmed by the share of that fog's light it reaches: the mean of its shadow at steps samples, each carrying an
-* equal share of the light gathered (fogFarSampleDistance), offset by turn (0..1) so each pixel and frame samples
-* elsewhere and the anti-aliasing averages them. Unshadowed lights, and every light with no steps, light it all.
+* The light the fog over a stretch past the grid scatters towards the eye per unit of optical depth, as the mean of its
+* light at steps samples, each carrying an equal share of the light gathered (fogMediaFarSampleDistance), offset by turn
+* (0..1) so each pixel and frame samples elsewhere and the anti-aliasing averages them. At each sample: the layers'
+* shares there, each directional light dimmed by its shadow and by the fog above. With no steps, fogBeyondSource (the
+* stretch lit throughout).
 */
 vec3 fogBeyondSourceShadowed(FogFarStretch stretch, int steps, float turn) {
-    vec3 light = fogBeyondAmbient();
-
-    for (int i = 0; i < counts.x; ++i) {
-        vec3 reached = vec3(1.0);
-        int tile = directional[i].shadowTile;
-
-        if (tile >= 0 && steps > 0) {
-            vec3 sum = vec3(0.0);
-
-            for (int k = 0; k < steps; ++k) {
-                float share = (float(k) + turn) / float(steps);
-                float distance = fogFarSampleDistance(frameFog.medium, cameraOrigin.y, stretch.direction.y, stretch.start, stretch.end, share);
-                sum += sunShadowInAir(tile, directional[i].cascadeCount, stretch.direction * distance, directional[i].toLight.xyz,
-                                      directional[i].farShadowTile, directional[i].distantOccluderReach);
-            }
-
-            reached = sum / float(steps);
-        }
-
-        light += fogInScattering(directional[i].radiance.rgb * reached, directional[i].toLight.xyz, stretch.direction, frameFog.medium.w);
+    if (steps <= 0) {
+        return fogBeyondSource(stretch);
     }
 
-    return light * frameFog.albedo.rgb;
+    vec3 ambient = fogBeyondAmbient();
+    vec3 sum = vec3(0.0);
+
+    for (int k = 0; k < steps; ++k) {
+        float share = (float(k) + turn) / float(steps);
+        float distance = fogMediaFarSampleDistance(frameFog.media, cameraOrigin.y, stretch.direction.y, stretch.start, stretch.end, share);
+        vec3 point = stretch.direction * distance;
+        float height = cameraOrigin.y + point.y;
+        vec4 shares = fogMediaShares(frameFog.media, height, distance);
+        sum += fogMediaAmbient(frameFog.media, shares, ambient);
+
+        for (int i = 0; i < counts.x; ++i) {
+            vec3 irradiance = directional[i].radiance.rgb * fogSunThrough(height, directional[i].toLight.xyz);
+            int tile = directional[i].shadowTile;
+
+            if (tile >= 0) {
+                irradiance *= sunShadowInAir(tile, directional[i].cascadeCount, point, directional[i].toLight.xyz, directional[i].farShadowTile,
+                                             directional[i].distantOccluderReach);
+            }
+
+            sum += fogMediaInScattering(frameFog.media, shares, irradiance, directional[i].toLight.xyz, stretch.direction);
+        }
+    }
+
+    return sum / float(steps);
 }
 
 // fogAlongView with the fog past the grid in the sun's shadows (fogBeyondSourceShadowed).

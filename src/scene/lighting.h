@@ -68,7 +68,7 @@ struct FrameLighting {
     std::vector<ProbeEvent> probeEvents;   // big changes signalled since the last frame, in order
     std::optional<Atmosphere> atmosphere;  // the sky and the air the light crosses (the first, if several)
     std::optional<StarrySky> stars;        // the stars behind the sky, drawn with an atmosphere (the first, if several)
-    std::optional<Fog> fog;                // fog in the air, lit by the lights (the first, if several)
+    std::vector<Fog> fogLayers;            // fog in the air, lit by the lights: every layer, adding (the renderer reads the first FOG_MAX_LAYERS)
 };
 
 // Gather the World's lights for drawing at alpha (0..1) between the last two ticks.

@@ -25,13 +25,14 @@
 *
 * Rather than march every pixel's ray, the GPU fills a grid shaped like the view (froxels: frustum voxels, gridWidth x
 * gridHeight across the screen, slices deep out to range), three compute passes a frame:
-* - fog_light.comp: each froxel's extinction (the Fog's height fog) and its light (the sun with its cascades' shadow,
+* - fog_light.comp: each froxel's extinction (the Fog layers' sum) and its light (the sun with its cascades' shadow,
 *   the point and spot lights its cluster lists with theirs, the light probes' light from all around), at a point that
 *   moves round the froxel's middle each frame, blended with last frame's grid carried along to where the point was;
 * - fog_integrate.comp: each column of froxels front to back, the light gathered and let through to the far side of
 *   each slice (exact for constant fog in a slice: energy-conserving, Hillaire 2015);
 * - fog_apply.comp: each pixel of the picture before the glass dimmed and lit by the grid at its depth, past the grid
-*   the height fog's closed form lit by the sun and sky without shadows. Glass applies it to itself as it is drawn.
+*   the layers' closed form lit by the sun (in its shadows at samples along the ray) and sky. Glass applies it to itself
+*   as it is drawn.
 *
 * Units: light values are irradiance (render/gpu/brdf.h), pixels pi times radiance, so a light of irradiance E adds
 * pi p E per unit of optical depth, and the probes' irradiance from above and below gives the light from all around.
@@ -62,25 +63,72 @@ struct FogSettings {
     // the camera and a pillar hundreds of metres away, in its shadow, was lit as brightly as open air towards the sun
     // (the user's look at the forest, Nov 14 2026). Only the picture pass reads them; glass sees that fog unshadowed.
     int farShadowSteps = 16;
+
+    // The directional lights (sun, moon) dimmed by the fog on their way down (fogSunTransmittance), both to each point
+    // of the fog and to each surface, so dense mist is darker deep down, the ground under it less sunlit, and a low sun
+    // barely reaches under it.
+    bool sunThroughFog = true;
+
+    // How much of the light a layer scatters forwards (its albedo times its anisotropy g) counts as still arriving from
+    // the sun's direction (the similarity relation): 1 by default (the user's choice, Nov 18 2026), 0 every scattered
+    // photon lost. Droplets deflect light only a little, and a deflected photon lights the ground nearly as well.
+    float forwardShare = 1.0f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(FogSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a range, grid size, slice count, history weight or far shadow steps outside
-// volumetric_fog_shared.h's limits.
+// volumetric_fog_shared.h's limits, or a forward share outside 0..1.
 void validateFog(const FogSettings& settings);
 
-// The fog's extinction per metre at a height: the density at the base height, falling by e every scale height.
+// One layer's extinction per metre at a height (its shape: scene/fog.h).
 float fogDensity(const Fog& fog, float height);
 
 /*
-* The fog's optical depth (the integral of its extinction) along a ray from originHeight whose direction rises
-* directionY per metre, from start to end metres along it: the closed form of the exponential, the density at start times
-* the length times (1 - exp(-x)) / x for x the exponent's change (its series near 0, so a level ray gives density x
-* length), the exponents capped at FOG_MAX_EXPONENT.
+* One layer's optical depth (the integral of its extinction) along a ray from originHeight whose direction rises
+* directionY per metre, from start to end metres along it. Exponential: the closed form, the density at start times the
+* length times (1 - exp(-x)) / x for x the exponent's change (its series near 0, so a level ray gives density x length),
+* the exponents capped at FOG_MAX_EXPONENT. Pooled: a straight ray crosses the top at most once, so the density times
+* the length below it plus the exponential's form above it, taken from that part's lower, denser end (so a ray from far
+* above stays a float).
 */
 float fogOpticalDepth(const Fog& fog, float originHeight, float directionY, float start, float end);
+
+/*
+* The fog as layers that add (Hillaire 2015; Unreal's second fog layer): the extinctions sum, and the light the mix
+* scatters is each layer's (its albedo and phase function) weighed by its share of the extinction. Each layer reaches
+* only to its maxDistance along a view ray. The layers are the first FOG_MAX_LAYERS Fogs (packFog takes no more).
+*/
+using FogLayerShares = std::array<float, FOG_MAX_LAYERS>;
+
+// The layers' summed extinction at a height, distance metres along a view ray.
+float fogMediaDensity(std::span<const Fog> layers, float height, float distance);
+
+// The layers' summed optical depth along a ray (fogOpticalDepth's arguments), each to no further than its maxDistance.
+float fogMediaOpticalDepth(std::span<const Fog> layers, float originHeight, float directionY, float start, float end);
+
+// Each layer's share of the extinction at a point (fogMediaDensity's arguments); all 0 where there is none.
+FogLayerShares fogMediaShares(std::span<const Fog> layers, float height, float distance);
+
+// Each layer's share of the optical depth over a stretch of ray, which weighs its light in the closed form past the grid.
+FogLayerShares fogMediaStretchShares(std::span<const Fog> layers, float originHeight, float directionY, float start, float end);
+
+// The light a light of this irradiance scatters towards the eye per unit of the mix's optical depth: each layer's
+// fogInScattering (its anisotropy) through its albedo, weighed by its share.
+Vec3 fogMediaInScattering(std::span<const Fog> layers, const FogLayerShares& shares, const Vec3& irradiance, const Vec3& toLight, const Vec3& viewDirection);
+
+// The light from all around (fogAmbient's) through the layers' albedos, weighed by their shares.
+Vec3 fogMediaAmbient(std::span<const Fog> layers, const FogLayerShares& shares, const Vec3& ambient);
+
+/*
+* The share of a directional light, per colour, that reaches a point (in the fog or on a surface) through the fog above
+* it: exp(-optical depth) along the ray from the point towards the light (rising toLightY per metre), each layer to its
+* maxDistance, its depth taken times 1 - forwardShare x albedo x g (the similarity relation, van de Hulst: the share
+* scattered forwards goes on nearly as it came). Under 14 m of white mist at 0.03 per metre with g 0.6, a high sun keeps
+* about 85% of its light with forwardShare 1 (66% with 0); one 5 degrees up, almost none.
+*/
+Vec3 fogSunTransmittance(std::span<const Fog> layers, float height, float toLightY, float forwardShare);
 
 // A slice coordinate (0 at the camera, 1 at the range) as a view depth (m along the view), and back (past 1 beyond the range).
 float fogSliceDepth(float slice, float range);
@@ -226,9 +274,9 @@ float fogHistoryWeight(const Vec3& previousCoordinate, float weight);
 */
 std::vector<FogIntegration> integrateFogColumn(std::span<const Vec4> lighting, float range, float stretch);
 
-// The fog from start to end metres along a ray past the grid: the height fog's closed form, lit by one source (the light
+// The fog from start to end metres along a ray past the grid: the layers' closed form, lit by one source (the light
 // scattered per unit of optical depth); nothing when end is not past start.
-FogIntegration fogBeyondGrid(const Fog& fog, const Vec3& source, float originHeight, float directionY, float start, float end);
+FogIntegration fogBeyondGrid(std::span<const Fog> layers, const Vec3& source, float originHeight, float directionY, float start, float end);
 
 /*
 * Where along a ray past the grid (from start to end metres) share (0..1) of the light the fog there scatters towards the
@@ -241,29 +289,53 @@ FogIntegration fogBeyondGrid(const Fog& fog, const Vec3& source, float originHei
 float fogFarSampleDistance(const Fog& fog, float originHeight, float directionY, float start, float end, float share);
 
 /*
+* fogFarSampleDistance through the layers, whose summed optical depth has no closed inverse: Newton's steps on the depth
+* from start (its slope is the density there), FOG_FAR_SAMPLE_NEWTON_STEPS of them from the distance exact for even fog,
+* bracketed, halving the bracket when a step would leave it (the density can fall to 0 past a layer's end). One
+* exponential layer alone keeps the closed form: fast, and the same as before layers.
+*/
+float fogMediaFarSampleDistance(std::span<const Fog> layers, float originHeight, float directionY, float start, float end, float share);
+
+/*
+* The layers as the frame's record holds them (std430, scene_fog.glsl's FogMedia): per layer (density, base height,
+* scale height, anisotropy) and (albedo, farthest distance), each layer's shape (0 exponential, FOG_SHAPE_POOLED), and
+* the extent: x the layer count, y the farthest of their distances, z the forward share (FogSettings, set by packFog).
+*/
+struct GpuFogMedia {
+    float layer[FOG_MAX_LAYERS][4];
+    float albedo[FOG_MAX_LAYERS][4];
+    float shape[4];
+    float extent[4];
+};
+
+static_assert(FOG_MAX_LAYERS == 4, "The shaders keep the layers' shares and shapes in one vec4 each");
+static_assert(sizeof(GpuFogMedia) == 160, "GpuFogMedia must match volumetric_fog.glsl's FogMedia");
+
+// The first FOG_MAX_LAYERS layers packed.
+GpuFogMedia packFogMedia(std::span<const Fog> layers);
+
+/*
 * The frame's fog for every pass that reads it (std430, scene set 1 binding 27): the grid's camera (camera-relative,
 * without the jitter), its inverse and last frame's (taking this frame's camera-relative points), the grid (froxels
-* across, down, slices, range), the medium (density, base height, scale height, anisotropy), the albedo with the
-* farthest distance in w, the options (x 1 when on, y the history weight (0 without a usable history), z 1 reading the
-* probes) and the frame's jitter.
+* across, down, slices, range), the options (x 1 when on, y the history weight (0 without a usable history), z 1 reading
+* the probes, w 1 dimming the directional lights through the fog), the frame's jitter and the layers.
 */
 struct GpuFog {
     float viewProjection[16];
     float inverseViewProjection[16];
     float previousViewProjection[16];
     float grid[4];
-    float medium[4];
-    float albedo[4];
     float options[4];
     float jitter[4];
+    GpuFogMedia media;
 };
 
-static_assert(sizeof(GpuFog) == 272, "GpuFog must match scene_fog.glsl's Fog");
+static_assert(sizeof(GpuFog) == 400, "GpuFog must match scene_fog.glsl's Fog");
 
-// The frame's record: off without a fog or with the setting off; the range no further than the camera's far plane; the
+// The frame's record: off without layers or with the setting off; the range no further than the camera's far plane; the
 // air lit by the light probes only when probesRead (the frame has them), since without them their reading falls back to
 // the open sky's light, which lit the air in closed rooms as outdoors (the sky visibility grid lights it instead).
-GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
+GpuFog packFog(std::span<const Fog> layers, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
                bool probesRead, std::uint64_t frame, float cameraFar);
 
 // The picture pass's push constants (fog_apply.comp): the camera-relative view-projection's inverse as the frame was

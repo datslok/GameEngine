@@ -14,6 +14,7 @@ glTF metallic-roughness. Numbers in `render/gpu/brdf_shared.h`: dielectric refle
 - Diffuse: Lambert × `1 - specular albedo`, so a white surface under even light returns exactly what it gets (the white furnace test).
 - **Units:** the BRDF is multiplied by π, so a light's radiance is the irradiance it gives a surface facing it, and white matte lit head-on by 1 shows 1.
 - `facesLight` is asked before a light's shadow lookups: a light giving nothing would waste them.
+- Directional lights arrive dimmed by the fog above the surface (`fogSunThrough`, `fog.md`, Layers).
 
 **`ShadingPoint`** (`prepareShading`, once a pixel, C++ and GLSL alike):
 

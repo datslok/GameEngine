@@ -46,13 +46,19 @@ struct ForestSunSettings {
 void visit(ForestSunSettings& settings, SettingsVisitor& visitor);
 
 /*
-* The valley's haze (a Fog, render/gpu/volumetric_fog.h): humid air filling the valley, about 6 km of sight on its floor
-* (3 / density), thinning by e every 300 m up, so the pillars' tops and the islands stand clearer than their feet, out
-* to 20 km along a ray (the far plane). A first guess for the rough valley, to be judged by eye.
+* The valley's mist, two layers of Fog that add (render/gpu/volumetric_fog.h, docs/research/FOGLAYERS.md):
+* - fog, the haze: humid air filling the valley, about 6 km of sight on its floor (3 / density), thinning by e every
+*   300 m up, so the pillars' tops and the islands stand clearer than their feet, out to 20 km along a ray (the far plane);
+* - floor, a pool of mist on the valley's floor: about 100 m of sight (the user asked for a denser layer in the jungle
+*   that tops out under the canopy, Nov 18 2026), even up to 12 m and fading over 4 m above, under the canopy trees'
+*   forks (18 m); heights absolute, as cold air pools, so knolls rise out of it. Out to 2 km along a ray.
+* enabled switches both; floorEnabled the pool alone.
 */
 struct ForestMistSettings {
     bool enabled = true;
     Fog fog{.density = 0.0005f, .baseHeight = 0.0f, .scaleHeight = 300.0f, .maxDistance = 20000.0f};
+    bool floorEnabled = true;
+    Fog floor{.density = 0.03f, .baseHeight = 12.0f, .scaleHeight = 4.0f, .maxDistance = 2000.0f, .shape = FogShape::Pooled};
 };
 
 void visit(ForestMistSettings& settings, SettingsVisitor& visitor);
@@ -390,6 +396,7 @@ private:
     std::vector<Entity> structures;
     Entity sun;
     Entity air;
+    Entity floorMist; // the mist's pool on the valley's floor, a second Fog beside the air's haze
     Entity probes;
 
     // What is walked on: the finest ring of ground and the Monolith, built once in onInit, never rebuilt.

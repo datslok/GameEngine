@@ -1,6 +1,9 @@
 #include "scene/fog.h"
 
+#include <array>
+
 void visit(Fog& fog, SettingsVisitor& visitor) {
+    visitor.choice("Shape", fog.shape, std::array{"Exponential", "Pooled"});
     visitor.field("Density", fog.density, {.min = 0.0f, .max = 10.0f, .sliderMax = 0.1f, .unit = "/m"});
     visitor.field("Base height", fog.baseHeight, {.min = -10000.0f, .max = 10000.0f, .sliderMin = -20.0f, .sliderMax = 50.0f, .unit = "m"});
     visitor.field("Scale height", fog.scaleHeight, {.min = 0.1f, .max = 10000.0f, .sliderMax = 100.0f, .unit = "m"});
