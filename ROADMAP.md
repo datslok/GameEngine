@@ -397,7 +397,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] The camera's CPU work measured in parts (FRUSTUM, LEVELS, BATCH, MOVING on F4; `camera-timing`); CPU-side occlusion by readback dropped for GPU-driven drawing (the user, Nov 18 2026)
 - [ ] GPU-driven drawing (the user, Nov 18 2026: to fill the whole valley and build larger worlds): the GPU culls, chooses levels and batches every view into indirect draws, the CPU only coarse regions; research and a staged plan first (Decima, RedLynx, Unreal's GPU Scene, niagara) in `docs/research/GPUDRIVEN.md`. The user's choices (Nov 18 2026): the CPU path deleted after stage 5; F4's counts a frame or two late; the shared mesh buffer late; worlds as big as possible (the space simulator of phase 13), so the chunks stage is required
   - [x] 1. Indirect draws: each batch drawn by `vkCmdDrawIndexedIndirect` from a command the CPU writes, nothing else changed (`indirect-draws`)
-  - [ ] 2. Lasting culling records and a level table on the GPU; level and frustum maths in shader libraries with C++ mirrors (`cull-records`)
+  - [x] 2. Culling records and a level table on the GPU, copied each frame as the instances are (the user chose two steps; the persistent scene's lasting GPU buffers then remove both copies); level and frustum maths in shader libraries with C++ mirrors (`cull-records`)
   - [ ] 3. The camera's and velocity pass's lists built on the GPU behind a setting, `cull-compare` against the CPU's (`gpu-cull-camera`)
   - [ ] 4. Reflection probe faces and the mirror as GPU views (`gpu-cull-captures`)
   - [ ] 5. Shadow tiles as GPU views, the cache redrawn on announced changes; then the CPU path deleted (`gpu-cull-shadows`)

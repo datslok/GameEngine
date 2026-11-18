@@ -82,6 +82,7 @@ void testImpostors();
 void testLeafClusters();
 void testDepthPrepass();
 void testOcclusionCulling();
+void testCullRecords();
 void testTextureEncoding();
 void testCoverageMips();
 void testBlockCompression();
@@ -350,6 +351,7 @@ const RoutineTest routineTests[] = {
     {"testGroundLayers", testGroundLayers},
     {"testDepthPrepass", testDepthPrepass},
     {"testOcclusionCulling", testOcclusionCulling},
+    {"testCullRecords", testCullRecords},
     {"testTextureEncoding", testTextureEncoding},
     {"testCoverageMips", testCoverageMips},
     {"testBlockCompression", testBlockCompression},

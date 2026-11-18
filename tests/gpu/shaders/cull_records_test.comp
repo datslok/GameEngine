@@ -1,0 +1,58 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs culling.glsl's and level_of_detail.glsl's functions on the cases cull_records_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "culling.glsl"
+#include "level_of_detail.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_CULL_DRAW) {
+        // Inputs: the record's bounds and level sphere, (flags, hidden below error, levels, shares vertices), the four
+        // slots' meshes (-1: none), their errors, the view's eye and pixels a metre, (pixel error, view flags), then the
+        // frustum's six planes. Output: (slot, thinned, sphere in frustum, camera takes).
+        CullRecord record;
+        record.bounds = testInput(0);
+        record.levelSphere = testInput(1);
+        vec4 packed = testInput(2);
+        record.flags = uint(packed.x);
+        record.mesh = 0u;
+        record.hiddenBelowError = packed.y;
+        record.unused = 0u;
+
+        MeshLevels levels;
+        vec4 meshes = testInput(3);
+        vec4 errors = testInput(4);
+
+        for (int slot = 0; slot < CULL_LEVEL_SLOTS; ++slot) {
+            levels.meshes[slot] = meshes[slot] < 0.0 ? CULL_NO_MESH : uint(meshes[slot]);
+            levels.errorMetres[slot] = errors[slot];
+        }
+
+        levels.levels = uint(packed.z);
+        levels.sharesVertices = uint(packed.w);
+        levels.unused0 = 0u;
+        levels.unused1 = 0u;
+
+        LevelView view;
+        view.eye = testInput(5);
+        view.pixelError = testInput(6).x;
+        view.flags = uint(testInput(6).y);
+        view.unused0 = 0u;
+        view.unused1 = 0u;
+
+        CullFrustum frustum;
+
+        for (int plane = 0; plane < 6; ++plane) {
+            frustum.planes[plane] = testInput(7 + uint(plane));
+        }
+
+        int slot = chooseLevelSlot(record, levels, view);
+        testOutput(0, vec4(float(slot), slotThinned(record, levels, slot) ? 1.0 : 0.0, sphereInFrustum(frustum, record.bounds) ? 1.0 : 0.0,
+                           cameraTakes(record, frustum) ? 1.0 : 0.0));
+    }
+}

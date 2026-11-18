@@ -87,6 +87,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `depth_of_field.glsl` | `render/gpu/depth_of_field` | `depth_of_field_gpu_test.cpp` |
 | `dither.glsl` | `core/srgb`, `core/dither` | `dither_gpu_test.cpp` |
 | `occlusion_culling.glsl` | `render/gpu/occlusion_culling` | `occlusion_culling_gpu_test.cpp` |
+| `culling.glsl`, `level_of_detail.glsl` | `render/gpu/cull_records` | `cull_records_gpu_test.cpp` |
 | `overlay.glsl` | `render/gpu/overlay_composite` | `overlay_gpu_test.cpp` |
 | `clusters.glsl` | `render/gpu/clusters` | `clusters_gpu_test.cpp` |
 | `cascades.glsl` | `render/gpu/cascades` | `cascades_gpu_test.cpp` |
