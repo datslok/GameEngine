@@ -142,7 +142,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     occlusionCulling = std::make_unique<VulkanOcclusionCulling>(device, nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout(),
                                                                 framesInFlight);
     cameraCulling = std::make_unique<VulkanCameraCulling>(device, framesInFlight);
-    cullStyles.resize(framesInFlight);
+    meshPool = std::make_unique<VulkanMeshPool>(device, uploads);
+    cullFrameStyles.resize(framesInFlight);
     cullCompares.resize(framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -1171,7 +1172,7 @@ std::string VulkanRenderer::compareCulling() {
 * when it was compared, its lists against the CPU's of the same frame, differences near an edge told apart.
 */
 void VulkanRenderer::takeCameraCull(const VulkanCameraCulling::Collected& culled, std::uint32_t frameIndex) {
-    const std::vector<CullGroupStyle>& styles = cullStyles.at(frameIndex);
+    const std::vector<CullGroupStyle>& styles = cullFrameStyles.at(frameIndex);
     lastCameraCull = CameraCullCounts{};
     lastCameraCull.drawn = culled.counts.values[CAMERA_CULL_COUNT_DRAWN];
 
@@ -1400,6 +1401,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Video memory as this frame begins: the driver's figures are fetched again once per frame number.
     device.startMemoryFrame(++memoryFrameNumber);
     stats.videoMemory = summariseVideoMemory(device.getHeapMemory(), device.reportsMemoryBudget());
+    stats.videoMemory.meshBytes = meshPool->getUsedBytes();
+    stats.videoMemory.meshHeldBytes = meshPool->getHeldBytes();
 
     Camera camera = description.camera;
     camera.setAspectRatio(getFrameAspectRatio());
@@ -1469,7 +1472,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (gpuCulling) {
         cullFrame = cameraCullTable.update(
-            description, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getIndexCount(); },
+            description, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
             [this](MeshHandle mesh) { return mesh.index < meshes.size() && meshes[mesh.index] && meshes[mesh.index]->changedShape(); });
     }
 
@@ -1801,7 +1804,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, *cullFrame, cullView, frames[frame.frameIndex].scene->drawList.describe().buffer,
                             comparing);
         endGpuPass(frame, GpuPass::CameraCull);
-        cullStyles[frame.frameIndex] = cullFrame->styles;
+        cullFrameStyles[frame.frameIndex] = cullFrame->styles;
         cullCompares[frame.frameIndex].reset();
 
         if (comparing) {
@@ -1810,8 +1813,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             cullCompares[frame.frameIndex] = std::move(compare);
         }
 
-        mainPass = PassDraws{nullptr, &*cullFrame, cameraCulling->getMainCommands(frame.frameIndex)};
-        motionPass = PassDraws{nullptr, &*cullFrame, cameraCulling->getMotionCommands(frame.frameIndex)};
+        mainPass = PassDraws{nullptr, &*cullFrame, cameraCulling->getMainCommands(frame.frameIndex), cameraCulling->getPackedMain(frame.frameIndex),
+                             cameraCulling->getDrawCounts(frame.frameIndex), 0};
+        motionPass = PassDraws{nullptr, &*cullFrame, cameraCulling->getMotionCommands(frame.frameIndex), cameraCulling->getPackedMotion(frame.frameIndex),
+                               cameraCulling->getDrawCounts(frame.frameIndex), static_cast<std::uint32_t>(cullStyles)};
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
@@ -3017,9 +3022,8 @@ void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparen
     // One object at a time, far to near: a double-sided one's back faces (front faces culled), then its front faces.
     for (const TransparentBatch& batch : transparent.batches) {
         vkCmdSetCullMode(commands, batch.backFaces ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT);
-        std::uint32_t indexCount = 0;
-        bindMesh(commands, batch.mesh, indexCount);
-        vkCmdDrawIndexed(commands, indexCount, 1, 0, 0, batch.firstInstance);
+        const MeshPlacement& placed = bindMesh(commands, batch.mesh);
+        vkCmdDrawIndexed(commands, placed.indexCount, 1, placed.firstIndex, static_cast<std::int32_t>(placed.firstVertex), batch.firstInstance);
         ++stats.drawCalls;
     }
 
@@ -3167,41 +3171,91 @@ namespace {
     };
 }
 
+/*
+* Consecutive pooled batches drawn the same way go in one multi-draw (drawRuns): their commands written side by side
+* (writeRun keeps a run in one chunk, so a run longer than a chunk takes a call a chunk), the pools bound once. A mesh
+* with its own buffers is bound and drawn alone. Returns the draw calls.
+*/
 std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches, const BatchPipelines& pipelines) const {
     BatchState state{pipelines};
+    bool poolsBound = false;
+    std::size_t calls = 0;
+    std::vector<GpuDrawCommand> run;
 
-    for (const DrawBatch& batch : batches) {
-        state.use(commands, batch.cutOut, batch.doubleSided);
-        std::uint32_t indexCount = 0;
-        bindMesh(commands, batch.mesh, indexCount, pipelines.previousShapes);
-        const VulkanIndirectCommands::Slot slot = frames[frameIndex].indirect->write(packDrawCommand(batch, indexCount));
-        vkCmdDrawIndexedIndirect(commands, slot.buffer, slot.offset, 1, sizeof(GpuDrawCommand));
+    for (const DrawRun& drawRun : drawRuns(batches, [this](MeshHandle mesh) { return pooledMesh(mesh); })) {
+        const DrawBatch& first = batches[drawRun.first];
+        state.use(commands, first.cutOut, first.doubleSided);
+
+        if (!drawRun.pooled) {
+            const MeshPlacement& placed = bindMesh(commands, first.mesh, pipelines.previousShapes);
+            poolsBound = false;
+            const VulkanIndirectCommands::Slot slot = frames[frameIndex].indirect->write(packDrawCommand(first, placed));
+            vkCmdDrawIndexedIndirect(commands, slot.buffer, slot.offset, 1, sizeof(GpuDrawCommand));
+            ++calls;
+            continue;
+        }
+
+        if (!poolsBound) {
+            bindPools(commands, pipelines.previousShapes);
+            poolsBound = true;
+        }
+
+        for (std::size_t start = 0; start < drawRun.count; start += indirectChunkCommands) {
+            const std::size_t count = std::min<std::size_t>(indirectChunkCommands, drawRun.count - start);
+            run.clear();
+
+            for (std::size_t batch = drawRun.first + start; batch < drawRun.first + start + count; ++batch) {
+                run.push_back(packDrawCommand(batches[batch], meshes.at(batches[batch].mesh.index)->getPlacement()));
+            }
+
+            const VulkanIndirectCommands::Slot slot = frames[frameIndex].indirect->writeRun(run);
+            vkCmdDrawIndexedIndirect(commands, slot.buffer, slot.offset, static_cast<std::uint32_t>(count), sizeof(GpuDrawCommand));
+            ++calls;
+        }
     }
 
-    return batches.size();
+    return calls;
 }
 
 /*
-* GPU-culled groups are drawn whether or not the GPU found anything of theirs in view (the CPU never learns the counts in
-* time): an empty command draws nothing, at the cost of its binds, until the shared mesh buffer lets one multi-draw take
-* them all (docs/research/GPUDRIVEN.md, stage 6). Their commands sit in group order; they are drawn in drawing order.
+* GPU-culled groups: each style's pooled run drawn by one vkCmdDrawIndexedIndirectCount over its packed commands, the
+* GPU's count telling how many draw something (the CPU never learns it in time); then the groups with buffers of their
+* own (deforming meshes), each by its own command, empty or not. Returns the draw calls.
 */
 std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDraws& draws, const BatchPipelines& pipelines) const {
     if (draws.groups == nullptr) {
         return drawBatches(commands, *draws.batches, pipelines);
     }
 
+    const CullDrawOrder& order = draws.groups->drawOrder;
     BatchState state{pipelines};
+    std::size_t calls = 0;
 
-    for (const std::uint32_t group : draws.groups->drawOrder) {
-        const CullGroupStyle& style = draws.groups->styles[group];
-        state.use(commands, style.cutOut, style.doubleSided);
-        std::uint32_t indexCount = 0;
-        bindMesh(commands, style.mesh, indexCount, pipelines.previousShapes);
-        vkCmdDrawIndexedIndirect(commands, draws.commands, static_cast<VkDeviceSize>(group) * sizeof(GpuDrawCommand), 1, sizeof(GpuDrawCommand));
+    if (order.pooled > 0) {
+        bindPools(commands, pipelines.previousShapes);
     }
 
-    return draws.groups->drawOrder.size();
+    for (std::size_t run = 0; run < cullStyles; ++run) {
+        if (order.runCount[run] == 0) {
+            continue;
+        }
+
+        state.use(commands, (run & 2) != 0, (run & 1) != 0);
+        vkCmdDrawIndexedIndirectCount(commands, draws.packed, VkDeviceSize{order.runFirst[run]} * sizeof(GpuDrawCommand), draws.counts,
+                                      (draws.countOffset + run) * sizeof(std::uint32_t), order.runCount[run], sizeof(GpuDrawCommand));
+        ++calls;
+    }
+
+    for (std::size_t position = order.pooled; position < order.order.size(); ++position) {
+        const std::uint32_t group = order.order[position];
+        const CullGroupStyle& style = draws.groups->styles[group];
+        state.use(commands, style.cutOut, style.doubleSided);
+        bindMesh(commands, style.mesh, pipelines.previousShapes);
+        vkCmdDrawIndexedIndirect(commands, draws.commands, static_cast<VkDeviceSize>(group) * sizeof(GpuDrawCommand), 1, sizeof(GpuDrawCommand));
+        ++calls;
+    }
+
+    return calls;
 }
 
 /*
@@ -3566,7 +3620,7 @@ void VulkanRenderer::runCloths(VkCommandBuffer commands) {
 * Handles are indices into the same numbering the AssetManager uses, so finding the GPU copy is one array access. A
 * deforming mesh binds its current shape; with previousShape, its last frame's too (the same buffer for every other mesh).
 */
-void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, std::uint32_t& indexCount, bool previousShape) const {
+const MeshPlacement& VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, bool previousShape) const {
     if (!meshHandle.isValid() || meshHandle.index >= meshes.size()) {
         throw std::out_of_range("Mesh handle has not been uploaded");
     }
@@ -3581,7 +3635,23 @@ void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, s
         vkCmdBindVertexBuffers(commands, 1, 1, &previousBuffer, &offset);
     }
     vkCmdBindIndexBuffer(commands, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    indexCount = mesh.getIndexCount();
+    return mesh.getPlacement();
+}
+
+void VulkanRenderer::bindPools(VkCommandBuffer commands, bool previousShape) const {
+    const VkBuffer vertexBuffer = meshPool->getVertices();
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(commands, 0, 1, &vertexBuffer, &offset);
+
+    if (previousShape) {
+        vkCmdBindVertexBuffers(commands, 1, 1, &vertexBuffer, &offset);
+    }
+
+    vkCmdBindIndexBuffer(commands, meshPool->getIndices(), 0, VK_INDEX_TYPE_UINT32);
+}
+
+bool VulkanRenderer::pooledMesh(MeshHandle mesh) const {
+    return meshes.at(mesh.index)->getPlacement().pooled;
 }
 
 // The shader would read an empty slot of the texture array for a texture that was never uploaded; better to stop here.
@@ -3611,7 +3681,7 @@ VertexEntries VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming
         throw std::invalid_argument("A hanging mesh needs one hanging entry a vertex");
     }
 
-    meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh, deforming));
+    meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh, deforming, meshPool.get()));
 
     if (rayTracing) {
         rayTracing->addMesh(uploads, *meshes.back());
@@ -3783,7 +3853,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     eyeAdaptation->setFramesInFlight(count);
     occlusionCulling->setFramesInFlight(count);
     cameraCulling->setFramesInFlight(count);
-    cullStyles.assign(count, {});
+    cullFrameStyles.assign(count, {});
     cullCompares.assign(count, std::nullopt);
 
     if (rayTracing) {

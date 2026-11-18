@@ -28,6 +28,8 @@ struct VideoMemory {
     std::uint64_t inUseBytes = 0;
     std::uint64_t usedBytes = 0;
     std::uint64_t budgetBytes = 0;
+    std::uint64_t meshBytes = 0;     // the meshes in the shared mesh buffer (render/gpu/mesh_pool.h)
+    std::uint64_t meshHeldBytes = 0; // its pools' sizes
 };
 
 // The device local heaps' numbers added up; driverReported says whether the driver gave them.

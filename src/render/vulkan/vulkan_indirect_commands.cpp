@@ -2,6 +2,7 @@
 #include "render/vulkan/vulkan_device.h"
 
 #include <cstring>
+#include <stdexcept>
 
 VulkanIndirectCommands::VulkanIndirectCommands(const VulkanDevice& device):
     device(device)
@@ -18,7 +19,19 @@ void VulkanIndirectCommands::reset() {
 * already written keep their chunk, so the draws recorded with them stay valid.
 */
 VulkanIndirectCommands::Slot VulkanIndirectCommands::write(const GpuDrawCommand& command) {
-    if (written == indirectChunkCommands) {
+    return writeRun(std::span<const GpuDrawCommand>{&command, 1});
+}
+
+/*
+* Into the current chunk when the run fits what is left of it, else the next chunk (made the first time a frame needs
+* it). Commands already written keep their chunk, so the draws recorded with them stay valid.
+*/
+VulkanIndirectCommands::Slot VulkanIndirectCommands::writeRun(std::span<const GpuDrawCommand> commands) {
+    if (commands.size() > indirectChunkCommands) {
+        throw std::invalid_argument("An indirect run takes at most a chunk's worth of commands");
+    }
+
+    if (written + commands.size() > indirectChunkCommands) {
         ++chunk;
         written = 0;
     }
@@ -29,8 +42,8 @@ VulkanIndirectCommands::Slot VulkanIndirectCommands::write(const GpuDrawCommand&
     }
 
     const VkDeviceSize offset = static_cast<VkDeviceSize>(written) * sizeof(GpuDrawCommand);
-    std::memcpy(static_cast<std::byte*>(chunks[chunk].getMapped()) + offset, &command, sizeof(command));
-    ++written;
+    std::memcpy(static_cast<std::byte*>(chunks[chunk].getMapped()) + offset, commands.data(), commands.size_bytes());
+    written += static_cast<std::uint32_t>(commands.size());
     return Slot{chunks[chunk].get(), offset};
 }
 

@@ -59,6 +59,7 @@
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_camera_culling.h"
+#include "render/vulkan/vulkan_mesh_pool.h"
 #include "render/vulkan/vulkan_sky_visibility.h"
 #include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
@@ -90,13 +91,17 @@ struct BatchPipelines {
 };
 
 /*
-* What a camera pass draws: the CPU's batches, or, while the GPU culls the camera (render/gpu/camera_culling.h), every
-* group of the frame's table in its drawing order, each by the command the GPU wrote for it (commands, one a group).
+* What a camera pass draws: the CPU's batches, or, while the GPU culls the camera (render/gpu/camera_culling.h), the
+* frame's groups: each style's pooled groups by one multi-draw of the packed commands (packed, their counts in counts
+* from word countOffset), then the groups with buffers of their own one by one from commands (one a group).
 */
 struct PassDraws {
     const std::vector<DrawBatch>* batches = nullptr;
     const CameraCullFrame* groups = nullptr;
     VkBuffer commands = VK_NULL_HANDLE;
+    VkBuffer packed = VK_NULL_HANDLE;
+    VkBuffer counts = VK_NULL_HANDLE;
+    std::uint32_t countOffset = 0;
 };
 
 /*
@@ -442,8 +447,11 @@ private:
     void takeCameraCull(const VulkanCameraCulling::Collected& culled, std::uint32_t frameIndex);
 
     CameraCullTable cameraCullTable;
+
+    // The shared mesh buffer (render/vulkan/vulkan_mesh_pool.h): every mesh that does not deform.
+    std::unique_ptr<VulkanMeshPool> meshPool;
     std::unique_ptr<VulkanCameraCulling> cameraCulling;
-    std::vector<std::vector<CullGroupStyle>> cullStyles;
+    std::vector<std::vector<CullGroupStyle>> cullFrameStyles;
     std::vector<std::optional<CullCompare>> cullCompares;
     CameraCullCounts lastCameraCull;
     bool cullCompareAsked = false;
@@ -762,7 +770,15 @@ private:
     // After the frame's fence: the readbacks its last use of each cloth asked for.
     void collectClothReadbacks();
 
-    void bindMesh(VkCommandBuffer commands, MeshHandle mesh, std::uint32_t& indexCount, bool previousShape = false) const;
+    // A mesh's vertex (and with previousShape its last shape's) and index buffers bound: the pools' for a pooled mesh.
+    // Returns where its indices are in them.
+    const MeshPlacement& bindMesh(VkCommandBuffer commands, MeshHandle mesh, bool previousShape = false) const;
+
+    // The shared mesh buffer's pools bound (both vertex bindings with previousShape: still meshes keep their shape).
+    void bindPools(VkCommandBuffer commands, bool previousShape) const;
+
+    // Whether a mesh is in the pools (render/gpu/mesh_pool.h).
+    bool pooledMesh(MeshHandle mesh) const;
     void checkTexturesUploaded(const Material& material) const;
     SampledImage sampled(const VulkanTexture& texture) const;
 };

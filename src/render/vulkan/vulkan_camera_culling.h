@@ -14,9 +14,10 @@
 class VulkanDevice;
 
 /*
-* The camera's lists built on the GPU (render/gpu/camera_culling.h): three compute passes (camera_cull_flags,
-* camera_cull_scan, camera_cull_write) write the camera's and the velocity pass's regions of the frame's draw list and
-* one indirect command a group for each. Each frame in flight has its own tables in upload memory (the still part
+* The camera's lists built on the GPU (render/gpu/camera_culling.h): four compute passes (camera_cull_flags,
+* camera_cull_scan, camera_cull_write, camera_cull_compact) write the camera's and the velocity pass's regions of the
+* frame's draw list, one indirect command a group for each, and each list's commands packed style by style with their
+* counts, for one vkCmdDrawIndexedIndirectCount a style (the shared mesh buffer, render/vulkan/vulkan_mesh_pool.h). Each frame in flight has its own tables in upload memory (the still part
 * rewritten only when its generation changes), its own working buffers and commands in GPU memory, and a read-back
 * copy of the counts and commands (and, for cull-compare, both lists) the CPU reads once the frame has finished, so
 * F4's counts show a frame or two late.
@@ -37,9 +38,15 @@ public:
     void cull(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, const CameraCullFrame& table, GpuCameraCull view,
               VkBuffer drawList, bool readLists);
 
-    // The frame's commands, one a group in the table's group order (GpuDrawCommand each).
+    // The frame's commands, one a group in the table's group order (GpuDrawCommand each), for the groups drawn one by one.
     VkBuffer getMainCommands(std::uint32_t frameIndex) const;
     VkBuffer getMotionCommands(std::uint32_t frameIndex) const;
+
+    // Each list's packed commands (a style's from its run's first place in the drawing order) and the counts
+    // (CAMERA_CULL_DRAW_COUNTS words: the camera's styles, then the velocity pass's).
+    VkBuffer getPackedMain(std::uint32_t frameIndex) const;
+    VkBuffer getPackedMotion(std::uint32_t frameIndex) const;
+    VkBuffer getDrawCounts(std::uint32_t frameIndex) const;
 
     // What a finished frame wrote: its counts, both lists' commands and, when read, their entries (from their bases).
     struct Collected {
@@ -62,6 +69,7 @@ private:
         VulkanBuffer candidates;
         VulkanBuffer groups;
         VulkanBuffer view;
+        VulkanBuffer order;
         std::uint64_t heldGeneration = 0; // the still part the records and candidates hold (0: none)
 
         // GPU memory: the passes' working buffers and the commands.
@@ -71,6 +79,10 @@ private:
         VulkanBuffer counts;
         VulkanBuffer mainCommands;
         VulkanBuffer motionCommands;
+        VulkanBuffer places;
+        VulkanBuffer packedMain;
+        VulkanBuffer packedMotion;
+        VulkanBuffer drawCounts;
 
         // Read-back memory: counts, then both commands; both lists when asked.
         VulkanBuffer readback;
@@ -88,5 +100,6 @@ private:
     std::unique_ptr<ComputePipeline> flagPass;
     std::unique_ptr<ComputePipeline> scanPass;
     std::unique_ptr<ComputePipeline> writePass;
+    std::unique_ptr<ComputePipeline> compactPass;
     std::vector<PerFrame> frames;
 };

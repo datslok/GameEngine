@@ -51,6 +51,7 @@ VulkanCameraCulling::VulkanCameraCulling(const VulkanDevice& device, std::uint32
     flagPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_flags.comp.spv", 8));
     scanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_scan.comp.spv", 3));
     writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_write.comp.spv", 9));
+    compactPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_compact.comp.spv", 8));
     setFramesInFlight(framesInFlight);
 }
 
@@ -72,6 +73,7 @@ void VulkanCameraCulling::upload(PerFrame& frame, const CameraCullFrame& table, 
     ensureBuffer(device, frame.levels, table.meshLevels.size() * sizeof(GpuMeshLevels), storage, BufferMemory::Upload);
     ensureBuffer(device, frame.groups, table.groups.size() * sizeof(GpuCullGroup), storage, BufferMemory::Upload);
     ensureBuffer(device, frame.view, sizeof(GpuCameraCull), storage, BufferMemory::Upload);
+    ensureBuffer(device, frame.order, table.drawOrder.order.size() * sizeof(std::uint32_t), storage, BufferMemory::Upload);
 
     if (rewriteStill) {
         writeAt(frame.records, 0, table.stillRecords);
@@ -84,8 +86,9 @@ void VulkanCameraCulling::upload(PerFrame& frame, const CameraCullFrame& table, 
     writeAt(frame.levels, 0, std::span<const GpuMeshLevels>{table.meshLevels});
     writeAt(frame.groups, 0, std::span<const GpuCullGroup>{table.groups});
     writeAt(frame.view, 0, std::span<const GpuCameraCull>{&view, 1});
+    writeAt(frame.order, 0, std::span<const std::uint32_t>{table.drawOrder.order});
 
-    for (const VulkanBuffer* buffer : {&frame.records, &frame.candidates, &frame.levels, &frame.groups, &frame.view}) {
+    for (const VulkanBuffer* buffer : {&frame.records, &frame.candidates, &frame.levels, &frame.groups, &frame.view, &frame.order}) {
         buffer->flush();
     }
 }
@@ -104,6 +107,12 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
     view.candidates = candidateCount;
     view.groups = groupCount;
     view.blocks = (candidateCount + cameraCullGroupSize - 1) / cameraCullGroupSize;
+
+    for (std::size_t run = 0; run < cullStyles; ++run) {
+        view.runFirst[run] = table.drawOrder.runFirst[run];
+        view.runCount[run] = table.drawOrder.runCount[run];
+    }
+
     upload(frame, table, view);
 
     const VkBufferUsageFlags commandUsage = storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -115,6 +124,11 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
     ensureBuffer(device, frame.mainCommands, static_cast<VkDeviceSize>(groupCount) * sizeof(GpuDrawCommand), commandUsage, BufferMemory::Gpu);
     ensureBuffer(device, frame.motionCommands, static_cast<VkDeviceSize>(groupCount) * sizeof(GpuDrawCommand), commandUsage, BufferMemory::Gpu);
     const VkDeviceSize commandBytes = static_cast<VkDeviceSize>(groupCount) * sizeof(GpuDrawCommand);
+    const VkBufferUsageFlags drawUsage = storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+    ensureBuffer(device, frame.places, (static_cast<VkDeviceSize>(table.drawOrder.pooled) + 1) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device, frame.packedMain, commandBytes, drawUsage, BufferMemory::Gpu);
+    ensureBuffer(device, frame.packedMotion, commandBytes, drawUsage, BufferMemory::Gpu);
+    ensureBuffer(device, frame.drawCounts, CAMERA_CULL_DRAW_COUNTS * sizeof(std::uint32_t), drawUsage, BufferMemory::Gpu);
     ensureBuffer(device, frame.readback, sizeof(GpuCameraCullCounts) + 2 * commandBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
 
     // The previous copy of the counts (its frame finished) before they are cleared; cleared before the passes add to them.
@@ -160,16 +174,31 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
         vkCmdDispatch(commands, (writers + cameraCullGroupSize - 1) / cameraCullGroupSize, 1, 1);
     }
 
-    // The lists for the scene's vertex shaders (and the copy below); the commands for the indirect draws and the copy;
-    // the counts, finished by the scan, for the copy.
+    // The lists for the scene's vertex shaders (and the copy below); the commands for the packing, the indirect draws of
+    // the groups drawn one by one and the copy; the counts, finished by the scan, for the copy.
     bufferBarrier(commands, drawList, computeWrite,
                   {VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT});
 
     for (VkBuffer buffer : {frame.mainCommands.get(), frame.motionCommands.get()}) {
         bufferBarrier(commands, buffer, computeWrite,
-                      {VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
-                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT});
+                      {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                       VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT});
+    }
+
+    // The packing: last frame's draws from this frame in flight's packed commands finished long ago (its fence), so they
+    // are written straight away, then read by the indirect draws with their counts.
+    const std::array<ComputeBinding, 8> compactBindings{
+        storageBufferBinding(frame.view.get()),       storageBufferBinding(frame.order.get()),
+        storageBufferBinding(frame.mainCommands.get()), storageBufferBinding(frame.motionCommands.get()),
+        storageBufferBinding(frame.packedMain.get()), storageBufferBinding(frame.packedMotion.get()),
+        storageBufferBinding(frame.places.get()),     storageBufferBinding(frame.drawCounts.get()),
+    };
+    bindComputeSet(commands, device.getDevice(), descriptors, *compactPass, compactBindings);
+    vkCmdDispatch(commands, 1, 1, 1);
+
+    for (VkBuffer buffer : {frame.packedMain.get(), frame.packedMotion.get(), frame.drawCounts.get()}) {
+        bufferBarrier(commands, buffer, computeWrite, {VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT});
     }
 
     bufferBarrier(commands, frame.counts.get(), computeWrite, transferRead);
@@ -212,6 +241,18 @@ VkBuffer VulkanCameraCulling::getMainCommands(std::uint32_t frameIndex) const {
 
 VkBuffer VulkanCameraCulling::getMotionCommands(std::uint32_t frameIndex) const {
     return frames.at(frameIndex).motionCommands.get();
+}
+
+VkBuffer VulkanCameraCulling::getPackedMain(std::uint32_t frameIndex) const {
+    return frames.at(frameIndex).packedMain.get();
+}
+
+VkBuffer VulkanCameraCulling::getPackedMotion(std::uint32_t frameIndex) const {
+    return frames.at(frameIndex).packedMotion.get();
+}
+
+VkBuffer VulkanCameraCulling::getDrawCounts(std::uint32_t frameIndex) const {
+    return frames.at(frameIndex).drawCounts.get();
 }
 
 std::optional<VulkanCameraCulling::Collected> VulkanCameraCulling::collect(std::uint32_t frameIndex) {

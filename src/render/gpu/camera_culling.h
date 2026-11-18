@@ -3,6 +3,7 @@
 #include "render/gpu/camera_culling_shared.h"
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/mesh_pool.h"
 #include "scene/frame_description.h"
 
 #include <array>
@@ -36,22 +37,30 @@ struct GpuCullCandidate {
 
 static_assert(sizeof(GpuCullCandidate) == 8, "GpuCullCandidate must match camera_culling.glsl's CullCandidate");
 
-// A group: its run of candidates and its mesh's index count, for its indirect command. Must match camera_cull_write.comp.
+// A group: its run of candidates and its mesh's indices where they are (mesh_pool.h), for its indirect command. Must
+// match camera_cull_write.comp.
 struct GpuCullGroup {
     std::uint32_t firstCandidate = 0;
     std::uint32_t candidates = 0;
     std::uint32_t indexCount = 0;
-    std::uint32_t unused = 0;
+    std::uint32_t firstIndex = 0;
+    std::int32_t vertexOffset = 0;
+    std::uint32_t unused[3] = {0, 0, 0};
 };
 
-static_assert(sizeof(GpuCullGroup) == 16, "GpuCullGroup must match camera_cull_write.comp's Group");
+static_assert(sizeof(GpuCullGroup) == 32, "GpuCullGroup must match camera_cull_write.comp's Group");
 
-// How a group is drawn: its mesh and its pipeline (cut-out, double-sided).
+// How a group is drawn: its mesh, its pipeline (cut-out, double-sided), and whether its mesh is in the pools.
 struct CullGroupStyle {
     MeshHandle mesh;
     bool cutOut = false;
     bool doubleSided = false;
+    bool pooled = false;
 };
+
+// The ways of drawing (batchByMesh's styles: plain, double-sided, cut-out, double-sided cut-out), one run each.
+inline constexpr std::size_t cullStyles = CAMERA_CULL_STYLES;
+static_assert(CAMERA_CULL_DRAW_COUNTS == 2 * CAMERA_CULL_STYLES, "A packed count for each style of both lists");
 
 // The frame's camera, read by every pass. Must match camera_culling.glsl's CameraCull.
 struct GpuCameraCull {
@@ -65,9 +74,11 @@ struct GpuCameraCull {
     std::uint32_t motionBase = 0;
     std::uint32_t blocks = 0;
     std::uint32_t unused = 0;
+    std::uint32_t runFirst[cullStyles] = {};  // each style's pooled groups' first place in the drawing order
+    std::uint32_t runCount[cullStyles] = {};  // and how many
 };
 
-static_assert(sizeof(GpuCameraCull) == 160, "GpuCameraCull must match camera_culling.glsl's CameraCull");
+static_assert(sizeof(GpuCameraCull) == 192, "GpuCameraCull must match camera_culling.glsl's CameraCull");
 
 // What the passes count (CAMERA_CULL_COUNTS words): draws by level slot, the camera's and the velocity pass's totals.
 struct GpuCameraCullCounts {
@@ -79,7 +90,7 @@ static_assert(sizeof(GpuCameraCullCounts) == 32, "GpuCameraCullCounts must match
 /*
 * Groups of draws first to first + count of draws, numbered as draw indices into the whole list: every draw not
 * transparent, each mesh slot it has (glass is sorted on the CPU; shadow-only and hidden draws are candidates, so a draw
-* hidden or shown keeps its groups, and the GPU drops them by their flags). indexCount gives a mesh's indices.
+* hidden or shown keeps its groups, and the GPU drops them by their flags). placement says where a mesh's indices are.
 */
 struct CullGroups {
     std::vector<GpuCullGroup> groups;
@@ -88,7 +99,20 @@ struct CullGroups {
 };
 
 CullGroups buildCullGroups(std::span<const DrawItem> draws, std::size_t first, std::size_t count,
-                           const std::function<std::uint32_t(MeshHandle)>& indexCount);
+                           const std::function<MeshPlacement(MeshHandle)>& placement);
+
+/*
+* The groups in drawing order: the pooled ones first, by style then mesh (stable, so still groups before moving ones),
+* each style a run drawn by one multi-draw; then those with their own buffers (deforming meshes), drawn one by one.
+*/
+struct CullDrawOrder {
+    std::vector<std::uint32_t> order;
+    std::array<std::uint32_t, cullStyles> runFirst{};
+    std::array<std::uint32_t, cullStyles> runCount{};
+    std::uint32_t pooled = 0;
+};
+
+CullDrawOrder cullDrawOrder(std::span<const CullGroupStyle> styles);
 
 /*
 * The view's record. motion: the velocity pass's list is built; sway: things sway this frame (the wind's settings on),
@@ -106,18 +130,30 @@ std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLev
 
 // ---- The passes' steps on the CPU ----
 
-// The camera's and the velocity pass's entries (from their bases) and every group's commands, as the GPU writes them.
+/*
+* The camera's and the velocity pass's entries (from their bases), every group's commands, as the GPU writes them, and
+* each list's commands packed (camera_cull_compact.comp): within each style's run of the drawing order (view.runFirst,
+* runCount) the commands drawing something, in order, from the run's first place, and how many (style by style).
+*/
 struct CameraCullResult {
     std::vector<std::uint32_t> mainEntries;
     std::vector<std::uint32_t> motionEntries;
     std::vector<GpuDrawCommand> mainCommands;
     std::vector<GpuDrawCommand> motionCommands;
     std::array<std::uint32_t, CULL_LEVEL_SLOTS> levels{};
+    std::vector<GpuDrawCommand> packedMain;
+    std::vector<GpuDrawCommand> packedMotion;
+    std::array<std::uint32_t, cullStyles> mainCounts{};
+    std::array<std::uint32_t, cullStyles> motionCounts{};
 };
 
-// The flags, then their prefix sum, then the writes. records by draw, levels by mesh.
+// The flags, then their prefix sum, then the writes, then the packing. records by draw, levels by mesh.
 CameraCullResult cullCameraOnCpu(std::span<const GpuCullRecord> records, std::span<const GpuMeshLevels> levels, std::span<const GpuCullGroup> groups,
-                                 std::span<const GpuCullCandidate> candidates, const GpuCameraCull& view);
+                                 std::span<const GpuCullCandidate> candidates, std::span<const std::uint32_t> drawOrder, const GpuCameraCull& view);
+
+// The packing alone: each style's run of commands (in drawing order) to those drawing something, and their counts.
+void packCullCommands(std::span<const GpuDrawCommand> commands, std::span<const std::uint32_t> drawOrder, const GpuCameraCull& view,
+                      std::vector<GpuDrawCommand>& packed, std::array<std::uint32_t, cullStyles>& counts);
 
 /*
 * Whether the draw's choice is within rounding of changing (a level's error within 1e-4 of the budget, its sphere
@@ -160,9 +196,8 @@ struct CameraCullFrame {
     std::vector<GpuCullGroup> groups;
     std::vector<CullGroupStyle> styles;
 
-    // The groups in drawing order: by style, then mesh (still before moving), so a pass switches pipeline at most
-    // three times.
-    std::vector<std::uint32_t> drawOrder;
+    // The groups in drawing order (cullDrawOrder).
+    CullDrawOrder drawOrder;
 
     // By mesh number: every mesh a draw names, its levels, changesShape set for this frame.
     std::vector<GpuMeshLevels> meshLevels;
@@ -182,14 +217,14 @@ public:
     * built ranges repack their records, and the groups are built again only where a draw's mesh, style, glass or flat
     * faces or a mesh's levels changed; otherwise everything is built afresh. changesShape: whether a mesh deformed.
     */
-    CameraCullFrame update(const FrameDescription& frame, const std::function<std::uint32_t(MeshHandle)>& indexCount,
+    CameraCullFrame update(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement,
                            const std::function<bool(MeshHandle)>& changesShape);
 
     // How many times the still groups were built (for tests: kept frames build none).
     std::size_t getStillBuilds() const;
 
 private:
-    void buildStill(const FrameDescription& frame, const std::function<std::uint32_t(MeshHandle)>& indexCount);
+    void buildStill(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement);
     bool repackRanges(const FrameDescription& frame);
 
     std::vector<GpuCullRecord> records;

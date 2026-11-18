@@ -1,0 +1,121 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The camera's GPU culling, pass 4 of 4 (render/vulkan/vulkan_camera_culling.h): each list's commands packed for
+* drawing by vkCmdDrawIndexedIndirectCount, one call a style. One workgroup walks the pooled groups in drawing order a
+* workgroup's worth at a time: the commands drawing something get their place by a prefix sum (carried between rounds),
+* then each is copied to its style's run's first place plus its place within the run, and each style's count is
+* written. Mirrored by packCullCommands.
+*/
+#include "camera_culling.glsl"
+
+layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer View {
+    CameraCull view;
+};
+
+// The groups in drawing order (CullDrawOrder::order).
+layout(std430, set = 0, binding = 1) readonly buffer Order {
+    uint drawOrder[];
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer MainCommands {
+    DrawCommand mainCommands[];
+};
+
+layout(std430, set = 0, binding = 3) readonly buffer MotionCommands {
+    DrawCommand motionCommands[];
+};
+
+layout(std430, set = 0, binding = 4) writeonly buffer PackedMain {
+    DrawCommand packedMain[];
+};
+
+layout(std430, set = 0, binding = 5) writeonly buffer PackedMotion {
+    DrawCommand packedMotion[];
+};
+
+// Each pooled place's count of earlier commands drawing something (x the camera's, y the velocity pass's), one more
+// for the total.
+layout(std430, set = 0, binding = 6) coherent buffer Places {
+    uvec2 places[];
+};
+
+// Each style's packed count, the camera's then the velocity pass's.
+layout(std430, set = 0, binding = 7) writeonly buffer DrawCounts {
+    uint drawCounts[CAMERA_CULL_DRAW_COUNTS];
+};
+
+shared uvec2 sums[CAMERA_CULL_GROUP_SIZE];
+
+// Whether the group at a place draws something in each list.
+uvec2 drawsAt(uint place) {
+    uint group = drawOrder[place];
+    return uvec2(mainCommands[group].instanceCount > 0u ? 1u : 0u, motionCommands[group].instanceCount > 0u ? 1u : 0u);
+}
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    uint pooled = view.runCount.x + view.runCount.y + view.runCount.z + view.runCount.w;
+    uvec2 carried = uvec2(0u);
+
+    // The loop's bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
+    for (uint first = 0u; first < pooled; first += CAMERA_CULL_GROUP_SIZE) {
+        uint place = first + local;
+        uvec2 value = place < pooled ? drawsAt(place) : uvec2(0u);
+        sums[local] = value;
+        barrier();
+
+        for (uint offset = 1u; offset < CAMERA_CULL_GROUP_SIZE; offset *= 2u) {
+            uvec2 before = local >= offset ? sums[local - offset] : uvec2(0u);
+            barrier();
+            sums[local] += before;
+            barrier();
+        }
+
+        if (place < pooled) {
+            places[place] = carried + sums[local] - value;
+        }
+
+        carried += sums[CAMERA_CULL_GROUP_SIZE - 1];
+        barrier();
+    }
+
+    if (local == 0u) {
+        places[pooled] = carried;
+    }
+
+    // Every place written before any is read.
+    memoryBarrierBuffer();
+    barrier();
+
+    for (uint place = local; place < pooled; place += CAMERA_CULL_GROUP_SIZE) {
+        uvec2 draws = drawsAt(place);
+
+        for (uint run = 0u; run < CAMERA_CULL_STYLES; ++run) {
+            uint runFirst = view.runFirst[run];
+
+            if (place >= runFirst && place < runFirst + view.runCount[run]) {
+                uvec2 within = places[place] - places[runFirst];
+                uint group = drawOrder[place];
+
+                if (draws.x != 0u) {
+                    packedMain[runFirst + within.x] = mainCommands[group];
+                }
+
+                if (draws.y != 0u) {
+                    packedMotion[runFirst + within.y] = motionCommands[group];
+                }
+            }
+        }
+    }
+
+    if (local < CAMERA_CULL_STYLES) {
+        uint runFirst = view.runFirst[local];
+        uvec2 count = view.runCount[local] > 0u ? places[runFirst + view.runCount[local]] - places[runFirst] : uvec2(0u);
+        drawCounts[local] = count.x;
+        drawCounts[CAMERA_CULL_STYLES + local] = count.y;
+    }
+}

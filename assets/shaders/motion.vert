@@ -1,5 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+// gl_BaseVertexARB: the drawn mesh's first vertex in the shared mesh buffer (render/gpu/mesh_pool.h); the per-vertex
+// records (hanging things, thinned cards) count from the mesh's own first vertex.
+#extension GL_ARB_shader_draw_parameters : require
 
 /*
 * The velocity pass (render/gpu/taa.h): the objects that moved since last frame, drawn again over the main pass's depth,
@@ -42,8 +45,8 @@ void main() {
     uint instance = drawnInstance(entry);
 
     // Thinned cards (card_thinning_data.glsl) shaped exactly as triangle.vert shapes them, now and last frame alike.
-    vec3 shaped = thinnedVertex(instances[instance], entry, gl_VertexIndex, position, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
-    vec3 previousShaped = thinnedVertex(instances[instance], entry, gl_VertexIndex, previousPosition, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
+    vec3 shaped = thinnedVertex(instances[instance], entry, gl_VertexIndex - gl_BaseVertexARB, position, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
+    vec3 previousShaped = thinnedVertex(instances[instance], entry, gl_VertexIndex - gl_BaseVertexARB, previousPosition, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
 
     // As triangle.vert does: the camera subtracted from the translation first (camera-relative rendering).
     mat4 model = instances[instance].model;
@@ -53,7 +56,7 @@ void main() {
     relativePosition.y += groundLift(kind, relativePosition + cameraOrigin.xyz);
     float scale = instances[instance].handedness.y;
     vec4 sway = instances[instance].sway;
-    relativePosition += windSwayOfVertex(instances[instance].model, sway, scale, instances[instance].hanging, gl_VertexIndex, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    relativePosition += windSwayOfVertex(instances[instance].model, sway, scale, instances[instance].hanging, gl_VertexIndex - gl_BaseVertexARB, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
 
     // Last frame's sway from last frame's springs and time (the same fade: it changes too slowly to show).
@@ -63,7 +66,7 @@ void main() {
     currentClip = view.current * vec4(relativePosition, 1.0);
     vec3 previousRelative = (before * vec4(previousShaped, 1.0)).xyz;
     previousRelative.y += groundLift(kind, previousRelative + cameraOrigin.xyz);
-    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, instances[instance].hanging, gl_VertexIndex, previousShaped, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
+    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, instances[instance].hanging, gl_VertexIndex - gl_BaseVertexARB, previousShaped, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
     previousClip = view.previous * vec4(previousRelative, 1.0);
     textureUv = uv;
     materialIndex = instances[instance].material.x;

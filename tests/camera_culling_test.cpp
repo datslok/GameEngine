@@ -21,9 +21,14 @@
 #include <vector>
 
 namespace {
-    // Every mesh's indices: a different count each, so commands name the right one.
-    std::uint32_t testIndexCount(MeshHandle mesh) {
-        return 3 * (mesh.index + 1);
+    // Every mesh's place: a different count and place each, so commands name the right one; mesh 4 has buffers of its
+    // own, as a deforming mesh does.
+    MeshPlacement testPlacement(MeshHandle mesh) {
+        if (mesh.index == 4) {
+            return MeshPlacement{0, 100, 0, 15, false};
+        }
+
+        return MeshPlacement{1000 * mesh.index, 100, 5000 * mesh.index, 3 * (mesh.index + 1), true};
     }
 
     struct TestView {
@@ -55,13 +60,54 @@ namespace {
         return test;
     }
 
-    GpuCameraCull packTestView(const TestView& view, const CullGroups& groups) {
+    std::vector<GpuDrawCommand> drawingCommands(const std::vector<GpuDrawCommand>& commands);
+
+    // The view's record with the groups' drawing order's runs.
+    GpuCameraCull packTestView(const TestView& view, const CullGroups& groups, const CullDrawOrder& order) {
         GpuCameraCull packed = packCameraCull(view.frustum, view.levels, view.motion, view.wind.enabled && view.wind.sway, view.wind.swayFadeEnd);
         packed.candidates = static_cast<std::uint32_t>(groups.candidates.size());
         packed.groups = static_cast<std::uint32_t>(groups.groups.size());
         packed.mainBase = 7;
         packed.motionBase = 70000;
+
+        for (std::size_t run = 0; run < cullStyles; ++run) {
+            packed.runFirst[run] = order.runFirst[run];
+            packed.runCount[run] = order.runCount[run];
+        }
+
         return packed;
+    }
+
+    /*
+    * Each style's packed run holds, from its first place, exactly that run's commands drawing something, in drawing
+    * order; with the groups drawn one by one (own buffers), every command drawing something is drawn once.
+    */
+    void assertPacked(const std::vector<GpuDrawCommand>& commands, const std::vector<GpuDrawCommand>& packed,
+                      const std::array<std::uint32_t, cullStyles>& counts, const CullDrawOrder& order) {
+        std::size_t drawn = 0;
+
+        for (std::size_t run = 0; run < cullStyles; ++run) {
+            std::uint32_t next = order.runFirst[run];
+
+            for (std::uint32_t position = order.runFirst[run]; position < order.runFirst[run] + order.runCount[run]; ++position) {
+                const GpuDrawCommand& command = commands[order.order[position]];
+
+                if (command.instanceCount > 0) {
+                    assert(packed[next].firstInstance == command.firstInstance && packed[next].instanceCount == command.instanceCount);
+                    assert(packed[next].firstIndex == command.firstIndex && packed[next].vertexOffset == command.vertexOffset);
+                    ++next;
+                }
+            }
+
+            assert(next - order.runFirst[run] == counts[run]);
+            drawn += counts[run];
+        }
+
+        for (std::size_t position = order.pooled; position < order.order.size(); ++position) {
+            drawn += commands[order.order[position]].instanceCount > 0 ? 1 : 0;
+        }
+
+        assert(drawn == drawingCommands(commands).size());
     }
 
     // The draw list entries a CPU list gives (appendDrawList) and its batches as commands.
@@ -84,10 +130,11 @@ namespace {
         assert(drawing.size() == batched.batches.size());
 
         for (std::size_t batch = 0; batch < drawing.size(); ++batch) {
-            assert(drawing[batch].indexCount == testIndexCount(batched.batches[batch].mesh));
+            const MeshPlacement placed = testPlacement(batched.batches[batch].mesh);
+            assert(drawing[batch].indexCount == placed.indexCount);
             assert(drawing[batch].instanceCount == batched.batches[batch].instanceCount);
             assert(drawing[batch].firstInstance == base + batched.batches[batch].firstInstance);
-            assert(drawing[batch].firstIndex == 0 && drawing[batch].vertexOffset == 0);
+            assert(drawing[batch].firstIndex == placed.firstIndex && drawing[batch].vertexOffset == static_cast<std::int32_t>(placed.firstVertex));
         }
     }
 
@@ -100,7 +147,8 @@ namespace {
         std::mt19937 random{43};
         const CullScene scene = randomCullScene(random);
         const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
-        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testIndexCount);
+        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testPlacement);
+        const CullDrawOrder order = cullDrawOrder(groups.styles);
         std::vector<GpuCullRecord> records;
 
         for (const DrawItem& draw : scene.draws) {
@@ -111,8 +159,10 @@ namespace {
 
         for (int index = 0; index < 18; ++index) {
             const TestView view = randomView(random, index);
-            const GpuCameraCull packed = packTestView(view, groups);
-            const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, packed);
+            const GpuCameraCull packed = packTestView(view, groups, order);
+            const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, order.order, packed);
+            assertPacked(result.mainCommands, result.packedMain, result.mainCounts, order);
+            assertPacked(result.motionCommands, result.packedMotion, result.motionCounts, order);
 
             const std::vector<std::size_t> visible = opaqueDraws(scene.draws, visibleDraws(scene.draws, view.frustum));
             const BatchedDraws mainDraws = batchByMesh(scene.draws, visible, 0, &view.levels);
@@ -154,7 +204,7 @@ namespace {
     void testGroupsFollowTheBatchOrder() {
         std::mt19937 random{47};
         const CullScene scene = randomCullScene(random, 600);
-        const CullGroups groups = buildCullGroups(scene.draws, 100, 400, testIndexCount);
+        const CullGroups groups = buildCullGroups(scene.draws, 100, 400, testPlacement);
         assert(groups.groups.size() == groups.styles.size());
 
         std::size_t candidates = 0;
@@ -180,7 +230,8 @@ namespace {
             const GpuCullGroup& g = groups.groups[group];
             const CullGroupStyle& style = groups.styles[group];
             assert(g.firstCandidate == next && g.candidates > 0);
-            assert(g.indexCount == testIndexCount(style.mesh));
+            assert(g.indexCount == testPlacement(style.mesh).indexCount && g.firstIndex == testPlacement(style.mesh).firstIndex);
+            assert(style.pooled == testPlacement(style.mesh).pooled);
             next += g.candidates;
 
             if (group > 0) {
@@ -230,7 +281,7 @@ namespace {
 
         CameraCullTable table;
         const auto deforms = [](MeshHandle mesh) { return mesh.index == 5; };
-        CameraCullFrame first = table.update(stillFrame(scene, 600, 1, 0), testIndexCount, deforms);
+        CameraCullFrame first = table.update(stillFrame(scene, 600, 1, 0), testPlacement, deforms);
         assert(table.getStillBuilds() == 1);
         assert(first.stillRecords.size() == 600 && first.movingRecords.size() == 200);
         assert(first.meshLevels.size() == cullSceneMeshes && first.meshLevels[5].changesShape == 1 && first.meshLevels[4].changesShape == 0);
@@ -243,7 +294,7 @@ namespace {
         }
 
         // The still candidates first, then the moving ones; every group's candidates within its own part.
-        const CullGroups stillGroups = buildCullGroups(scene.draws, 0, 600, testIndexCount);
+        const CullGroups stillGroups = buildCullGroups(scene.draws, 0, 600, testPlacement);
         assert(first.stillCandidates.size() == stillGroups.candidates.size());
         assert(first.groups.size() > stillGroups.groups.size());
 
@@ -255,25 +306,41 @@ namespace {
             assert(candidate.draw >= 600);
         }
 
-        assert(first.drawOrder.size() == first.groups.size());
+        // Drawing order: pooled groups first by style then mesh, each style a run; the own-buffer groups after.
+        const CullDrawOrder& order = first.drawOrder;
+        assert(order.order.size() == first.groups.size());
+        assert(order.pooled > 0 && order.pooled < order.order.size());
 
-        for (std::size_t position = 1; position < first.drawOrder.size(); ++position) {
-            const CullGroupStyle& before = first.styles[first.drawOrder[position - 1]];
-            const CullGroupStyle& now = first.styles[first.drawOrder[position]];
-            const int styleBefore = (before.cutOut ? 2 : 0) + (before.doubleSided ? 1 : 0);
-            const int styleNow = (now.cutOut ? 2 : 0) + (now.doubleSided ? 1 : 0);
+        for (std::size_t position = 1; position < order.order.size(); ++position) {
+            const CullGroupStyle& before = first.styles[order.order[position - 1]];
+            const CullGroupStyle& now = first.styles[order.order[position]];
+            const int styleBefore = (before.cutOut ? 2 : 0) + (before.doubleSided ? 1 : 0) + (before.pooled ? 0 : 4);
+            const int styleNow = (now.cutOut ? 2 : 0) + (now.doubleSided ? 1 : 0) + (now.pooled ? 0 : 4);
             assert(styleBefore < styleNow || (styleBefore == styleNow && before.mesh.index <= now.mesh.index));
         }
 
+        std::uint32_t runs = 0;
+
+        for (std::size_t run = 0; run < cullStyles; ++run) {
+            for (std::uint32_t position = order.runFirst[run]; position < order.runFirst[run] + order.runCount[run]; ++position) {
+                const CullGroupStyle& style = first.styles[order.order[position]];
+                assert(style.pooled && static_cast<std::size_t>((style.cutOut ? 2 : 0) + (style.doubleSided ? 1 : 0)) == run);
+            }
+
+            runs += order.runCount[run];
+        }
+
+        assert(runs == order.pooled);
+
         const std::uint64_t generation = first.stillGeneration;
-        CameraCullFrame again = table.update(stillFrame(scene, 600, 1, 0), testIndexCount, deforms);
+        CameraCullFrame again = table.update(stillFrame(scene, 600, 1, 0), testPlacement, deforms);
         assert(table.getStillBuilds() == 1 && again.stillGeneration == generation);
 
         // A built range whose bounds moved: records repacked, groups kept.
         scene.draws[10].bounds.centre.x += 5.0f;
         FrameDescription moved = stillFrame(scene, 600, 2, 1);
         moved.builtStillDraws = {DrawRange{10, 1}};
-        CameraCullFrame repacked = table.update(moved, testIndexCount, deforms);
+        CameraCullFrame repacked = table.update(moved, testPlacement, deforms);
         assert(table.getStillBuilds() == 1 && repacked.stillGeneration != generation);
         assert(repacked.stillRecords[10].bounds[0] == scene.draws[10].bounds.centre.x);
 
@@ -282,11 +349,11 @@ namespace {
         scene.draws[11].levels = scene.levelsByMesh[scene.draws[11].mesh.index];
         FrameDescription remeshed = stillFrame(scene, 600, 3, 2);
         remeshed.builtStillDraws = {DrawRange{11, 1}};
-        table.update(remeshed, testIndexCount, deforms);
+        table.update(remeshed, testPlacement, deforms);
         assert(table.getStillBuilds() == 2);
 
         // Not following: afresh.
-        table.update(stillFrame(scene, 600, 9, 7), testIndexCount, deforms);
+        table.update(stillFrame(scene, 600, 9, 7), testPlacement, deforms);
         assert(table.getStillBuilds() == 3);
     }
 
@@ -297,7 +364,8 @@ namespace {
     void testComparison() {
         std::mt19937 random{59};
         const CullScene scene = randomCullScene(random, 1000);
-        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testIndexCount);
+        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testPlacement);
+        const CullDrawOrder order = cullDrawOrder(groups.styles);
         const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
         std::vector<GpuCullRecord> records;
 
@@ -306,8 +374,8 @@ namespace {
         }
 
         const TestView view = randomView(random, 0);
-        const GpuCameraCull packed = packTestView(view, groups);
-        const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, packed);
+        const GpuCameraCull packed = packTestView(view, groups, order);
+        const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, order.order, packed);
         const BatchedDraws cpu = batchByMesh(scene.draws, opaqueDraws(scene.draws, visibleDraws(scene.draws, view.frustum)), 0, &view.levels);
         const auto never = [](std::uint32_t) { return false; };
 

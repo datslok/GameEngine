@@ -5,6 +5,7 @@
 #include "volk/volk.h"
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 class VulkanDevice;
@@ -29,6 +30,10 @@ public:
     };
 
     Slot write(const GpuDrawCommand& command);
+
+    // Commands side by side in one chunk (a multi-draw reads them so), from the slot returned; at most a chunk's worth.
+    // Throws std::invalid_argument for more.
+    Slot writeRun(std::span<const GpuDrawCommand> commands);
 
     // Before the frame is submitted: the CPU's writes made visible to the GPU, where memory is not kept coherent.
     void flush() const;

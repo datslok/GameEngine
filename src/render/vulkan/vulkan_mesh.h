@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gpu/deforming_slots.h"
+#include "render/gpu/mesh_pool.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "scene/indexed_mesh.h"
 
@@ -10,6 +11,7 @@
 
 class ImmediateCommands;
 class VulkanDevice;
+class VulkanMeshPool;
 
 /*
 * A mesh in GPU memory: a vertex buffer of MeshVertex and an index buffer of 32-bit indices, three per triangle. The
@@ -19,10 +21,13 @@ class VulkanDevice;
 * A deforming mesh (scene/deforming_mesh.h) instead keeps its vertices in a ring of buffers the CPU writes directly
 * (render/gpu/deforming_slots.h), each holding the whole mesh in one shape, all starting with the rest shape; its
 * indices never change, so they live in GPU memory as any mesh's. Every frame must either show a shape or hold.
+*
+* Given the shared mesh buffer (render/vulkan/vulkan_mesh_pool.h), a mesh that does not deform is copied into its pools
+* instead and keeps only its place there; its buffers are the pools'.
 */
 class VulkanMesh {
 public:
-    VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming = false);
+    VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming = false, VulkanMeshPool* pool = nullptr);
 
     bool isDeforming() const;
 
@@ -57,11 +62,18 @@ public:
     std::uint32_t getIndexCount() const;
     std::uint32_t getVertexCount() const;
 
-    // The buffers' GPU addresses, for building acceleration structures and for shaders reading a ray hit's corners.
+    // The buffers' GPU addresses, for building acceleration structures and for shaders reading a ray hit's corners: where
+    // the mesh starts in the pools, for a pooled mesh (read when used: a pool's address moves when it grows).
     VkDeviceAddress getVertexAddress() const;
     VkDeviceAddress getIndexAddress() const;
 
+    // Where its vertices and indices are: in the pools, or from the start of its own buffers.
+    const MeshPlacement& getPlacement() const;
+
 private:
+    VulkanMeshPool* pool = nullptr;
+    MeshPlacement placement;
+
     VulkanBuffer vertices;
     VulkanBuffer indices;
 

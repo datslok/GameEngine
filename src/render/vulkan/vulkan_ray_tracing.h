@@ -73,8 +73,9 @@ private:
 
     struct MeshStructure {
         AccelerationStructure structure;
-        VkDeviceAddress vertices = 0;
-        VkDeviceAddress indices = 0;
+
+        // Its mesh, whose addresses are read when the table is written (a pooled mesh's move when the pool grows).
+        const VulkanMesh* source = nullptr;
 
         // A deforming mesh: its structure per slot, the slot's version each was built from, and its scratch memory.
         const VulkanMesh* deforming = nullptr;

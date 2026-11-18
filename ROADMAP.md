@@ -401,7 +401,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] 3. The camera's and velocity pass's lists built on the GPU behind a setting, `cull-compare` against the CPU's (`gpu-cull-camera`): on by default, lists equal the CPU's, the camera's CPU work 9-10 ms → 0.2 ms at the rim and Ring
   - [ ] 4. Reflection probe faces and the mirror as GPU views (`gpu-cull-captures`)
   - [ ] 5. Shadow tiles as GPU views, the cache redrawn on announced changes; then the CPU path deleted (`gpu-cull-shadows`)
-  - [ ] 6. One shared mesh buffer, a multi-draw per pipeline state (`mesh-megabuffer`)
+  - [x] 6. One shared mesh buffer, a multi-draw per pipeline state (`mesh-megabuffer`; done before stages 4 and 5, the user's choice, Nov 18 2026, research in `docs/research/MESHPOOL.md`): the forest's 502 MB of meshes in two pools, each pass's groups packed by the GPU and drawn by one call a style; the camera's calls 7,500 to 12, RECORD 3.5 to 1.3 ms
   - [ ] 7. Chunks of instances culled first, coarse CPU cells for streaming worlds (`scene-chunks`, required for phase 13)
 - [x] Texture compression (moved from phase 12's asset cooking): BC7 for every texture, normal maps too (x, y and z kept for Toksvig), a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB; mips on the CPU, `bc7enc`, a disk cache in `build/texture_cache`, `engine.textureCompression` settings; a game's lookup textures stay exact (`texture-compression`, research in `docs/research/TEXTURECOMPRESSION.md`)
 - [x] Video memory in use on F4: the bytes the engine's resources take (VMA's allocation bytes) beside the blocks it holds, which move in 256 MB steps and hid most of texture compression's 466 MB saving (`vram-in-use`)

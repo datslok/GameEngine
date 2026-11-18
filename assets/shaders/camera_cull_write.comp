@@ -11,23 +11,6 @@
 
 layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
 
-// Must match GpuCullGroup.
-struct Group {
-    uint firstCandidate;
-    uint candidates;
-    uint indexCount;
-    uint unused;
-};
-
-// Must match GpuDrawCommand (VkDrawIndexedIndirectCommand).
-struct DrawCommand {
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int vertexOffset;
-    uint firstInstance;
-};
-
 layout(std430, set = 0, binding = 0) readonly buffer View {
     CameraCull view;
 };
@@ -49,7 +32,7 @@ layout(std430, set = 0, binding = 4) readonly buffer BlockSums {
 };
 
 layout(std430, set = 0, binding = 5) readonly buffer Groups {
-    Group groups[];
+    CullGroup groups[];
 };
 
 // The frame's draw list (instances.glsl's), its camera and velocity regions written here.
@@ -91,10 +74,10 @@ void main() {
     }
 
     if (index < view.groups) {
-        Group group = groups[index];
+        CullGroup group = groups[index];
         uvec2 start = placeOf(group.firstCandidate);
         uvec2 end = placeOf(group.firstCandidate + group.candidates);
-        mainCommands[index] = DrawCommand(group.indexCount, end.x - start.x, 0u, 0, view.mainBase + start.x);
-        motionCommands[index] = DrawCommand(group.indexCount, end.y - start.y, 0u, 0, view.motionBase + start.y);
+        mainCommands[index] = DrawCommand(group.indexCount, end.x - start.x, group.firstIndex, group.vertexOffset, view.mainBase + start.x);
+        motionCommands[index] = DrawCommand(group.indexCount, end.y - start.y, group.firstIndex, group.vertexOffset, view.motionBase + start.y);
     }
 }

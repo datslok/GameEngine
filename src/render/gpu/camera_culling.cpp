@@ -62,7 +62,7 @@ namespace {
 * as batchByMesh's stable sort keeps them, and each run of one key becomes a group.
 */
 CullGroups buildCullGroups(std::span<const DrawItem> draws, std::size_t first, std::size_t count,
-                           const std::function<std::uint32_t(MeshHandle)>& indexCount) {
+                           const std::function<MeshPlacement(MeshHandle)>& placement) {
     struct Keyed {
         int style = 0;
         std::uint32_t mesh = 0;
@@ -106,8 +106,14 @@ CullGroups buildCullGroups(std::span<const DrawItem> draws, std::size_t first, s
 
         if (position == 0 || key.style != keyed[position - 1].style || key.mesh != keyed[position - 1].mesh) {
             const MeshHandle mesh{key.mesh};
-            groups.groups.push_back(GpuCullGroup{static_cast<std::uint32_t>(position), 0, indexCount(mesh), 0});
-            groups.styles.push_back(CullGroupStyle{mesh, (key.style & 2) != 0, (key.style & 1) != 0});
+            const MeshPlacement placed = placement(mesh);
+            GpuCullGroup group;
+            group.firstCandidate = static_cast<std::uint32_t>(position);
+            group.indexCount = placed.indexCount;
+            group.firstIndex = placed.firstIndex;
+            group.vertexOffset = static_cast<std::int32_t>(placed.firstVertex);
+            groups.groups.push_back(group);
+            groups.styles.push_back(CullGroupStyle{mesh, (key.style & 2) != 0, (key.style & 1) != 0, placed.pooled});
         }
 
         ++groups.groups.back().candidates;
@@ -115,6 +121,40 @@ CullGroups buildCullGroups(std::span<const DrawItem> draws, std::size_t first, s
     }
 
     return groups;
+}
+
+// A stable sort by (not pooled, style, mesh); each style's pooled groups then sit together.
+CullDrawOrder cullDrawOrder(std::span<const CullGroupStyle> styles) {
+    CullDrawOrder drawOrder;
+    drawOrder.order.resize(styles.size());
+
+    for (std::size_t group = 0; group < styles.size(); ++group) {
+        drawOrder.order[group] = static_cast<std::uint32_t>(group);
+    }
+
+    const auto key = [&styles](std::uint32_t group) {
+        return std::make_tuple(!styles[group].pooled, styleOf(styles[group]), styles[group].mesh.index);
+    };
+    std::stable_sort(drawOrder.order.begin(), drawOrder.order.end(), [&key](std::uint32_t a, std::uint32_t b) { return key(a) < key(b); });
+
+    for (std::size_t position = 0; position < drawOrder.order.size(); ++position) {
+        const CullGroupStyle& style = styles[drawOrder.order[position]];
+
+        if (!style.pooled) {
+            break;
+        }
+
+        const std::size_t run = static_cast<std::size_t>(styleOf(style));
+
+        if (drawOrder.runCount[run] == 0) {
+            drawOrder.runFirst[run] = static_cast<std::uint32_t>(position);
+        }
+
+        ++drawOrder.runCount[run];
+        ++drawOrder.pooled;
+    }
+
+    return drawOrder;
 }
 
 GpuCameraCull packCameraCull(const Frustum& frustum, const LevelView& levels, bool motion, bool sway, float swayFadeEnd) {
@@ -162,7 +202,7 @@ std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLev
 * up to the same numbers); each flagged candidate's entry at its sum; each group's command from the sums at its two ends.
 */
 CameraCullResult cullCameraOnCpu(std::span<const GpuCullRecord> records, std::span<const GpuMeshLevels> levels, std::span<const GpuCullGroup> groups,
-                                 std::span<const GpuCullCandidate> candidates, const GpuCameraCull& view) {
+                                 std::span<const GpuCullCandidate> candidates, std::span<const std::uint32_t> drawOrder, const GpuCameraCull& view) {
     std::vector<std::uint32_t> flags(candidates.size());
     std::vector<std::uint32_t> mainSums(candidates.size() + 1, 0);
     std::vector<std::uint32_t> motionSums(candidates.size() + 1, 0);
@@ -194,11 +234,33 @@ CameraCullResult cullCameraOnCpu(std::span<const GpuCullRecord> records, std::sp
     for (const GpuCullGroup& group : groups) {
         const std::size_t first = group.firstCandidate;
         const std::size_t end = first + group.candidates;
-        result.mainCommands.push_back(GpuDrawCommand{group.indexCount, mainSums[end] - mainSums[first], 0, 0, view.mainBase + mainSums[first]});
-        result.motionCommands.push_back(GpuDrawCommand{group.indexCount, motionSums[end] - motionSums[first], 0, 0, view.motionBase + motionSums[first]});
+        result.mainCommands.push_back(GpuDrawCommand{group.indexCount, mainSums[end] - mainSums[first], group.firstIndex, group.vertexOffset,
+                                                     view.mainBase + mainSums[first]});
+        result.motionCommands.push_back(GpuDrawCommand{group.indexCount, motionSums[end] - motionSums[first], group.firstIndex, group.vertexOffset,
+                                                       view.motionBase + motionSums[first]});
     }
 
+    packCullCommands(result.mainCommands, drawOrder, view, result.packedMain, result.mainCounts);
+    packCullCommands(result.motionCommands, drawOrder, view, result.packedMotion, result.motionCounts);
     return result;
+}
+
+// The packed list keeps the drawing order's length; places past a run's count are left empty.
+void packCullCommands(std::span<const GpuDrawCommand> commands, std::span<const std::uint32_t> drawOrder, const GpuCameraCull& view,
+                      std::vector<GpuDrawCommand>& packed, std::array<std::uint32_t, cullStyles>& counts) {
+    packed.assign(drawOrder.size(), GpuDrawCommand{});
+    counts.fill(0);
+
+    for (std::size_t run = 0; run < cullStyles; ++run) {
+        for (std::uint32_t position = view.runFirst[run]; position < view.runFirst[run] + view.runCount[run]; ++position) {
+            const GpuDrawCommand& command = commands[drawOrder[position]];
+
+            if (command.instanceCount > 0) {
+                packed[view.runFirst[run] + counts[run]] = command;
+                ++counts[run];
+            }
+        }
+    }
 }
 
 bool nearACameraEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view) {
@@ -298,7 +360,7 @@ std::string describeCullComparison(const CullListComparison& camera, const CullL
 * Kept when the frame is the one packed; built ranges repacked when it follows it; otherwise built afresh. The moving
 * draws' part is made every frame.
 */
-CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std::function<std::uint32_t(MeshHandle)>& indexCount,
+CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement,
                                         const std::function<bool(MeshHandle)>& changesShape) {
     const std::size_t stillCount = std::min(frame.stillDraws, frame.draws.size());
 
@@ -306,7 +368,7 @@ CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std
         const bool follows = packedVersion != 0 && packedVersion == frame.stillPreviousVersion && records.size() == stillCount && stillCount > 0;
 
         if (!follows || !repackRanges(frame)) {
-            buildStill(frame, indexCount);
+            buildStill(frame, placement);
         }
 
         packedVersion = frame.stillVersion;
@@ -324,7 +386,7 @@ CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std
         result.movingRecords.push_back(packCullRecord(frame.draws[draw]));
     }
 
-    CullGroups moving = buildCullGroups(frame.draws, stillCount, movingCount, indexCount);
+    CullGroups moving = buildCullGroups(frame.draws, stillCount, movingCount, placement);
     const std::uint32_t stillCandidates = static_cast<std::uint32_t>(still.candidates.size());
 
     for (GpuCullGroup& group : moving.groups) {
@@ -337,15 +399,7 @@ CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std
     result.styles = still.styles;
     result.styles.insert(result.styles.end(), moving.styles.begin(), moving.styles.end());
 
-    result.drawOrder.resize(result.groups.size());
-
-    for (std::size_t group = 0; group < result.drawOrder.size(); ++group) {
-        result.drawOrder[group] = static_cast<std::uint32_t>(group);
-    }
-
-    std::stable_sort(result.drawOrder.begin(), result.drawOrder.end(), [&result](std::uint32_t a, std::uint32_t b) {
-        return std::make_pair(styleOf(result.styles[a]), result.styles[a].mesh.index) < std::make_pair(styleOf(result.styles[b]), result.styles[b].mesh.index);
-    });
+    result.drawOrder = cullDrawOrder(result.styles);
 
     result.meshLevels = stillLevels;
     tableLevels(frame.draws, stillCount, movingCount, result.meshLevels);
@@ -364,7 +418,7 @@ std::size_t CameraCullTable::getStillBuilds() const {
     return stillBuilds;
 }
 
-void CameraCullTable::buildStill(const FrameDescription& frame, const std::function<std::uint32_t(MeshHandle)>& indexCount) {
+void CameraCullTable::buildStill(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement) {
     const std::size_t stillCount = std::min(frame.stillDraws, frame.draws.size());
     records.clear();
     keys.clear();
@@ -376,7 +430,7 @@ void CameraCullTable::buildStill(const FrameDescription& frame, const std::funct
         keys.push_back(candidateKey(frame.draws[draw]));
     }
 
-    still = buildCullGroups(frame.draws, 0, stillCount, indexCount);
+    still = buildCullGroups(frame.draws, 0, stillCount, placement);
     stillLevels.clear();
     tableLevels(frame.draws, 0, stillCount, stillLevels);
     stillGlass.clear();

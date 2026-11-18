@@ -57,6 +57,12 @@ namespace {
         assert(videoMemoryText(memory) == "VRAM ENGINE 482 MB IN USE, 540 HELD  NO DRIVER BUDGET");
 
         assert(videoMemoryText(VideoMemory{}) == "VRAM -");
+
+        // The shared mesh buffer's meshes and pools, while there are pools.
+        memory.driverReported = true;
+        memory.meshBytes = 300 * megabyte;
+        memory.meshHeldBytes = 448 * megabyte;
+        assert(videoMemoryText(memory) == "VRAM 613 / 14800 MB  ENGINE 482 MB IN USE, 540 HELD  MESHES 300 OF 448 MB");
     }
 
     // The readout's lines: the engine's counts, the light probes, memory, exposure and camera first, then its timings, then the game's own.
