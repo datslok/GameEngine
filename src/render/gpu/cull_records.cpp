@@ -27,6 +27,7 @@ GpuCullRecord packCullRecord(const DrawItem& draw) {
                    (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u);
     record.mesh = draw.mesh.index;
     record.hiddenBelowError = draw.hiddenBelowError;
+    record.shadowCascades = draw.shadowCascades;
     return record;
 }
 

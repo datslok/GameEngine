@@ -30,7 +30,7 @@ struct GpuCullRecord {
     std::uint32_t flags = 0; // CULL_* bits
     std::uint32_t mesh = 0;  // its mesh's number, which also names its level table
     float hiddenBelowError = 0.0f; // an impostor's: drawn only where this error (metres) fits (DrawItem::hiddenBelowError)
-    std::uint32_t unused = 0;
+    std::int32_t shadowCascades = 0; // the sun's nearest cascades it casts into (DrawItem::shadowCascades; 0 all)
 };
 
 static_assert(sizeof(GpuCullRecord) == 48, "GpuCullRecord must match culling.glsl's CullRecord");

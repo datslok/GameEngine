@@ -24,7 +24,7 @@ void main() {
         record.flags = uint(packed.x);
         record.mesh = 0u;
         record.hiddenBelowError = packed.y;
-        record.unused = 0u;
+        record.shadowCascades = function == GPU_TEST_CAMERA_CANDIDATE ? int(testInput(15).z) : 0;
 
         MeshLevels levels;
         vec4 meshes = testInput(3);
@@ -60,8 +60,9 @@ void main() {
             return;
         }
 
-        // One more input: (mesh changes shape, the candidate's slot, the sway's fade end, the camera's flags). Output:
-        // (the candidate's flags, whether the sway reaches it).
+        // Three more inputs: (mesh changes shape, the candidate's slot, the sway's fade end, the view's flags), a shadow
+        // tile's reach, (its smallest caster, its cascade, the record's cascades). Output: (the candidate's flags, whether
+        // the sway reaches it, whether a shadow tile takes it).
         vec4 camera = testInput(13);
         levels.changesShape = uint(camera.x);
         CameraCull cull;
@@ -76,7 +77,12 @@ void main() {
         cull.blocks = 0u;
         cull.view = 0u;
         cull.slices = uvec4(0u);
+        cull.reach = testInput(14);
+        cull.smallestCaster = testInput(15).x;
+        cull.cascade = int(testInput(15).y);
+        cull.unused0 = 0u;
+        cull.unused1 = 0u;
         testOutput(0, vec4(float(cameraCandidateFlags(record, levels, cull, uint(camera.y))), swayReaches(record.bounds, view.eye.xyz, camera.z) ? 1.0 : 0.0,
-                           0.0, 0.0));
+                           shadowTakes(record, cull) ? 1.0 : 0.0, 0.0));
     }
 }

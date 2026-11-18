@@ -415,27 +415,42 @@ private:
     // The camera's lists built on the GPU (render/gpu/camera_culling.h, passes.gpuCulling): the still draws' tables kept
     // between frames, the passes, and what each frame in flight culled with (its groups' styles, for the triangles; the
     // CPU's lists and the records, for a comparison asked for).
-    // A comparison: the CPU's lists by view (the camera's first), the velocity pass's, each view's name and record.
+    // A comparison: each list compared (its view, whether its second list, its name, the CPU's list) and every view's record.
     struct CullCompare {
-        std::vector<BatchedDraws> viewDraws;
-        BatchedDraws motionDraws;
-        std::vector<std::string> names;
+        struct List {
+            std::uint32_t view = 0;
+            bool second = false;
+            std::string name;
+            BatchedDraws cpu;
+        };
+
+        std::vector<List> lists;
         std::vector<GpuCameraCull> views;
         std::vector<GpuCullRecord> records;
         std::vector<GpuMeshLevels> levels;
     };
 
-    // F4's counts: the camera's, and the probe faces' triangles.
+    // F4's counts: the camera's, the probe faces' triangles, the shadow tiles' casters drawn and left out.
     struct CameraCullCounts {
         std::size_t drawn = 0;
         std::array<std::size_t, meshLevelSlots> levels{};
         std::size_t triangles = 0;
         std::size_t cutOutTriangles = 0;
         std::size_t probeTriangles = 0;
+        std::size_t shadowDrawn = 0;
+        std::size_t shadowCulled = 0;
     };
 
-    // Each frame in flight's views after the camera: which capture each is (a probe face, or cubeFaceCount the mirror).
-    std::vector<std::vector<int>> cullFrameCaptures;
+    // Each frame in flight's views after the camera, for its counts read back: a capture (a probe face, or cubeFaceCount
+    // the mirror), or a shadow tile (whether its still casters were drawn).
+    struct CullViewKind {
+        int capture = -1;
+        bool shadow = false;
+        bool shadowStill = false;
+    };
+
+    std::vector<std::vector<CullViewKind>> cullFrameViews;
+    std::vector<std::size_t> cullFrameDraws;
 
     void takeCameraCull(const VulkanCameraCulling::Collected& culled, std::uint32_t frameIndex);
 
@@ -650,14 +665,21 @@ private:
         BatchedDraws moving;
         std::vector<ShadowPatch> restore;
         bool sways = false; // its casters drawn swaying in the wind (tileSways)
+
+        // While the GPU culls: its still (or all) casters and its moved ones, from its view's two lists.
+        bool gpu = false;
+        PassDraws casterDraws;
+        PassDraws moverDraws;
     };
 
-    // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches).
+    // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches). views: while the GPU culls,
+    // each drawn tile's view (in tiles' order), its lists' regions in drawList left for the GPU.
     struct ShadowDraws {
         std::vector<ShadowTileDraw> tiles;
         std::vector<std::uint32_t> drawList;
         std::vector<bool> tileGlass;
         std::vector<ShadowPatch> nextMoverPatches;
+        std::vector<GpuCameraCull> views;
     };
 
     // The still copy at this size (a new one when it changes, the GPU waited for first).
@@ -699,6 +721,11 @@ private:
     // wind's settings while things sway this frame (render/gpu/wind.h), else null: tiles that sway redraw while their casters do.
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry,
                                    bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway);
+    // The same while the GPU culls (render/gpu/shadow_culling.h): which tiles are drawn decided from the changes the table
+    // reports, each drawn tile a view whose lists get listEntries entries each.
+    ShadowDraws prepareGpuShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry,
+                                      bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway,
+                                      const CameraCullFrame& table, std::size_t listEntries);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawGlassShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
 

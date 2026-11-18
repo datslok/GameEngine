@@ -254,6 +254,9 @@ namespace {
         assert((glassInReach(draws, reach) == std::vector<std::size_t>{2, 3, 4}));
         assert((glassInReach(draws, BoundingSphere{}) == std::vector<std::size_t>{1, 2, 3, 4}));
 
+        // Of a list only (the cached glass), the same test, in the list's order.
+        assert((glassInReach(draws, std::vector<std::size_t>{4, 2, 1, 0}, reach) == std::vector<std::size_t>{4, 2}));
+
         // The solid casters are the rest, as before.
         assert((castersInReach(draws, BoundingSphere{}) == std::vector<std::size_t>{0, 5}));
     }

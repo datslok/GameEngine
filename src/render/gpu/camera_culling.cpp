@@ -199,15 +199,17 @@ void placeCullView(GpuCameraCull& view, std::uint32_t index, std::uint32_t candi
         view.runCount[run] = order.runCount[run];
     }
 
-    view.slices[CAMERA_CULL_SLICE_FLAGS] = static_cast<std::uint32_t>(index * one.flags);
-    view.slices[CAMERA_CULL_SLICE_BLOCKS] = static_cast<std::uint32_t>(index * one.blocks);
+    const std::uint32_t inBatch = index % static_cast<std::uint32_t>(cullScratchViews);
+    view.slices[CAMERA_CULL_SLICE_FLAGS] = static_cast<std::uint32_t>(inBatch * one.flags);
+    view.slices[CAMERA_CULL_SLICE_BLOCKS] = static_cast<std::uint32_t>(inBatch * one.blocks);
     view.slices[CAMERA_CULL_SLICE_COMMANDS] = static_cast<std::uint32_t>(index * one.commands);
     view.slices[CAMERA_CULL_SLICE_PLACES] = static_cast<std::uint32_t>(index * one.places);
 }
 
 CullViewSizes cullViewSizes(std::size_t views, std::uint32_t candidates, const CullDrawOrder& order) {
     const std::size_t blocks = (static_cast<std::size_t>(candidates) + cameraCullGroupSize - 1) / cameraCullGroupSize;
-    return CullViewSizes{views * candidates, views * (blocks + 1), views * order.order.size(), views * (static_cast<std::size_t>(order.pooled) + 1)};
+    const std::size_t scratch = std::min(views, cullScratchViews);
+    return CullViewSizes{scratch * candidates, scratch * (blocks + 1), views * order.order.size(), views * (static_cast<std::size_t>(order.pooled) + 1)};
 }
 
 bool swayReaches(const float bounds[4], const Vec3& eye, float fadeEnd) {
@@ -215,8 +217,37 @@ bool swayReaches(const float bounds[4], const Vec3& eye, float fadeEnd) {
     return offset.length() - std::max(bounds[3], 0.0f) < fadeEnd;
 }
 
+// The CPU's steps in its order: the kind of draw, the reach (squared distances, as castersInReach), the view, the size,
+// the cascade.
+bool shadowTakes(const GpuCullRecord& record, const GpuCameraCull& view) {
+    if ((record.flags & (CULL_TRANSPARENT | CULL_HIDDEN)) != 0u || (record.flags & CULL_CASTS_SHADOWS) == 0u) {
+        return false;
+    }
+
+    if (view.reach[3] >= 0.0f && record.bounds[3] >= 0.0f) {
+        const float touching = view.reach[3] + record.bounds[3];
+        const Vec3 offset{record.bounds[0] - view.reach[0], record.bounds[1] - view.reach[1], record.bounds[2] - view.reach[2]};
+
+        if (offset.lengthSquared() >= touching * touching) {
+            return false;
+        }
+    }
+
+    if (!sphereInFrustum(view.frustum, record.bounds)) {
+        return false;
+    }
+
+    if (record.bounds[3] >= 0.0f && record.bounds[3] < view.smallestCaster) {
+        return false;
+    }
+
+    return view.cascade < 0 || record.shadowCascades <= 0 || view.cascade < record.shadowCascades;
+}
+
 std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view, std::uint32_t slot) {
-    if (!cameraTakes(record, view.frustum)) {
+    const bool shadow = (view.flags & CAMERA_CULL_SHADOW) != 0u;
+
+    if (shadow ? !shadowTakes(record, view) : !cameraTakes(record, view.frustum)) {
         return 0u;
     }
 
@@ -224,6 +255,12 @@ std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLev
 
     if (chosen != static_cast<int>(slot)) {
         return 0u;
+    }
+
+    // A shadow tile keeping its movers apart lists those that moved second; its shaders thin nothing.
+    if (shadow) {
+        const bool apart = (view.flags & CAMERA_CULL_MOTION) != 0u && (record.flags & CULL_MOVED) != 0u;
+        return apart ? CAMERA_CULL_MOVING : CAMERA_CULL_DRAWN;
     }
 
     std::uint32_t flags = CAMERA_CULL_DRAWN;
@@ -310,6 +347,13 @@ void packCullCommands(std::span<const GpuDrawCommand> commands, std::span<const 
 bool nearACameraEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view) {
     if (nearAChoiceEdge(record, levels, view.levels, view.frustum)) {
         return true;
+    }
+
+    // A shadow tile's own edges: the sphere touching the reach within a millimetre, or the smallest caster's size.
+    if ((view.flags & CAMERA_CULL_SHADOW) != 0u) {
+        const Vec3 offset{record.bounds[0] - view.reach[0], record.bounds[1] - view.reach[1], record.bounds[2] - view.reach[2]};
+        const bool atReach = view.reach[3] >= 0.0f && record.bounds[3] >= 0.0f && std::abs(offset.length() - view.reach[3] - record.bounds[3]) < 1e-3f;
+        return atReach || std::abs(record.bounds[3] - view.smallestCaster) < 1e-4f;
     }
 
     if ((view.flags & CAMERA_CULL_SWAY) == 0u || (record.flags & CULL_SWAYS) == 0u) {
@@ -414,19 +458,21 @@ std::string describeCullComparison(std::span<const NamedCullComparison> lists) {
 CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement,
                                         const std::function<bool(MeshHandle)>& changesShape) {
     const std::size_t stillCount = std::min(frame.stillDraws, frame.draws.size());
+    CameraCullFrame result;
 
     if (packedVersion != frame.stillVersion || records.size() != stillCount || (stillCount == 0 && generation == 0)) {
         const bool follows = packedVersion != 0 && packedVersion == frame.stillPreviousVersion && records.size() == stillCount && stillCount > 0;
 
-        if (!follows || !repackRanges(frame)) {
+        if (!follows || !repackRanges(frame, result.stillChanges)) {
             buildStill(frame, placement);
+            result.stillRebuilt = true;
+            result.stillChanges.clear();
         }
 
         packedVersion = frame.stillVersion;
         ++generation;
     }
 
-    CameraCullFrame result;
     const std::size_t movingCount = frame.draws.size() - stillCount;
     result.stillRecords = records;
     result.stillCandidates = still.candidates;
@@ -491,10 +537,10 @@ void CameraCullTable::buildStill(const FrameDescription& frame, const std::funct
 }
 
 /*
-* Each built draw's record packed again; false (build everything) where its candidates or lists would change: its key,
-* or its mesh's levels' meshes.
+* Each built draw's record packed again, its old and new records added to changes; false (build everything) where its
+* candidates or lists would change: its key, or its mesh's levels' meshes.
 */
-bool CameraCullTable::repackRanges(const FrameDescription& frame) {
+bool CameraCullTable::repackRanges(const FrameDescription& frame, std::vector<GpuCullRecord>& changes) {
     for (const DrawRange& range : frame.builtStillDraws) {
         if (range.first + range.count > records.size()) {
             return false;
@@ -521,7 +567,9 @@ bool CameraCullTable::repackRanges(const FrameDescription& frame) {
                 stillLevels[item.mesh.index] = packed;
             }
 
+            changes.push_back(records[draw]);
             records[draw] = packCullRecord(item);
+            changes.push_back(records[draw]);
         }
     }
 

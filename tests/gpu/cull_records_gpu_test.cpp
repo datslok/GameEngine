@@ -6,6 +6,7 @@
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_depth_range.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -24,6 +25,11 @@ namespace {
         std::uint32_t slot = 0;
         float swayFadeEnd = 0.0f;
         std::uint32_t cameraFlags = 0;
+
+        // A shadow tile's (shadowTakes): its reach, smallest caster and cascade.
+        float reach[4] = {0.0f, 0.0f, 0.0f, -1.0f};
+        float smallestCaster = 0.0f;
+        std::int32_t cascade = -1;
     };
 
     // The case's camera record (GpuCameraCull) for cameraCandidateFlags.
@@ -33,6 +39,9 @@ namespace {
         view.levels = c.view;
         view.swayFadeEnd = c.swayFadeEnd;
         view.flags = c.cameraFlags;
+        std::copy(std::begin(c.reach), std::end(c.reach), std::begin(view.reach));
+        view.smallestCaster = c.smallestCaster;
+        view.cascade = c.cascade;
         return view;
     }
 
@@ -61,6 +70,8 @@ namespace {
             draw.material.alphaMode = i % 13 == 0 ? AlphaMode::Blend : i % 3 == 0 ? AlphaMode::Mask : AlphaMode::Opaque;
             draw.thinningEntry = i % 4 == 0 ? 1u : 0u;
             draw.sway.kind = i % 3 == 1 ? SwayKind::Plant : SwayKind::Still;
+            draw.castsShadows = i % 7 != 3;
+            draw.shadowCascades = i % 5 == 1 ? 1 + i % 3 : 0;
 
             if (i % 8 == 2) {
                 draw.previousModel = Mat4::translation(0.0f, 1.0f, 0.0f);
@@ -93,7 +104,19 @@ namespace {
             c.levels.changesShape = i % 23 == 0 ? 1u : 0u;
             c.slot = static_cast<std::uint32_t>(i / 4) % 4u;
             c.swayFadeEnd = random.between(20.0f, 3000.0f);
-            c.cameraFlags = (i % 6 != 0 ? CAMERA_CULL_MOTION : 0u) | (i % 5 != 0 ? CAMERA_CULL_SWAY : 0u);
+            c.cameraFlags = (i % 6 != 0 ? CAMERA_CULL_MOTION : 0u) | (i % 5 != 0 ? CAMERA_CULL_SWAY : 0u) | (i % 3 == 0 ? CAMERA_CULL_SHADOW : 0u);
+
+            if (i % 4 != 0) {
+                const Vec3 reachCentre{random.between(-1500.0f, 1500.0f), random.between(0.0f, 200.0f), random.between(-1500.0f, 1500.0f)};
+                const float reachRadius = random.between(100.0f, 2500.0f);
+                c.reach[0] = reachCentre.x;
+                c.reach[1] = reachCentre.y;
+                c.reach[2] = reachCentre.z;
+                c.reach[3] = reachRadius;
+            }
+
+            c.smallestCaster = i % 2 == 0 ? random.between(0.0f, 20.0f) : 0.0f;
+            c.cascade = i % 3 == 0 ? -1 : static_cast<std::int32_t>(i % 4);
             cases.push_back(c);
         }
 
@@ -132,9 +155,11 @@ namespace {
         for (const Case& c : cases) {
             appendInputs(inputs, c);
             inputs.push_back(gpuVec4(static_cast<float>(c.levels.changesShape), static_cast<float>(c.slot), c.swayFadeEnd, static_cast<float>(c.cameraFlags)));
+            inputs.push_back(GpuVec4{c.reach[0], c.reach[1], c.reach[2], c.reach[3]});
+            inputs.push_back(gpuVec4(c.smallestCaster, static_cast<float>(c.cascade), static_cast<float>(c.record.shadowCascades)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CAMERA_CANDIDATE, inputs, 14, 1);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CAMERA_CANDIDATE, inputs, 16, 1);
 
         for (std::size_t i = 0; i < cases.size(); ++i) {
             if (nearAThreshold(cases[i])) {
@@ -146,6 +171,7 @@ namespace {
             const Vec3 eye{c.view.eye[0], c.view.eye[1], c.view.eye[2]};
             report.check("cameraCandidateFlags", exactTolerance, static_cast<float>(cameraCandidateFlags(c.record, c.levels, view, c.slot)), outputs[i][0]);
             report.check("swayReaches", exactTolerance, swayReaches(c.record.bounds, eye, c.swayFadeEnd) ? 1.0f : 0.0f, outputs[i][1]);
+            report.check("shadowTakes", exactTolerance, shadowTakes(c.record, view) ? 1.0f : 0.0f, outputs[i][2]);
         }
     }
 

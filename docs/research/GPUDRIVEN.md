@@ -54,3 +54,28 @@ Laptop, release, hidden copy, ms. ~50K draws in the forest.
 - Two paths while the CPU one stays as the reference.
 - Empty indirect draws still cost the command processor until the shared mesh buffer.
 - Above ~500K instances, chunks of instances culled first (Decima's clusters) and coarse CPU cells become necessary.
+
+## Stage 5: shadow tiles (`gpu-cull-shadows`), gathered Nov 18 2026
+
+**The problem:** a tile is redrawn only when its fingerprint (`shadowCasterSignature`: every caster's mesh, matrix, shape and level) differs from the last. Computing the fingerprint needs the CPU's caster list, so every tile walks every draw each frame, cached or not: SHADOWS 2.1-3.9 ms at the rim, Ring and wall, nearly all of it for tiles then skipped (`TILES DRAWN 2 CACHED 3`).
+
+| Source | What they do | Numbers |
+|---|---|---|
+| Haar & Aaltonen, SIGGRAPH 2015 (above) | AC Unity culls each cascade's casters on the GPU, also against an occlusion depth for the cascade made by reprojecting the camera's depth | 30-80% of shadow triangles culled ([DSOGaming's account](https://www.dsogaming.com/?p=80038), not checked against the slides) |
+| Unreal 5 virtual shadow maps ([`EShadowCacheInvalidationBehavior`](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/EShadowCacheInvalidationBehavior)) | Cached pages invalidated by what the scene reports: a primitive's transform changed, or its material moves vertices (world position offset); a primitive can opt out (Rigid, Static) | Forum reports of swaying foliage invalidating every frame ([1](https://forums.unrealengine.com/t/wpo-causes-shadow-glitches-when-rendering-with-vsm-using-caching-default/2707254), [2](https://forums.unrealengine.com/t/constant-invalidation-of-vsm-dynamic-shadows-in-5-7-0/2686534)) |
+| Cyberpunk 2077, SIGGRAPH 2021 (`SHADOWCACHE.md`) | A budget of shadow updates a frame | |
+
+**What it means here:** the cache's decision moves from a fingerprint of the casters to the changes the scene already announces, so the CPU's work follows what changed, not what exists; the GPU culls only the tiles redrawn.
+
+| A tile is redrawn when | Known from |
+|---|---|
+| Its view changed (matrix, square, reach, smallest caster, cascade) or a shadow setting changed | the plan, as today (`ShadowTileMemory`, its key widened by the settings) |
+| A still draw rebuilt in place touches it (old or new sphere in reach and view) | `FrameDescription::builtStillDraws`, the kept records' old spheres |
+| The still draws were rebuilt whole (version not following) | that frame only, today's fingerprint on the CPU (exact, one frame at today's cost) |
+| A moving draw that moved, or whose mesh deformed, touches it | the draws after `stillDraws` (hundreds), tested on the CPU |
+| Something swaying may be in it (the nearest cascade with sway on) | redrawn every frame (today: whenever a caster in it sways, nearly always in the forest) |
+| Glass tinting it changed | glass's cached list, on the CPU as today |
+
+- **Tiles as views:** each redrawn tile a view of the culling passes: its own candidate test (casts shadows, shadow-only kept, hidden dropped, reach sphere, frustum, smallest caster, cascade limit; a new `culling.glsl` function mirrored by `prepareShadowDraws`' steps), levels by its texels (`tileLevelView`), its second list the movers (the far tile keeps them apart).
+- **Room:** a view's working buffers (12 B a candidate) are scratch, reusable for the next batch of views; its draw list region (4 B a draw) and commands live to the draw.
+- **Then the CPU path goes:** the renderer draws only the GPU's lists; `cull-compare` still builds the CPU's on request, as the reference.
