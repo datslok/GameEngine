@@ -1405,7 +1405,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const std::vector<std::size_t> visible = opaqueDraws(description.draws, seen);
     stats.drawn = seen.size();
     stats.culled = description.draws.size() - seen.size();
-    cpuClock.lap(CpuStage::Camera, profilerSeconds());
+    cpuClock.lap(CpuStage::Frustum, profilerSeconds());
 
     // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
     // surfaces, so they need the anti-aliasing on. A flat mirror's picture (render/gpu/planar_reflection.h) goes with
@@ -1472,9 +1472,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
     cameraThinning = thinningErrorPerMetre(cameraLevels);
     stats.drawnByLevel = levelsChosen(description.draws, visible, cameraLevels);
+    cpuClock.lap(CpuStage::Levels, profilerSeconds());
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible, 0, &cameraLevels);
     std::tie(stats.drawnTriangles, stats.drawnCutOutTriangles) = batchTriangles(mainDraws.batches);
-    cpuClock.lap(CpuStage::Camera, profilerSeconds());
+    cpuClock.lap(CpuStage::Batch, profilerSeconds());
 
     // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway and the velocity pass.
     validateWind(settings.wind);
@@ -1507,7 +1508,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()), &cameraLevels);
-    cpuClock.lap(CpuStage::Camera, profilerSeconds());
+    cpuClock.lap(CpuStage::Moving, profilerSeconds());
 
     // The probe round the camera is captured while reflections run, a few faces a frame (probeCaptureStep), each from the
     // place its cycle started. Each face drawn draws what its own view holds, those entries following the velocity

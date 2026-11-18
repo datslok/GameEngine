@@ -11,13 +11,13 @@ namespace {
         CpuStageClock clock;
         clock.start(10.0);
         clock.lap(CpuStage::Wait, 10.5);
-        clock.lap(CpuStage::Camera, 10.75);
+        clock.lap(CpuStage::Frustum, 10.75);
         clock.lap(CpuStage::Shadows, 11.0);
-        clock.lap(CpuStage::Camera, 11.25);
+        clock.lap(CpuStage::Frustum, 11.25);
         const CpuStageTimings timings = clock.finish();
         assert(timings.valid);
         assert(timings.seconds[static_cast<std::size_t>(CpuStage::Wait)] == 0.5);
-        assert(timings.seconds[static_cast<std::size_t>(CpuStage::Camera)] == 0.5);
+        assert(timings.seconds[static_cast<std::size_t>(CpuStage::Frustum)] == 0.5);
         assert(timings.seconds[static_cast<std::size_t>(CpuStage::Shadows)] == 0.25);
         assert(timings.seconds[static_cast<std::size_t>(CpuStage::Pack)] == 0.0);
         assert(timings.totalSeconds == 1.25);
@@ -25,6 +25,16 @@ namespace {
         // Finished, it starts afresh: laps before the next start count nothing.
         clock.lap(CpuStage::Wait, 12.0);
         assert(!clock.finish().valid);
+    }
+
+    // What the camera draws, in four parts in the frame's order, so the readout shows where its CPU time goes: the frustum
+    // test over every draw, the levels counted, the main batch, the moving draws and their batch.
+    void testTheCameraInParts() {
+        assert(static_cast<int>(CpuStage::Setup) + 1 == static_cast<int>(CpuStage::Frustum));
+        assert(static_cast<int>(CpuStage::Frustum) + 1 == static_cast<int>(CpuStage::Levels));
+        assert(static_cast<int>(CpuStage::Levels) + 1 == static_cast<int>(CpuStage::Batch));
+        assert(static_cast<int>(CpuStage::Batch) + 1 == static_cast<int>(CpuStage::Moving));
+        assert(std::string(cpuStageName(CpuStage::Frustum)) == "FRUSTUM" && std::string(cpuStageName(CpuStage::Moving)) == "MOVING");
     }
 
     // Every stage has its own short upper-case name for the readout.
@@ -49,4 +59,5 @@ namespace {
 void testCpuTiming() {
     testLapsAddUpByStage();
     testStageNames();
+    testTheCameraInParts();
 }

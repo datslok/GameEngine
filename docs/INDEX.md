@@ -50,6 +50,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/GROUNDCOVER.md` | Grass and floor cover |
 | `docs/research/TEXTURECOMPRESSION.md` | Block-compressed textures, the encoder, the texture cache |
 | `docs/research/OCCLUSION.md` | Occlusion culling: the depth pyramid, two-phase culling, foliage (phase 18) |
+| `docs/research/GPUDRIVEN.md` | GPU-driven drawing: culling, levels and batching on the GPU, the CPU baseline (phase 18) |
 | `docs/research/CLOTHGPU.md` | Any cloth solver, low-frequency layer or self-collision work (phases 7, 10); yardstick numbers in Part 5 |
 | `docs/research/RAGDOLLPLAN.md` | Active ragdolls (phase 8); check formulas marked as from memory |
 | `docs/research/DESTRUCTION.md` | Flight and destruction (phase 15); check facts marked as from memory |
