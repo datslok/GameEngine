@@ -88,6 +88,19 @@ What is left: CAMERA (0.9 ms) and SHADOWS (1.7 ms) scan every draw for every vie
 - **On the CPU:** a grid of still objects' bounds, so each view tests cells, not objects; shadow signatures from a still tile's version rather than hashing every caster.
 - **On the GPU:** culling and levels of detail in a compute pass writing indirect draws (RedLynx's design). The bigger change: the shadow cache, glass sorting and the planar mirror's choice all read the CPU's lists today.
 
+### Stage 4: changes announced, not found (`still-announced`)
+
+After GPU-driven drawing, the CPU still walked every renderer twice a frame (`StillDraws::update` for additions and removals, `buildFrame` for the moving ones): about 0.7 ms in the forest, growing with the world. How others learn of changes (from the engines' documentation and source, from memory):
+
+| Engine | How |
+|---|---|
+| Unreal | The game calls `AddPrimitive`, `RemovePrimitive`, `UpdatePrimitiveTransform`; the scene keeps dirty lists and never scans |
+| EnTT, flecs | Signals or observers when a component is added or removed (`on_construct`, `on_destroy`; `OnAdd`, `OnRemove`) |
+| Bevy | Component hooks and observers keep its retained render world in step (0.14, 0.15) |
+| Unity Entities | A change version per chunk of about 128 entities, bumped on write access: every chunk still checked, 128 times fewer checks |
+
+Chosen: Unreal's and EnTT's, since Unity's still grows with the world. The world logs entities gaining or losing a `ModelRenderer`, `Transform` or `DeformingMesh` (`World::logChanges`); shown and still are private, changed only by setters that announce (`setRenderVisible`, `setRenderStill`; the user chose them over plain fields with a debug check, since the check samples and misses more as the world grows); the still draws keep the moving list themselves. Cost: the changes and the moving entities.
+
 ## Risks
 
 - **A still object that moves unannounced** draws in the wrong place. Hence the debug check, and still being off by default.

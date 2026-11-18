@@ -27,6 +27,10 @@ namespace {
         assert(nearlyEqual(origin.z, z));
     }
 
+    // Whether shown or still can be chosen on a renderer held by reference (one already in a world): never.
+    template <typename Renderer>
+    constexpr bool choosableInPlace = requires(Renderer& held) { held.withVisible(false); } || requires(Renderer& held) { held.withStill(true); };
+
     template <typename Function>
     bool throws(Function function) {
         try {
@@ -71,7 +75,7 @@ void testModelRenderer() {
     const ModelRenderer renderer = assets.makeModelRenderer(model, Mat4::scaling(0.5f, 0.5f, 0.5f));
 
     assert(renderer.parts.size() == 2);
-    assert(renderer.visible);
+    assert(renderer.isVisible());
 
     const RenderPart& a = renderer.parts[0];
     const RenderPart& b = renderer.parts[1];
@@ -159,4 +163,11 @@ void testModelRenderer() {
     assertPartOrigin(Transform{}, single.parts[0], 0.0f, 0.0f, 0.0f);
 
     assert(throws([&] { makeMeshRenderer(MeshHandle{}); }));
+
+    // Shown or hidden, still or not, is chosen before a renderer joins a world (on a value about to be moved in); once
+    // in one, only setRenderVisible and setRenderStill change it, announcing it.
+    static_assert(!choosableInPlace<ModelRenderer>);
+    const ModelRenderer chosen = makeMeshRenderer(cube).withVisible(false).withStill(true);
+    assert(!chosen.isVisible() && chosen.isStill() && chosen.parts.size() == 1);
+    assert(ModelRenderer{}.isVisible() && !ModelRenderer{}.isStill());
 }

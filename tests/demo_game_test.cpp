@@ -607,7 +607,7 @@ void testDemoGame() {
     assert(world.isAlive(player));
     assert(world.isAlive(marker));
     assert(!game.wantsMouseLook());
-    assert(!world.get<ModelRenderer>(marker).visible);
+    assert(!world.get<ModelRenderer>(marker).isVisible());
 
     // Files are loaded once: the two cubes share a mesh, so there are fewer meshes than drawable parts.
     std::size_t parts = 0;
@@ -628,7 +628,7 @@ void testDemoGame() {
     // Where that click should land on the ground, worked out independently.
     const auto expected = intersectGround(makeCameraRay(game.getCamera(), 0.75f, 0.5f, 1600.0f / 900.0f));
     assert(expected);
-    assert(world.get<ModelRenderer>(marker).visible);
+    assert(world.get<ModelRenderer>(marker).isVisible());
     assert(world.get<CharacterMovement>(player).isMoving());
 
     // Nothing moves until a tick runs: input only becomes a command.
@@ -643,7 +643,7 @@ void testDemoGame() {
     assert(!world.get<CharacterMovement>(player).isMoving());
 
     // On arrival the simulation hides the marker.
-    assert(!world.get<ModelRenderer>(marker).visible);
+    assert(!world.get<ModelRenderer>(marker).isVisible());
 
     // A tap does not start hold-to-steer: with the button up, later frames give no new command.
     Input later = mobaInput();

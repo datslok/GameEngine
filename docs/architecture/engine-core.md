@@ -77,6 +77,7 @@ Same build + same commands → bit-identical state.
 - `Entity`: index + generation; handles to destroyed entities go stale even after reuse; `Entity{}` means none.
 - `World` holds one sparse-set `ComponentStorage<T>` per type (packed `components`, owning `entities`, `sparse` index).
 - `world.each<A, B>(...)` walks `A`'s packed array: list the rarest first.
+- **Change logs** (`logChanges<T>(on)`, `takeChanges<T>()`, `isLoggingChanges<T>()`): while on, each entity gaining or losing a `T` (removed or destroyed, as applied) is recorded in order until taken; values changed in place are not. For code that keeps something built between frames (the still draws), so it looks at what changed, never at every component. Off drops the log.
 - **During a walk:** `destroy` and `remove<T>` are queued (`PendingChange`) and applied when the outermost walk ends (also on a throw); `create` is immediate; `add<T>` on a walked type throws, `addLater<T>` queues. Tested in `deferred_changes_test`.
 - **Components by folder:** `math/` `Transform` (`getMatrix` = T·R·S), `PreviousTransform`; `scene/` `ModelRenderer` (a list of `RenderPart`s: mesh, material, local transform; built by `makeModelRenderer` or `makeMeshRenderer`), lights, `SkyBackground`; `gameplay/` `Spinner`, `Firefly`, `CharacterMovement`, `FirstPersonBody`, `Grenade`; `physics/` `Collider`, `CharacterController`, `Particle`.
 

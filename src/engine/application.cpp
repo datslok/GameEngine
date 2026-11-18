@@ -500,7 +500,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
 
         still = &stillDraws;
     } else {
-        stillDraws.invalidate();
+        stillDraws.stopLogging(world);
     }
 
     FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory, jobs, terrainDraws, still);

@@ -11,7 +11,7 @@ Other forest files: `forest-rock.md` (pillars, islands, what hangs from them, dr
 In order: `buildGround`, `buildShapes`, `buildTrees`, `buildLianas`, `buildUnderstorey`, `buildPalms`, `buildGrass`, `buildFloorCover`; then the start, the body, the sun, the air entity and `ProbeCascades`.
 
 - Generated meshes are built on the game's job system (`Game::getJobs`), each into its own slot, so the result does not depend on thread order; most are kept drawn-only (`AssetManager::addDrawnMesh`).
-- Scenery is `ModelRenderer::still` (`addShape`): its draws are kept between frames, so any change to its material or sway is announced with `markRenderChanged`.
+- Scenery is `ModelRenderer::isStill` (`addShape`): its draws are kept between frames, so any change to its material or sway is announced with `markRenderChanged`.
 - Static and walked on (`StaticLevel`): the finest ring of ground and the Monolith's boxes only. Pillars, islands, the Ring and trees have no collision; they stand clear of the path.
 - Without `assets/forest` (a fresh clone; tests pass a folder that does not exist) every texture role falls back to a plain stand-in, and drawn textures use stand-in colours.
 

@@ -20,6 +20,10 @@ public:
     // How many walks (World::each) are going through this storage right now. Its packed arrays must not grow or
     // shrink meanwhile: removing moves the last component into the hole, and adding can move the whole array.
     int activeWalks = 0;
+
+    // While logging (World::logChanges), every entity given or losing the component, in order, until taken.
+    bool logging = false;
+    std::vector<Entity> logged;
 };
 
 /*
@@ -47,6 +51,10 @@ public:
         entities.push_back(entity);
         components.push_back(std::move(component));
 
+        if (logging) {
+            logged.push_back(entity);
+        }
+
         return components.back();
     }
 
@@ -65,6 +73,11 @@ public:
 
     const Component* tryGet(Entity entity) const {
         return contains(entity) ? &components[sparse[entity.index]] : nullptr;
+    }
+
+    // Where the entity's component stands in the packed arrays (it must have one): moves when others are removed.
+    std::size_t placeOf(Entity entity) const {
+        return sparse[entity.index];
     }
 
     /*
@@ -88,6 +101,10 @@ public:
         components.pop_back();
         entities.pop_back();
         sparse[entity.index] = missing;
+
+        if (logging) {
+            logged.push_back(entity);
+        }
     }
 
     std::size_t size() const {

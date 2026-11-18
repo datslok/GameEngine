@@ -964,7 +964,7 @@ namespace {
 
         forest.world.each<ModelRenderer>([&](Entity entity, const ModelRenderer& renderer) {
             const bool drifts = forest.world.has<DriftingRock>(entity);
-            assert(renderer.still == !drifts);
+            assert(renderer.isStill() == !drifts);
             moving += drifts ? 1 : 0;
         });
 

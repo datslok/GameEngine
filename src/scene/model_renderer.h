@@ -1,10 +1,12 @@
 #pragma once
 
+#include "ecs/world.h"
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
 #include "scene/wind.h"
 
+#include <utility>
 #include <vector>
 
 // One drawable piece of a model.
@@ -23,7 +25,25 @@ struct RenderPart {
 */
 struct ModelRenderer {
     std::vector<RenderPart> parts;
-    bool visible = true;
+
+    // Drawn at all (shown), and kept from frame to frame (still: see below).
+    bool isVisible() const { return visible; }
+    bool isStill() const { return still; }
+
+    /*
+    * Chosen before the renderer joins a world: callable only on a value about to be moved in, so one already in a
+    * world changes only through setRenderVisible and setRenderStill, which announce it. What keeps the still draws
+    * (scene/still_draws.h) looking only at what changed, never at every renderer.
+    */
+    ModelRenderer withVisible(bool shown) && {
+        visible = shown;
+        return std::move(*this);
+    }
+
+    ModelRenderer withStill(bool kept) && {
+        still = kept;
+        return std::move(*this);
+    }
 
     // Whether it blocks light from shadow-casting lights. Off for things that surround their own light, like a glowing lamp shade.
     bool castsShadows = true;
@@ -48,15 +68,6 @@ struct ModelRenderer {
     bool hidden = false;
 
     /*
-    * Never moves and never changes (scene/still_draws.h): its draws are built once and kept from frame to frame, which
-    * with the forest's 35,000 objects saved most of the CPU's frame. A game that does change one (its Transform, parts or
-    * materials) calls markRenderChanged that frame; being hidden or shown, given more or fewer parts, or no longer still
-    * are noticed without it. Debug builds check that kept matrices still match. Separate from isStatic: a tree is still
-    * but not part of the level the probes and the sky bake treat as solid. No PreviousTransform needed.
-    */
-    bool still = false;
-
-    /*
     * Follows the ground (scene/ground_follow.h): its meshes stand on y = 0 of their own frame, and the vertex shaders
     * lift each vertex by the terrain's height at its place, so one flat patch of grass serves every spot of lumpy land.
     * Its bounds are lifted to match; no ray meets it.
@@ -65,7 +76,28 @@ struct ModelRenderer {
 
     // How it sways in the wind (scene/wind.h; Still by default): every vertex shader bends it by its spring.
     WindSway sway{};
+
+private:
+    friend void setRenderVisible(World& world, Entity entity, bool shown);
+    friend void setRenderStill(World& world, Entity entity, bool kept);
+
+    bool visible = true;
+
+    /*
+    * Never moves and never changes (scene/still_draws.h): its draws are built once and kept from frame to frame, which
+    * with the forest's 35,000 objects saved most of the CPU's frame. A game that does change one (its Transform, parts or
+    * materials) calls markRenderChanged that frame; hiding, showing and stilling announce themselves. Debug builds check
+    * that kept matrices and parts still match. Separate from isStatic: a tree is still but not part of the level the
+    * probes and the sky bake treat as solid. No PreviousTransform needed.
+    */
+    bool still = false;
 };
+
+// Shows or hides an entity's renderer, announced (markRenderChanged) when it changes. Nothing without a renderer.
+void setRenderVisible(World& world, Entity entity, bool shown);
+
+// Makes an entity's renderer still or moving, announced when it changes. Nothing without a renderer.
+void setRenderStill(World& world, Entity entity, bool kept);
 
 // Build a renderer with a single mesh.
 ModelRenderer makeMeshRenderer(MeshHandle mesh, const Material& material = Material{});

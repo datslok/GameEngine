@@ -9,6 +9,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <utility>
 
 namespace {
     bool nearlyEqual(float actual, float expected) {
@@ -122,9 +123,7 @@ namespace {
 
         const Entity hidden = world.create();
         world.add(hidden, Transform{});
-        ModelRenderer hiddenRenderer = makeMeshRenderer(MeshHandle{0});
-        hiddenRenderer.visible = false;
-        world.add(hidden, hiddenRenderer);
+        world.add(hidden, makeMeshRenderer(MeshHandle{0}).withVisible(false));
 
         const Entity unplaced = world.create();
         world.add(unplaced, makeMeshRenderer(MeshHandle{1}));
@@ -192,10 +191,10 @@ namespace {
         world.add(entity, makeMeshRenderer(MeshHandle{0}));
         buildFrame(world, makeTestCamera(), 0.0f, &history);
 
-        world.get<ModelRenderer>(entity).visible = false;
+        setRenderVisible(world, entity, false);
         assert(buildFrame(world, makeTestCamera(), 0.0f, &history).draws.empty());
 
-        world.get<ModelRenderer>(entity).visible = true;
+        setRenderVisible(world, entity, true);
         assert(!buildFrame(world, makeTestCamera(), 0.0f, &history).draws[0].previousModel);
         assert(buildFrame(world, makeTestCamera(), 0.0f, &history).draws[0].previousModel);
     }
@@ -224,8 +223,7 @@ namespace {
             renderer.castsShadows = i % 3 != 0;
             renderer.shadowOnly = i % 11 == 0;
             renderer.isStatic = i % 2 == 0;
-            renderer.visible = i % 13 != 0;
-            world.add(entity, renderer);
+            world.add(entity, std::move(renderer).withVisible(i % 13 != 0));
 
             if (i % 5 == 0) {
                 world.add(entity, PreviousTransform{placedAt(static_cast<float>(i) - 1.0f, 0.0f, 0.0f)});

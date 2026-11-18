@@ -118,7 +118,7 @@ namespace {
 
         for (const Entity entity : cover) {
             const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.followsGround && !renderer.castsShadows && renderer.still);
+            assert(renderer.followsGround && !renderer.castsShadows && renderer.isStill());
             assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
             const Vec3& place = forest.world.get<Transform>(entity).position;
             underTrees = underTrees || (place.z > treeNorthmost && place.z < treeSouthmost);

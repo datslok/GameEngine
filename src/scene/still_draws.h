@@ -11,7 +11,7 @@
 #include <vector>
 
 /*
-* Component, for one frame: a still entity (ModelRenderer::still) changed, so its draws are built again
+* Component, for one frame: a still entity (ModelRenderer::isStill) changed, so its draws are built again
 * (markRenderChanged). The engine removes it once the frame is described (clearRenderChanged).
 */
 struct RenderChanged {};
@@ -51,23 +51,32 @@ bool isEmptyDrawSlot(const DrawItem& draw);
 * not given back, after invalidate, or with other cell settings. The count of slots only grows between full layouts,
 * and the built ranges cover every slot past the count before. A deforming mesh's entity is never kept: its shape
 * changes every frame. Render-only: nothing here touches the simulation.
+*
+* Nothing walks every renderer, but a full layout: the world logs which entities gain or lose a ModelRenderer,
+* Transform or DeformingMesh (World::logChanges, turned on by the first update), and hiding, showing, stilling and
+* changes in place are announced (setRenderVisible, setRenderStill, markRenderChanged), so a frame looks only at those
+* entities and keeps the list of moving ones itself. Its cost grows with what changed and what moves, not with the world.
 */
 class StillDraws {
 public:
-    // What a frame starts from: the still draws first (count of them, those in built built this frame), with every
-    // renderer's place in the world's ModelRenderer storage marked 1 in kept when its draws are among them.
+    // What a frame starts from: the still draws first (count of them, those in built built this frame), and the places
+    // in the world's ModelRenderer storage of the renderers drawn but not kept (moving), in the storage's order.
     struct Update {
         std::vector<DrawItem> draws;
         std::size_t count = 0;
         std::vector<DrawRange> built;
-        std::vector<std::uint8_t> kept;
+        std::vector<std::size_t> moving;
         std::uint64_t version = 0;         // this update's, never 0
         std::uint64_t previousVersion = 0; // the update before's (0: none)
     };
 
     // The still draws brought up to date with the world, placed at alpha (still entities have no PreviousTransform, so
     // it changes nothing), built on jobs. Each one's last-frame matrix is its own. Built ranges are sorted and apart.
-    Update update(const World& world, float alpha, JobSystem& jobs);
+    // Takes the world's change logs (turning them on when off, everything then laid out afresh).
+    Update update(World& world, float alpha, JobSystem& jobs);
+
+    // Turns the world's change logs off (the kept draws turned off), so they do not grow; the next update lays out afresh.
+    void stopLogging(World& world);
 
     // The frame's list back once drawn: its first draws are kept for the next frame, the rest dropped then.
     void giveBack(std::vector<DrawItem> draws);
@@ -80,7 +89,8 @@ public:
 
     /*
     * The debug builds' check, up to count kept entities a call, taking turns: throws std::logic_error when one's draws
-    * no longer match where it stands (moved without markRenderChanged). Nothing while the list is out.
+    * no longer match where it stands or its parts (changed without markRenderChanged), or it is no longer shown and still
+    * (its renderer replaced whole). Nothing while the list is out.
     */
     void verify(const World& world, std::size_t count);
 
@@ -93,14 +103,17 @@ public:
     std::size_t getChunkSlots() const;
 
 private:
-    // A kept entity, by its index: its generation, its cell, its first draw and its parts, and the update that last saw it.
+    // How an entity is drawn: not at all, kept (still, shown, placed, not deforming) or built every frame (moving).
+    enum class Kind : std::uint8_t { None, Kept, Moving };
+
+    // An entity, by its index: its generation and kind; kept, its cell, first draw and parts; moving, its place in moving.
     struct Entry {
         std::uint32_t generation = 0;
         std::uint32_t first = 0;
         std::uint32_t parts = 0;
-        bool present = false;
+        Kind kind = Kind::None;
         CellKey cell{};
-        std::uint64_t seen = 0;
+        std::uint32_t movingAt = 0;
     };
 
     // A cell's block of slots and its entities, in their draws' order.
@@ -111,12 +124,18 @@ private:
         std::vector<Entity> entities;
     };
 
+    static Kind kindOf(const World& world, Entity entity);
+    void layOutAfresh(World& world, float alpha, JobSystem& jobs);
     void buildAll(const World& world, const std::vector<std::uint8_t>& kept, float alpha, JobSystem& jobs);
+    void addMoving(Entity entity, Entry& entry);
+    void removeMoving(Entry& entry);
+    std::vector<std::size_t> movingPlaces(const World& world) const;
     void buildCell(const World& world, const CellKey& key, Cell& cell, float alpha, JobSystem& jobs);
     void emptySlots(std::size_t first, std::size_t count);
     CellKey cellOfEntity(const World& world, Entity entity, float alpha) const;
 
     std::vector<Entry> byIndex;
+    std::vector<Entity> moving; // in no order: movingPlaces sorts their storage places
     std::map<CellKey, Cell> cells; // by key: walked in a fixed order
     SlotBlocks blocks;
     CellSettings cellSettings;

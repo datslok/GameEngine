@@ -160,7 +160,7 @@ struct FrameDescription {
     FrameLighting lighting{};
     std::vector<DrawItem> draws{};
 
-    // The draws of still entities (ModelRenderer::still) come first, stillDraws of them, kept from last frame but for
+    // The draws of still entities (ModelRenderer::isStill) come first, stillDraws of them, kept from last frame but for
     // builtStillDraws, built this frame; every draw after them was built this frame (scene/still_draws.h). None without
     // kept draws.
     std::size_t stillDraws = 0;

@@ -227,7 +227,7 @@ namespace {
 
         for (const Entity entity : lianas) {
             const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.still && renderer.shadowCascades == lianaShadowCascades);
+            assert(renderer.isStill() && renderer.shadowCascades == lianaShadowCascades);
             assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
         }
 

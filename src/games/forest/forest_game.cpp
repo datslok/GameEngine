@@ -153,11 +153,10 @@ namespace {
         return material;
     }
 
-    // Still (ModelRenderer::still): the valley never moves, but for its drifting rocks, which say otherwise.
+    // Still (ModelRenderer::isStill): the valley never moves, but for its drifting rocks, which say otherwise.
     Entity addShape(World& world, MeshHandle mesh, const Material& material, const Transform& transform, bool isStatic = false) {
-        ModelRenderer renderer = makeMeshRenderer(mesh, material);
+        ModelRenderer renderer = makeMeshRenderer(mesh, material).withStill(true);
         renderer.isStatic = isStatic;
-        renderer.still = true;
         const Entity entity = world.create();
         world.add(entity, transform);
         world.add(entity, std::move(renderer));
@@ -423,7 +422,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         const Entity entity = addShape(world, assets.addDrawnMeshWithLevels(std::move(driftingShapes[index]), std::move(driftingLevels[index])), driftingRock, pose);
         world.add(entity, drifting[index]);
         world.add(entity, PreviousTransform{pose});
-        world.get<ModelRenderer>(entity).still = false;
+        setRenderStill(world, entity, false);
         driftingRocks.push_back(entity);
     }
 
@@ -1187,7 +1186,7 @@ void ForestGame::updateDaylight(World& world) {
     applySway(world);
 }
 
-// Everything swaying is still (ModelRenderer::still): given its sway, and announced, only when the settings changed.
+// Everything swaying is still (ModelRenderer::isStill): given its sway, and announced, only when the settings changed.
 void ForestGame::applySway(World& world) {
     if (appliedSwaySettings == swaySettings) {
         return;

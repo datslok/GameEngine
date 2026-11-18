@@ -846,13 +846,13 @@ namespace {
         assert(lighting.atmosphere.has_value());
         assert(lighting.atmosphere->sunDiscScale == lab.game.getSunSettings().sunDiscScale);
         assert(lighting.atmosphere->groundAlbedo.y > lighting.atmosphere->groundAlbedo.x); // the planet beyond is grass too
-        assert(!lab.world.get<ModelRenderer>(lab.game.getSunDisc()).visible);
+        assert(!lab.world.get<ModelRenderer>(lab.game.getSunDisc()).isVisible());
 
         const Input noInput;
         lab.game.getSunSettings().atmosphere = false;
         lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
         assert(!collectLighting(lab.world, 1.0f).atmosphere.has_value());
-        assert(lab.world.get<ModelRenderer>(lab.game.getSunDisc()).visible);
+        assert(lab.world.get<ModelRenderer>(lab.game.getSunDisc()).isVisible());
 
         lab.game.getSunSettings().atmosphere = true;
         lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
@@ -1039,7 +1039,7 @@ namespace {
             const ModelRenderer& renderer = lab.world.get<ModelRenderer>(disc);
             const Vec3 expected = discRadiance(sun.colour * sun.intensity, sun.angularRadius * sizeTimes);
             const Vec3& glow = renderer.parts[0].material.emissive;
-            assert(renderer.visible && !renderer.castsShadows);
+            assert(renderer.isVisible() && !renderer.castsShadows);
             assert(near(glow.x, expected.x, 1e-3f) && near(glow.y, expected.y, 1e-3f) && near(glow.z, expected.z, 1e-3f));
         };
 
@@ -1059,7 +1059,7 @@ namespace {
         // Midnight: the sun is below the ground, and so is its disc, hidden.
         lab.game.getSunSettings().solarHours = 0.0f;
         lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
-        assert(!lab.world.get<ModelRenderer>(disc).visible);
+        assert(!lab.world.get<ModelRenderer>(disc).isVisible());
     }
 }
 
