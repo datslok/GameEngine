@@ -84,6 +84,10 @@ struct RenderSettings {
     // depth test as it is drawn, for comparing the two in the GPU timings.
     bool depthPrepass = true;
 
+    // Occlusion culling's first stage (render/gpu/occlusion_culling.h): after the prepass, count how many of the camera's
+    // draws its depth would hide (F4's HIDDEN line); drawing is unchanged. Needs the prepass.
+    bool measureOcclusion = true;
+
     // Each pixel loops only over the lights listed for its cluster (render/gpu/clusters.h) instead of every light in the
     // frame; both add the same lights in the same order, so the picture is identical. Off is for comparing the timings.
     bool clusteredShading = true;

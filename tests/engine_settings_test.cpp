@@ -96,6 +96,16 @@ namespace {
         assert(none.empty());
         assert(settings.maxTickSecondsPerFrame == 0.0);
     }
+
+    // F4's boxes round everything drawn bury the readout in a forest, so they are off until asked for, switched live.
+    void testDebugBoundingBoxesOffByDefault() {
+        EngineSettings settings;
+        assert(!settings.debugBoundingBoxes);
+
+        const std::vector<std::string> none = applySettings({{"debugBoundingBoxes", "true"}}, walkOf(settings), StartupFields::Keep);
+        assert(none.empty());
+        assert(settings.debugBoundingBoxes);
+    }
 }
 
 void testEngineSettings() {
@@ -106,4 +116,5 @@ void testEngineSettings() {
     testRendererFramesInFlightAreClamped();
     testWorkerThreads();
     testTickBudget();
+    testDebugBoundingBoxesOffByDefault();
 }

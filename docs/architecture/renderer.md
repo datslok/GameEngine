@@ -65,23 +65,24 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 8 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
 | 9 | Fog [FOG] | frame has a `Fog` and fog is on | `fog.md` |
 | 10 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
-| 11 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
-| 12-15 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
-| 16 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
-| 17 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
-| 18 | Main [MAIN] | always; sky and stars drawn in it or in a block of their own after | here |
-| 19 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
-| 20 | Motion [MOTION] | temporal AA: moved or swaying draws into the velocity image | `anti-aliasing.md` |
-| 21 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
-| 22 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
-| 23 | Reflections [SSR] | reflections on | `reflections.md` |
-| 24 | Fog apply [FOGMIX] | fog | `fog.md` |
-| 25 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
-| 26 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
-| 27 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
-| 28 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
-| 29 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
-| 30 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
+| 11 | Occlusion [OCCLUSION] | the prepass and `measureOcclusion` (on): its farthest-depth pyramid, the camera's draws counted against it | `occlusion-culling.md` |
+| 12 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
+| 13-16 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
+| 17 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
+| 18 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
+| 19 | Main [MAIN] | always; sky and stars drawn in it or in a block of their own after | here |
+| 20 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
+| 21 | Motion [MOTION] | temporal AA: moved or swaying draws into the velocity image | `anti-aliasing.md` |
+| 22 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
+| 23 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
+| 24 | Reflections [SSR] | reflections on | `reflections.md` |
+| 25 | Fog apply [FOGMIX] | fog | `fog.md` |
+| 26 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
+| 27 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
+| 28 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
+| 29 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
+| 30 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
+| 31 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
 
 The F4 readout groups them: setup to the prepass; lighting from `firstLightingPass` (PYRAMID) to MAIN; picture from `firstPicturePass` (BALLS) on (`engine/debug_views.h`).
 

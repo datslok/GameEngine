@@ -19,7 +19,7 @@ void main() {
         vec4 cells = testInput(0);
         vec4 texel = testInput(1);
         testOutput(0, vec4(float(pyramidLastFine(int(cells.x), int(cells.y), int(cells.z))),
-                           float(pyramidCell(int(texel.x), int(cells.w), int(texel.y))), nearerDepth(texel.z, texel.w), 0.0));
+                           float(pyramidCell(int(texel.x), int(cells.w), int(texel.y))), nearerDepth(texel.z, texel.w), fartherDepth(texel.z, texel.w)));
     } else if (function == GPU_TEST_SSR_POSITION) {
         // Inputs: the inverse view-projection's four columns, (pixel, depth, 0), (size, 0, 0).
         vec4 pixel = testInput(4);

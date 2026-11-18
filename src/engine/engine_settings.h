@@ -61,6 +61,10 @@ struct EngineSettings {
     // off builds every draw every frame, as before (for measuring). Read every frame.
     bool keepStillDraws = true;
 
+    // The debug view (F4) also boxes everything the camera draws (with the colliders). Off by default: in a forest the
+    // boxes hide the readout. Read every frame.
+    bool debugBoundingBoxes = false;
+
     // Listen for commands (core/command_registry.h) from tools and AIs on 127.0.0.1 at commandPort, which nothing
     // outside this computer can reach: game.exe --send <command> talks to it. Read once, at start-up.
     bool commandServer = true;

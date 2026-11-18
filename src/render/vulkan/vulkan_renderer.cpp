@@ -139,6 +139,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     depthOfField = std::make_unique<VulkanDepthOfField>(device, nearestSampler.get(), linearSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
+    occlusionCulling = std::make_unique<VulkanOcclusionCulling>(device, nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout(),
+                                                                framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
@@ -853,6 +855,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     fsr->ensureSize(width, height);
     dlss->ensureSize(width, height);
     reflections->ensureSize(scene);
+    occlusionCulling->ensureSize(scene);
 
     if (mirroredLights && mirroredLights->hasImages()) {
         mirroredLights->ensureSize(scene);
@@ -976,6 +979,10 @@ FrameContext VulkanRenderer::beginFrame() {
 
     if (const std::optional<GpuEyeAdaptation> adapted = eyeAdaptation->collect(frameIndex)) {
         lastEyeAdaptation = adapted;
+    }
+
+    if (const std::optional<OcclusionCounts> counted = occlusionCulling->collect(frameIndex)) {
+        lastOcclusionCounts = counted;
     }
 
     collectClothReadbacks();
@@ -1771,6 +1778,24 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::DepthPrepass);
         drawDepthPrepass(frame, mainDraws, sceneSet);
         endGpuPass(frame, GpuPass::DepthPrepass);
+    }
+
+    // Occlusion culling's first stage: how many of the camera's draws the prepass's depth would hide, counted on the GPU
+    // and shown a frame or two late; drawing is unchanged. The test's lens is the camera's own, without TAA's jitter
+    // (the rectangles' margin covers it).
+    if (settings.depthPrepass && settings.measureOcclusion) {
+        beginGpuPass(frame, GpuPass::Occlusion);
+        const OcclusionView occlusionView = makeOcclusionView(cameraRelativeView(camera), toGpuDepthRange(camera.getProjectionMatrix()),
+                                                              camera.getNearPlane(), sceneSize);
+        const std::vector<GpuOcclusionBatch> occlusionBatches = packOcclusionBatches(mainDraws.batches, [&](MeshHandle mesh) {
+            return static_cast<std::uint32_t>(meshes.at(mesh.index)->getIndexCount() / 3);
+        });
+        occlusionCulling->count(frame.commands, frame.descriptors, frame.frameIndex, depth, bindlessTextures->getSet(), sceneSet, occlusionBatches,
+                                occlusionView, cameraOrigin);
+        endGpuPass(frame, GpuPass::Occlusion);
+        stats.occlusion = lastOcclusionCounts;
+    } else {
+        lastOcclusionCounts.reset();
     }
 
     reflections->forgetColourPyramid();
@@ -3596,6 +3621,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     mirrorDepthRange->setFramesInFlight(count);
     reflections->setFramesInFlight(count);
     eyeAdaptation->setFramesInFlight(count);
+    occlusionCulling->setFramesInFlight(count);
 
     if (rayTracing) {
         rayTracing->setFramesInFlight(count);

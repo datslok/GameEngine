@@ -39,6 +39,15 @@ float nearerDepth(float a, float b) {
     return max(a, b);
 }
 
+float fartherDepth(float a, float b) {
+    return min(a, b);
+}
+
+// Two depths reduced as the pyramid's reduction says (DEPTH_PYRAMID_NEAREST or DEPTH_PYRAMID_FARTHEST).
+float reduceDepths(int reduction, float a, float b) {
+    return reduction == DEPTH_PYRAMID_FARTHEST ? fartherDepth(a, b) : nearerDepth(a, b);
+}
+
 vec4 unprojectPixel(mat4 inverseViewProjection, vec2 pixel, float depth, vec2 size) {
     return inverseViewProjection * vec4(pixelToNdc(pixel, size), depth, 1.0);
 }

@@ -149,8 +149,8 @@ Each view draws the coarsest of a mesh's levels whose error covers at most `pixe
 
 **Each frame** (`Application::render`), with the game's debug view on:
 
-1. `drawBoundingBoxes`: boxes only round what the camera draws (`visibleDraws` in its frustum, `chosenMesh` valid at last frame's output height), since boxing every draw of a big world cost most of a frame.
-2. `drawColliders`: every collider's query shape, orange, interpolated.
+1. Only with `EngineSettings::debugBoundingBoxes` (off; `debugBoundingBoxes`, F5's "Debug bounding boxes": in a forest they hide the readout), `drawBoundingBoxes`: boxes only round what the camera draws (`visibleDraws` in its frustum, `chosenMesh` valid at last frame's output height), since boxing every draw of a big world cost most of a frame.
+2. With the same setting, `drawColliders`: every collider's query shape, orange, interpolated.
 3. The readout (below), `drawCameraReadout`, the profilers.
 
 Then, independently, `drawWindField` while `WindSettings::showField` is on (wind doc); then `onDebugDraw`; the lines go into `debugLines` and `debugScreenLines`.
@@ -167,6 +167,7 @@ Then, independently, `drawWindField` while `WindSettings::showField` is on (wind
 |---|---|
 | `DRAWN  CULLED  CALLS` | Camera draws, culled, draw calls (prepass included) |
 | `LEVELS a b c d  TRIS  CUT  PROBE` | `drawnByLevel` (mesh itself first); thousands of triangles drawn, of cut-outs, of reflection probe faces this frame |
+| `HIDDEN n OF m p PCT  TRIS aK OF bK q PCT` | While `measureOcclusion`: the camera's draws and triangles the prepass's depth would hide (`occlusion-culling.md`), a frame or two late |
 | `SHADOW DRAWN  CULLED  CALLS` | Over drawn shadow views |
 | `LIGHTS  IN VIEW  LIT  SHADOWED  IN MIRRORS` | Point lights; image lights only when any |
 | `TILES DRAWN  CACHED  SKIPPED  SUN TO` | Shadow tiles; `sunShadowDistance` when a sun is shadowed |

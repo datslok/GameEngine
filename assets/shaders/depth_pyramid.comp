@@ -2,9 +2,10 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* One level of screen-space reflections' depth pyramid (render/gpu/screen_reflections.h), one invocation per texel:
-* level 0 copies the depth image, each level above keeps the nearest depth of the 2x2 texels below it (3 at the far
-* edge of an odd level, so every texel has a cell above it). The march reads it to skip empty space.
+* One level of a depth pyramid (render/gpu/screen_reflections.h), one invocation per texel: level 0 copies the depth
+* image, each level above keeps the nearest or the farthest depth of the 2x2 texels below it (3 at the far edge of an odd
+* level, so every texel has a cell above it). The reflections' march reads the nearest to skip empty space; occlusion
+* culling reads the farthest (render/gpu/occlusion_culling.h).
 */
 #include "screen_reflections.glsl"
 
@@ -16,7 +17,7 @@ layout(set = 0, binding = 2, r32f) uniform writeonly image2D level;  // the leve
 
 // Must match GpuPyramidPass.
 layout(push_constant) uniform Pass {
-    ivec4 target; // xy: this level's size, z: the level
+    ivec4 target; // xy: this level's size, z: the level, w: what it keeps (DEPTH_PYRAMID_NEAREST or DEPTH_PYRAMID_FARTHEST)
     ivec4 source; // xy: the level below's size
 } pass;
 
@@ -34,13 +35,14 @@ void main() {
 
     int lastX = pyramidLastFine(texel.x, pass.target.x, pass.source.x);
     int lastY = pyramidLastFine(texel.y, pass.target.y, pass.source.y);
-    float nearest = float(GPU_FAR_DEPTH);
+    int reduction = pass.target.w;
+    float kept = reduction == DEPTH_PYRAMID_FARTHEST ? float(GPU_NEAR_DEPTH) : float(GPU_FAR_DEPTH);
 
     for (int y = 2 * texel.y; y <= lastY; ++y) {
         for (int x = 2 * texel.x; x <= lastX; ++x) {
-            nearest = nearerDepth(nearest, imageLoad(finer, ivec2(x, y)).r);
+            kept = reduceDepths(reduction, kept, imageLoad(finer, ivec2(x, y)).r);
         }
     }
 
-    imageStore(level, texel, vec4(nearest));
+    imageStore(level, texel, vec4(kept));
 }

@@ -24,6 +24,8 @@ const char* gpuPassName(GpuPass pass) {
         return "FOG";
     case GpuPass::DepthPrepass:
         return "PREPASS";
+    case GpuPass::Occlusion:
+        return "OCCLUSION";
     case GpuPass::ColourPyramid:
         return "PYRAMID";
     case GpuPass::AmbientOcclusion:

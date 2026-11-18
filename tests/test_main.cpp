@@ -81,6 +81,7 @@ void testGroundFollow();
 void testImpostors();
 void testLeafClusters();
 void testDepthPrepass();
+void testOcclusionCulling();
 void testTextureEncoding();
 void testCoverageMips();
 void testBlockCompression();
@@ -348,6 +349,7 @@ const RoutineTest routineTests[] = {
     {"testTypicalGpu", testTypicalGpu},
     {"testGroundLayers", testGroundLayers},
     {"testDepthPrepass", testDepthPrepass},
+    {"testOcclusionCulling", testOcclusionCulling},
     {"testTextureEncoding", testTextureEncoding},
     {"testCoverageMips", testCoverageMips},
     {"testBlockCompression", testBlockCompression},

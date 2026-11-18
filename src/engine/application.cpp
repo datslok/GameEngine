@@ -377,11 +377,14 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     debugDraw.clear();
 
     if (game.wantsDebugView()) {
-        // The boxes of what the camera draws, its levels chosen for the height last frame was drawn at.
-        const LevelView boxLevels = levelView(camera.getPosition(), static_cast<float>(renderer.getLastFrameStats().outputHeight),
-                                              camera.getVerticalFov(), settings.render.levelOfDetail);
-        drawBoundingBoxes(frame.draws, boundsByMesh, camera, boxLevels, debugDraw);
-        drawColliders(world, alpha, debugDraw);
+        // The boxes of what the camera draws, its levels chosen for the height last frame was drawn at, and the colliders:
+        // only when asked for (debugBoundingBoxes), since in a forest they hide the readout.
+        if (settings.debugBoundingBoxes) {
+            const LevelView boxLevels = levelView(camera.getPosition(), static_cast<float>(renderer.getLastFrameStats().outputHeight),
+                                                  camera.getVerticalFov(), settings.render.levelOfDetail);
+            drawBoundingBoxes(frame.draws, boundsByMesh, camera, boxLevels, debugDraw);
+            drawColliders(world, alpha, debugDraw);
+        }
 
         // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
         // The readout wraps to the width that frame was presented at.

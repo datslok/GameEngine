@@ -267,7 +267,7 @@ void addCameraCommands(CommandRegistry& registry, Game& game, World& world) {
 }
 
 void addDebugViewCommand(CommandRegistry& registry, Game& game) {
-    registry.add("debug-view", "debug-view [on|off]", "Shows whether the debug view (F4: bounding boxes and the readout) shows, or switches it on or off.",
+    registry.add("debug-view", "debug-view [on|off]", "Shows whether the debug view (F4: the readout, and the bounding boxes when debugBoundingBoxes is on) shows, or switches it on or off.",
                  [&game](const CommandArguments& arguments) {
                      if (arguments.empty()) {
                          return commandOk(std::string{"Debug view "} + (game.wantsDebugView() ? "on" : "off"));

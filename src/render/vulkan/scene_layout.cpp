@@ -29,7 +29,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // shadow atlas, compared
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // shadow atlas, raw depths
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // BRDF table
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // draw list
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // draw list (compute for occlusion culling)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // cluster masks
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe irradiance (compute for probe rays' hits)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe distances
