@@ -537,3 +537,46 @@ Ray tracing and global illumination quality must stay optional and scalable, so 
 | Relocation inside geometry | [2021] ramp a scale factor down from 2 in 100 steps | solve for the largest move inside the offset limit |
 | Offset limit | [2021] half the spacing | 0.4 of the spacing |
 | Vigilant test | [2021] closest front face within one probe spacing | any front-face hit inside a box of one spacing plus 2 × self-shadow bias, or one closer than 0.05 (comment says 2 cm) |
+
+## Planned (moved from ROADMAP.md, Nov 18 2026)
+
+### The sun's bounce without probes' blotches (phase 17)
+
+- Moved from phase 16 on Nov 12 2026 (the user: bounced sunlight is for the ray-traced path). With ray tracing the probes carry it already; this is for rooms lit only by sunlight bounced off a patch next door.
+- Tried on the CPU grid (unmerged `sun-bounce` branch): a shadow ray from every hit (blotchy, 4 times the bake's time); aiming at sunlit spots found down the sun's beam (smoother, 2.5 times; spikes from light seen through doors the point's rays missed, and a defensive mixture against them leaves more noise). Read the build log's `sun-bounce` entry before taking it up again.
+
+### More hardware ray tracing (phase 17)
+
+- Ray-traced shadows (exact soft shadows from area lights), then ReSTIR-style sampling of many lights.
+- Always optional: each ray-traced feature a `RenderSettings` switch at run time, falling back to shadow maps, reflection probes and screen-space GI; the game tuned on the path without rays first.
+- **Foliage for rays** (Nov 14 2026, from `jungle-canopy`'s shadow leaves): split `castsShadows` into shadow maps and rays, so the leaves seen are solid to rays while their shadow leaves (`ModelRenderer::shadowOnly`, ray mask 0 for now) stay in the maps only. Measure the cut-out test at each leaf hit (about 400k cards in the jungle patch); if slow, a ray mask bit of their own that only shadow rays include.
+
+### DDGI at the valley's scale (phase 17; the user's question, Nov 14 2026)
+
+- **The gap:** the six cascades reach about 116 m (0.5 to 16 m apart); past them the flat sky light. In the valley almost everything is further (pillars 300 m tall, islands 400-700 m up, kilometres across).
+- **Far cascades:** keep doubling, 32, 64, 128, 256 m apart; four more 21 x 13 x 21 grids (about 23,000 probes) reach about 5 km across and over 3 km up.
+- **Updated rarely:** far light changes only with the sun or something huge, so far cascades every few seconds; probes in open air mostly sleep (probe states trace only those near surfaces or moving things).
+- **Rays:** against the valley's rock (about 3 million triangles), roots and moss; cut-out moss and leaves left out of bounce rays. Estimated: 8,192 probes x 256 rays, about 2 million rays a frame, 1-2 ms on the RTX 4070 Laptop.
+- **Leaks:** a 256 m cell is wider than a 40 m pillar, so its shaded side gets about the mean of both sides; shows under the islands and in narrow gaps; the fine cascades take over near the camera.
+- **Worth it for:** the sunlit floor's warm bounce onto the pillars' and islands' undersides, the mist lit by it, deep shade among pillars.
+- **As others do it:** RTXGI's scrolling cascades with rarely updated far ones; Lumen's near detail, far field and stand-in meshes (`LUMEN.md`).
+
+### Path-traced mode (phase 17)
+
+- Several bounces a pixel, nothing approximated; real time only with one or two paths a pixel, so ReSTIR's reuse across pixels and frames, a strong denoiser and upscaling; high-end GPUs only.
+- First as a reference: golden views path-traced to convergence offline, so the real-time lighting's errors (probe parallax, leaks, missing occlusion) are measured, not judged by eye.
+
+### Physical light units and an exposure for all lights (phase 14)
+
+- Emissive surfaces linked to the lights they stand for (the light from the moon is its brightness times the solid angle it covers); the exposure maps the real range (the moon disc 10,000+ times brighter than moonlit ground) to the screen.
+- The night's look waits for it: night vision's thresholds (off by default), lower contrast at night (rods), the sky round a low or crescent moon against the dark ground. Until then the demo's moon and the light lab's sun and sky are separate artistic dials.
+
+### The sky visibility grid, later (phase 14)
+
+- **Lamps** (phase 16's stage 3): each point keeping its brightest few lamps found by shadow rays, refreshed in a region when one switches.
+- **Denoised** (Nov 12 2026): each point blended with neighbours that see it (`skyCornerSees`, never through a wall), weighted by its escaped rays, as bakers denoise lightmaps.
+- **Rays aimed at openings** (Nov 12 2026): doors and windows found automatically (escaped rays clustered by direction, or the gaps between rooms), more rays through them weighted back (importance sampling, as bakers' portals), no hand-placed volumes.
+- **Baked offline and streamed** (Nov 11 2026; agreed as option C: the background bake `ao-bounce-unfog` first, then this as its own project, with a research write-up first):
+  - Bakes geometry, not light (the sky's reach and the bounce per unit of sky light), combined with the sun and sky at run time, so the time of day stays free; the sun's bounce stays a runtime layer.
+  - Sparse storage following surfaces: 0.5-1 m near walls and interiors, several metres over open ground, none inside buildings (a uniform 0.5 m grid over 800 x 800 m would be about 2.4 GB); coarse tiles first, read ahead along the camera's velocity.
+  - `SkyCellStore` (`ao-temporal`) is its first half; the runtime bake stays for what changes (phase 15's falling buildings). Offline it affords thousands of rays a point (bakers use about 512-4,000 a texel).

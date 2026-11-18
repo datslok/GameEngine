@@ -57,3 +57,5 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/CLOTHGPU.md` | Any cloth solver, low-frequency layer or self-collision work (phases 7, 10); yardstick numbers in Part 5 |
 | `docs/research/RAGDOLLPLAN.md` | Active ragdolls (phase 8); check formulas marked as from memory |
 | `docs/research/DESTRUCTION.md` | Flight and destruction (phase 15); check facts marked as from memory |
+| `docs/research/ORBITAL.md` | The solar system's plan notes (phase 13); no sources yet |
+| `docs/research/LATHE.md` | The lathe's plan notes (phase 14); no sources yet |
