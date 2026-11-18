@@ -1,0 +1,98 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The camera's GPU culling, pass 1 of 3 (render/vulkan/vulkan_camera_culling.h): one invocation a candidate (a draw and
+* one of its level slots) flags whether the camera and the velocity pass draw it with that slot (cameraCandidateFlags),
+* then the workgroup sums its flags (an exclusive prefix sum in shared memory, Hillis and Steele's), keeping each
+* candidate's offset within the block and the block's totals for pass 2. The draws drawn at each level are counted too.
+*/
+#include "camera_culling.glsl"
+
+layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Records {
+    CullRecord records[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer Levels {
+    MeshLevels meshLevels[];
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer Candidates {
+    CullCandidate candidates[];
+};
+
+layout(std430, set = 0, binding = 3) readonly buffer View {
+    CameraCull view;
+};
+
+layout(std430, set = 0, binding = 4) writeonly buffer Flags {
+    uint flags[];
+};
+
+// Each candidate's offset within its block: x the camera's list, y the velocity pass's.
+layout(std430, set = 0, binding = 5) writeonly buffer Offsets {
+    uvec2 offsets[];
+};
+
+// Each block's totals, summed in place by pass 2.
+layout(std430, set = 0, binding = 6) writeonly buffer BlockSums {
+    uvec2 blockSums[];
+};
+
+// Must match GpuCameraCullCounts; cleared before the pass.
+layout(std430, set = 0, binding = 7) buffer Counts {
+    uint counts[CAMERA_CULL_COUNTS];
+};
+
+shared uvec2 sums[CAMERA_CULL_GROUP_SIZE];
+shared uint levelCounts[CULL_LEVEL_SLOTS];
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    uint candidateIndex = gl_GlobalInvocationID.x;
+
+    if (local < CULL_LEVEL_SLOTS) {
+        levelCounts[local] = 0u;
+    }
+
+    barrier();
+
+    uint candidateFlags = 0u;
+
+    if (candidateIndex < view.candidates) {
+        CullCandidate candidate = candidates[candidateIndex];
+        CullRecord record = records[candidate.draw];
+        candidateFlags = cameraCandidateFlags(record, meshLevels[record.mesh], view, candidate.slot);
+        flags[candidateIndex] = candidateFlags;
+
+        if ((candidateFlags & CAMERA_CULL_DRAWN) != 0u) {
+            atomicAdd(levelCounts[candidate.slot], 1u);
+        }
+    }
+
+    uvec2 value = uvec2((candidateFlags & CAMERA_CULL_DRAWN) != 0u ? 1u : 0u, (candidateFlags & CAMERA_CULL_MOVING) != 0u ? 1u : 0u);
+    sums[local] = value;
+    barrier();
+
+    // Each step adds the sum from offset places before: after log2(size) steps, every place holds its inclusive sum.
+    for (uint offset = 1u; offset < CAMERA_CULL_GROUP_SIZE; offset *= 2u) {
+        uvec2 before = local >= offset ? sums[local - offset] : uvec2(0u);
+        barrier();
+        sums[local] += before;
+        barrier();
+    }
+
+    if (candidateIndex < view.candidates) {
+        offsets[candidateIndex] = sums[local] - value;
+    }
+
+    if (local == CAMERA_CULL_GROUP_SIZE - 1) {
+        blockSums[gl_WorkGroupID.x] = sums[local];
+    }
+
+    if (local < CULL_LEVEL_SLOTS && levelCounts[local] > 0u) {
+        atomicAdd(counts[local], levelCounts[local]);
+    }
+}

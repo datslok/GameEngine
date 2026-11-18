@@ -25,6 +25,9 @@ void attachVertexEntries(std::span<DrawItem> draws, const std::vector<VertexEntr
 // The draws the camera can see (by index, in order).
 std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const Frustum& cameraFrustum);
 
+// The candidates (draw indices) the camera can see, in the candidates' order: visibleDraws over a few draws only.
+std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates, const Frustum& cameraFrustum);
+
 // The draws that can block a light: shadow casters inside the light's own view. Never use the camera's frustum here:
 // something behind the camera can still throw a shadow into view.
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const Frustum& lightFrustum);

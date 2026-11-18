@@ -51,13 +51,30 @@ namespace {
     bool mightBeSeen(const DrawItem& draw, const Frustum& frustum) {
         return draw.bounds.radius < 0.0f || frustum.intersectsSphere(draw.bounds.centre, draw.bounds.radius);
     }
+
+    // The camera's views take neither shadow stand-ins nor hidden draws.
+    bool cameraMightSee(const DrawItem& draw, const Frustum& frustum) {
+        return !draw.shadowOnly && !draw.hidden && mightBeSeen(draw, frustum);
+    }
 }
 
 std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const Frustum& cameraFrustum) {
     std::vector<std::size_t> visible;
 
     for (std::size_t i = 0; i < draws.size(); ++i) {
-        if (!draws[i].shadowOnly && !draws[i].hidden && mightBeSeen(draws[i], cameraFrustum)) {
+        if (cameraMightSee(draws[i], cameraFrustum)) {
+            visible.push_back(i);
+        }
+    }
+
+    return visible;
+}
+
+std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates, const Frustum& cameraFrustum) {
+    std::vector<std::size_t> visible;
+
+    for (const std::size_t i : candidates) {
+        if (cameraMightSee(draws[i], cameraFrustum)) {
             visible.push_back(i);
         }
     }

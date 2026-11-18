@@ -1,0 +1,60 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The camera's GPU culling, pass 2 of 3 (render/vulkan/vulkan_camera_culling.h): one workgroup turns the blocks' totals
+* into each block's first place (an exclusive prefix sum), a workgroup's worth of blocks at a time carried on, and
+* writes the grand totals after the last block and into the counts.
+*/
+#include "camera_culling.glsl"
+
+layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer View {
+    CameraCull view;
+};
+
+// The blocks' totals in, their first places out; one more after them for the totals.
+layout(std430, set = 0, binding = 1) buffer BlockSums {
+    uvec2 blockSums[];
+};
+
+// Must match GpuCameraCullCounts.
+layout(std430, set = 0, binding = 2) buffer Counts {
+    uint counts[CAMERA_CULL_COUNTS];
+};
+
+shared uvec2 sums[CAMERA_CULL_GROUP_SIZE];
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    uvec2 carried = uvec2(0u);
+
+    // The loop's bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
+    for (uint first = 0u; first < view.blocks; first += CAMERA_CULL_GROUP_SIZE) {
+        uint block = first + local;
+        uvec2 value = block < view.blocks ? blockSums[block] : uvec2(0u);
+        sums[local] = value;
+        barrier();
+
+        for (uint offset = 1u; offset < CAMERA_CULL_GROUP_SIZE; offset *= 2u) {
+            uvec2 before = local >= offset ? sums[local - offset] : uvec2(0u);
+            barrier();
+            sums[local] += before;
+            barrier();
+        }
+
+        if (block < view.blocks) {
+            blockSums[block] = carried + sums[local] - value;
+        }
+
+        carried += sums[CAMERA_CULL_GROUP_SIZE - 1];
+        barrier();
+    }
+
+    if (local == 0u) {
+        blockSums[view.blocks] = carried;
+        counts[CAMERA_CULL_COUNT_DRAWN] = carried.x;
+        counts[CAMERA_CULL_COUNT_MOVING] = carried.y;
+    }
+}

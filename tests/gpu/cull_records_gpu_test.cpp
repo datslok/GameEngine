@@ -2,6 +2,7 @@
 #include "gpu_test_functions.h"
 
 #include "math/mat4.h"
+#include "render/gpu/camera_culling.h"
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_depth_range.h"
 
@@ -18,33 +19,29 @@ namespace {
         GpuMeshLevels levels;
         GpuLevelView view;
         GpuFrustum frustum;
+
+        // The camera's own (camera_culling.glsl): the slot a candidate names, the sway's reach and the view's flags.
+        std::uint32_t slot = 0;
+        float swayFadeEnd = 0.0f;
+        std::uint32_t cameraFlags = 0;
     };
+
+    // The case's camera record (GpuCameraCull) for cameraCandidateFlags.
+    GpuCameraCull cameraOf(const Case& c) {
+        GpuCameraCull view;
+        view.frustum = c.frustum;
+        view.levels = c.view;
+        view.swayFadeEnd = c.swayFadeEnd;
+        view.flags = c.cameraFlags;
+        return view;
+    }
 
     /*
     * Whether any of the case's level tests lands within a hair of its threshold, where the GPU's square root may round
     * the other way: a choice either side is right there, so those cases are left out of the comparison.
     */
     bool nearAThreshold(const Case& c) {
-        const Vec3 eye{c.view.eye[0], c.view.eye[1], c.view.eye[2]};
-        const bool orthographic = (c.view.flags & CULL_LEVELS_ORTHOGRAPHIC) != 0u;
-        const float distance = levelSphereDistance(c.record.levelSphere, eye);
-        const auto near = [&](float errorMetres) {
-            const float ratio = levelErrorInPixels(errorMetres, distance, c.view.eye[3], orthographic) / c.view.pixelError;
-            return std::abs(ratio - 1.0f) < 1e-4f;
-        };
-
-        bool any = c.record.hiddenBelowError > 0.0f && near(c.record.hiddenBelowError);
-
-        for (std::uint32_t slot = 1; slot <= c.levels.levels; ++slot) {
-            any = any || near(c.levels.errorMetres[slot]);
-        }
-
-        for (const auto& plane : c.frustum.planes) {
-            const float signedDistance = plane[0] * c.record.bounds[0] + plane[1] * c.record.bounds[1] + plane[2] * c.record.bounds[2] + plane[3];
-            any = any || std::abs(signedDistance + c.record.bounds[3]) < 1e-3f;
-        }
-
-        return any;
+        return nearACameraEdge(c.record, c.levels, cameraOf(c));
     }
 
     // Draws, meshes' levels, views and frustums all over a few kilometres, every flag and view option met.
@@ -63,6 +60,11 @@ namespace {
             draw.hidden = i % 19 == 0;
             draw.material.alphaMode = i % 13 == 0 ? AlphaMode::Blend : i % 3 == 0 ? AlphaMode::Mask : AlphaMode::Opaque;
             draw.thinningEntry = i % 4 == 0 ? 1u : 0u;
+            draw.sway.kind = i % 3 == 1 ? SwayKind::Plant : SwayKind::Still;
+
+            if (i % 8 == 2) {
+                draw.previousModel = Mat4::translation(0.0f, 1.0f, 0.0f);
+            }
 
             std::vector<MeshLevel> levels;
             float error = 0.01f;
@@ -86,8 +88,13 @@ namespace {
             const Mat4 viewMatrix = Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
             const Mat4 projection = toGpuDepthRange(Mat4::perspective(random.between(0.6f, 1.4f), 16.0f / 9.0f, 0.1f, random.between(1000.0f, 5000.0f)));
 
-            cases.push_back(Case{packCullRecord(draw), packMeshLevels(draw.mesh, levels), packLevelView(view),
-                                 packFrustum(Frustum::fromClipMatrix(projection * viewMatrix, ClipDepth::OneToZero))});
+            Case c{packCullRecord(draw), packMeshLevels(draw.mesh, levels), packLevelView(view),
+                   packFrustum(Frustum::fromClipMatrix(projection * viewMatrix, ClipDepth::OneToZero))};
+            c.levels.changesShape = i % 23 == 0 ? 1u : 0u;
+            c.slot = static_cast<std::uint32_t>(i / 4) % 4u;
+            c.swayFadeEnd = random.between(20.0f, 3000.0f);
+            c.cameraFlags = (i % 6 != 0 ? CAMERA_CULL_MOTION : 0u) | (i % 5 != 0 ? CAMERA_CULL_SWAY : 0u);
+            cases.push_back(c);
         }
 
         return cases;
@@ -114,6 +121,31 @@ namespace {
 
         for (const auto& plane : c.frustum.planes) {
             inputs.push_back(GpuVec4{plane[0], plane[1], plane[2], plane[3]});
+        }
+    }
+
+    // A candidate's flags and the sway's reach, against the C++ mirror, case by case (the draw cases plus one input).
+    void checkCandidates(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const std::vector<Case> cases = randomCases();
+        std::vector<GpuVec4> inputs;
+
+        for (const Case& c : cases) {
+            appendInputs(inputs, c);
+            inputs.push_back(gpuVec4(static_cast<float>(c.levels.changesShape), static_cast<float>(c.slot), c.swayFadeEnd, static_cast<float>(c.cameraFlags)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CAMERA_CANDIDATE, inputs, 14, 1);
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            if (nearAThreshold(cases[i])) {
+                continue;
+            }
+
+            const Case& c = cases[i];
+            const GpuCameraCull view = cameraOf(c);
+            const Vec3 eye{c.view.eye[0], c.view.eye[1], c.view.eye[2]};
+            report.check("cameraCandidateFlags", exactTolerance, static_cast<float>(cameraCandidateFlags(c.record, c.levels, view, c.slot)), outputs[i][0]);
+            report.check("swayReaches", exactTolerance, swayReaches(c.record.bounds, eye, c.swayFadeEnd) ? 1.0f : 0.0f, outputs[i][1]);
         }
     }
 
@@ -146,4 +178,6 @@ namespace {
 void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("culling.glsl, level_of_detail.glsl");
     checkDraws(runner, report);
+    report.section("camera_culling.glsl");
+    checkCandidates(runner, report);
 }

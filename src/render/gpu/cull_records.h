@@ -41,7 +41,8 @@ struct GpuMeshLevels {
     float errorMetres[CULL_LEVEL_SLOTS];  // each slot's error (slot 0's unused)
     std::uint32_t levels = 0;             // levels after the mesh itself (0 to 3)
     std::uint32_t sharesVertices = 0;     // bit k: slot k uses the mesh's first vertices, so card thinning shapes it (bit 0 always)
-    std::uint32_t unused[2] = {0, 0};
+    std::uint32_t changesShape = 0;       // 1: the mesh deformed this frame (cloth), so the velocity pass redraws its draws
+    std::uint32_t unused = 0;
 };
 
 static_assert(sizeof(GpuMeshLevels) == 48, "GpuMeshLevels must match level_of_detail.glsl's MeshLevels");
@@ -92,3 +93,7 @@ int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, co
 
 // Whether that slot is drawn with its cards thinned (DrawItem::thinningEntry, and the slot sharing the mesh's vertices).
 bool slotThinned(const GpuCullRecord& record, const GpuMeshLevels& levels, int slot);
+
+// Whether a draw's choice in a view is within rounding of changing: a level's (or an impostor's) error within 1e-4 of
+// the pixel budget, or its sphere within a millimetre of a plane, where the GPU's square root may round either way.
+bool nearAChoiceEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view, const GpuFrustum& frustum);

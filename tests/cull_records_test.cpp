@@ -1,3 +1,4 @@
+#include "cull_helpers.h"
 #include "math/frustum.h"
 #include "math/mat4.h"
 #include "render/gpu/cull_records.h"
@@ -14,71 +15,6 @@
 #include <vector>
 
 namespace {
-    struct Scene {
-        std::vector<std::vector<MeshLevel>> levelsByMesh;
-        std::vector<DrawItem> draws;
-    };
-
-    /*
-    * Random draws over a few kilometres: meshes with no levels or up to three (the last sometimes drawing nothing, as a
-    * tree's does), some sharing the mesh's vertices; impostors; unknown bounds; shadow-only, hidden, glass, cut-out,
-    * double-sided and thinnable draws; a shared level sphere for some, as a tree's parts have.
-    */
-    Scene randomScene(std::mt19937& random) {
-        std::uniform_real_distribution<float> unit{0.0f, 1.0f};
-        Scene scene;
-
-        for (std::uint32_t mesh = 0; mesh < 12; ++mesh) {
-            std::vector<MeshLevel> levels;
-            const int count = static_cast<int>(unit(random) * 4.0f);
-            float error = 0.01f;
-
-            for (int level = 0; level < count; ++level) {
-                error *= 2.0f + 6.0f * unit(random);
-                const bool drawsNothing = level == count - 1 && unit(random) < 0.4f;
-                levels.push_back(MeshLevel{drawsNothing ? MeshHandle{} : MeshHandle{100 + mesh * 4 + static_cast<std::uint32_t>(level)}, error,
-                                           unit(random) < 0.5f});
-            }
-
-            scene.levelsByMesh.push_back(levels);
-        }
-
-        for (int i = 0; i < 3000; ++i) {
-            DrawItem draw;
-            const std::uint32_t mesh = static_cast<std::uint32_t>(unit(random) * 12.0f) % 12;
-            draw.mesh = MeshHandle{mesh};
-            draw.levels = scene.levelsByMesh[mesh];
-            draw.bounds = unit(random) < 0.03f ? BoundingSphere{}
-                                               : BoundingSphere{Vec3{(unit(random) - 0.5f) * 4000.0f, unit(random) * 300.0f, (unit(random) - 0.5f) * 4000.0f},
-                                                                0.1f + unit(random) * 40.0f};
-
-            if (unit(random) < 0.3f && draw.bounds.radius > 0.0f) {
-                draw.levelBounds = BoundingSphere{draw.bounds.centre + Vec3{3.0f, 5.0f, -2.0f}, draw.bounds.radius * 3.0f};
-            }
-
-            draw.hiddenBelowError = unit(random) < 0.1f ? 0.05f + unit(random) * 2.0f : 0.0f;
-            draw.shadowOnly = unit(random) < 0.05f;
-            draw.hidden = unit(random) < 0.05f;
-            draw.castsShadows = unit(random) < 0.8f;
-            draw.material.alphaMode = unit(random) < 0.1f ? AlphaMode::Blend : unit(random) < 0.4f ? AlphaMode::Mask : AlphaMode::Opaque;
-            draw.material.doubleSided = unit(random) < 0.3f;
-            draw.thinningEntry = unit(random) < 0.3f ? 1 + static_cast<std::uint32_t>(i) : 0;
-            scene.draws.push_back(draw);
-        }
-
-        return scene;
-    }
-
-    std::vector<GpuMeshLevels> packTables(const Scene& scene) {
-        std::vector<GpuMeshLevels> tables;
-
-        for (std::uint32_t mesh = 0; mesh < scene.levelsByMesh.size(); ++mesh) {
-            tables.push_back(packMeshLevels(MeshHandle{mesh}, scene.levelsByMesh[mesh]));
-        }
-
-        return tables;
-    }
-
     // The mesh a slot names, as chosenMesh answers: none for no slot.
     MeshHandle slotMesh(const GpuMeshLevels& levels, int slot) {
         return slot == cullNoSlot ? MeshHandle{} : MeshHandle{levels.meshes[slot]};
@@ -91,8 +27,8 @@ namespace {
     void testLevelsMatchTheCpu() {
         std::mt19937 random{29};
         std::uniform_real_distribution<float> unit{0.0f, 1.0f};
-        const Scene scene = randomScene(random);
-        const std::vector<GpuMeshLevels> tables = packTables(scene);
+        const CullScene scene = randomCullScene(random);
+        const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
         int drawnNothing = 0;
         int coarser = 0;
 
@@ -145,7 +81,7 @@ namespace {
     void testFrustumMatchesTheCpu() {
         std::mt19937 random{31};
         std::uniform_real_distribution<float> unit{0.0f, 1.0f};
-        const Scene scene = randomScene(random);
+        const CullScene scene = randomCullScene(random);
 
         for (int viewIndex = 0; viewIndex < 8; ++viewIndex) {
             const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.6f + unit(random), 16.0f / 9.0f, 0.1f, 1000.0f + unit(random) * 4000.0f));
@@ -188,6 +124,14 @@ namespace {
         assert(record.levelSphere[3] == 4.0f); // no level sphere of its own: its bounds
         assert(record.flags == (CULL_SHADOW_ONLY | CULL_CASTS_SHADOWS | CULL_CUT_OUT | CULL_THINNABLE));
         assert(record.mesh == 7 && record.hiddenBelowError == 0.25f);
+
+        // Moved (a last-frame matrix of its own) and swaying; a last-frame matrix equal to its own is not a move.
+        DrawItem moving;
+        moving.sway.kind = SwayKind::Grass;
+        moving.previousModel = Mat4::translation(1.0f, 0.0f, 0.0f);
+        assert(packCullRecord(moving).flags == (CULL_CASTS_SHADOWS | CULL_MOVED | CULL_SWAYS));
+        moving.previousModel = moving.model;
+        assert(packCullRecord(moving).flags == (CULL_CASTS_SHADOWS | CULL_SWAYS));
 
         const std::vector<MeshLevel> four(4, MeshLevel{MeshHandle{1}, 0.1f, false});
         bool refused = false;

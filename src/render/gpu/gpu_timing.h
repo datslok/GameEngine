@@ -14,6 +14,7 @@
 enum class GpuPass {
     Cloth,
     DebugUi,
+    CameraCull,   // the camera's and velocity pass's lists built on the GPU (render/gpu/camera_culling.h), while engine.render.passes.gpuCulling is on
     RayScene,
     Atmosphere,
     Probes,

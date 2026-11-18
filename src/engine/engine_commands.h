@@ -52,3 +52,9 @@ void addDebugViewCommand(CommandRegistry& registry, Game& game);
 * the typical GPU setup on or off through the view, with the upscalers support says this PC can run).
 */
 void addRenderCommands(CommandRegistry& registry, RenderSettings& settings, TypicalGpuView& view, std::function<UpscalerSupport()> support);
+
+/*
+* cull-compare (render/gpu/camera_culling.h): while the GPU culls the camera (passes.gpuCulling), compare asks for the next
+* frame's lists to be compared with the CPU's and returns the last comparison's report (empty when none has finished).
+*/
+void addCullCompareCommand(CommandRegistry& registry, const RenderSettings& settings, std::function<std::string()> compare);
