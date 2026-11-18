@@ -52,6 +52,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/OCCLUSION.md` | Occlusion culling: the depth pyramid, two-phase culling, foliage (phase 18) |
 | `docs/research/GPUDRIVEN.md` | GPU-driven drawing: culling, levels and batching on the GPU, the CPU baseline (phase 18) |
 | `docs/research/WORLDSCALE.md` | Cutting the GPU frame: shipped games' budgets, upscaler cost, foliage, per-view budgets, VRS, async compute (phase 18) |
+| `docs/research/SKY.md` | The sky's art controls, sun and moon, clouds, weather presets (phase 20) |
 | `docs/research/MESHPOOL.md` | The shared mesh buffer: every mesh in one vertex and index buffer, multi-draws (phase 18) |
 | `docs/research/CLOTHGPU.md` | Any cloth solver, low-frequency layer or self-collision work (phases 7, 10); yardstick numbers in Part 5 |
 | `docs/research/RAGDOLLPLAN.md` | Active ragdolls (phase 8); check formulas marked as from memory |
