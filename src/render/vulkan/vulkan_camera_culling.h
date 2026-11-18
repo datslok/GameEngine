@@ -50,25 +50,26 @@ public:
 
     /*
     * Record the passes into the frame's draw list (the scene's, already written by the CPU, each view's regions left for
-    * the GPU: mainBase, and the camera's motionBase), then make the lists readable by the vertex shaders and the
-    * commands by the indirect draws. views: the camera first, at most maxCullViews; each one's place (placeCullView) is
+    * the GPU: each view's mainBase and motionBase), then make the lists readable by the vertex shaders and the
+    * commands by the indirect draws. views: the camera first, then any number; each one's place (placeCullView) is
     * filled in here. readLists: copy the lists back too (cull-compare).
     */
     void cull(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, const CameraCullFrame& table,
               std::span<const GpuCameraCull> views, VkBuffer drawList, bool readLists);
 
-    // What a view's pass draws (the frame's commands for that view), and the camera's velocity pass.
+    // What a view's list draws (the frame's commands for that view), and its second list (the camera's velocity pass, a
+    // shadow tile's moved casters).
     PassDraws mainDraws(std::uint32_t frameIndex, const CameraCullFrame& table, std::uint32_t view) const;
-    PassDraws motionDraws(std::uint32_t frameIndex, const CameraCullFrame& table) const;
+    PassDraws motionDraws(std::uint32_t frameIndex, const CameraCullFrame& table, std::uint32_t view) const;
 
-    // What a finished frame wrote: each view's counts and commands, the velocity pass's commands and, when read, every
-    // list's entries (from their bases).
+    // What a finished frame wrote, by view: its counts, both lists' commands and, when read, both lists' entries (from
+    // their bases).
     struct Collected {
         std::vector<GpuCameraCullCounts> counts;
         std::vector<std::vector<GpuDrawCommand>> mainCommands;
-        std::vector<GpuDrawCommand> motionCommands;
+        std::vector<std::vector<GpuDrawCommand>> motionCommands;
         std::vector<std::vector<std::uint32_t>> mainEntries;
-        std::vector<std::uint32_t> motionEntries;
+        std::vector<std::vector<std::uint32_t>> motionEntries;
         bool lists = false;
     };
 

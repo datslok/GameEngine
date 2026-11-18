@@ -116,7 +116,7 @@ After `renderer.render`, `giveBackStillDraws` returns the list. Golden captures 
 | `castersInReach(draws, reach)` | Casters touching a light's sphere of reach, before a point light's six faces |
 | `castersForCascade(draws, casters, cascade)` | Drops casters whose `shadowCascades` stops before this sun cascade |
 | `castersAtLeast(draws, candidates, radius)` | The far shadow map's: drops what is too small for its texels |
-| `glassInReach(draws, reach)` | Glass a light reaches, for coloured shadow maps (any `castsShadows`) |
+| `glassInReach(draws, reach)`, `glassInReach(draws, candidates, reach)` | Glass a light reaches, for coloured shadow maps (any `castsShadows`); of a list only (the GPU culling's cached glass) |
 
 Glass is never a solid caster, nor a solid caster glass. Which views call these: renderer.md.
 

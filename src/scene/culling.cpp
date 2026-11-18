@@ -91,26 +91,27 @@ std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const
 * Unknown sizes are kept, as everywhere in culling.
 */
 namespace {
-    // The draws of one kind within the reach: solid shadow casters, or glass (all of it, as the glass rays see it).
+    // Whether a draw of one kind is within the reach: a solid shadow caster, or glass (all of it, as the glass rays see it).
+    bool shadowDrawInReach(const DrawItem& draw, const BoundingSphere& reach, bool glass) {
+        if (isTransparent(draw.material) != glass || (!glass && !draw.castsShadows) || draw.hidden) {
+            return false;
+        }
+
+        if (reach.radius >= 0.0f && draw.bounds.radius >= 0.0f) {
+            const float touching = reach.radius + draw.bounds.radius;
+            return (draw.bounds.centre - reach.centre).lengthSquared() < touching * touching;
+        }
+
+        return true;
+    }
+
     std::vector<std::size_t> shadowDrawsInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach, bool glass) {
         std::vector<std::size_t> casters;
 
         for (std::size_t i = 0; i < draws.size(); ++i) {
-            const DrawItem& draw = draws[i];
-
-            if (isTransparent(draw.material) != glass || (!glass && !draw.castsShadows) || draw.hidden) {
-                continue;
+            if (shadowDrawInReach(draws[i], reach, glass)) {
+                casters.push_back(i);
             }
-
-            if (reach.radius >= 0.0f && draw.bounds.radius >= 0.0f) {
-                const float touching = reach.radius + draw.bounds.radius;
-
-                if ((draw.bounds.centre - reach.centre).lengthSquared() >= touching * touching) {
-                    continue;
-                }
-            }
-
-            casters.push_back(i);
         }
 
         return casters;
@@ -141,6 +142,18 @@ std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, cons
 
 std::vector<std::size_t> glassInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach) {
     return shadowDrawsInReach(draws, reach, true);
+}
+
+std::vector<std::size_t> glassInReach(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates, const BoundingSphere& reach) {
+    std::vector<std::size_t> glass;
+
+    for (std::size_t index : candidates) {
+        if (shadowDrawInReach(draws[index], reach, true)) {
+            glass.push_back(index);
+        }
+    }
+
+    return glass;
 }
 
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates,

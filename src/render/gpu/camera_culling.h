@@ -63,9 +63,10 @@ struct CullGroupStyle {
 inline constexpr std::size_t cullStyles = CAMERA_CULL_STYLES;
 static_assert(CAMERA_CULL_DRAW_COUNTS == 2 * CAMERA_CULL_STYLES, "A packed count for each style of both lists");
 
-inline constexpr std::size_t maxCullViews = CAMERA_CULL_MAX_VIEWS;
+inline constexpr std::size_t cullScratchViews = CAMERA_CULL_SCRATCH_VIEWS;
 
-// A view culled (the camera, a probe face or the mirror), read by every pass. Must match camera_culling.glsl's CameraCull.
+// A view culled (the camera, a probe face, the mirror or a shadow tile), read by every pass. Must match
+// camera_culling.glsl's CameraCull.
 struct GpuCameraCull {
     GpuFrustum frustum{};
     GpuLevelView levels{};
@@ -80,9 +81,13 @@ struct GpuCameraCull {
     std::uint32_t runFirst[cullStyles] = {};  // each style's pooled groups' first place in the drawing order
     std::uint32_t runCount[cullStyles] = {};  // and how many
     std::uint32_t slices[4] = {};             // CAMERA_CULL_SLICE_*: its parts of the shared working buffers
+    float reach[4] = {0.0f, 0.0f, 0.0f, -1.0f}; // a shadow tile's light reach (xyz centre, w radius; below 0 everywhere)
+    float smallestCaster = 0.0f;              // a shadow tile's: casters of a smaller radius left out
+    std::int32_t cascade = -1;                // a shadow tile's sun cascade (ShadowTile::sunCascade; -1 none)
+    std::uint32_t unused[2] = {0, 0};
 };
 
-static_assert(sizeof(GpuCameraCull) == 208, "GpuCameraCull must match camera_culling.glsl's CameraCull");
+static_assert(sizeof(GpuCameraCull) == 240, "GpuCameraCull must match camera_culling.glsl's CameraCull");
 
 // What the passes count (CAMERA_CULL_COUNTS words): draws by level slot, the camera's and the velocity pass's totals.
 struct GpuCameraCullCounts {
@@ -143,11 +148,12 @@ GpuCameraCull packCaptureCull(const CaptureCullView& capture);
 
 /*
 * The view's place in one dispatch of views: its number, the table's counts and drawing order's runs, and its slices
-* of the shared working buffers, each view's after the one before's (the same sizes for every view).
+* of the shared working buffers, each view's after the one before's (the same sizes for every view); the scratch ones
+* (flags, offsets, block sums) by its place in its batch of cullScratchViews.
 */
 void placeCullView(GpuCameraCull& view, std::uint32_t index, std::uint32_t candidates, const CullDrawOrder& order);
 
-// What views views' slices take together, in elements of each buffer.
+// What views views' slices take together (scratch for at most one batch), in elements of each buffer.
 struct CullViewSizes {
     std::size_t flags = 0;     // flags and offsets, one a candidate
     std::size_t blocks = 0;    // block sums, the totals after each view's
@@ -162,7 +168,15 @@ CullViewSizes cullViewSizes(std::size_t views, std::uint32_t candidates, const C
 // Whether part of the sphere is nearer the eye than the fade's end (drawSways).
 bool swayReaches(const float bounds[4], const Vec3& eye, float fadeEnd);
 
-// The candidate's CAMERA_CULL_* flags: drawn, moving and thinned, as visibleDraws, chosenMesh and drawSways choose.
+/*
+* Whether a shadow tile takes a draw: a solid caster, not hidden (shadow-only kept), touching the light's reach, maybe
+* in the tile's view, at least the smallest caster's size (unknown sizes kept) and within its cascades (castersInReach,
+* shadowCasters, castersAtLeast, castersForCascade).
+*/
+bool shadowTakes(const GpuCullRecord& record, const GpuCameraCull& view);
+
+// The candidate's CAMERA_CULL_* flags: drawn, moving and thinned, as visibleDraws, chosenMesh and drawSways choose; for
+// a shadow tile, drawn as shadowTakes says (moved casters moving instead where it keeps them apart), never thinned.
 std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view, std::uint32_t slot);
 
 // ---- The passes' steps on the CPU ----
@@ -251,6 +265,11 @@ struct CameraCullFrame {
 
     // Changes whenever the still records or candidates do, so uploads rewrite them only then.
     std::uint64_t stillGeneration = 0;
+
+    // What changed in the still part since the frame before, for the shadow cache (render/gpu/shadow_culling.h): built
+    // afresh (anything may have), else each draw built in place, its record as it was and as it is.
+    bool stillRebuilt = false;
+    std::vector<GpuCullRecord> stillChanges;
 };
 
 class CameraCullTable {
@@ -268,7 +287,7 @@ public:
 
 private:
     void buildStill(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement);
-    bool repackRanges(const FrameDescription& frame);
+    bool repackRanges(const FrameDescription& frame, std::vector<GpuCullRecord>& changes);
 
     std::vector<GpuCullRecord> records;
     std::vector<std::uint64_t> keys;

@@ -59,6 +59,7 @@ inline CullScene randomCullScene(std::mt19937& random, int drawCount = 3000) {
         draw.shadowOnly = unit(random) < 0.05f;
         draw.hidden = unit(random) < 0.05f;
         draw.castsShadows = unit(random) < 0.8f;
+        draw.shadowCascades = unit(random) < 0.2f ? 1 + static_cast<int>(unit(random) * 3.0f) : 0;
         draw.material.alphaMode = unit(random) < 0.1f ? AlphaMode::Blend : unit(random) < 0.4f ? AlphaMode::Mask : AlphaMode::Opaque;
         draw.material.doubleSided = unit(random) < 0.3f;
         draw.thinningEntry = unit(random) < 0.3f ? 1 + static_cast<std::uint32_t>(i) : 0;

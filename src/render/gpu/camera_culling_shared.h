@@ -12,9 +12,11 @@
 #define CAMERA_CULL_MOVING 2u
 #define CAMERA_CULL_THINNED 4u
 
-// GpuCameraCull::flags: the velocity pass's list is built (temporal anti-aliasing on); things sway this frame.
+// GpuCameraCull::flags: the velocity pass's list is built (temporal anti-aliasing on; for a shadow tile, the casters
+// that moved in the second list, kept apart from the still ones); things sway this frame; a shadow tile (shadowTakes).
 #define CAMERA_CULL_MOTION 1u
 #define CAMERA_CULL_SWAY 2u
+#define CAMERA_CULL_SHADOW 4u
 
 // The packed commands' counts (camera_cull_compact.comp): the camera's four styles, then the velocity pass's.
 #define CAMERA_CULL_STYLES 4
@@ -25,11 +27,13 @@
 #define CAMERA_CULL_COUNT_MOVING 5
 #define CAMERA_CULL_COUNTS 8
 
-// The views culled in one dispatch (the camera, six probe faces, a mirror): the dispatch's second dimension.
-#define CAMERA_CULL_MAX_VIEWS 8
+// Views share the flags, offsets and block sums in batches of this many (the dispatch's second dimension), since those
+// are spent once the batch's lists are written; commands and lists are each view's own.
+#define CAMERA_CULL_SCRATCH_VIEWS 16
 
 // GpuCameraCull::slices: where the view's part of each shared working buffer starts (flags and offsets by candidate,
-// block sums with the totals after them, commands and packed commands by group, packed places with the total after).
+// block sums with the totals after them: its place in its batch; commands and packed commands by group, packed places
+// with the total after: its own).
 #define CAMERA_CULL_SLICE_FLAGS 0
 #define CAMERA_CULL_SLICE_BLOCKS 1
 #define CAMERA_CULL_SLICE_COMMANDS 2

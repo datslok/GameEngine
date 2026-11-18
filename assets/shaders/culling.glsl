@@ -12,7 +12,7 @@ struct CullRecord {
     uint flags;            // CULL_* bits
     uint mesh;             // its mesh's number, naming its level table
     float hiddenBelowError; // an impostor's: drawn only where this error fits
-    uint unused;
+    int shadowCascades;    // the sun's nearest cascades it casts into (0 all)
 };
 
 // A view's six planes: inward normal xyz, distance w. Must match GpuFrustum.
