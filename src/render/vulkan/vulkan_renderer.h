@@ -91,20 +91,6 @@ struct BatchPipelines {
 };
 
 /*
-* What a camera pass draws: the CPU's batches, or, while the GPU culls the camera (render/gpu/camera_culling.h), the
-* frame's groups: each style's pooled groups by one multi-draw of the packed commands (packed, their counts in counts
-* from word countOffset), then the groups with buffers of their own one by one from commands (one a group).
-*/
-struct PassDraws {
-    const std::vector<DrawBatch>* batches = nullptr;
-    const CameraCullFrame* groups = nullptr;
-    VkBuffer commands = VK_NULL_HANDLE;
-    VkBuffer packed = VK_NULL_HANDLE;
-    VkBuffer counts = VK_NULL_HANDLE;
-    std::uint32_t countOffset = 0;
-};
-
-/*
 * The engine's renderer, on Vulkan 1.3 (phase 6b; it replaced SDL_GPU, drawing every golden image bit for bit the same):
 * the shadow atlas, the main pass into a float scene image, bloom, tone mapping into the swapchain image, debug lines
 * and the debug UI's overlay. It draws into a window it does not own, so the window must outlive it. It says itself when
@@ -429,20 +415,27 @@ private:
     // The camera's lists built on the GPU (render/gpu/camera_culling.h, passes.gpuCulling): the still draws' tables kept
     // between frames, the passes, and what each frame in flight culled with (its groups' styles, for the triangles; the
     // CPU's lists and the records, for a comparison asked for).
+    // A comparison: the CPU's lists by view (the camera's first), the velocity pass's, each view's name and record.
     struct CullCompare {
-        BatchedDraws mainDraws;
+        std::vector<BatchedDraws> viewDraws;
         BatchedDraws motionDraws;
+        std::vector<std::string> names;
+        std::vector<GpuCameraCull> views;
         std::vector<GpuCullRecord> records;
         std::vector<GpuMeshLevels> levels;
-        GpuCameraCull view;
     };
 
+    // F4's counts: the camera's, and the probe faces' triangles.
     struct CameraCullCounts {
         std::size_t drawn = 0;
         std::array<std::size_t, meshLevelSlots> levels{};
         std::size_t triangles = 0;
         std::size_t cutOutTriangles = 0;
+        std::size_t probeTriangles = 0;
     };
+
+    // Each frame in flight's views after the camera: which capture each is (a probe face, or cubeFaceCount the mirror).
+    std::vector<std::vector<int>> cullFrameCaptures;
 
     void takeCameraCull(const VulkanCameraCulling::Collected& culled, std::uint32_t frameIndex);
 
@@ -672,7 +665,8 @@ private:
 
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
     // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
-    // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
+    // captureDraws: each capture's draws (the probe faces, then the mirror), following the velocity pass's in the draw
+    // list (none without a capture); while the GPU culls, gpuCaptureLists regions of gpuListEntries entries in their place.
     // gpuListEntries: while the GPU culls the camera, the room left for its camera and velocity lists (each that many
     // entries, written by VulkanCameraCulling), in place of mainDraws' and motionDraws'; 0 without.
     // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
@@ -681,7 +675,8 @@ private:
     // frameFog: the fog's record (off without fog).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws, std::size_t gpuListEntries,
-                               std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
+                               std::span<const BatchedDraws> captureDraws, std::size_t gpuCaptureLists, const SortedTransparentDraws& transparent,
+                               const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
                                const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
                                bool occlusionAccumulates, bool gathersLight,
@@ -742,11 +737,11 @@ private:
     // The scene drawn through a flat mirror into its picture, as a capture face is, the sky in it when there is one.
     // Everything behind clipPlane (planarClipPlane) is cut away; eye is where it is seen from (the camera reflected across
     // the mirror, measured from the camera), for its shading's view direction.
-    void drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
+    void drawPlanarReflection(FrameContext& frame, const PassDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
                               const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, const GpuRayDebugView& skyRays, const Vec3& background,
                               bool sky);
 
-    void drawProbeCapture(FrameContext& frame, const ProbeCaptureStep& step, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet,
+    void drawProbeCapture(FrameContext& frame, const ProbeCaptureStep& step, std::span<const PassDraws> captureDraws, VkDescriptorSet sceneSet,
                           bool sampleProbes, bool traceRays, float farPlane, const Vec3& background, bool sky);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
     // its probe events, which happen once).

@@ -39,19 +39,29 @@ Packed by `packCullRecord`, `packMeshLevels` (throws past three levels), `packLe
 | Candidate (`GpuCullCandidate`, 8 B) | a draw and one level slot with a mesh; every draw not glass, shadow-only and hidden included (the GPU drops them by flag, so hiding keeps the groups) |
 | Group (`GpuCullGroup`, 16 B; `CullGroupStyle`) | the candidates of one (style, mesh), groups in `batchByMesh`'s order, candidates in draw order (`buildCullGroups`) |
 | `CameraCullTable` | still draws' records, groups, level tables, glass and flat-faced lists kept; built ranges repack records, groups rebuilt only when a draw's mesh, style, glass, flat faces or its mesh's level meshes change; the moving draws' groups made each frame after the still ones |
-| `GpuCameraCull` (160 B) | frustum, level view, sway fade end, motion and sway flags, counts, the two lists' bases |
+| `GpuCameraCull` (208 B, one a view) | frustum, level view, sway fade end, motion and sway flags, counts, the lists' bases, its number and slices (`placeCullView`) |
 
-Three passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers are written:
+Four passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers are written, each one dispatch over every view (below):
 
 1. `camera_cull_flags`: a thread a candidate, `cameraCandidateFlags` (drawn: taken and this slot chosen; moving: moved, mesh deformed or swaying within reach, with the velocity pass on; thinned); a 256-wide Hillis-Steele prefix sum per workgroup; level counts.
 2. `camera_cull_scan`: one workgroup sums the block totals into each block's first place, a carry between rounds; totals after the last.
 3. `camera_cull_write`: each flagged candidate writes `draw | thinned bit` at its place; each group its two commands (its mesh's `firstIndex` and `vertexOffset` in the shared mesh buffer) from the places at its ends.
 4. `camera_cull_compact`: one workgroup packs each list's commands that draw something, style run by style run of the drawing order (`cullDrawOrder`: pooled groups by style then mesh, then deforming ones), by a prefix sum, and writes each style's count (`packCullCommands` mirrors it).
 
+**Views (`gpu-cull-captures`):** the camera, then each probe face and the mirror drawn this frame (at most `CAMERA_CULL_MAX_VIEWS`, 8), are the dispatch's second dimension (`gl_WorkGroupID.y`).
+
+| Piece | What |
+|---|---|
+| Captures' views (`CaptureCullView`) | `probeFaceCullView` (the face from its cycle's origin, `probeSize` pixels a quarter turn), `mirrorCullView` (`planarFrustum`, the mirror's picture height); the CPU's lists use the same |
+| Their records (`packCaptureCull`) | no velocity list, no sway test, so a capture's velocity commands draw nothing |
+| Slices (`placeCullView`, `cullViewSizes`) | each view's flags, offsets, block sums, commands, packed commands and places after the one before's; its counts and packed counts at its number; the table, groups and drawing order shared |
+| Drawing | `drawProbeCapture` and `drawPlanarReflection` draw `mainDraws(frame, table, view)` with the capture pipelines (front faces culled): a call a style |
+| Read back | every view's counts and commands, the velocity pass's; for `cull-compare` every view's list |
+
 - **Same order as the CPU:** the places are prefix sums over a fixed candidate order, so the lists equal `batchByMesh`'s entry for entry (`cullCameraOnCpu`, tested on random scenes). No atomics in the lists.
-- **Draw list:** the camera's region (room for every draw) first, then the shadows', then the velocity region (as big), then captures and glass; the CPU writes zeros where the GPU writes.
-- **Drawing (`PassDraws`):** prepass, main and velocity passes bind the pools once and draw each style's packed commands with one `vkCmdDrawIndexedIndirectCount` (`drawIndirectCount`); groups of deforming meshes after, one by one from their own commands.
-- **Stays on the CPU:** glass (its cached list tested against the frustum and sorted), the mirror's choice (flat-faced draws only), shadows and captures (stages 4 and 5). HIDDEN (occlusion measurement) is not counted.
-- **F4:** DRAWN, levels and triangles from the counts and commands read back a frame or two late.
-- **`cull-compare`:** asks for the next frame's CPU lists too, reads the GPU's back and reports each list's matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.
-- Tests: `camera_culling_test` (lists, groups, kept table, comparison, edges, setting, command).
+- **Draw list:** the camera's region (room for every draw) first, then the shadows', then the velocity region (as big), then a region as big for each capture drawn (faces, then the mirror), then glass; the CPU writes zeros where the GPU writes.
+- **Drawing (`PassDraws`, a view's commands from `commandFirst`):** prepass, main, velocity and capture passes bind the pools once and draw each style's packed commands with one `vkCmdDrawIndexedIndirectCount` (`drawIndirectCount`); groups of deforming meshes after, one by one from their own commands.
+- **Stays on the CPU:** glass (its cached list tested against the frustum and sorted), the mirror's choice (flat-faced draws only), shadows (stage 5). HIDDEN (occlusion measurement) is not counted.
+- **F4:** DRAWN, levels, triangles and the probe faces' triangles from the counts and commands read back a frame or two late.
+- **`cull-compare`:** asks for the next frame's CPU lists too, reads the GPU's back and reports each list's (camera, velocity, each probe face drawn, mirror) matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.
+- Tests: `camera_culling_test` (lists, capture views, slices, groups, kept table, comparison, edges, setting, command).

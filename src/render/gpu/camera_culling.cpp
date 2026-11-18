@@ -1,4 +1,7 @@
 #include "render/gpu/camera_culling.h"
+#include "math/angles.h"
+#include "render/gpu/reflection_probe.h"
+#include "render/gpu/reflection_probe_shared.h"
 #include "scene/material.h"
 
 #include <algorithm>
@@ -164,6 +167,47 @@ GpuCameraCull packCameraCull(const Frustum& frustum, const LevelView& levels, bo
     packed.swayFadeEnd = swayFadeEnd;
     packed.flags = (motion ? CAMERA_CULL_MOTION : 0u) | (sway ? CAMERA_CULL_SWAY : 0u);
     return packed;
+}
+
+// The face's camera measured from the origin (as the capture draws it), moved back into the world for culling.
+CaptureCullView probeFaceCullView(int face, const Vec3& origin, float farPlane, float faceSize, const LevelOfDetailSettings& settings) {
+    const Mat4 worldView = cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane) * Mat4::translation(-origin.x, -origin.y, -origin.z);
+    return CaptureCullView{Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero), levelView(origin, faceSize, 0.25f * fullTurnRadians, settings)};
+}
+
+// The mirror's levels are the camera's lens over the picture's height: the mirrored camera is as far from what it shows.
+CaptureCullView mirrorCullView(const Mat4& mirrorViewProjection, const Vec3& cameraOrigin, const MirrorPlane& mirror, float pictureHeight,
+                               float verticalFov, const LevelOfDetailSettings& settings) {
+    const Mat4 worldView = mirrorViewProjection * Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
+    return CaptureCullView{planarFrustum(worldView, mirror), levelView(cameraOrigin, pictureHeight, verticalFov, settings)};
+}
+
+GpuCameraCull packCaptureCull(const CaptureCullView& capture) {
+    return packCameraCull(capture.frustum, capture.levels, false, false, 0.0f);
+}
+
+// Every view's slices the same size, so a view's start is its number times one view's size.
+void placeCullView(GpuCameraCull& view, std::uint32_t index, std::uint32_t candidates, const CullDrawOrder& order) {
+    const CullViewSizes one = cullViewSizes(1, candidates, order);
+    view.candidates = candidates;
+    view.groups = static_cast<std::uint32_t>(order.order.size());
+    view.blocks = (candidates + cameraCullGroupSize - 1) / cameraCullGroupSize;
+    view.view = index;
+
+    for (std::size_t run = 0; run < cullStyles; ++run) {
+        view.runFirst[run] = order.runFirst[run];
+        view.runCount[run] = order.runCount[run];
+    }
+
+    view.slices[CAMERA_CULL_SLICE_FLAGS] = static_cast<std::uint32_t>(index * one.flags);
+    view.slices[CAMERA_CULL_SLICE_BLOCKS] = static_cast<std::uint32_t>(index * one.blocks);
+    view.slices[CAMERA_CULL_SLICE_COMMANDS] = static_cast<std::uint32_t>(index * one.commands);
+    view.slices[CAMERA_CULL_SLICE_PLACES] = static_cast<std::uint32_t>(index * one.places);
+}
+
+CullViewSizes cullViewSizes(std::size_t views, std::uint32_t candidates, const CullDrawOrder& order) {
+    const std::size_t blocks = (static_cast<std::size_t>(candidates) + cameraCullGroupSize - 1) / cameraCullGroupSize;
+    return CullViewSizes{views * candidates, views * (blocks + 1), views * order.order.size(), views * (static_cast<std::size_t>(order.pooled) + 1)};
 }
 
 bool swayReaches(const float bounds[4], const Vec3& eye, float fadeEnd) {
@@ -351,9 +395,16 @@ namespace {
     }
 }
 
-std::string describeCullComparison(const CullListComparison& camera, const CullListComparison& motion) {
-    return describeList("Camera", camera) + ". " + describeList("Velocity", motion) + ". " +
-           (agrees(camera) && agrees(motion) ? "The GPU's lists agree with the CPU's." : "The GPU's lists DIFFER from the CPU's.");
+std::string describeCullComparison(std::span<const NamedCullComparison> lists) {
+    std::string reply;
+    bool allAgree = true;
+
+    for (const NamedCullComparison& named : lists) {
+        reply += describeList(named.name.c_str(), named.list) + ". ";
+        allAgree = allAgree && agrees(named.list);
+    }
+
+    return reply + (allAgree ? "The GPU's lists agree with the CPU's." : "The GPU's lists DIFFER from the CPU's.");
 }
 
 /*

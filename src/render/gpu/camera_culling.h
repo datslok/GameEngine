@@ -4,6 +4,7 @@
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/mesh_pool.h"
+#include "render/gpu/planar_reflection.h"
 #include "scene/frame_description.h"
 
 #include <array>
@@ -62,7 +63,9 @@ struct CullGroupStyle {
 inline constexpr std::size_t cullStyles = CAMERA_CULL_STYLES;
 static_assert(CAMERA_CULL_DRAW_COUNTS == 2 * CAMERA_CULL_STYLES, "A packed count for each style of both lists");
 
-// The frame's camera, read by every pass. Must match camera_culling.glsl's CameraCull.
+inline constexpr std::size_t maxCullViews = CAMERA_CULL_MAX_VIEWS;
+
+// A view culled (the camera, a probe face or the mirror), read by every pass. Must match camera_culling.glsl's CameraCull.
 struct GpuCameraCull {
     GpuFrustum frustum{};
     GpuLevelView levels{};
@@ -73,12 +76,13 @@ struct GpuCameraCull {
     std::uint32_t mainBase = 0;
     std::uint32_t motionBase = 0;
     std::uint32_t blocks = 0;
-    std::uint32_t unused = 0;
+    std::uint32_t view = 0;                   // its number in the dispatch: its counts' and packed counts' place
     std::uint32_t runFirst[cullStyles] = {};  // each style's pooled groups' first place in the drawing order
     std::uint32_t runCount[cullStyles] = {};  // and how many
+    std::uint32_t slices[4] = {};             // CAMERA_CULL_SLICE_*: its parts of the shared working buffers
 };
 
-static_assert(sizeof(GpuCameraCull) == 192, "GpuCameraCull must match camera_culling.glsl's CameraCull");
+static_assert(sizeof(GpuCameraCull) == 208, "GpuCameraCull must match camera_culling.glsl's CameraCull");
 
 // What the passes count (CAMERA_CULL_COUNTS words): draws by level slot, the camera's and the velocity pass's totals.
 struct GpuCameraCullCounts {
@@ -119,6 +123,39 @@ CullDrawOrder cullDrawOrder(std::span<const CullGroupStyle> styles);
 * fading out at swayFadeEnd.
 */
 GpuCameraCull packCameraCull(const Frustum& frustum, const LevelView& levels, bool motion, bool sway, float swayFadeEnd);
+
+/*
+* A capture's view: what it can see and its levels. A probe face from its cycle's origin (faceSize pixels across a
+* quarter turn, so coarser levels than the camera's); the mirror through its camera-relative view-projection
+* (planarViewProjection), with its plane for its near side.
+*/
+struct CaptureCullView {
+    Frustum frustum;
+    LevelView levels;
+};
+
+CaptureCullView probeFaceCullView(int face, const Vec3& origin, float farPlane, float faceSize, const LevelOfDetailSettings& settings);
+CaptureCullView mirrorCullView(const Mat4& mirrorViewProjection, const Vec3& cameraOrigin, const MirrorPlane& mirror, float pictureHeight,
+                               float verticalFov, const LevelOfDetailSettings& settings);
+
+// A capture's record: no velocity list, nothing tested for sway.
+GpuCameraCull packCaptureCull(const CaptureCullView& capture);
+
+/*
+* The view's place in one dispatch of views: its number, the table's counts and drawing order's runs, and its slices
+* of the shared working buffers, each view's after the one before's (the same sizes for every view).
+*/
+void placeCullView(GpuCameraCull& view, std::uint32_t index, std::uint32_t candidates, const CullDrawOrder& order);
+
+// What views views' slices take together, in elements of each buffer.
+struct CullViewSizes {
+    std::size_t flags = 0;     // flags and offsets, one a candidate
+    std::size_t blocks = 0;    // block sums, the totals after each view's
+    std::size_t commands = 0;  // commands and packed commands, one a group
+    std::size_t places = 0;    // packed places, the total after each view's
+};
+
+CullViewSizes cullViewSizes(std::size_t views, std::uint32_t candidates, const CullDrawOrder& order);
 
 // ---- Mirrored by camera_culling.glsl ----
 
@@ -180,8 +217,14 @@ CullListComparison compareCullList(std::span<const CullGroupStyle> styles, std::
                                    std::span<const std::uint32_t> entries, std::uint32_t base, const BatchedDraws& cpu,
                                    const std::function<bool(std::uint32_t)>& nearEdge);
 
-// cull-compare's reply: both lists, and whether they agree (differences only near edges).
-std::string describeCullComparison(const CullListComparison& camera, const CullListComparison& motion);
+// A list compared, with its name in the reply ("Camera", "Velocity", "Probe face 2", "Mirror").
+struct NamedCullComparison {
+    std::string name;
+    CullListComparison list;
+};
+
+// cull-compare's reply: every list compared, and whether they agree (differences only near edges).
+std::string describeCullComparison(std::span<const NamedCullComparison> lists);
 
 // ---- The kept table ----
 
