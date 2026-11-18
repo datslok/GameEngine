@@ -41,13 +41,13 @@ Everything every view draws is settled before any command is recorded, so the sc
 1. Cloth ticks (`runCloths`), video memory read.
 2. Camera: `viewProjection` (world), `relativeViewProjection` (camera-relative, jittered for TAA), `motionViewProjection` (unjittered), last frame's for reprojection; `makeClusterGrid`.
 3. Directional lights dimmed by the air when there is an `Atmosphere` (so the brightest *arriving* light gets the cascades), then `prioritizeLights`.
-4. `visibleDraws` → `opaqueDraws`; the flat mirror chosen; image lights added without ray-traced mirror search.
+4. With `passes.gpuCulling` (default) `CameraCullTable::update` and only the glass and flat-faced draws tested; else `visibleDraws` → `opaqueDraws`. The flat mirror chosen; image lights added without ray-traced mirror search.
 5. `packLighting`, `planShadows`, `holdStaggeredCascades`, `attachShadows`; coloured shadow maps made if glass needs them.
-6. The camera's levels of detail (by the output's height) and `batchByMesh`; `prepareShadowDraws`; the velocity pass's moving draws; the reflection probe's faces and the mirror's view; transparent draws sorted far to near.
+6. Without GPU culling, the camera's levels of detail (by the output's height), `batchByMesh` and the velocity pass's moving draws; `prepareShadowDraws`; the reflection probe's faces and the mirror's view; transparent draws sorted far to near.
 7. Probe cascades, mirrored light pairs, ambient occlusion, contact shadows, fog, wind and sky visibility readied before the scene set is written.
 8. `writeScene`, debug line vertices and shadow tile data straight into upload memory (no copy passes).
 
-Draw list order (one buffer): main pass, shadow tiles, velocity pass, probe faces, mirror view, transparent.
+Draw list order (one buffer): main pass, shadow tiles, velocity pass, probe faces, mirror view, transparent. With GPU culling the main and velocity regions hold every draw, written by the CULL pass (`gpu-driven.md`).
 
 ## Pass order
 
@@ -57,32 +57,33 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 |---|---|---|---|
 | 1 | Cloth [CLOTH] | GPU cloths ticked | `cloth-gpu.md` |
 | 2 | Debug UI [UI] | F5 open: the UI into its own overlay image | `settings-and-commands.md` |
-| 3 | Ray scene [TLAS] | anything traces rays (probes, ray debug, probe capture, reflections, mirrored lights, glass shadows) | `ray-tracing.md` |
-| 4 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
-| 5 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
-| 6 | Wind [WIND] | the wind field runs | wind (`render/gpu/wind`) |
-| 7 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
-| 8 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
-| 9 | Fog [FOG] | frame has a `Fog` and fog is on | `fog.md` |
-| 10 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
-| 11 | Occlusion [OCCLUSION] | the prepass and `measureOcclusion` (on): its farthest-depth pyramid, the camera's draws counted against it | `occlusion-culling.md` |
-| 12 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
+| 3 | Camera culling [CULL] | `passes.gpuCulling`: the camera's and velocity pass's lists and commands | `gpu-driven.md` |
+| 4 | Ray scene [TLAS] | anything traces rays (probes, ray debug, probe capture, reflections, mirrored lights, glass shadows) | `ray-tracing.md` |
+| 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
+| 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
+| 7 | Wind [WIND] | the wind field runs | wind (`render/gpu/wind`) |
+| 8 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
+| 9 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
+| 10 | Fog [FOG] | frame has a `Fog` and fog is on | `fog.md` |
+| 11 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
+| 12 | Occlusion [OCCLUSION] | the prepass and `measureOcclusion` (on), GPU culling off: its farthest-depth pyramid, the camera's draws counted against it | `occlusion-culling.md` |
+| 13 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
 | 13-16 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
-| 17 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
-| 18 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
-| 19 | Main [MAIN] | always; sky and stars drawn in it or in a block of their own after | here |
-| 20 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
-| 21 | Motion [MOTION] | temporal AA: moved or swaying draws into the velocity image | `anti-aliasing.md` |
-| 22 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
-| 23 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
-| 24 | Reflections [SSR] | reflections on | `reflections.md` |
-| 25 | Fog apply [FOGMIX] | fog | `fog.md` |
-| 26 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
-| 27 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
-| 28 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
-| 29 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
-| 30 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
-| 31 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
+| 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
+| 19 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
+| 20 | Main [MAIN] | always; sky and stars drawn in it or in a block of their own after | here |
+| 21 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
+| 22 | Motion [MOTION] | temporal AA: moved or swaying draws into the velocity image | `anti-aliasing.md` |
+| 23 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
+| 24 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
+| 25 | Reflections [SSR] | reflections on | `reflections.md` |
+| 26 | Fog apply [FOGMIX] | fog | `fog.md` |
+| 27 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
+| 28 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
+| 29 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
+| 30 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
+| 31 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
+| 32 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
 
 The F4 readout groups them: setup to the prepass; lighting from `firstLightingPass` (PYRAMID) to MAIN; picture from `firstPicturePass` (BALLS) on (`engine/debug_views.h`).
 
