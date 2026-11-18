@@ -142,7 +142,7 @@ The game starts in first person; F1-F3 switch modes. Every game shares the camer
 | **L** | Toggle the light lab's back-room ceiling lamp, or the demo's field of 100 coloured lamps |
 | **K** | Toggle the light lab's street lights, or the demo's four floodlights (on at the start) |
 | **Left mouse (held)** | Drag the cloth lab's sheet where the crosshair points, within 10 m |
-| **F4** | Debug view: timings, GPU passes, bounding boxes, colliders, light counts, video memory |
+| **F4** | Debug view: timings, GPU passes, light counts, video memory; bounding boxes and colliders with "Debug bounding boxes" on (F5) |
 | **F5** | Settings window: every setting, quality presets, the typical GPU setup, Save and Reset |
 
 **First person and free camera**

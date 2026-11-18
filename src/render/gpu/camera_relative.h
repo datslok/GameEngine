@@ -17,6 +17,9 @@
 * subtraction; the solar system (ROADMAP phase 13) keeps them in doubles for that.
 */
 
+// The camera's view for points measured from the camera: it turns them but does not move them.
+Mat4 cameraRelativeView(const Camera& camera);
+
 // The camera's view and projection (in the GPU's depth range) for points measured from the camera: it turns them but
 // does not move them, since the camera sits at the origin.
 Mat4 cameraRelativeViewProjection(const Camera& camera);

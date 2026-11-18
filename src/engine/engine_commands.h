@@ -44,7 +44,7 @@ void addSimulationCommands(CommandRegistry& registry, SimulationControl& control
 // camera: shows the camera's place and direction, or places it (Game::poseCamera), looking at a point or as before.
 void addCameraCommands(CommandRegistry& registry, Game& game, World& world);
 
-// debug-view: says whether the game's debug view (F4: bounding boxes, the readout) shows, or switches it on or off.
+// debug-view: says whether the game's debug view (F4: the readout, and the bounding boxes when debugBoundingBoxes is on) shows, or switches it on or off.
 void addDebugViewCommand(CommandRegistry& registry, Game& game);
 
 /*

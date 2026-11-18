@@ -5,6 +5,7 @@
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
 #include "render/vulkan/vulkan_colour_pyramid.h"
+#include "render/vulkan/vulkan_depth_pyramid.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "render/vulkan/vulkan_reflection_probe.h"
@@ -90,7 +91,6 @@ private:
     VkSampler nearestLevels;
     VkFormat standInFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
-    std::unique_ptr<ComputePipeline> depthPyramidPipeline;
     std::unique_ptr<ComputePipeline> reflectionPipeline;
     std::unique_ptr<ComputePipeline> rayReflectionPipeline; // null without ray queries
     std::vector<VulkanBuffer> passRecords;
@@ -99,12 +99,7 @@ private:
     VulkanImage normals;
     VulkanImage properties;
     VulkanImage standIns;
-    VulkanImage depthPyramid;
+    std::unique_ptr<VulkanDepthPyramid> depthPyramid; // the nearest depth
     std::unique_ptr<VulkanColourPyramid> colourPyramid;
     bool colourPyramidPrepared = false; // built this frame already, by prepareColourPyramid
-
-    // A view of each depth pyramid level alone, for writing one level at a time.
-    std::vector<OwnedHandle<VkImageView>> depthLevels;
-
-    void buildDepthPyramid(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth);
 };

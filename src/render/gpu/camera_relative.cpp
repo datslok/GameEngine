@@ -5,11 +5,14 @@
 * The same lens and the same turn as the camera's own view, from a copy of the camera moved to the origin: its view
 * matrix then has no translation left in it.
 */
-Mat4 cameraRelativeViewProjection(const Camera& camera) {
+Mat4 cameraRelativeView(const Camera& camera) {
     Camera atOrigin = camera;
     atOrigin.setPosition(Vec3{0.0f, 0.0f, 0.0f});
+    return atOrigin.getViewMatrix();
+}
 
-    return toGpuDepthRange(atOrigin.getProjectionMatrix()) * atOrigin.getViewMatrix();
+Mat4 cameraRelativeViewProjection(const Camera& camera) {
+    return toGpuDepthRange(camera.getProjectionMatrix()) * cameraRelativeView(camera);
 }
 
 /*

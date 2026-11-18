@@ -143,7 +143,7 @@ namespace {
 
                 for (std::uint32_t y = 0; y < levelSize.height; ++y) {
                     for (std::uint32_t x = 0; x < levelSize.width; ++x) {
-                        assert(pyramid.nearest(level, static_cast<int>(x), static_cast<int>(y)) == nearest[y * levelSize.width + x]);
+                        assert(pyramid.at(level, static_cast<int>(x), static_cast<int>(y)) == nearest[y * levelSize.width + x]);
                     }
                 }
             }

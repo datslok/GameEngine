@@ -11,6 +11,11 @@
 // The depth pyramid's most levels: enough to reach one texel from 32768 pixels across.
 #define SSR_MAX_PYRAMID_LEVELS 16
 
+// What a depth pyramid level keeps of the 2x2 texels below it (GpuPyramidPass target.w): the nearest, for the reflections'
+// march, or the farthest, for occlusion culling (render/gpu/occlusion_culling.h).
+#define DEPTH_PYRAMID_NEAREST 0
+#define DEPTH_PYRAMID_FARTHEST 1
+
 // How far past a cell's edge, in texels, a step out of the cell lands, so it is inside the next cell and never stuck
 // on the edge between them.
 #define SSR_CELL_CROSSING 0.01

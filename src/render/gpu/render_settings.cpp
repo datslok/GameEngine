@@ -64,6 +64,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);
+        visitor.field("Measure occlusion", settings.measureOcclusion);
         visitor.field("Clustered shading", settings.clusteredShading);
         visitor.field("Cluster heatmap", settings.clusterHeatmap);
         visitor.field("Normal map filtering", settings.normalMapFiltering);

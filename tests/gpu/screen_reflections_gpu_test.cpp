@@ -49,6 +49,7 @@ namespace {
             report.check("pyramidLastFine", exactTolerance, static_cast<float>(lastFine), outputs[i][0]);
             report.check("pyramidCell", exactTolerance, static_cast<float>(cell), outputs[i][1]);
             report.check("nearerDepth", exactTolerance, nearerDepth(in[1][2], in[1][3]), outputs[i][2]);
+            report.check("fartherDepth", exactTolerance, fartherDepth(in[1][2], in[1][3]), outputs[i][3]);
         }
     }
 

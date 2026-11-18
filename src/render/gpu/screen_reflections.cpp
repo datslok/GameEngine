@@ -98,7 +98,7 @@ int pyramidCell(int texel, std::uint32_t level, int levelSize) {
     return std::clamp(texel >> level, 0, levelSize - 1);
 }
 
-float DepthPyramid::nearest(std::uint32_t level, int x, int y) const {
+float DepthPyramid::at(std::uint32_t level, int x, int y) const {
     return levels[level][static_cast<std::size_t>(y) * sizes[level].width + static_cast<std::size_t>(x)];
 }
 
@@ -107,7 +107,16 @@ float nearerDepth(float a, float b) {
     return std::max(a, b);
 }
 
-DepthPyramid buildDepthPyramid(std::span<const float> depths, RenderSize size) {
+// Reversed-Z: the farther surface has the smaller depth.
+float fartherDepth(float a, float b) {
+    return std::min(a, b);
+}
+
+float reduceDepths(DepthReduction reduction, float a, float b) {
+    return reduction == DepthReduction::Farthest ? fartherDepth(a, b) : nearerDepth(a, b);
+}
+
+DepthPyramid buildDepthPyramid(std::span<const float> depths, RenderSize size, DepthReduction reduction) {
     DepthPyramid pyramid;
     const std::uint32_t levelCount = depthPyramidLevels(size);
     pyramid.sizes.push_back(size);
@@ -123,15 +132,15 @@ DepthPyramid buildDepthPyramid(std::span<const float> depths, RenderSize size) {
             for (int x = 0; x < static_cast<int>(coarse.width); ++x) {
                 const int lastX = pyramidLastFine(x, static_cast<int>(coarse.width), static_cast<int>(fine.width));
                 const int lastY = pyramidLastFine(y, static_cast<int>(coarse.height), static_cast<int>(fine.height));
-                float nearest = gpuFarDepth;
+                float kept = reduction == DepthReduction::Farthest ? gpuNearDepth : gpuFarDepth;
 
                 for (int fineY = 2 * y; fineY <= lastY; ++fineY) {
                     for (int fineX = 2 * x; fineX <= lastX; ++fineX) {
-                        nearest = nearerDepth(nearest, below[static_cast<std::size_t>(fineY) * fine.width + static_cast<std::size_t>(fineX)]);
+                        kept = reduceDepths(reduction, kept, below[static_cast<std::size_t>(fineY) * fine.width + static_cast<std::size_t>(fineX)]);
                     }
                 }
 
-                texels[static_cast<std::size_t>(y) * coarse.width + static_cast<std::size_t>(x)] = nearest;
+                texels[static_cast<std::size_t>(y) * coarse.width + static_cast<std::size_t>(x)] = kept;
             }
         }
 
@@ -281,7 +290,7 @@ std::optional<ScreenHit> traceScreenRay(const DepthPyramid& pyramid, const Scree
         const RenderSize levelSize = pyramid.sizes[level];
         const int cellX = pyramidCell(static_cast<int>(std::floor(trace.position.x)), level, static_cast<int>(levelSize.width));
         const int cellY = pyramidCell(static_cast<int>(std::floor(trace.position.y)), level, static_cast<int>(levelSize.height));
-        const float nearest = pyramid.nearest(level, cellX, cellY);
+        const float nearest = pyramid.at(level, cellX, cellY);
         const HizTrace next = hizStep(trace, ray, nearest, topLevel);
 
         if (next.level >= 0) {
@@ -385,11 +394,12 @@ GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inv
     return pass;
 }
 
-GpuPyramidPass packPyramidPass(RenderSize target, std::uint32_t level, RenderSize source) {
+GpuPyramidPass packPyramidPass(RenderSize target, std::uint32_t level, RenderSize source, DepthReduction reduction) {
     GpuPyramidPass pass{};
     pass.target[0] = static_cast<std::int32_t>(target.width);
     pass.target[1] = static_cast<std::int32_t>(target.height);
     pass.target[2] = static_cast<std::int32_t>(level);
+    pass.target[3] = static_cast<std::int32_t>(reduction);
     pass.source[0] = static_cast<std::int32_t>(source.width);
     pass.source[1] = static_cast<std::int32_t>(source.height);
     return pass;

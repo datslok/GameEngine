@@ -1,6 +1,6 @@
 # Reflections
 
-Covers: `src/render/gpu/screen_reflections`, `src/render/gpu/screen_reflections_shared.h`, `src/render/vulkan/vulkan_reflections`, `src/render/vulkan/vulkan_colour_pyramid`, `assets/shaders/reflections_pass.glsl`, `assets/shaders/reflections.comp`, `assets/shaders/reflections_rays.comp`, `assets/shaders/screen_reflections.glsl`, `assets/shaders/depth_pyramid.comp`, `assets/shaders/colour_pyramid.comp`, `assets/shaders/triangle_surfaces.frag`, `assets/shaders/triangle_surfaces_rays.frag`
+Covers: `src/render/gpu/screen_reflections`, `src/render/gpu/screen_reflections_shared.h`, `src/render/vulkan/vulkan_reflections`, `src/render/vulkan/vulkan_colour_pyramid`, `src/render/vulkan/vulkan_depth_pyramid`, `assets/shaders/reflections_pass.glsl`, `assets/shaders/reflections.comp`, `assets/shaders/reflections_rays.comp`, `assets/shaders/screen_reflections.glsl`, `assets/shaders/depth_pyramid.comp`, `assets/shaders/colour_pyramid.comp`, `assets/shaders/triangle_surfaces.frag`, `assets/shaders/triangle_surfaces_rays.frag`
 
 The reflection pass: how each glossy pixel's stand-in is replaced, the depth and colour pyramids, and screen-space reflections. The probe's search: `reflection-probe.md`. Flat mirrors: `planar-reflections.md`. Light reaching surfaces off mirrors: `mirrored-lights.md`. Mirror rules: `.claude/rules/shader-mirror.md`.
 
@@ -48,7 +48,7 @@ With reflections on, the main pass writes three more targets at the render size 
 
 | Pyramid | Shader | Format | Level 0 | Each level up |
 |---|---|---|---|---|
-| Depth (`VulkanReflections::buildDepthPyramid`) | `depth_pyramid.comp` | R32F, full chain, at most `SSR_MAX_PYRAMID_LEVELS` (16) | this frame's depth | nearest (reversed-Z: largest) of the 2x2 below |
+| Depth (`VulkanDepthPyramid`) | `depth_pyramid.comp` | R32F, full chain, at most `SSR_MAX_PYRAMID_LEVELS` (16) | this frame's depth | `DepthReduction`: nearest (reversed-Z: largest) of the 2x2 below for the reflections; farthest (smallest) for occlusion culling (`occlusion-culling.md`), its own pyramid |
 | Colour (`VulkanColourPyramid`) | `colour_pyramid.comp` | RGBA16F, same levels | last frame's finished picture (`finishedScene`: TAA's history, FSR's or DLSS's output) resampled to the render size | average of the 2x2 below |
 
 - An odd level's far edge also takes the leftover texel (`pyramidLastFine`), so every texel has a cell above it (`pyramidCell` clamps).

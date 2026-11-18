@@ -41,6 +41,7 @@
 #include "render/vulkan/vulkan_ddgi.h"
 #include "render/vulkan/vulkan_debug_lines.h"
 #include "render/vulkan/vulkan_depth_range.h"
+#include "render/vulkan/vulkan_occlusion_culling.h"
 #include "render/vulkan/vulkan_device.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "render/vulkan/vulkan_mesh.h"
@@ -397,6 +398,11 @@ private:
     std::unique_ptr<VulkanDepthRange> depthRange;
     // The same for a flat mirror's own cascades (shadow_map.h, MirrorShadowView), from its picture's depths.
     std::unique_ptr<VulkanDepthRange> mirrorDepthRange;
+
+    // Occlusion culling's first stage (render/gpu/occlusion_culling.h): the pyramid and count after the prepass, and the
+    // last count read back, for the readout.
+    std::unique_ptr<VulkanOcclusionCulling> occlusionCulling;
+    std::optional<OcclusionCounts> lastOcclusionCounts;
 
     // The eye's adaptation (render/gpu/eye_adaptation.h): its passes and the last reading, for the readout. It snaps
     // to its target when it starts afresh (the first frame, or switched on again) and on every frame a capture draws.

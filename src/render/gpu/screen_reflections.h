@@ -108,20 +108,33 @@ int pyramidLastFine(int coarse, int coarseSize, int fineSize);
 // holding the texels left over at the far edge.
 int pyramidCell(int texel, std::uint32_t level, int levelSize);
 
+// What each pyramid texel keeps of the depths it covers: the nearest (the reflections' march skips space in front of
+// everything) or the farthest (occlusion culling: an object behind it is behind everything there).
+enum class DepthReduction : std::int32_t {
+    Nearest = DEPTH_PYRAMID_NEAREST,
+    Farthest = DEPTH_PYRAMID_FARTHEST,
+};
+
 // The depth pyramid on the CPU, as depth_pyramid.comp builds it: level 0 the depth image, each texel above the nearest
-// (in reversed-Z the largest) depth of the texels it covers.
+// or farthest depth of the texels it covers.
 struct DepthPyramid {
     std::vector<RenderSize> sizes;
     std::vector<std::vector<float>> levels;
 
-    // The nearest depth in the cell at (x, y) of this level.
-    float nearest(std::uint32_t level, int x, int y) const;
+    // The kept depth in the cell at (x, y) of this level.
+    float at(std::uint32_t level, int x, int y) const;
 };
 
-DepthPyramid buildDepthPyramid(std::span<const float> depths, RenderSize size);
+DepthPyramid buildDepthPyramid(std::span<const float> depths, RenderSize size, DepthReduction reduction = DepthReduction::Nearest);
 
-// The nearer of two depths (reversed-Z: the larger), the pyramid's reduction.
+// The nearer of two depths (reversed-Z: the larger), the reflections' pyramid's reduction.
 float nearerDepth(float a, float b);
+
+// The farther of two depths (reversed-Z: the smaller), occlusion culling's pyramid's reduction.
+float fartherDepth(float a, float b);
+
+// Two depths reduced as the pyramid's reduction says.
+float reduceDepths(DepthReduction reduction, float a, float b);
 
 // A point on screen from a pixel (counted from the top-left corner) and its depth, measured from the camera, through the
 // inverse of the camera-relative view-projection that drew it.
@@ -254,10 +267,10 @@ GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inv
 
 // The pyramid passes' push constants: the level written (its size) and the level read (its size).
 struct GpuPyramidPass {
-    std::int32_t target[4]; // xy: the level's size, z: the level, w: unused
+    std::int32_t target[4]; // xy: the level's size, z: the level, w: the depth reduction (DepthReduction; the colour pyramid ignores it)
     std::int32_t source[4]; // xy: the level below's size (the depth image's for level 0), zw: unused
 };
 
 static_assert(sizeof(GpuPyramidPass) == 32, "GpuPyramidPass must match depth_pyramid.comp's and colour_pyramid.comp's push constants");
 
-GpuPyramidPass packPyramidPass(RenderSize target, std::uint32_t level, RenderSize source);
+GpuPyramidPass packPyramidPass(RenderSize target, std::uint32_t level, RenderSize source, DepthReduction reduction = DepthReduction::Nearest);
