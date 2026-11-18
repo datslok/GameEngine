@@ -13,7 +13,7 @@ Each pixel averages what it saw over many frames while the projection shifts by 
 | `Off` | nothing: no jitter, no velocity pass, no history; the scene image is the finished picture |
 | `Taa` | the engine's own resolve (`taa.comp`) |
 | `Fsr` | AMD FSR 3.1 (`VulkanFsr`), settings-file name "FSR 3.1" |
-| `Dlss` (default) | NVIDIA DLSS through Streamline (`VulkanDlss`); at render scale 1 this is DLAA |
+| `Dlss` (default) | NVIDIA DLSS through Streamline (`VulkanDlss`), in its Quality mode by default; at render scale 1 this is DLAA |
 
 - `temporalAntiAliasing(settings)`: anything but Off. FSR and DLSS replace only the resolve; they still use the jitter and the velocity pass.
 - `activeUpscaler(settings, UpscalerSupport)`: FSR or DLSS only where their library loaded and the GPU can run it, else TAA. A failed dispatch also makes that upscaler unavailable and the frame falls back to the resolve.
@@ -76,7 +76,7 @@ Glass and blended surfaces change a pixel in ways motion vectors cannot follow. 
 
 ## Upscaling
 
-- `renderScale` (1; `minRenderScale` 0.33 to 1) applies only while anti-aliasing is on (`appliedRenderScale`), since it is what upscales.
+- `renderScale` (Quality's 0.67, `upscalingModeScale`; `minRenderScale` 0.33 to 1) applies only while anti-aliasing is on (`appliedRenderScale`), since it is what upscales.
 - `renderSize(width, height, scale)`: each side rounded, 1 to the output's. `ensureFrameTextures` keeps the scene image, depth, velocity image and cluster lists at it (`sceneSize`) and remakes them on change.
 - At the render size: prepass, main pass, sky, stars, probe balls, ray debug view, velocity pass, clusters, depth measurement, ambient occlusion. At the output's: histories, everything after anti-aliasing, debug lines and UI. Shadows, probes and sky tables are screen-independent.
 - **Modes** (`UpscalingMode`: Native, Quality, Balanced, Performance, Ultra performance = scales 1, 1/1.5, 1/1.7, 1/2, 1/3, `upscalingModeScale`): not stored. F5's combo sets the scale; `matchingUpscalingMode` reads it back within 0.005, else Custom. Presets leave the scale alone.

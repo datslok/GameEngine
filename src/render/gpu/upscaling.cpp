@@ -12,9 +12,6 @@ namespace {
     // FSR's jitter cycle at full size, growing with the square of the upscaling.
     constexpr double fsrBasePhaseCount = 8.0;
 
-    // Each mode's upscaling, the output's size over the render's, in UpscalingMode's order (AMD's and NVIDIA's figures).
-    constexpr std::array<float, 5> modeUpscaling{1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
-
     // Half the render scale slider's step of a hundredth, so a scale dragged to the nearest hundredth reads as its mode.
     constexpr float modeTolerance = 0.005f;
 }
@@ -56,12 +53,8 @@ float appliedRenderScale(const UpscalingSettings& settings) {
     return temporalAntiAliasing(settings) ? settings.renderScale : 1.0f;
 }
 
-float upscalingModeScale(UpscalingMode mode) {
-    return 1.0f / modeUpscaling[static_cast<std::size_t>(mode)];
-}
-
 std::optional<UpscalingMode> matchingUpscalingMode(float renderScale) {
-    for (std::size_t index = 0; index < modeUpscaling.size(); ++index) {
+    for (std::size_t index = 0; index < upscalingModeFactors.size(); ++index) {
         const UpscalingMode mode = static_cast<UpscalingMode>(index);
 
         if (std::abs(renderScale - upscalingModeScale(mode)) <= modeTolerance) {
@@ -76,7 +69,7 @@ std::optional<UpscalingMode> matchingUpscalingMode(float renderScale) {
 UpscalingMode nearestUpscalingMode(float renderScale) {
     UpscalingMode nearest = UpscalingMode::Native;
 
-    for (std::size_t index = 0; index < modeUpscaling.size(); ++index) {
+    for (std::size_t index = 0; index < upscalingModeFactors.size(); ++index) {
         const UpscalingMode mode = static_cast<UpscalingMode>(index);
 
         if (std::abs(renderScale - upscalingModeScale(mode)) < std::abs(renderScale - upscalingModeScale(nearest))) {

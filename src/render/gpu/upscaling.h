@@ -67,27 +67,6 @@ struct UpscalerSupport {
     bool dlss = false;
 };
 
-struct UpscalingSettings {
-    // FSR and DLSS only where they are available (activeUpscaler). DLSS by default at full size (DLAA; the user's
-    // choice on Oct 23 2026), which falls back to temporal anti-aliasing without an RTX GPU or Streamline's DLLs.
-    Upscaler upscaler = Upscaler::Dlss;
-
-    // The render size's share of the output's, across and down (0.5 draws a quarter of the pixels). Only while
-    // anti-aliasing is on, since it is what upscales.
-    float renderScale = 1.0f;
-
-    // FSR's sharpening after it upscales (RCAS, robust contrast-adaptive sharpening): 0 for none, up to 1. 0.8 by
-    // default (the user's choice on Oct 23 2026; it was 0.5). DLSS and TAA do not read it.
-    float sharpness = 0.8f;
-
-    // The model DLSS runs, in every mode. M by default: it trailed least at the flashlight beam's edge, by the user's
-    // eye (Oct 23 2026), where Default (K at DLAA) trailed.
-    DlssModel dlssModel = DlssModel::M;
-};
-
-// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
-void visit(UpscalingSettings& settings, SettingsVisitor& visitor);
-
 /*
 * The named modes FSR and DLSS offer, each only a render scale: the output's size over the render's is 1, 1.5, 1.7, 2
 * and 3 (so Quality draws 44% of the pixels, Performance a quarter). The debug UI's list sets the scale; the scale is
@@ -104,7 +83,35 @@ enum class UpscalingMode {
 // In the order of UpscalingMode's values.
 inline constexpr std::array<const char*, 5> upscalingModeNames{"Native", "Quality", "Balanced", "Performance", "Ultra performance"};
 
-float upscalingModeScale(UpscalingMode mode);
+// Each mode's output size over its render size, in the order of UpscalingMode's values.
+inline constexpr std::array<float, 5> upscalingModeFactors{1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
+
+// The mode's render scale. Constexpr so the settings' default can name a mode.
+constexpr float upscalingModeScale(UpscalingMode mode) {
+    return 1.0f / upscalingModeFactors[static_cast<std::size_t>(mode)];
+}
+
+struct UpscalingSettings {
+    // FSR and DLSS only where they are available (activeUpscaler). DLSS by default (the user's choice on Oct 23 2026),
+    // which falls back to temporal anti-aliasing without an RTX GPU or Streamline's DLLs.
+    Upscaler upscaler = Upscaler::Dlss;
+
+    // The render size's share of the output's, across and down (0.5 draws a quarter of the pixels). Only while
+    // anti-aliasing is on, since it is what upscales. Quality's (0.67) by default, the user's choice on Nov 18 2026: it
+    // was 1 (DLAA), whose DLSS pass alone took about 3.7 ms on the laptop's RTX 4070 (docs/research/WORLDSCALE.md).
+    float renderScale = upscalingModeScale(UpscalingMode::Quality);
+
+    // FSR's sharpening after it upscales (RCAS, robust contrast-adaptive sharpening): 0 for none, up to 1. 0.8 by
+    // default (the user's choice on Oct 23 2026; it was 0.5). DLSS and TAA do not read it.
+    float sharpness = 0.8f;
+
+    // The model DLSS runs, in every mode. M by default: it trailed least at the flashlight beam's edge, by the user's
+    // eye (Oct 23 2026), where Default (K at DLAA) trailed.
+    DlssModel dlssModel = DlssModel::M;
+};
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(UpscalingSettings& settings, SettingsVisitor& visitor);
 
 // The mode a render scale is, within half a slider step (0.005, so 0.67 is Quality), or nothing for a custom scale.
 std::optional<UpscalingMode> matchingUpscalingMode(float renderScale);
