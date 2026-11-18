@@ -137,6 +137,7 @@ void gpuTestTerrain(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestImpostor(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCardThinning(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestFacetVariation(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCameraFinish(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestMotionBlur(GpuFunctionRunner& runner, GpuCheckReport& report);

@@ -1,6 +1,6 @@
 # Forest
 
-Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/games/forest/forest_ground`, `src/games/forest/forest_sway`
+Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/games/forest/forest_ground`, `src/games/forest/forest_sway`, `src/games/forest/structures`
 
 `ForestGame` (`--game forest`, title "Forest"): a jungle valley at a scale meant to be felt. Rules for working here: `src/games/forest/CLAUDE.md`; research: `docs/research/JUNGLE.md`. North is -z.
 
@@ -12,7 +12,7 @@ In order: `buildGround`, `buildShapes`, `buildTrees`, `buildLianas`, `buildUnder
 
 - Generated meshes are built on the game's job system (`Game::getJobs`), each into its own slot, so the result does not depend on thread order; most are kept drawn-only (`AssetManager::addDrawnMesh`).
 - Scenery is `ModelRenderer::isStill` (`addShape`): its draws are kept between frames, so any change to its material or sway is announced with `markRenderChanged`.
-- Static and walked on (`StaticLevel`): the finest ring of ground and the Monolith's boxes only. Pillars, islands, the Ring and trees have no collision; they stand clear of the path.
+- Static and walked on (`StaticLevel`): the finest ring of ground and the Monolith's slabs and strut only. Pillars, islands, the Ring and trees have no collision; they stand clear of the path.
 - Without `assets/forest` (a fresh clone; tests pass a folder that does not exist) every texture role falls back to a plain stand-in, and drawn textures use stand-in colours.
 
 ## The land (`forest_terrain`)
@@ -53,6 +53,21 @@ A `Terrain` (CDLOD; engine side: `terrain.md`) on its own entity:
 - **Leaf materials:** `forestLeafMaterial` (an atlas as a double-sided cut-out, opacity in alpha, mips keeping coverage; the ivy `LeafSet017` by default), `forestLeafClusterMaterial`, and drawn ones (palm, aroid, epiphyte, grass, floor cover, moss), each with its plants.
 - **Light through leaves** (`ForestLeafLightSettings`, F5 Leaf light, start-up; `withLeafLight`): `Material::diffuseTransmission` share 1, tint (0.8, 1, 0.4), on every leaf material; `engine.render.materials.lightThroughLeaves` switches it live.
 
+## The structures (`structures`)
+
+Stealth-alien shapes (design: `docs/research/STRUCTURES.md`), every one lofted from sections by `appendLoft`: convex polygons of equal size whose points go round from -u through +v to +u and -v (u x v back along the loft), so the sides face out; both ends capped; vertices shared, triangles flat (no corner normals). Each triangle's corners share one texture coordinate, two `forestUnitRandom` numbers, read as its facet's tone and roughness (`Material::facetTone`, `facetRoughness`; `materials.md`).
+
+| Shape | Built by | Form |
+|---|---|---|
+| Slab | `makeSlab`, `slabMesh` | hexagon sections (left edge, front ridge, a knee, right edge, the same turned half round: three facets a side a band; `ridgeShare` across, zigzagging by each level's `ridgeShift`), bands every 60-120 m on the Monolith: sunk 10 m, nearly upright to `shoulderShare` of the height, a shoulder stepping in a quarter over `slabShoulderRise` (3 m, so its facets face the sky: upward part 0.55-0.9, the rock's moss range), a chisel top cut towards `cut`'s side |
+| The Monolith | `monolithSlabs` | five slabs 240-600 m tall, 79-110 m wide, depth 0.45 of width, tops cut alternately; the tallest's front ridge on `forestMonolithPlace`, the others staggered 10-20 m behind |
+| Strut | `monolithStrut`, `strutMesh` | an 8 m rhombus from inside `monolithPillar` into the second slab's side, 331 m up |
+| The Ring | `ringSegmentsMesh` | `ringSegments` (20) straight prisms round a polygon, middles `forestRingRadius` out, chamfered square section of half `forestRingTubeRadius`, ends cut on radial planes 1.5 m short; within 30 degrees of the top drifted 3-10 m out and turned up to 1 degree. One mesh, at the ground with no scale |
+| Far spires | `farSpires` | ten needles 300-800 m at the old towers' places, sunk 20 m |
+
+- One material for all (`applyStructureSettings`, `ForestStructureSettings`): matte coating, linear albedo 0.04 times a cool tint, roughness 0.65, facet tone 0.12, facet roughness 0.07; rewritten when the settings change (`appliedStructureSettings`).
+- `getStructures()` lists every structure entity; `getMonolith()` its slabs and the strut (static, with collision).
+
 ## Sky, air and wind
 
 Everything on the air entity, rewritten each frame by `updateDaylight`:
@@ -71,9 +86,9 @@ Everything on the air entity, rewritten each frame by `updateDaylight`:
 
 ## Settings
 
-F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Hangings, Moss, Drifting rocks, Canopy trees, Emergent trees, Mid trees, Leaf light, Understorey, Palms, Lianas, Climbers, Epiphytes, Grass, Forest floor, Valley.
+F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, Hangings, Moss, Drifting rocks, Canopy trees, Emergent trees, Mid trees, Leaf light, Understorey, Palms, Lianas, Climbers, Epiphytes, Grass, Forest floor, Valley.
 
-- Live: Sun, Atmosphere, Wind, Sway, Mist, Ground (`ForestGroundSettings`: blend depth 0.2, hex tiling on), Rock (but its bed waves), drifting rocks' `moving`.
+- Live: Sun, Atmosphere, Wind, Sway, Mist, Ground (`ForestGroundSettings`: blend depth 0.2, hex tiling on), Rock (but its bed waves), Structures, drifting rocks' `moving`.
 - Start-up: the rest, including `ForestValleySettings` (`groundCoarseness` 0, `pillarCount` 220, `islandCount` 30, `start`).
 - Ground and rock materials are rewritten only when their settings differ from those last applied (`appliedGroundSettings`, `appliedRockSettings`).
 
@@ -86,4 +101,4 @@ F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Hangings, Mos
 
 ## Tests
 
-`forest_test` (the land, rings, paint, weights, layer files and stand-ins, strata, shapes, the headless game at its coarsest ground, `forest-view`, settings applied); one test file per other module (`forest_trees_test`, `island_hangings_test`, `hanging_moss_test`, `drifting_rocks_test`, `understorey_test`, `palms_test`, `lianas_test`, `climbers_test`, `epiphytes_test`, `grass_test`, `floor_cover_test`), sway in `wind_sway_test` and `wind_hanging_test`. Shared helpers: `tests/forest_helpers.h`.
+`forest_test` (the land, rings, paint, weights, layer files and stand-ins, strata, shapes, the headless game at its coarsest ground, `forest-view`, settings applied); one test file per other module (`forest_structures_test`, `forest_trees_test`, `island_hangings_test`, `hanging_moss_test`, `drifting_rocks_test`, `understorey_test`, `palms_test`, `lianas_test`, `climbers_test`, `epiphytes_test`, `grass_test`, `floor_cover_test`), sway in `wind_sway_test` and `wind_hanging_test`. Shared helpers: `tests/forest_helpers.h`.

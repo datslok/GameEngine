@@ -90,6 +90,22 @@ struct ForestRockSettings {
 
 void visit(ForestRockSettings& settings, SettingsVisitor& visitor);
 
+/*
+* The structures' matte coating (games/forest/structures, docs/research/STRUCTURES.md): its albedo (linear; charcoal
+* paint is about 0.02-0.05, never 0, or the facets go black in shadow), its roughness, and how much each facet's own
+* tone (a share) and roughness vary, so neighbouring facets at nearly the same angle stay apart.
+*/
+struct ForestStructureSettings {
+    float coatingAlbedo = 0.04f;
+    float coatingRoughness = 0.65f;
+    float facetTone = 0.12f;
+    float facetRoughness = 0.07f;
+
+    bool operator==(const ForestStructureSettings&) const = default;
+};
+
+void visit(ForestStructureSettings& settings, SettingsVisitor& visitor);
+
 // Where the player starts: on the rim, seeing the valley's scale (the design's start), or among the trees on the path
 // between the Ring and the clearing (for looking at them).
 enum class ForestStart {
@@ -166,6 +182,9 @@ public:
     ForestMistSettings& getMistSettings();
     ForestGroundSettings& getGroundSettings();
     ForestRockSettings& getRockSettings();
+    ForestStructureSettings& getStructureSettings();
+    // Every structure's entity: the Monolith's slabs and strut, the Ring, the far spires.
+    const std::vector<Entity>& getStructures() const;
     const std::vector<Entity>& getRockShapes() const;
     ForestHangingSettings& getHangingSettings();
     // Each island's roots and vines (bark) and then its leaves, island by island.
@@ -294,11 +313,13 @@ private:
     ForestMistSettings mistSettings;
     ForestGroundSettings groundSettings;
     ForestRockSettings rockSettings;
+    ForestStructureSettings structureSettings;
 
     // What the ground's and the still rocks' materials were last given (updateDaylight): they are written, and their
     // still draws built again, only when the settings differ.
     std::optional<ForestGroundSettings> appliedGroundSettings;
     std::optional<ForestRockSettings> appliedRockSettings;
+    std::optional<ForestStructureSettings> appliedStructureSettings;
     ForestHangingSettings hangingSettings;
     ForestMossSettings mossSettings;
     ForestDriftSettings driftSettings;
@@ -365,7 +386,8 @@ private:
     std::vector<Entity> trees;
     std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;
-    std::vector<Entity> monolith;
+    std::vector<Entity> monolith; // its slabs, the strut last
+    std::vector<Entity> structures;
     Entity sun;
     Entity air;
     Entity probes;

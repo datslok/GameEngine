@@ -5,6 +5,7 @@
 #include "core/srgb.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/leaf_clusters.h"
+#include "games/forest/structures.h"
 #include "games/forest/valley_strata.h"
 #include "scene/indexed_mesh.h"
 #include "scene/simplify_mesh.h"
@@ -18,6 +19,7 @@
 #include "scene/sun.h"
 #include "scene/terrain.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <utility>
@@ -46,9 +48,8 @@ namespace {
     constexpr float morningHours = 9.5f;
     constexpr float duskHours = 17.8f;
 
-    // The grey stand-in materials, in sRGB as colour pickers give them: the Monolith's concrete, the Ring's steel.
-    constexpr Pixel concrete{122, 126, 130};
-    constexpr Pixel steel{160, 164, 168};
+    // The structures' coating's tint, multiplying its albedo: a little cool, as the concept sheets' charcoal.
+    const Vec3 coatingTint{0.94f, 0.98f, 1.08f};
 
     Vec3 onGround(float x, float z, float above = 0.0f) {
         return Vec3{x, forestHeight(x, z) + above, z};
@@ -163,8 +164,14 @@ namespace {
         return entity;
     }
 
-    Transform boxTransform(const ValleyBox& box) {
-        return Transform{.position = box.centre, .rotation = Quat{}, .scale = box.halfSize};
+    // The structures' tunable parts (ForestStructureSettings), applied when they change.
+    void applyStructureSettings(Material& material, const ForestStructureSettings& settings) {
+        const Vec3 albedo = coatingTint * std::max(settings.coatingAlbedo, 0.0f);
+        material.colour = Pixel{linearToSrgbByte(albedo.x), linearToSrgbByte(albedo.y), linearToSrgbByte(albedo.z)};
+        material.roughness = settings.coatingRoughness;
+        material.metallic = 0.0f;
+        material.facetTone = settings.facetTone;
+        material.facetRoughness = settings.facetRoughness;
     }
 
     /*
@@ -221,6 +228,13 @@ void visit(ForestRockSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Streaks", settings.streakStrength, {.min = 0.0f, .max = 1.0f});
     visitor.field("Hex tiling", settings.hexTiling);
     visitor.field("Tone variation", settings.toneVariation, {.min = 0.0f, .max = 1.0f});
+}
+
+void visit(ForestStructureSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Coating albedo", settings.coatingAlbedo, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.2f});
+    visitor.field("Coating roughness", settings.coatingRoughness, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Facet tone", settings.facetTone, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.4f});
+    visitor.field("Facet roughness", settings.facetRoughness, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.3f});
 }
 
 void visit(ForestValleySettings& settings, SettingsVisitor& visitor) {
@@ -330,7 +344,7 @@ void ForestGame::buildGround(World& world, AssetManager& assets) {
 
 /*
 * A few pillar and island shapes, each placed many times turned and scaled, so the GPU draws all of one shape in one
-* instanced draw. Only the Monolith is static and walked against: a handful of big boxes; the pillars, islands and Ring
+* instanced draw. Only the Monolith is static and walked against: five faceted slabs and a strut; the pillars, islands and Ring
 * stand clear of the path, so nobody walks into them yet.
 */
 void ForestGame::buildShapes(World& world, AssetManager& assets) {
@@ -426,21 +440,32 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         driftingRocks.push_back(entity);
     }
 
+    // The structures (games/forest/structures): faceted, in one matte coating whose facets each keep their own tone.
+    Material coating;
+    applyStructureSettings(coating, structureSettings);
+    appliedStructureSettings = structureSettings;
+
     // The Ring stands across the path, its centre at the ground there, so its lower half is buried.
-    ring = addShape(world, assets.addMesh(ringMesh(forestRingTubeRadius / forestRingRadius)), plainMaterial(steel, 0.35f, 1.0f),
-                    Transform{.position = onGround(forestRingPlace.x, forestRingPlace.y), .rotation = Quat{},
-                              .scale = Vec3{forestRingRadius, forestRingRadius, forestRingRadius}});
+    ring = addShape(world, assets.addMesh(ringSegmentsMesh(forestRingRadius, forestRingTubeRadius, forestShapeSeed(0, 43))), coating,
+                    Transform{.position = onGround(forestRingPlace.x, forestRingPlace.y)});
+    structures.push_back(ring);
 
-    const MeshHandle box = assets.addMesh(Mesh::cube());
-    const Material concreteMaterial = plainMaterial(concrete, 0.8f);
+    // The Monolith's slabs and its strut are static and walked against.
+    const auto addSolid = [&](Mesh mesh, const Transform& transform) {
+        const Entity entity = addShape(world, assets.addMesh(std::move(mesh)), coating, transform, true);
+        staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(entity)), transform.getMatrix());
+        monolith.push_back(entity);
+        structures.push_back(entity);
+    };
 
-    for (const ValleyBox& part : monolithBoxes(clearingLevel())) {
-        monolith.push_back(addShape(world, box, concreteMaterial, boxTransform(part), true));
-        staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(monolith.back())), boxTransform(part).getMatrix());
+    for (const SlabShape& slab : monolithSlabs(clearingLevel())) {
+        addSolid(slabMesh(slab), Transform{.position = slab.foot});
     }
 
-    for (const ValleyBox& tower : farTowerBoxes()) {
-        addShape(world, box, concreteMaterial, boxTransform(tower));
+    addSolid(strutMesh(monolithStrut(clearingLevel())), Transform{});
+
+    for (const SlabShape& spire : farSpires()) {
+        structures.push_back(addShape(world, assets.addMesh(slabMesh(spire)), coating, Transform{.position = spire.foot}));
     }
 }
 
@@ -1179,6 +1204,15 @@ void ForestGame::updateDaylight(World& world) {
         appliedRockSettings = rockSettings;
     }
 
+    if (appliedStructureSettings != structureSettings) {
+        for (const Entity structure : structures) {
+            applyStructureSettings(world.get<ModelRenderer>(structure).parts.front().material, structureSettings);
+            markRenderChanged(world, structure);
+        }
+
+        appliedStructureSettings = structureSettings;
+    }
+
     for (const Entity rock : driftingRocks) {
         applyRockSettings(world.get<ModelRenderer>(rock).parts.front().material, rockSettings);
     }
@@ -1272,6 +1306,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Rock", [&] {
         visit(rockSettings, visitor);
+    });
+    visitor.group("Structures", [&] {
+        visit(structureSettings, visitor);
     });
     visitor.group("Hangings", [&] {
         visit(hangingSettings, visitor);
@@ -1490,6 +1527,14 @@ ForestGroundSettings& ForestGame::getGroundSettings() {
 
 ForestRockSettings& ForestGame::getRockSettings() {
     return rockSettings;
+}
+
+ForestStructureSettings& ForestGame::getStructureSettings() {
+    return structureSettings;
+}
+
+const std::vector<Entity>& ForestGame::getStructures() const {
+    return structures;
 }
 
 const std::vector<Entity>& ForestGame::getRockShapes() const {

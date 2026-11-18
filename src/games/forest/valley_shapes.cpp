@@ -398,16 +398,6 @@ SurfaceGrid islandSurface(const IslandPlacement& island, const RockCarving& carv
     });
 }
 
-// Columns round the ring (anticlockwise seen from +z), rows round its tube, so "around" crossed with "up" points out of the tube.
-Mesh ringMesh(float tubeShare, int segments, int sides) {
-    return wrappedSurfaceMesh(sides, segments, true, [&](int row, int column) {
-        const float ringAngle = fullTurnRadians * static_cast<float>(column) / static_cast<float>(segments);
-        const float tubeAngle = fullTurnRadians * static_cast<float>(row) / static_cast<float>(sides);
-        const float reach = 1.0f + tubeShare * std::cos(tubeAngle);
-        return Vec3{std::cos(ringAngle) * reach, std::sin(ringAngle) * reach, tubeShare * std::sin(tubeAngle)};
-    });
-}
-
 std::vector<PillarPlacement> placePillars(const ValleyLayout& layout) {
     std::vector<PillarPlacement> pillars;
     const int tries = std::max(layout.pillarCount, 0) * triesPerShape;
@@ -480,76 +470,9 @@ std::vector<IslandPlacement> placeIslands(const ValleyLayout& layout, const std:
     return islands;
 }
 
-/*
-* From the concept art: a main slab 260 m wide, 120 deep and 600 tall, a 400 m block west and a 330 m annex east, a
-* crown with masts, a deck standing out 160 m east at 420 m up, and a truss bridge 330 m up to the pillar on the
-* western rim. Everything stands 10 m into the ground, so uneven ground never shows under it.
-*/
-std::vector<ValleyBox> monolithBoxes(float groundLevel) {
-    const float x = forestMonolithPlace.x;
-    const float front = forestMonolithPlace.y;
-    const float sink = 10.0f;
-    const auto standing = [&](float centreX, float width, float height, float depth, float frontZ) {
-        return ValleyBox{Vec3{centreX, groundLevel - sink + 0.5f * (height + sink), frontZ - 0.5f * depth},
-                         Vec3{0.5f * width, 0.5f * (height + sink), 0.5f * depth}};
-    };
-
-    std::vector<ValleyBox> boxes{
-        standing(x, 260.0f, 600.0f, 120.0f, front),
-        standing(x - 175.0f, 90.0f, 400.0f, 100.0f, front - 10.0f),
-        standing(x + 175.0f, 90.0f, 330.0f, 100.0f, front - 10.0f),
-        ValleyBox{Vec3{x - 20.0f, groundLevel + 625.0f, front - 60.0f}, Vec3{80.0f, 25.0f, 40.0f}},
-        ValleyBox{Vec3{x + 290.0f, groundLevel + 420.0f, front - 40.0f}, Vec3{70.0f, 7.0f, 30.0f}}
-    };
-
-    for (const auto& [mastX, mastHeight] : {std::pair{-90.0f, 70.0f}, std::pair{20.0f, 110.0f}, std::pair{40.0f, 60.0f}}) {
-        boxes.push_back(ValleyBox{Vec3{x + mastX, groundLevel + 650.0f + 0.5f * mastHeight, front - 60.0f}, Vec3{1.5f, 0.5f * mastHeight, 1.5f}});
-    }
-
-    // The truss: its two chords and a post every 20 m between them.
-    const PillarPlacement pillar = monolithPillar(groundLevel);
-    const float bridgeEast = x - 220.0f;
-    const float bridgeWest = pillar.foot.x + 0.6f * pillar.radius;
-    const float bridgeMiddle = 0.5f * (bridgeEast + bridgeWest);
-    const float bridgeHalf = 0.5f * (bridgeEast - bridgeWest);
-    const float bridgeZ = front - 50.0f;
-
-    for (const float chord : {groundLevel + 322.0f, groundLevel + 340.0f}) {
-        boxes.push_back(ValleyBox{Vec3{bridgeMiddle, chord, bridgeZ}, Vec3{bridgeHalf, 1.5f, 4.0f}});
-    }
-
-    for (float post = bridgeWest + 20.0f; post < bridgeEast; post += 20.0f) {
-        boxes.push_back(ValleyBox{Vec3{post, groundLevel + 331.0f, bridgeZ}, Vec3{1.0f, 9.0f, 4.0f}});
-    }
-
-    return boxes;
-}
-
 PillarPlacement monolithPillar(float groundLevel) {
     const float x = forestMonolithPlace.x - 480.0f;
     const float z = forestMonolithPlace.y - 50.0f;
     const float foot = forestHeight(x, z);
     return PillarPlacement{.foot = Vec3{x, foot, z}, .radius = 45.0f, .height = groundLevel + 470.0f - foot, .turnRadians = 0.0f, .seed = forestShapeSeed(0, 9)};
-}
-
-/*
-* Ten slabs placed by hand in the haze north of the walk, each with a narrower block on top, so the skyline is
-* built rather than random: (x, z, height, width).
-*/
-std::vector<ValleyBox> farTowerBoxes() {
-    constexpr std::array<std::array<float, 4>, 10> towers{{
-        {-1800.0f, -3000.0f, 520.0f, 120.0f}, {1500.0f, -3800.0f, 760.0f, 150.0f}, {300.0f, -5200.0f, 640.0f, 180.0f},
-        {-900.0f, -6500.0f, 800.0f, 140.0f}, {2600.0f, -2500.0f, 380.0f, 90.0f}, {-2800.0f, -4500.0f, 450.0f, 110.0f},
-        {900.0f, -7000.0f, 560.0f, 160.0f}, {-3500.0f, -2000.0f, 300.0f, 80.0f}, {3300.0f, -5600.0f, 700.0f, 130.0f},
-        {-1500.0f, -4100.0f, 340.0f, 60.0f}
-    }};
-    std::vector<ValleyBox> boxes;
-
-    for (const auto& [x, z, height, width] : towers) {
-        const float foot = forestHeight(x, z) - 20.0f;
-        boxes.push_back(ValleyBox{Vec3{x, foot + 0.5f * height, z}, Vec3{0.5f * width, 0.5f * height, 0.4f * width}});
-        boxes.push_back(ValleyBox{Vec3{x - 0.15f * width, foot + 1.04f * height, z}, Vec3{0.2f * width, 0.04f * height, 0.25f * width}});
-    }
-
-    return boxes;
 }

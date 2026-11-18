@@ -12,8 +12,8 @@
 #include <vector>
 
 /*
-* The valley's big shapes (ROADMAP phase 18): sandstone pillars and floating islands carved by the valley's beds, the
-* Ring and the boxes the Monolith and the far towers are built from, all generated, and where they stand.
+* The valley's big shapes (ROADMAP phase 18): sandstone pillars and floating islands carved by the valley's beds and
+* the pillar the Monolith's strut reaches, all generated, and where they stand (the structures: games/forest/structures).
 */
 
 /*
@@ -129,12 +129,6 @@ SurfaceGrid pillarSurface(const PillarPlacement& pillar, const RockCarving& carv
 inline constexpr float islandDepth = 1.4f;
 SurfaceGrid islandSurface(const IslandPlacement& island, const RockCarving& carving);
 
-/*
-* A ring of unit radius standing on edge: a torus round the z axis, its tube tubeShare of the radius thick, in segments
-* round the ring and sides round the tube.
-*/
-Mesh ringMesh(float tubeShare, int segments = 96, int sides = 16);
-
 // How many pillars and islands the game makes (start-up values).
 struct ValleyLayout {
     int pillarCount = 220;
@@ -155,20 +149,5 @@ std::vector<PillarPlacement> placePillars(const ValleyLayout& layout);
 */
 std::vector<IslandPlacement> placeIslands(const ValleyLayout& layout, const std::vector<PillarPlacement>& pillars);
 
-// A box: its centre and half its size along each axis (the engine's cube mesh is 2 m a side, scaled by halfSize).
-struct ValleyBox {
-    Vec3 centre;
-    Vec3 halfSize;
-};
-
-/*
-* The Monolith: a 600 m slab across the clearing's north end, with lower blocks either side, a crown on top, a deck
-* standing out east, and a truss bridge west to a pillar on the rim (monolithPillar). The level is the clearing's height.
-*/
-std::vector<ValleyBox> monolithBoxes(float groundLevel);
-
-// The pillar the Monolith's bridge reaches, west of it.
+// The pillar the Monolith's strut reaches (games/forest/structures, monolithStrut), west of it.
 PillarPlacement monolithPillar(float groundLevel);
-
-// The far towers: slabs 300-800 m tall standing 2.5-7 km away in the haze, with the ground under each.
-std::vector<ValleyBox> farTowerBoxes();

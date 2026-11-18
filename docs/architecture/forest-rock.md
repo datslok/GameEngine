@@ -2,7 +2,7 @@
 
 Covers: `src/games/forest/valley_strata`, `src/games/forest/valley_shapes`, `src/games/forest/island_hangings`, `src/games/forest/hanging_moss`, `src/games/forest/drifting_rocks`
 
-The valley's pillars, floating islands, the Ring, the Monolith and far towers, the strata painting them, and the roots, vines, moss and drifting rocks round them. The game: `forest.md`.
+The valley's pillars and floating islands, the strata painting them, and the roots, vines, moss and drifting rocks round them. The game: `forest.md`.
 
 ## Strata (`valley_strata`)
 
@@ -39,20 +39,16 @@ Every pillar and island is its own mesh at its real size, in metres, built on th
   - Joints (`jointGroove`): vertical cracks `rockJointDepth` (2.5 m) deep about every `rockJointSpacing` (9 m) round, fractal noise read round a circle, wandering as they rise.
 - `pillarSurface(placement, carving)`: `pillarBuriedDepth` (5%) of its height buried, tapering by a third, bulging by noise read round a circle (so the seam matches), its axis leaning by slow noise, then beds and joints in metres, never under a third of the plain radius; a broken, nearly flat top 1.6 m above the body, room for trees. The top's last row lies exactly on the axis.
 - `islandSurface(placement, carving)`: a jagged underside narrowing from the rim to a point `islandDepth` (1.4) radii below, carved and fading out towards the tip; a gently domed top.
-- `ringMesh(tubeShare)`: a unit torus round z.
 
 ## Placements
 
 | What | Function | Numbers |
 |---|---|---|
 | Pillars | `placePillars(ValleyLayout)` | dart throwing (Poisson disk), `pillarCount` (220); 200-350 m tall, 12-45 m in radius, thickest near the axis; 70 m of air between two; clear of the path (40 m plus a third of the radius), the Ring, the clearing, the Monolith and the start; each on the lowest ground under its edge |
-| Monolith's pillar | `monolithPillar` | appended to the pillars; the bridge's far end on the western rim |
+| Monolith's pillar | `monolithPillar` | appended to the pillars; the strut's far end on the western rim (the structures: `forest.md`) |
 | Islands | `placeIslands(layout, pillars)` | `islandCount` (30); 25-150 m radius, tips 380-700 m over the ground, none over a pillar reaching within 120 m of their tip, none within 400 m of the start |
-| Ring | in `buildShapes` | `forestRingRadius` 200 m, tube `forestRingTubeRadius` 12 m, steel, at `forestRingPlace` across the path, its centre on the ground (half buried) |
-| Monolith | `monolithBoxes(groundLevel)` → `ValleyBox`es | a 600 m slab across the clearing's north end (front at `forestMonolithPlace`), lower blocks either side, a crown with masts, a deck east, a truss bridge west; cubes scaled by `halfSize`, concrete, static and walked against |
-| Far towers | `farTowerBoxes` | ten slabs 300-800 m tall, 2.5-7 km north in the haze |
 
-Pillars, islands and the Ring are still but not static: no collision, not in the sky visibility's level.
+Pillars and islands are still but not static: no collision, not in the sky visibility's level.
 
 ## Strands, tubes and cards (`island_hangings`)
 
