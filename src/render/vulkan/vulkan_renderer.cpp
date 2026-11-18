@@ -228,6 +228,7 @@ void VulkanRenderer::createFrames() {
         frame.imageAcquired = device.createSemaphore();
         frame.descriptors = std::make_unique<FrameDescriptors>(device.getDevice());
         frame.uniforms = std::make_unique<FrameUniforms>(device, layouts);
+        frame.indirect = std::make_unique<VulkanIndirectCommands>(device);
         frame.scene = std::make_unique<SceneBuffers>(device.getAllocator());
 
         VkCommandBufferAllocateInfo info{};
@@ -989,6 +990,7 @@ FrameContext VulkanRenderer::beginFrame() {
 
     frame.descriptors->reset();
     frame.uniforms->reset();
+    frame.indirect->reset();
     vulkanCheck(vkResetCommandPool(device.getDevice(), frame.commandPool.get(), 0), "Frame command pool reset failed");
 
     VkCommandBufferBeginInfo begin{};
@@ -1018,6 +1020,7 @@ void VulkanRenderer::submitFrame(FrameContext& context, bool toScreen) {
     recording = false;
     vulkanCheck(vkEndCommandBuffer(context.commands), "Frame command buffer end failed");
     frame.uniforms->flush();
+    frame.indirect->flush();
 
     VkCommandBufferSubmitInfo commandInfo{};
     commandInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
@@ -3001,7 +3004,8 @@ void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraw
 
 /*
 * One instanced draw per batch: the mesh's buffers bound, and every instance of it drawn at once (gl_InstanceIndex counts
-* from firstInstance, the batch's first entry in the draw list, which names each instance). Each batch is drawn by the
+* from firstInstance, the batch's first entry in the draw list, which names each instance). The draw is indirect: its command
+* (packDrawCommand) written into the frame's VulkanIndirectCommands, the first step of GPU-driven drawing. Each batch is drawn by the
 * pass's pipeline for how it is drawn, bound when it changes (cut-outs come last, so at most once), and the cull mode set
 * when it changes: none for double-sided batches. The scene's sets and push constants stay bound across the pipelines,
 * which share their layout. Returns how many draw calls that took.
@@ -3039,7 +3043,8 @@ std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vec
 
         std::uint32_t indexCount = 0;
         bindMesh(commands, batch.mesh, indexCount, pipelines.previousShapes);
-        vkCmdDrawIndexed(commands, indexCount, batch.instanceCount, 0, 0, batch.firstInstance);
+        const VulkanIndirectCommands::Slot slot = frames[frameIndex].indirect->write(packDrawCommand(batch, indexCount));
+        vkCmdDrawIndexedIndirect(commands, slot.buffer, slot.offset, 1, sizeof(GpuDrawCommand));
     }
 
     return batches.size();

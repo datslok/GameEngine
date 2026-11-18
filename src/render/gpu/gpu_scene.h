@@ -216,3 +216,18 @@ std::vector<GpuThinningRecord> packCardThinning(const IndexedMesh& mesh);
 */
 BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance = 0,
                          const LevelView* levels = nullptr);
+
+// One batch's draw as the GPU reads it from a buffer (vkCmdDrawIndexedIndirect): byte for byte
+// VkDrawIndexedIndirectCommand, so GPU-driven drawing (docs/research/GPUDRIVEN.md) can later write instanceCount itself.
+struct GpuDrawCommand {
+    std::uint32_t indexCount = 0;
+    std::uint32_t instanceCount = 0;
+    std::uint32_t firstIndex = 0;
+    std::int32_t vertexOffset = 0;
+    std::uint32_t firstInstance = 0;
+};
+
+static_assert(sizeof(GpuDrawCommand) == 20, "GpuDrawCommand must match VkDrawIndexedIndirectCommand");
+
+// A batch drawn whole from its mesh's own buffers: every index, every instance, numbered from the batch's first entry.
+GpuDrawCommand packDrawCommand(const DrawBatch& batch, std::uint32_t indexCount);
