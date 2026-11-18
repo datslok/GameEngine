@@ -32,8 +32,9 @@ Split into files of about 28 KB at entry boundaries, the text unchanged. New ent
 | `docs/buildlog/phase-16-1.md` | Phase 16: Beautiful without ray tracing (Nov 6-13 2026) (part 1 of 3) |
 | `docs/buildlog/phase-16-2.md` | Phase 16: Beautiful without ray tracing (Nov 6-13 2026) (part 2 of 3) |
 | `docs/buildlog/phase-16-3.md` | Phase 16: Beautiful without ray tracing (Nov 6-13 2026) (part 3 of 3) |
-| `docs/buildlog/phase-18-1.md` | Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 1 of 2) |
-| `docs/buildlog/phase-18-2.md` | Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 2 of 2) |
+| `docs/buildlog/phase-18-1.md` | Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 1 of 3) |
+| `docs/buildlog/phase-18-2.md` | Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 2 of 3) |
+| `docs/buildlog/phase-18-3.md` | Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 3 of 3) |
 | `docs/buildlog/phase-19.md` | Phase 19: Documentation refactor (Nov 17 2026 onwards) |
-| `docs/buildlog/tools-1.md` | Tools outside the phases (part 1 of 2) |
-| `docs/buildlog/tools-2.md` | Tools outside the phases (part 2 of 2) |
+| `docs/buildlog/tools-1.md` | Tools outside the phases (part 1 of 3) |
+| `docs/buildlog/tools-2.md` | Tools outside the phases (part 2 of 3) |

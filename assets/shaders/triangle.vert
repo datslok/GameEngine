@@ -13,6 +13,7 @@
 #include "impostor.glsl"
 #include "wind_data.glsl"
 #include "card_thinning_data.glsl"
+#include "level_fade.glsl"
 
 // Whether this pipeline draws a capture (a reflection probe's cube face, or a flat mirror's picture): its
 // view-projection comes as push constants (render/gpu/reflection_probe.h, cubeFaceViewProjection;
@@ -50,6 +51,8 @@ layout(location = 6) flat out vec3 viewerPosition;
 // world (the model's rotation), to turn normals into the object's frame and back.
 layout(location = 7) out vec3 framePosition;
 layout(location = 8) flat out mat3 frameAxes;
+// The level fade of its draw list entry (level_fade.glsl, 0 none), for the depth prepass to keep its share of the pixels.
+layout(location = 11) flat out uint levelFade;
 
 // The depth prepass runs this same shader, and the main pass then shades only fragments whose depth EQUALS the one the
 // prepass stored. Invariant makes the compiler compute the position the same way in both pipelines, bit for bit (it
@@ -59,6 +62,7 @@ invariant gl_Position;
 void main() {
     uint entry = drawList[gl_InstanceIndex];
     InstanceData instance = instances[drawnInstance(entry)];
+    levelFade = drawListFade(entry);
     mat4 normalMatrix = instance.normalMatrix;
     vec4 handedness = instance.handedness;
     materialIndex = instance.material.x;

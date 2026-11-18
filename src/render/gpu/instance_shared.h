@@ -9,7 +9,17 @@
 #define INSTANCE_KIND_FOLLOWS_GROUND 2
 
 // A draw list entry's top bit: the view draws the instance with its thinned mesh (scene/card_thinning.h), so the vertex
-// shaders thin its cards; the rest of the entry is the instance's number.
+// shaders thin its cards.
 #define DRAW_LIST_THINNED_BIT 0x80000000u
+
+// Its next seven bits: the instance's level fade (level_fade.glsl, render/gpu/level_fade.h), 0 for none; the low 24
+// bits are the instance's number.
+#define DRAW_LIST_FADE_SHIFT 24u
+#define DRAW_LIST_FADE_MASK 0x7f000000u
+#define DRAW_LIST_INSTANCE_MASK 0x00ffffffu
+
+// A fade field: this bit for the coarser of the two levels drawn, then the step plus 1 (1 to DRAW_LIST_FADE_STEPS).
+#define DRAW_LIST_FADE_COARSE 64u
+#define DRAW_LIST_FADE_STEPS 63u
 
 #endif

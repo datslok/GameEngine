@@ -218,9 +218,17 @@ bool boxInFrustum(const GpuFrustum& frustum, const float minimum[3], const float
 */
 bool chunkInView(const GpuCullChunk& chunk, const GpuCameraCull& view);
 
-// The candidate's CAMERA_CULL_* flags: drawn, moving and thinned, as visibleDraws, chosenMesh and drawSways choose; for
-// a shadow tile, drawn as shadowTakes says (moved casters moving instead where it keeps them apart), never thinned.
+// The candidate's CAMERA_CULL_* flags: drawn, moving and thinned, as visibleDraws, chosenMesh and drawSways choose, and
+// fading where its draw crosses a switch in the fade band (levelFadeSlots; both its slots drawn); for a shadow tile,
+// drawn as shadowTakes says (moved casters moving instead where it keeps them apart), never thinned, never fading.
 std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view, std::uint32_t slot);
+
+// The candidate's fade field (render/gpu/level_fade.h): 0 where it does not fade.
+std::uint32_t cameraCandidateFade(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view, std::uint32_t slot);
+
+// The draw list entry a flagged candidate writes: its draw, the thinned bit (by its flags), its fade field (the write
+// pass reads a record only for a candidate flagged fading).
+std::uint32_t cameraCandidateEntry(std::uint32_t draw, std::uint32_t flags, std::uint32_t fade);
 
 // ---- The passes' steps on the CPU ----
 
@@ -368,7 +376,7 @@ public:
     * The frame's tables. The still part is kept when the frame follows the last one (FrameDescription::stillVersion);
     * built ranges (covering any slots added at the end) repack their records and chunks, and the candidates of chunks
     * where a draw's mesh, style, glass or flat faces changed; a mesh's levels changed builds everything afresh, as does a
-    * frame not following. changesShape: whether a mesh deformed.
+    * frame not following. changesShape: whether a mesh deformed. Throws std::length_error past drawListInstances draws.
     */
     CameraCullFrame update(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement,
                            const std::function<bool(MeshHandle)>& changesShape);

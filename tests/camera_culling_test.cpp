@@ -6,6 +6,7 @@
 #include "math/mat4.h"
 #include "render/gpu/camera_culling.h"
 #include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/level_fade.h"
 #include "render/gpu/planar_reflection.h"
 #include "render/gpu/reflection_probe.h"
 #include "render/gpu/render_settings.h"
@@ -40,7 +41,7 @@ namespace {
         bool motion = true;
     };
 
-    // A camera somewhere over the scene looking about, levels and impostors on or off, the sway reaching 50-400 m.
+    // A camera somewhere over the scene looking about, levels, impostors and fades on or off, the sway reaching 50-400 m.
     TestView randomView(std::mt19937& random, int index) {
         std::uniform_real_distribution<float> unit{0.0f, 1.0f};
         const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.6f + unit(random), 16.0f / 9.0f, 0.1f, 1000.0f + unit(random) * 4000.0f));
@@ -52,10 +53,11 @@ namespace {
         settings.enabled = index % 5 != 4;
         settings.impostors = index % 3 != 2;
         settings.pixelError = 0.5f + unit(random) * 4.0f;
+        settings.fadeBand = index % 3 == 1 ? 0.0f : 0.05f + unit(random) * 0.4f;
 
         TestView test;
         test.frustum = Frustum::fromClipMatrix(projection * view, ClipDepth::OneToZero);
-        test.levels = levelView(eye, 1080.0f + unit(random) * 1080.0f, 0.6f + unit(random) * 0.8f, settings);
+        test.levels = cameraLevelView(eye, 1080.0f + unit(random) * 1080.0f, 0.6f + unit(random) * 0.8f, settings);
         test.wind.sway = index % 4 != 3;
         test.wind.swayFadeEnd = 50.0f + unit(random) * 350.0f;
         test.motion = index % 6 != 5;
@@ -142,8 +144,8 @@ namespace {
 
     /*
     * The passes' steps over every draw's candidates give batchByMesh's camera and velocity lists entry for entry (order
-    * and thinned bits), its batches as commands and levelsChosen's counts, over cameras with levels, impostors, sway and
-    * the velocity pass each on and off.
+    * and thinned bits and fade fields), its batches as commands and levelsChosen's counts, over cameras with levels,
+    * impostors, fades, sway and the velocity pass each on and off.
     */
     void testListsMatchTheCpu() {
         std::mt19937 random{43};
@@ -151,6 +153,7 @@ namespace {
         CullSceneTables both;
         buildCullSceneTables(both, scene, testPlacement);
         std::size_t movingSeen = 0;
+        std::size_t fadingSeen = 0;
 
         for (int index = 0; index < 18; ++index) {
             const TestView view = randomView(random, index);
@@ -181,6 +184,9 @@ namespace {
                 assertPacked(result.mainCommands, result.packedMain, result.mainCounts, order);
                 assertPacked(result.motionCommands, result.packedMotion, result.motionCounts, order);
                 assert(result.mainEntries == entriesOf(mainDraws));
+                fadingSeen += static_cast<std::size_t>(std::count_if(result.mainEntries.begin(), result.mainEntries.end(), [](std::uint32_t entry) {
+                    return drawListFade(entry) != 0u;
+                }));
                 assertCommandsMatch(result.mainCommands, mainDraws, packed.mainBase);
 
                 for (std::size_t slot = 0; slot < meshLevelSlots; ++slot) {
@@ -193,7 +199,7 @@ namespace {
             }
         }
 
-        assert(movingSeen > 100);
+        assert(movingSeen > 100 && fadingSeen > 20);
     }
 
     /*
@@ -672,6 +678,21 @@ namespace {
         // The sway reaching exactly to it.
         view = levelView(Vec3{0.0f, 0.0f, 0.0f}, 1000.0f, 1.0f, settings);
         assert(nearACameraEdge(record, table, packCameraCull(frustum, view, true, true, 99.0f)));
+
+        // Fading, the band's start (where the error covers pixelError / (1 - band)) is an edge too, and a share on a step.
+        draw.fadesLevels = true;
+        const GpuCullRecord fading = packCullRecord(draw);
+        view.fadeBand = 0.25f;
+        view.pixelError = 0.75f * errorInPixels(0.5f, 99.0f, view);
+        assert(!nearACameraEdge(record, table, packCameraCull(frustum, view, true, false, 100.0f)));
+        assert(nearACameraEdge(fading, table, packCameraCull(frustum, view, true, false, 100.0f)));
+
+        // Inside the band the share is (pixelError / pixels - 0.75) / 0.25: on a step of the field (21 of 63), and between two.
+        const float pixels = errorInPixels(0.5f, 99.0f, view);
+        view.pixelError = pixels * (0.75f + 0.25f * 21.0f / 63.0f);
+        assert(nearACameraEdge(fading, table, packCameraCull(frustum, view, true, false, 100.0f)));
+        view.pixelError = pixels * (0.75f + 0.25f * 21.5f / 63.0f);
+        assert(!nearACameraEdge(fading, table, packCameraCull(frustum, view, true, false, 100.0f)));
     }
 
     // GPU culling is the only way, so there is no setting for it: an old settings line is warned about.

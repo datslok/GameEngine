@@ -23,13 +23,13 @@ layout(std430, set = 1, binding = 1) readonly buffer Instances {
 
 // Which instance each drawn copy is: the main pass's run of entries, then each shadow tile's. An instanced draw's
 // gl_InstanceIndex counts from its batch's first entry. An entry's top bit (DRAW_LIST_THINNED_BIT) marks an instance the view
-// draws thinned (card_thinning_data.glsl); drawnInstance takes it off.
+// draws thinned (card_thinning_data.glsl), the bits below it its level fade (level_fade.glsl); drawnInstance takes them off.
 layout(std430, set = 1, binding = 10) readonly buffer DrawList {
     uint drawList[];
 };
 
 uint drawnInstance(uint entry) {
-    return entry & ~DRAW_LIST_THINNED_BIT;
+    return entry & DRAW_LIST_INSTANCE_MASK;
 }
 
 #endif

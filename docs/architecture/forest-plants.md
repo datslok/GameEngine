@@ -23,7 +23,7 @@ What grows under and between the trees. Research: `docs/research/JUNGLE.md` (the
 | Shadow's stand-in | `shadowOnly`, in the nearest `shadowCascades` (2) | |
 | Card | far only (`hiddenBelowError`), casting none | baked by `bakeImpostor` from the seen mesh with its texture, tint and cutoff, letting light through as the plant does |
 
-All choose by the seen mesh's box, so exactly one of plant and card is drawn. Seen mesh and stand-in sway as plants at the variant's height; the card does not.
+All choose by the seen mesh's box, so exactly one of plant and card is drawn. Seen mesh and stand-in sway as plants at the variant's height; the card does not. With `fades` (the understorey's, not the palms', which thin card by card) and a cut-out material, the seen mesh and the card cross-fade by a dither over the camera's fade band instead of swapping (`fadesLevels`; level-of-detail.md, Level fades).
 
 ## Understorey (`understorey`)
 

@@ -1,5 +1,6 @@
 #include "render/gpu/camera_culling.h"
 #include "math/angles.h"
+#include "render/gpu/level_fade.h"
 #include "render/gpu/reflection_probe.h"
 #include "render/gpu/reflection_probe_shared.h"
 #include "scene/material.h"
@@ -307,19 +308,26 @@ std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLev
         return 0u;
     }
 
-    const int chosen = chooseLevelSlot(record, levels, view.levels);
-
-    if (chosen != static_cast<int>(slot)) {
-        return 0u;
-    }
-
-    // A shadow tile keeping its movers apart lists those that moved second; its shaders thin nothing.
+    // A shadow tile keeping its movers apart lists those that moved second; its shaders thin nothing, and nothing fades.
     if (shadow) {
+        if (chooseLevelSlot(record, levels, view.levels) != static_cast<int>(slot)) {
+            return 0u;
+        }
+
         const bool apart = (view.flags & CAMERA_CULL_MOTION) != 0u && (record.flags & CULL_MOVED) != 0u;
         return apart ? CAMERA_CULL_MOVING : CAMERA_CULL_DRAWN;
     }
 
-    std::uint32_t flags = CAMERA_CULL_DRAWN;
+    // Fading, the coarser slot is drawn too (the finer is the one chosen).
+    const GpuLevelFade fade = levelFadeSlots(record, levels, view.levels);
+    const bool chosen = fade.fading ? fade.finer == static_cast<int>(slot) || fade.coarser == static_cast<int>(slot)
+                                    : chooseLevelSlot(record, levels, view.levels) == static_cast<int>(slot);
+
+    if (!chosen) {
+        return 0u;
+    }
+
+    std::uint32_t flags = CAMERA_CULL_DRAWN | (fade.fading ? CAMERA_CULL_FADES : 0u);
     const Vec3 eye{view.levels.eye[0], view.levels.eye[1], view.levels.eye[2]};
     const bool sways = (view.flags & CAMERA_CULL_SWAY) != 0u && (record.flags & CULL_SWAYS) != 0u && swayReaches(record.bounds, eye, view.swayFadeEnd);
 
@@ -327,11 +335,20 @@ std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLev
         flags |= CAMERA_CULL_MOVING;
     }
 
-    if (slotThinned(record, levels, chosen)) {
+    if (slotThinned(record, levels, static_cast<int>(slot))) {
         flags |= CAMERA_CULL_THINNED;
     }
 
     return flags;
+}
+
+std::uint32_t cameraCandidateFade(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view, std::uint32_t slot) {
+    const GpuLevelFade fade = (view.flags & CAMERA_CULL_SHADOW) != 0u ? GpuLevelFade{} : levelFadeSlots(record, levels, view.levels);
+    return fade.fading ? levelFadeField(fade.share, fade.coarser == static_cast<int>(slot)) : 0u;
+}
+
+std::uint32_t cameraCandidateEntry(std::uint32_t draw, std::uint32_t flags, std::uint32_t fade) {
+    return draw | ((flags & CAMERA_CULL_THINNED) != 0u ? drawListThinnedBit : 0u) | (fade << drawListFadeShift);
 }
 
 /*
@@ -371,7 +388,10 @@ CameraCullResult cullCameraOnCpu(const CullTables& tables, std::span<const std::
     result.motionEntries.resize(motionSums.back());
 
     for (std::size_t c = 0; c < visible.size(); ++c) {
-        const std::uint32_t entry = tables.candidates[visible[c]].draw | ((flags[c] & CAMERA_CULL_THINNED) != 0u ? drawListThinnedBit : 0u);
+        const GpuCullCandidate& candidate = tables.candidates[visible[c]];
+        const GpuCullRecord& record = tables.records[candidate.draw];
+        const std::uint32_t fade = (flags[c] & CAMERA_CULL_FADES) != 0u ? cameraCandidateFade(record, tables.levels[record.mesh], view, candidate.slot) : 0u;
+        const std::uint32_t entry = cameraCandidateEntry(candidate.draw, flags[c], fade);
 
         if ((flags[c] & CAMERA_CULL_DRAWN) != 0u) {
             result.mainEntries[mainSums[c]] = entry;
@@ -570,6 +590,11 @@ namespace {
 */
 CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement,
                                         const std::function<bool(MeshHandle)>& changesShape) {
+    // A draw list entry names its instance in its low bits, the rest its marks (instance_shared.h).
+    if (frame.draws.size() > drawListInstances) {
+        throw std::length_error("A frame has more draws than a draw list entry can name");
+    }
+
     const std::size_t stillCount = std::min(frame.stillDraws, frame.draws.size());
     const std::size_t frameChunkSlots = std::max<std::size_t>(frame.stillChunkSlots, 1);
     CameraCullFrame result;

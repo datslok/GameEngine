@@ -24,11 +24,16 @@ struct LevelOfDetailSettings {
     // Far trees as impostor cards (scene/impostor.h); off, each tree keeps its last level with a mesh however far, for
     // comparing the cards with the trees they stand in for.
     bool impostors = true;
+
+    // The camera's cross-fade (docs/research/LOD.md, Hiding the switches): a draw that fades (MeshLevelOptions::fadesLevels)
+    // draws both levels over this share of a switch's distance before it, each keeping the pixels the other throws away
+    // (render/gpu/level_fade.h). 0 swaps in one frame. Captures and shadow tiles never fade.
+    float fadeBand = 0.2f;
 };
 
 void visit(LevelOfDetailSettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a budget not above 0.
+// Throws std::invalid_argument for a budget not above 0, or a fade band outside 0 to fadeBandMost.
 void validateLevelOfDetail(const LevelOfDetailSettings& settings);
 
 /*
@@ -46,9 +51,19 @@ struct LevelView {
 
     // A view without perspective (the sun's shadow tiles): pixelsPerMetre holds everywhere in it, whatever the distance.
     bool orthographic = false;
+
+    // The share of a switch's distance its draws that fade cross-fade over (LevelOfDetailSettings::fadeBand); 0 none.
+    float fadeBand = 0.0f;
 };
 
+// The widest fade band: past it the band's start would come too near the eye to mean anything.
+inline constexpr float fadeBandMost = 0.9f;
+
+// A view's levels, fading nothing (captures, mirrors).
 LevelView levelView(const Vec3& eye, float viewHeightPixels, float verticalFovRadians, const LevelOfDetailSettings& settings);
+
+// The camera's: levelView with the settings' fade band.
+LevelView cameraLevelView(const Vec3& eye, float viewHeightPixels, float verticalFovRadians, const LevelOfDetailSettings& settings);
 
 // How many pixels an error of errorMetres covers distance metres from the view; everything at 0 (or nearer). In an
 // orthographic view, errorMetres times its pixels a metre, wherever it is.
@@ -71,7 +86,22 @@ std::size_t drawLevel(const DrawItem& draw, const LevelView& view);
 // nothing: an impostor not yet far enough, or a tree past its last level.
 MeshHandle chosenMesh(const DrawItem& draw, const LevelView& view);
 
-// How many of the chosen draws draw each level in this view (the F4 readout's).
+/*
+* A draw crossing a switch in the view's fade band: the mesh chosen (chosenMesh, the finer) and the one chosen at the
+* band's far side (the coarser; either may be none: an impostor fading in, a plant fading into its card), and the share
+* of the band crossed, 0 at its start to 1 at the switch, measured by the coarser's error.
+*/
+struct LevelFade {
+    bool fading = false;
+    MeshHandle finer;
+    MeshHandle coarser;
+    float share = 0.0f;
+};
+
+// Not fading where the draw does not fade, the view has no band (or no perspective), or no switch lies in the band.
+LevelFade levelFade(const DrawItem& draw, const LevelView& view);
+
+// How many of the chosen draws draw each level in this view (the F4 readout's); a fading draw counts both its levels.
 std::array<std::size_t, meshLevelSlots> levelsChosen(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, const LevelView& view);
 
 // Give each draw its mesh's levels and options, from tables indexed like MeshHandle (AssetManager::getMeshLevels and

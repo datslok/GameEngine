@@ -116,7 +116,7 @@ struct GpuFrameData {
     float contactShadowOptions[4]; // x: 1 when the main pass reads the sun's contact shadows (render/gpu/contact_shadows.h), y: 1 when it reads the local lights'
     std::int32_t contactLightSlots[4]; // the local lights with a contact shadow channel, by channel: a point light's slot, a spotlight's CONTACT_SPOT_SLOT_BASE past its slot, -1 none
     float materialOptions[4]; // parallax occlusion mapping (render/gpu/parallax.h): x 1 draws it, y 1 self-shadows from the sun, z the most steps; w 1 lets light through leaves (brdf.h, addDiffuseTransmission)
-    float levelOptions[4];    // x: the camera's error allowed a metre away, for card thinning (scene/card_thinning.h, thinningErrorPerMetre; 0 thins nothing)
+    float levelOptions[4];    // x: the camera's error allowed a metre away, for card thinning (scene/card_thinning.h, thinningErrorPerMetre; 0 thins nothing), y: the frame turning the level fades' dither (render/gpu/level_fade.h)
 };
 
 static_assert(sizeof(GpuFrameData) == 432, "GpuFrameData must match the shader's FrameData block");
@@ -196,18 +196,20 @@ struct DrawBatch {
     bool doubleSided = false;
 };
 
-// The chosen draws grouped by mesh: order lists the draw indices in instance order, and each batch covers a run of them;
-// thinned says, in the same order, which are drawn with their thinned mesh (DrawItem::thinningEntry, the mesh itself or
-// a level sharing its vertices), whose cards the vertex shaders thin.
+// The chosen draws grouped by mesh: order lists the draw indices in instance order (a fading draw twice, once for each
+// of its levels), and each batch covers a run of them; marks holds, in the same order, the bits each entry adds to its
+// instance: the thinned bit where it is drawn with its thinned mesh (DrawItem::thinningEntry, the mesh itself or a level
+// sharing its vertices), whose cards the vertex shaders thin, and its level fade field (render/gpu/level_fade.h).
 struct BatchedDraws {
     std::vector<std::size_t> order;
     std::vector<DrawBatch> batches;
-    std::vector<bool> thinned;
+    std::vector<std::uint32_t> marks;
 };
 
-// A draw list entry: the instance's number, its top bit set where the view draws it thinned (instance_shared.h).
+// A draw list entry: the instance's number in its low bits, its top bit set where the view draws it thinned, its fade
+// field between (instance_shared.h).
 inline constexpr std::uint32_t drawListThinnedBit = DRAW_LIST_THINNED_BIT;
-inline constexpr std::uint32_t drawListIndexMask = ~drawListThinnedBit;
+inline constexpr std::uint32_t drawListIndexMask = DRAW_LIST_INSTANCE_MASK;
 
 // Appends a view's draw list entries, in instance order.
 void appendDrawList(std::vector<std::uint32_t>& list, const BatchedDraws& batched);
@@ -257,7 +259,8 @@ std::vector<GpuThinningRecord> packCardThinning(const IndexedMesh& mesh);
 * Group the chosen draws (indices into draws) by how they are drawn (plain, double-sided, cut-out, double-sided cut-out)
 * and then by mesh, meshes in handle order and each mesh's draws in the order they were chosen, so the same frame always gives the same instances. Instances are numbered from firstInstance, for views that
 * write theirs after another view's in the same buffer (shadow tiles). With a view, each draw is drawn with the mesh
-* its level of detail picks there (scene/level_of_detail.h), and grouped by it; a draw drawing nothing there is left out.
+* its level of detail picks there (scene/level_of_detail.h), and grouped by it; a draw drawing nothing there is left out;
+* a draw fading there (levelFade) is drawn with both its levels, each marked with its fade field.
 */
 BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance = 0,
                          const LevelView* levels = nullptr);

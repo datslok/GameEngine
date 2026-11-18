@@ -13,7 +13,7 @@ A game engine written from scratch in C++23, as a learning project: its own Vulk
 - Its own Vulkan 1.3 renderer (volk, vk-bootstrap, VMA, dynamic rendering, hand-written barriers); two frames in flight; pipelines compiled on every core behind a loading screen.
 - A GPU scene: objects, materials and lights in storage buffers, every texture bindless, one instanced draw per mesh per view; still objects' draws kept between frames.
 - Depth prepass, clustered shading (1024 point and 256 spot lights, each pixel walking only its cluster's), reversed-Z, camera-relative positions.
-- Level of detail by screen error, impostors for far trees, card thinning instead of popping, CDLOD terrain reaching tens of kilometres.
+- Level of detail by screen error, impostors for far trees, card thinning and dithered cross-fades instead of popping, CDLOD terrain reaching tens of kilometres.
 - BC7-compressed textures, a quarter of the video memory, kept in `build/texture_cache` (the first start encodes them, later starts read them).
 
 **Lighting and shadows** ([lights](docs/architecture/lights.md), [sun shadows](docs/architecture/sun-shadows.md))

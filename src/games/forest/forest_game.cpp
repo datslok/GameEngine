@@ -562,10 +562,12 @@ namespace {
     * stand-in as its levels, then nothing from impostorErrorMetres (or the stand-in's error, if larger) on, where its
     * card begins (scene/impostor.h, baked from the seen mesh as the trees' are from theirs, the texture copied first:
     * adding the atlases can move the asset manager's textures). All choose by the seen mesh's one box, so exactly one is
-    * drawn. The card lets light through as the plant does.
+    * drawn. The card lets light through as the plant does. fades: its levels and card cross-fade by a dither rather than
+    * swap (scene/mesh_level.h; docs/research/LOD.md), where its material is cut out, as the depth prepass discards there.
     */
     PlantVariant makePlantVariant(AssetManager& assets, JobSystem& jobs, IndexedMesh seen, IndexedMesh level, float levelError, IndexedMesh shadow,
-                                  float shadowError, const Material& material, float impostorErrorMetres, int impostorFrames, int impostorTexels) {
+                                  float shadowError, const Material& material, float impostorErrorMetres, int impostorFrames, int impostorTexels,
+                                  bool fades) {
         const ImageData colour = material.texture.isValid() ? assets.getTexture(material.texture) : ImageData{};
         const ImpostorBake baked = bakeImpostor({ImpostorPart{.mesh = &seen,
                                                               .colour = material.texture.isValid() ? &colour : nullptr,
@@ -587,10 +589,11 @@ namespace {
         } else {
             assets.setMeshLevels(leaves, {MeshLevel{levelMesh, levelError}, MeshLevel{shadowMesh, shadowLevelError}, MeshLevel{MeshHandle{}, impostorError}});
         }
-        assets.setMeshLevelOptions(leaves, MeshLevelOptions{.hiddenBelowError = 0.0f, .chooseBounds = box});
+        const bool fadesLevels = fades && isCutOut(material);
+        assets.setMeshLevelOptions(leaves, MeshLevelOptions{.hiddenBelowError = 0.0f, .chooseBounds = box, .fadesLevels = fadesLevels});
 
         const MeshHandle card = assets.addDrawnMesh(impostorCardMesh(baked.centre, baked.radius));
-        assets.setMeshLevelOptions(card, MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = box});
+        assets.setMeshLevelOptions(card, MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = box, .fadesLevels = fadesLevels});
         Material cardMaterial = impostorMaterial(assets.addTexture(baked.colour, impostorCoverageCutoff), assets.addTexture(baked.normal), impostorFrames);
         cardMaterial.roughness = material.roughness;
         cardMaterial.diffuseTransmission = material.diffuseTransmission;
@@ -676,7 +679,7 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
             variants[static_cast<std::size_t>(kind)].push_back(makePlantVariant(assets, getJobs(), std::move(seen), std::move(level), levelError,
                                                                                 std::move(shadow), shadowError, materials[plant],
                                                                                 understoreySettings.impostorErrorMetres, understoreySettings.impostorFrames,
-                                                                                understoreySettings.impostorTexels));
+                                                                                understoreySettings.impostorTexels, true));
         }
     }
 
@@ -714,7 +717,7 @@ void ForestGame::buildPalms(World& world, AssetManager& assets) {
     for (PalmMeshes& meshes : grown) {
         variants.push_back(makePlantVariant(assets, getJobs(), std::move(meshes.palm), std::move(meshes.level), meshes.levelError, std::move(meshes.shadow),
                                             meshes.shadowError, leaf, palmSettings.impostorErrorMetres, palmSettings.impostorFrames,
-                                            palmSettings.impostorTexels));
+                                            palmSettings.impostorTexels, false));
     }
 
     palms.reserve(2 * palmPlacements.size());

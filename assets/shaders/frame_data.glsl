@@ -27,7 +27,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 contactShadowOptions;   // x: 1 when the main pass reads the sun's contact shadows (contact_shadows.comp), y: 1 when it reads the local lights'
     ivec4 contactLightSlots;     // the local lights with a contact shadow channel, by channel: a point light's slot, a spotlight's CONTACT_SPOT_SLOT_BASE past its slot, -1 none
     vec4 materialOptions;        // parallax occlusion mapping: x 1 draws it, y 1 self-shadows from the sun, z the most steps; w 1 lets light through leaves
-    vec4 levelOptions;           // x: the camera's error allowed a metre away, for card thinning (0 thins nothing)
+    vec4 levelOptions;           // x: the camera's error allowed a metre away, for card thinning (0 thins nothing), y: the frame turning the level fades' dither
 };
 
 #endif
