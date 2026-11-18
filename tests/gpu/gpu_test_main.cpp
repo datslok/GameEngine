@@ -42,6 +42,7 @@ int main() {
             gpuTestWind(runner, report);
             gpuTestCardThinning(runner, report);
             gpuTestOcclusionCulling(runner, report);
+            gpuTestCullRecords(runner, report);
             gpuTestCameraFinish(runner, report);
             gpuTestMotionBlur(runner, report);
             gpuTestDepthOfField(runner, report);
