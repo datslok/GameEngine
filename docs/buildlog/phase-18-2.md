@@ -140,3 +140,9 @@
   - **Moving draws keep their order:** sorted by storage place each frame (a sort of the movers, not a walk), so frames equal the old ones draw for draw.
   - **Tested:** a seeded run of 120 frames of random additions, destructions, hiding, stilling, Transforms and deforming meshes taken and given back, moves and parts, each frame matched against one built from scratch.
   - **Measured (laptop, hidden copy, release, main → branch):** BUILD 0.94-1.07 → 0.32-0.35 ms, SCENE 1.68-1.82 → 1.07-1.14 ms at the rim, Ring and wall. GPU not compared: main's worktree had no DLSS library and ran TAA.
+
+- `dlss-quality-default` (Nov 18 2026): render scale 0.67 (DLSS Quality) by default, not 1 (DLAA), the user's choice after the GPU frame's research (`docs/research/WORLDSCALE.md`, the rest of its plan left for later)
+  - **Why:** NVIDIA's guide puts model M at 1.18 ms for 1440p Performance on a 4070 Ti; the laptop is about half that GPU and DLAA feeds four times the pixels, so AA's ~3.7 ms was mostly DLSS itself. Shipped 60 fps modes render at 50-75% of the output.
+  - **Model kept at M:** K is 25-40% cheaper but trailed at the flashlight beam's edge (the user's eye, Oct 23 2026).
+  - **One table:** the modes' factors moved to `upscaling.h` (`upscalingModeFactors`, `upscalingModeScale` constexpr) so the default names Quality instead of repeating 0.67.
+  - **Not measured:** the gain waits for the GPU frame's measurements.

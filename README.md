@@ -30,7 +30,7 @@ A game engine written from scratch in C++23, as a learning project: its own Vulk
 **Sky, air and image** ([sky](docs/architecture/sky.md), [fog](docs/architecture/fog.md), [image](docs/architecture/image-pipeline.md))
 
 - A physical sky and atmosphere (Hillaire 2020), the sun, moon and 9,096 real stars placed by astronomy, volumetric fog lit by every light.
-- TAA with upscaling, FSR 3.1, DLSS (DLAA by default); eye adaptation, bloom, AgX, ACES or Reinhard tone mapping, HDR output; depth of field, motion blur and a camera finish (off by default).
+- TAA with upscaling, FSR 3.1, DLSS (its Quality mode by default); eye adaptation, bloom, AgX, ACES or Reinhard tone mapping, HDR output; depth of field, motion blur and a camera finish (off by default).
 
 **Simulation** ([engine core](docs/architecture/engine-core.md), [physics](docs/architecture/physics.md), [cloth](docs/architecture/cloth.md))
 
