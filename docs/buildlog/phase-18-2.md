@@ -65,3 +65,6 @@
   - **Solid alpha can come back as 254:** bc7enc's mode 6 shares a last bit between colour and alpha. Harmless: cut-outs test against their cutoff, opaque surfaces ignore alpha.
 - `vram-in-use` (Nov 17 2026): F4's ENGINE figure counted VMA's blocks (up to 256 MB each), so texture compression's saving showed as 256 MB. It now shows `allocationBytes` (in use) beside the blocks (held).
   - **Measured in the forest (laptop, start view):** in use 1841 MB compressed against 2311 MB without, 470 MB saved, as the cache's 466 MB predicted; held 2123 against 2379.
+- `tree-flutter` (Nov 18 2026): the user saw tree leaves shimmer, "catching light". F5 narrowed it: only wind off stopped it; reflections, shadows' swaying cascades, contact shadows, ambient occlusion and specular anti-aliasing changed nothing.
+  - **Cause:** the trees' flutter was 3 Hz with its phase turning every 0.5 m, so neighbouring leaves darted in and out of the canopy's sun flecks each on its own; far away many leaves share a pixel and the picture changed every frame, which TAA and DLSS cannot settle (motion vectors were right).
+  - **Fix:** the trees' default flutter 1 Hz over 8 m, picked live in F5 by the user; the lower layers keep 1.5 and 1.2 Hz over 8 m, hanging things 3 Hz over 0.5 m.
