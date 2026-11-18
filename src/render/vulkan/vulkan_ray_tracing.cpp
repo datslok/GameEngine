@@ -229,8 +229,7 @@ void VulkanRayTracing::addMesh(ImmediateCommands& uploads, const VulkanMesh& mes
 
     MeshStructure entry;
     entry.structure = createStructure(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, compactedSize);
-    entry.vertices = mesh.getVertexAddress();
-    entry.indices = mesh.getIndexAddress();
+    entry.source = &mesh;
 
     uploads.run([&](VkCommandBuffer commands) {
         VkCopyAccelerationStructureInfoKHR copy{};
@@ -266,7 +265,7 @@ void VulkanRayTracing::addDeformingMesh(ImmediateCommands& uploads, const Vulkan
 
     MeshStructure entry;
     entry.deforming = &mesh;
-    entry.indices = mesh.getIndexAddress();
+    entry.source = &mesh;
     for (std::uint32_t slot = 0; slot < deformingSlotCount; ++slot) {
         entry.slotStructures.push_back(createStructure(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizes.accelerationStructureSize));
     }
@@ -341,7 +340,7 @@ VkDeviceAddress VulkanRayTracing::MeshStructure::currentStructure() const {
 }
 
 VkDeviceAddress VulkanRayTracing::MeshStructure::currentVertices() const {
-    return deforming != nullptr ? deforming->getVertexAddress() : vertices;
+    return source->getVertexAddress();
 }
 
 std::size_t VulkanRayTracing::getMeshCount() const {
@@ -379,7 +378,7 @@ void VulkanRayTracing::buildScene(VkCommandBuffer commands, std::uint32_t frameI
     table.reserve(meshes.size());
 
     for (const MeshStructure& mesh : meshes) {
-        table.push_back(GpuMeshAddresses{mesh.currentVertices(), mesh.indices});
+        table.push_back(GpuMeshAddresses{mesh.currentVertices(), mesh.source->getIndexAddress()});
     }
 
     frame.meshTable->write(table);

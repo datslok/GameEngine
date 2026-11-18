@@ -1,5 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+// gl_BaseVertexARB: the drawn mesh's first vertex in the shared mesh buffer (render/gpu/mesh_pool.h); the per-vertex
+// records (hanging things, thinned cards) count from the mesh's own first vertex.
+#extension GL_ARB_shader_draw_parameters : require
 
 #include "frame_data.glsl"
 #include "ground_layers.glsl"
@@ -117,12 +120,12 @@ void main() {
 
     // Thinned cards (scene/card_thinning.h): each shrunk or grown about its stem as the view's distance allows, in every view
     // that marks it the same way, so the prepass and the main pass agree to the bit.
-    vec3 shaped = thinnedVertex(instance, entry, gl_VertexIndex, position, captureView ? captureEye.xyz : vec3(0.0), cameraOrigin.xyz,
+    vec3 shaped = thinnedVertex(instance, entry, gl_VertexIndex - gl_BaseVertexARB, position, captureView ? captureEye.xyz : vec3(0.0), cameraOrigin.xyz,
                                 captureView ? captureEye.w : levelOptions.x);
     relativePosition = (model * vec4(shaped, 1.0)).xyz;
     relativePosition.y += groundLift(instance.material.w, relativePosition + cameraOrigin.xyz);
     // The wind (render/gpu/wind.h): the same sway in every view, so the prepass and the main pass agree to the bit.
-    relativePosition += windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, gl_VertexIndex, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    relativePosition += windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, gl_VertexIndex - gl_BaseVertexARB, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
     gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
     viewerPosition = captureView ? captureEye.xyz : vec3(0.0);

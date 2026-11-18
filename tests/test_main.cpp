@@ -84,6 +84,7 @@ void testDepthPrepass();
 void testOcclusionCulling();
 void testCullRecords();
 void testCameraCulling();
+void testMeshPool();
 void testTextureEncoding();
 void testCoverageMips();
 void testBlockCompression();
@@ -354,6 +355,7 @@ const RoutineTest routineTests[] = {
     {"testOcclusionCulling", testOcclusionCulling},
     {"testCullRecords", testCullRecords},
     {"testCameraCulling", testCameraCulling},
+    {"testMeshPool", testMeshPool},
     {"testTextureEncoding", testTextureEncoding},
     {"testCoverageMips", testCoverageMips},
     {"testBlockCompression", testBlockCompression},

@@ -16,6 +16,10 @@
 #define CAMERA_CULL_MOTION 1u
 #define CAMERA_CULL_SWAY 2u
 
+// The packed commands' counts (camera_cull_compact.comp): the camera's four styles, then the velocity pass's.
+#define CAMERA_CULL_STYLES 4
+#define CAMERA_CULL_DRAW_COUNTS 8
+
 // GpuCameraCullCounts: the draws drawn at each level slot, then the camera's and the velocity pass's totals.
 #define CAMERA_CULL_COUNT_DRAWN 4
 #define CAMERA_CULL_COUNT_MOVING 5

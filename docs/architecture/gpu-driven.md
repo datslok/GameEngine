@@ -1,6 +1,6 @@
 # GPU-driven drawing
 
-Covers: `src/render/gpu/cull_records`, `src/render/gpu/cull_records_shared.h`, `assets/shaders/culling.glsl`, `assets/shaders/level_of_detail.glsl`, `src/render/gpu/camera_culling`, `src/render/gpu/camera_culling_shared.h`, `assets/shaders/camera_culling.glsl`, `assets/shaders/camera_cull_flags.comp`, `assets/shaders/camera_cull_scan.comp`, `assets/shaders/camera_cull_write.comp`, `src/render/vulkan/vulkan_camera_culling`
+Covers: `src/render/gpu/cull_records`, `src/render/gpu/cull_records_shared.h`, `assets/shaders/culling.glsl`, `assets/shaders/level_of_detail.glsl`, `src/render/gpu/camera_culling`, `src/render/gpu/camera_culling_shared.h`, `assets/shaders/camera_culling.glsl`, `assets/shaders/camera_cull_flags.comp`, `assets/shaders/camera_cull_scan.comp`, `assets/shaders/camera_cull_write.comp`, `src/render/vulkan/vulkan_camera_culling`, `assets/shaders/camera_cull_compact.comp`
 
 The GPU choosing what each view draws (culling, levels, batching), the CPU only coarse regions and changes. Research, baseline and stages: `docs/research/GPUDRIVEN.md`; progress: `ROADMAP.md` phase 18. Stage 1 (indirect draws) lives in `gpu-scene.md`.
 
@@ -45,11 +45,12 @@ Three passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers a
 
 1. `camera_cull_flags`: a thread a candidate, `cameraCandidateFlags` (drawn: taken and this slot chosen; moving: moved, mesh deformed or swaying within reach, with the velocity pass on; thinned); a 256-wide Hillis-Steele prefix sum per workgroup; level counts.
 2. `camera_cull_scan`: one workgroup sums the block totals into each block's first place, a carry between rounds; totals after the last.
-3. `camera_cull_write`: each flagged candidate writes `draw | thinned bit` at its place; each group its two commands from the places at its ends.
+3. `camera_cull_write`: each flagged candidate writes `draw | thinned bit` at its place; each group its two commands (its mesh's `firstIndex` and `vertexOffset` in the shared mesh buffer) from the places at its ends.
+4. `camera_cull_compact`: one workgroup packs each list's commands that draw something, style run by style run of the drawing order (`cullDrawOrder`: pooled groups by style then mesh, then deforming ones), by a prefix sum, and writes each style's count (`packCullCommands` mirrors it).
 
 - **Same order as the CPU:** the places are prefix sums over a fixed candidate order, so the lists equal `batchByMesh`'s entry for entry (`cullCameraOnCpu`, tested on random scenes). No atomics in the lists.
 - **Draw list:** the camera's region (room for every draw) first, then the shadows', then the velocity region (as big), then captures and glass; the CPU writes zeros where the GPU writes.
-- **Drawing (`PassDraws`):** prepass, main and velocity passes record every group in drawing order (style, then mesh, still before moving) with `vkCmdDrawIndexedIndirect` from the GPU's commands; empty groups still bind (until the shared mesh buffer).
+- **Drawing (`PassDraws`):** prepass, main and velocity passes bind the pools once and draw each style's packed commands with one `vkCmdDrawIndexedIndirectCount` (`drawIndirectCount`); groups of deforming meshes after, one by one from their own commands.
 - **Stays on the CPU:** glass (its cached list tested against the frustum and sorted), the mirror's choice (flat-faced draws only), shadows and captures (stages 4 and 5). HIDDEN (occlusion measurement) is not counted.
 - **F4:** DRAWN, levels and triangles from the counts and commands read back a frame or two late.
 - **`cull-compare`:** asks for the next frame's CPU lists too, reads the GPU's back and reports each list's matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.

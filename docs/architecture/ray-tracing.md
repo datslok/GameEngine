@@ -26,7 +26,7 @@ Hardware ray queries: any shader asks what a ray hits first (distance, instance,
 Required by Vulkan 1.3 and used here as pointers for builds and shader reads.
 
 - `VulkanBuffer::getDeviceAddress`, `UploadArray::getDeviceAddress`; VMA's `BUFFER_DEVICE_ADDRESS` flag.
-- Every `VulkanMesh` buffer has `SHADER_DEVICE_ADDRESS` usage (plus build-input usage with ray tracing): `getVertexAddress`, `getIndexAddress`, `getVertexCount`. Its upload barrier covers fragment and compute storage reads and structure builds.
+- Every mesh buffer (the shared mesh buffer's pools, a deforming mesh's own) has `SHADER_DEVICE_ADDRESS` usage (plus build-input usage with ray tracing): `getVertexAddress`, `getIndexAddress` (a pooled mesh's start in the pools), `getVertexCount`. `meshUploadBarrier` covers fragment and compute storage reads and structure builds. `MeshStructure::source` keeps the mesh, so the mesh table reads its addresses each frame (a pool moves when it grows).
 
 ## API-free part
 

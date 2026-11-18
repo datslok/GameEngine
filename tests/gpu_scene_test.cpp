@@ -67,15 +67,6 @@ namespace {
 
     // Shadow tiles write their instances one after another into one buffer, so each tile's batches start where the last
     // tile's ended.
-    // A batch's indirect draw: every index of its mesh, each of its instances, numbered from its first draw list entry
-    // (so gl_InstanceIndex still names the entry), with no offsets into a shared buffer.
-    void testBatchesBecomeIndirectDraws() {
-        const DrawBatch batch{MeshHandle{3}, 120, 7, true, false};
-        const GpuDrawCommand command = packDrawCommand(batch, 4500);
-        assert(command.indexCount == 4500 && command.instanceCount == 7 && command.firstInstance == 120);
-        assert(command.firstIndex == 0 && command.vertexOffset == 0);
-    }
-
     void testBatchesStartAtTheFirstInstance() {
         const std::vector<DrawItem> draws{drawOf(1), drawOf(0), drawOf(1)};
 
@@ -380,7 +371,6 @@ void testGpuScene() {
     testDrawsAreBatchedByMesh();
     testOnlyChosenDrawsAreBatchedInTheirOrder();
     testBatchesStartAtTheFirstInstance();
-    testBatchesBecomeIndirectDraws();
     testNothingChosenGivesNoBatches();
     testDrawsAreBatchedByStyle();
     testInstanceHoldsTheWorldMatrices();

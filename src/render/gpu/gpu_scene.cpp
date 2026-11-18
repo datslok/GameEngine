@@ -277,10 +277,6 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
     return batched;
 }
 
-GpuDrawCommand packDrawCommand(const DrawBatch& batch, std::uint32_t indexCount) {
-    return GpuDrawCommand{indexCount, batch.instanceCount, 0, 0, batch.firstInstance};
-}
-
 void appendDrawList(std::vector<std::uint32_t>& list, const BatchedDraws& batched) {
     for (std::size_t position = 0; position < batched.order.size(); ++position) {
         const std::uint32_t instance = static_cast<std::uint32_t>(batched.order[position]);

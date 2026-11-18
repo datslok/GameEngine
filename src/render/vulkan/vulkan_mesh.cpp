@@ -2,26 +2,31 @@
 #include "render/mesh_upload.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_device.h"
+#include "render/vulkan/vulkan_mesh_pool.h"
 
 #include <cstring>
 #include <stdexcept>
 
 /*
-* After the copies, one barrier makes the copied data visible to everything that reads it later: vertex attribute
-* fetching and index reading, shaders reading the buffers through their addresses (a ray's hit rebuilding its surface),
-* and, with ray tracing, building the mesh's acceleration structure. Waiting for the upload to finish (ImmediateCommands
-* does) orders it in time, but only a barrier makes the GPU's own writes visible to its later reads, including those in
-* later submissions.
+* Into the pools when there are pools and the mesh does not deform; otherwise buffers of its own, copied in the same way
+* and made visible by the same barrier (meshUploadBarrier).
 */
-VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming):
+VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming, VulkanMeshPool* pool):
     deforming(deforming)
 {
     checkMeshUpload(mesh);
+    indexCount = static_cast<std::uint32_t>(mesh.indices.size());
+    vertexCount = static_cast<std::uint32_t>(mesh.vertices.size());
+    placement = MeshPlacement{0, vertexCount, 0, indexCount, false};
+
+    if (pool != nullptr && !deforming) {
+        this->pool = pool;
+        placement = pool->add(mesh);
+        return;
+    }
 
     const std::uint32_t vertexSize = vertexBytes(mesh);
     const std::uint32_t indexSize = indexBytes(mesh);
-    indexCount = static_cast<std::uint32_t>(mesh.indices.size());
-    vertexCount = static_cast<std::uint32_t>(mesh.vertices.size());
 
     // Every mesh can be reached by address; with ray tracing it is also what acceleration structures are built from.
     VkBufferUsageFlags shared = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -59,25 +64,7 @@ VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, c
 
         const VkBufferCopy indexCopy{vertexSize, 0, indexSize};
         vkCmdCopyBuffer(commands, staging.get(), indices.get(), 1, &indexCopy);
-
-        VkMemoryBarrier2 barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
-        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT | VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
-                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
-
-        if (device.supportsRayQueries()) {
-            barrier.dstStageMask |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-            barrier.dstAccessMask |= VK_ACCESS_2_SHADER_READ_BIT;
-        }
-
-        VkDependencyInfo dependency{};
-        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dependency.memoryBarrierCount = 1;
-        dependency.pMemoryBarriers = &barrier;
-        vkCmdPipelineBarrier2(commands, &dependency);
+        meshUploadBarrier(commands, device);
     });
 }
 
@@ -133,19 +120,31 @@ std::uint64_t VulkanMesh::getSlotVersion() const {
 }
 
 VkDeviceAddress VulkanMesh::getSlotVertexAddress(std::uint32_t slot) const {
-    return deforming ? shapeSlots.at(slot).getDeviceAddress() : vertices.getDeviceAddress();
+    if (deforming) {
+        return shapeSlots.at(slot).getDeviceAddress();
+    }
+
+    return pool != nullptr ? pool->getVertexAddress() + VkDeviceAddress{placement.firstVertex} * sizeof(MeshVertex) : vertices.getDeviceAddress();
 }
 
 VkBuffer VulkanMesh::getVertexBuffer() const {
-    return deforming ? shapeSlots[slots.current()].get() : vertices.get();
+    if (deforming) {
+        return shapeSlots[slots.current()].get();
+    }
+
+    return pool != nullptr ? pool->getVertices() : vertices.get();
 }
 
 VkBuffer VulkanMesh::getPreviousVertexBuffer() const {
-    return deforming ? shapeSlots[slots.previous()].get() : vertices.get();
+    if (deforming) {
+        return shapeSlots[slots.previous()].get();
+    }
+
+    return pool != nullptr ? pool->getVertices() : vertices.get();
 }
 
 VkBuffer VulkanMesh::getIndexBuffer() const {
-    return indices.get();
+    return pool != nullptr ? pool->getIndices() : indices.get();
 }
 
 std::uint32_t VulkanMesh::getIndexCount() const {
@@ -161,5 +160,9 @@ VkDeviceAddress VulkanMesh::getVertexAddress() const {
 }
 
 VkDeviceAddress VulkanMesh::getIndexAddress() const {
-    return indices.getDeviceAddress();
+    return pool != nullptr ? pool->getIndexAddress() + VkDeviceAddress{placement.firstIndex} * sizeof(std::uint32_t) : indices.getDeviceAddress();
+}
+
+const MeshPlacement& VulkanMesh::getPlacement() const {
+    return placement;
 }

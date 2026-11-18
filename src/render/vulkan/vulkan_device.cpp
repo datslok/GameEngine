@@ -155,6 +155,7 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     features.samplerAnisotropy = VK_TRUE;
     features.depthClamp = VK_TRUE;
     features.drawIndirectFirstInstance = VK_TRUE; // indirect draws numbering instances from a batch's first draw list entry
+    features.multiDrawIndirect = VK_TRUE;         // many batches drawn by one call from the shared mesh buffer
     // triangle.vert's gl_ClipDistance: a mirror's picture cuts what is behind the mirror (render/gpu/planar_reflection.h).
     features.shaderClipDistance = VK_TRUE;
     features.shaderStorageImageExtendedFormats = VK_TRUE;
@@ -176,12 +177,19 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
     features12.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
     features12.bufferDeviceAddress = VK_TRUE; // required by Vulkan 1.3 itself, so every GPU here has it
+    features12.drawIndirectCount = VK_TRUE;   // the GPU-culled groups drawn as many as the GPU counted
+
+    // gl_BaseVertex: a mesh's own vertex number in the shared mesh buffer (wind and card thinning read per-vertex records).
+    VkPhysicalDeviceVulkan11Features features11{};
+    features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    features11.shaderDrawParameters = VK_TRUE;
 
     const auto select = [&](const VkPhysicalDeviceFeatures& chosen, const VkPhysicalDeviceVulkan12Features& chosen12) {
         vkb::PhysicalDeviceSelector selector{instance, surface};
         return selector.set_minimum_version(1, 3)
             .prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
             .set_required_features(chosen)
+            .set_required_features_11(features11)
             .set_required_features_12(chosen12)
             .set_required_features_13(features13)
             .select();

@@ -229,5 +229,3 @@ struct GpuDrawCommand {
 
 static_assert(sizeof(GpuDrawCommand) == 20, "GpuDrawCommand must match VkDrawIndexedIndirectCommand");
 
-// A batch drawn whole from its mesh's own buffers: every index, every instance, numbered from the batch's first entry.
-GpuDrawCommand packDrawCommand(const DrawBatch& batch, std::uint32_t indexCount);

@@ -13,6 +13,27 @@ struct CullCandidate {
     uint slot;
 };
 
+// A group: its run of candidates and its mesh's indices where they are. Must match GpuCullGroup.
+struct CullGroup {
+    uint firstCandidate;
+    uint candidates;
+    uint indexCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint unused0;
+    uint unused1;
+    uint unused2;
+};
+
+// Must match GpuDrawCommand (VkDrawIndexedIndirectCommand).
+struct DrawCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
+
 // The frame's camera. Must match GpuCameraCull.
 struct CameraCull {
     CullFrustum frustum;
@@ -25,6 +46,8 @@ struct CameraCull {
     uint motionBase;   // the velocity pass's
     uint blocks;       // workgroups of candidates
     uint unused;
+    uvec4 runFirst;    // each style's pooled groups' first place in the drawing order
+    uvec4 runCount;    // and how many
 };
 
 // Whether part of a sphere is nearer the eye than the sway's fade end (drawSways; unknown bounds count from the centre).
