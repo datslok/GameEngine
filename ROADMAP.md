@@ -362,7 +362,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [ ] 7. Lines near the camera as tube lights (`line-lights`)
   - [ ] 8. Searchlight beams kilometres long through the height fog, shadowed (`searchlight-beams`)
 - [ ] Layers of fog (research in `docs/research/FOGLAYERS.md`)
-  - [ ] Up to four fog layers, exponential or pooled; the jungle's floor mist under the canopy (`fog-layers`)
+  - [x] Up to four fog layers, exponential or pooled; the jungle's floor mist under the canopy; the sun dimmed through them (`fog-layers`)
   - [ ] Later: local fog volumes in the froxels, then drifting noise near the camera
 - [ ] Wind (research in `docs/research/WIND.md`); left: its shadow cache cost measured
   - [x] The wind field (`wind-field`), swaying plants (`wind-sway`), hanging things (`wind-hanging`), follow-ups (`wind-flutter`, `wind-chain-swing`)
