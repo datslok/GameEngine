@@ -11,6 +11,7 @@
 
 #include "test_jobs.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -363,6 +364,103 @@ namespace {
         assert(parallelTable.getEntries().size() == serialTable.getEntries().size() && serialTable.getEntries().size() < 20);
         assert(std::memcmp(parallelTable.getEntries().data(), serialTable.getEntries().data(), serialTable.getEntries().size() * sizeof(GpuMaterial)) == 0);
     }
+
+    /*
+    * The terrain's patches: runs of draws sharing a region's blended ground, regions alternating, grounds that differ
+    * in one layer only, a strata ground with its top layer, ordinary draws between: packed on every core, the instances
+    * and table are exactly what adding one by one gives (the layers before their ground). A ground packing refuses
+    * stays refused.
+    */
+    void testGroundRunsPackAsOneByOne() {
+        const auto layerOf = [](float roughness, std::uint8_t red) {
+            Material layer;
+            layer.roughness = roughness;
+            layer.colour = Pixel{red, 100, 50};
+            return layer;
+        };
+        const auto groundOf = [](std::vector<Material> layers, std::uint32_t weights) {
+            Material ground;
+            ground.groundLayers = std::move(layers);
+            ground.groundWeights = TextureHandle{weights};
+            return ground;
+        };
+        Material grass = groundOf({layerOf(0.8f, 40), layerOf(0.6f, 90), layerOf(0.9f, 120), layerOf(0.5f, 200)}, 1);
+        Material rocks = groundOf({layerOf(0.8f, 40), layerOf(0.6f, 90), layerOf(0.9f, 120), layerOf(0.4f, 200)}, 1);
+        Material otherWeights = groundOf({layerOf(0.8f, 40), layerOf(0.6f, 90)}, 2);
+        Material strata = groundOf({layerOf(0.3f, 10), layerOf(0.7f, 30), layerOf(0.2f, 60)}, 3);
+        strata.groundPaint = GroundPaint::Strata;
+        strata.groundTopLayer = 2;
+        strata.strataBottom = 10.0f;
+        strata.strataTop = 40.0f;
+        const std::array<Material, 4> regions{grass, rocks, otherWeights, strata};
+
+        std::vector<DrawItem> draws;
+
+        for (int i = 0; i < 2000; ++i) {
+            DrawItem draw;
+            draw.mesh = MeshHandle{static_cast<std::uint32_t>(i % 2)};
+            draw.model = Mat4::translation(static_cast<float>(i), 0.0f, 0.0f);
+            draw.material = i % 97 == 50 ? layerOf(0.1f, 7) : regions[static_cast<std::size_t>((i / 37) % 4)];
+            draw.terrainPatch = i;
+            draws.push_back(draw);
+        }
+
+        MaterialTable serialTable;
+        std::vector<GpuInstance> serial;
+
+        for (const DrawItem& draw : draws) {
+            serial.push_back(packInstance(draw, serialTable.add(draw.material)));
+        }
+
+        MaterialTable parallelTable;
+        const std::vector<GpuInstance> parallel = packInstances(draws, parallelTable, testJobs());
+        assert(std::memcmp(parallel.data(), serial.data(), serial.size() * sizeof(GpuInstance)) == 0);
+        assert(parallelTable.getEntries().size() == serialTable.getEntries().size());
+        assert(std::memcmp(parallelTable.getEntries().data(), serialTable.getEntries().data(), serialTable.getEntries().size() * sizeof(GpuMaterial)) == 0);
+
+        // Over a base holding some of them: the same numbers as the one-by-one table over the same base.
+        MaterialTable base;
+        base.add(grass);
+        MaterialTable serialOver = MaterialTable::over(base);
+        MaterialTable parallelOver = MaterialTable::over(base);
+
+        for (std::size_t draw = 0; draw < draws.size(); ++draw) {
+            serial[draw] = packInstance(draws[draw], serialOver.add(draws[draw].material));
+        }
+
+        const std::vector<GpuInstance> overBase = packInstances(draws, parallelOver, testJobs());
+        assert(std::memcmp(overBase.data(), serial.data(), serial.size() * sizeof(GpuInstance)) == 0);
+        assert(parallelOver.getEntries().size() == serialOver.getEntries().size());
+
+        // Refused as before: too many layers, layered layers, no weights, a strata top layer past the layers; a run of
+        // the same refused ground too.
+        const auto refused = [](const Material& material) {
+            std::vector<DrawItem> bad(3);
+
+            for (DrawItem& draw : bad) {
+                draw.material = material;
+            }
+
+            MaterialTable table;
+
+            try {
+                packInstances(bad, table, testJobs());
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+
+            return false;
+        };
+        assert(refused(groundOf({layerOf(0.1f, 1), layerOf(0.2f, 2), layerOf(0.3f, 3), layerOf(0.4f, 4), layerOf(0.5f, 5)}, 1)));
+        assert(refused(groundOf({grass}, 1)));
+        Material noWeights = groundOf({layerOf(0.1f, 1)}, 1);
+        noWeights.groundWeights = TextureHandle{};
+        assert(refused(noWeights));
+        Material badStrata = strata;
+        badStrata.groundTopLayer = 5;
+        assert(refused(badStrata));
+    }
+
     /*
     * A frame's draw list laid out: the GPU's regions only counted, the CPU's entries in runs at their places, runs side
     * by side joined into one, so writing them leaves the GPU's regions untouched.
@@ -388,6 +486,7 @@ namespace {
 void testGpuScene() {
     testDrawListLayoutLeavesTheGpuRegions();
     testPackingOnManyCoresIsTheSame();
+    testGroundRunsPackAsOneByOne();
     testFrameDataCarriesTheCascadeTransition();
     testDrawsAreBatchedByMesh();
     testOnlyChosenDrawsAreBatchedInTheirOrder();

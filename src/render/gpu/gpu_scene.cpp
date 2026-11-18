@@ -114,12 +114,9 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
 * GpuMaterial is all 4-byte fields with no padding (its size is checked), so its bytes can be hashed and compared as one
 * block. Two materials pack the same exactly when they shade the same.
 */
-std::uint32_t MaterialTable::add(const Material& material) {
-    GpuMaterial packed = packMaterial(material);
-
-    // A blended ground's layers are ordinary materials, added first (shared with any draw using the same), and named by
-    // their places plus one.
-    if (!material.groundLayers.empty()) {
+namespace {
+    // A blended ground takes one to four plain layers and a weights texture, and a strata ground's top layer is one of them.
+    void checkBlendedGround(const Material& material) {
         if (material.groundLayers.size() > 4 || !material.groundWeights.isValid()) {
             throw std::invalid_argument("A blended ground takes one to four layers and a weights texture");
         }
@@ -128,11 +125,23 @@ std::uint32_t MaterialTable::add(const Material& material) {
             throw std::invalid_argument("A blended ground's top layer must be one of its layers");
         }
 
-        for (std::size_t layer = 0; layer < material.groundLayers.size(); ++layer) {
-            if (!material.groundLayers[layer].groundLayers.empty()) {
+        for (const Material& layer : material.groundLayers) {
+            if (!layer.groundLayers.empty()) {
                 throw std::invalid_argument("A blended ground's layers may not be layered themselves");
             }
+        }
+    }
+}
 
+std::uint32_t MaterialTable::add(const Material& material) {
+    GpuMaterial packed = packMaterial(material);
+
+    // A blended ground's layers are ordinary materials, added first (shared with any draw using the same), and named by
+    // their places plus one.
+    if (!material.groundLayers.empty()) {
+        checkBlendedGround(material);
+
+        for (std::size_t layer = 0; layer < material.groundLayers.size(); ++layer) {
             packed.groundLayers[layer] = add(material.groundLayers[layer]) + 1;
         }
     }
@@ -197,23 +206,77 @@ std::uint32_t MaterialTable::addPacked(const GpuMaterial& packed, std::uint64_t 
     return index;
 }
 
+/*
+* Three passes. On every core: each material packed (a blended ground's own bytes with its layers' places empty), plain
+* ones hashed, a ground's layers packed and hashed into their own list. On every core: whether each draw's packed bytes
+* (and a ground's layers') equal the draw before's, as the terrain's patches of one region do in runs. On one thread, in
+* draw order: a draw like the one before takes its number; any other is added, a ground's layers first (checked as
+* MaterialTable::add checks them), then the ground with their places, so the table is what adding one by one gives.
+* The one thread's work follows the runs, not the draws: 699 terrain patches packed one by one cost 1.55 ms.
+*/
 std::vector<GpuInstance> packInstances(std::span<const DrawItem> draws, MaterialTable& materials, JobSystem& jobs) {
     constexpr std::size_t drawsPerPiece = 256;
+
+    // A ground with four layers packs five materials (about 2 us): smaller pieces, so the terrain's few hundred patches
+    // spread over every core rather than three.
+    constexpr std::size_t packedPerPiece = 32;
+    const auto isGround = [&](std::size_t draw) { return !draws[draw].material.groundLayers.empty(); };
+
+    // Each ground's first layer in the layer lists.
+    std::vector<std::size_t> firstLayer(draws.size() + 1, 0);
+
+    for (std::size_t draw = 0; draw < draws.size(); ++draw) {
+        firstLayer[draw + 1] = firstLayer[draw] + draws[draw].material.groundLayers.size();
+    }
+
     std::vector<GpuMaterial> packed(draws.size());
     std::vector<std::uint64_t> hashes(draws.size(), 0);
-    jobs.parallelFor(draws.size(), drawsPerPiece, [&](std::size_t draw) {
-        if (draws[draw].material.groundLayers.empty()) {
-            packed[draw] = packMaterial(draws[draw].material);
+    std::vector<GpuMaterial> layers(firstLayer.back());
+    std::vector<std::uint64_t> layerHashes(firstLayer.back(), 0);
+    jobs.parallelFor(draws.size(), packedPerPiece, [&](std::size_t draw) {
+        const Material& material = draws[draw].material;
+        packed[draw] = packMaterial(material);
+
+        if (!isGround(draw)) {
             hashes[draw] = materialHash(packed[draw]);
+            return;
+        }
+
+        for (std::size_t layer = 0; layer < material.groundLayers.size(); ++layer) {
+            layers[firstLayer[draw] + layer] = packMaterial(material.groundLayers[layer]);
+            layerHashes[firstLayer[draw] + layer] = materialHash(layers[firstLayer[draw] + layer]);
         }
     });
 
-    // In draw order, so the table's entries are what adding one by one would give; a blended ground adds its layers too.
+    std::vector<std::uint8_t> likeBefore(draws.size(), 0);
+    jobs.parallelFor(draws.size(), drawsPerPiece, [&](std::size_t draw) {
+        if (draw == 0 || isGround(draw) != isGround(draw - 1) || std::memcmp(&packed[draw], &packed[draw - 1], sizeof(GpuMaterial)) != 0) {
+            return;
+        }
+
+        const std::size_t layerCount = firstLayer[draw + 1] - firstLayer[draw];
+        const bool sameLayers = layerCount == firstLayer[draw] - firstLayer[draw - 1] &&
+                                (layerCount == 0 || std::memcmp(&layers[firstLayer[draw]], &layers[firstLayer[draw - 1]], layerCount * sizeof(GpuMaterial)) == 0);
+        likeBefore[draw] = sameLayers ? 1 : 0;
+    });
+
     std::vector<std::uint32_t> indices(draws.size());
 
     for (std::size_t draw = 0; draw < draws.size(); ++draw) {
-        indices[draw] = draws[draw].material.groundLayers.empty() ? materials.addPacked(packed[draw], hashes[draw])
-                                                                   : materials.add(draws[draw].material);
+        if (likeBefore[draw] != 0) {
+            indices[draw] = indices[draw - 1];
+        } else if (!isGround(draw)) {
+            indices[draw] = materials.addPacked(packed[draw], hashes[draw]);
+        } else {
+            checkBlendedGround(draws[draw].material);
+            GpuMaterial ground = packed[draw];
+
+            for (std::size_t layer = 0; layer < firstLayer[draw + 1] - firstLayer[draw]; ++layer) {
+                ground.groundLayers[layer] = materials.addPacked(layers[firstLayer[draw] + layer], layerHashes[firstLayer[draw] + layer]) + 1;
+            }
+
+            indices[draw] = materials.addPacked(ground, materialHash(ground));
+        }
     }
 
     std::vector<GpuInstance> instances(draws.size());

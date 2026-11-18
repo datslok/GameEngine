@@ -22,7 +22,7 @@ std430, mirrored byte for byte in the shaders, each size checked by a `static_as
 - **Instance** (`packInstance(draw, material)`): world model matrix, normal matrix (`normalMatrix`), handedness and `uniformScale`, material and mesh numbers, terrain patch, instance kind (plain, impostor, follows ground), wind sway, hanging and thinning entries, the level-of-detail sphere. Each view multiplies in its own matrix on the GPU, so one record serves the camera, every shadow tile and ray tracing.
 - **Lights:** `packLighting` and the slot rule (`selectDrawableLights`): `lights.md`. Shadows filled by `attachShadows` (`lights-and-shadow-atlas.md`).
 - **Materials:** `MaterialTable::add` / `addPacked`: an FNV-1a hash of the packed bytes, then a full comparison (packing has no padding); the last 8 found checked first, since draws alternate few materials (bark, leaves). A table `over` a base finds the base's entries first and numbers its own after them.
-- `packInstances` packs materials and instances on every core, handing out indices in draw order on one thread, so results match one-by-one adding.
+- `packInstances` packs materials (a blended ground's layers in their own list) and instances on every core, marks each draw whose packed bytes equal the draw before's (the terrain's patches of one region), and hands out indices in draw order on one thread only where they differ, so results match one-by-one adding (`add`'s ground checks kept, `checkBlendedGround`). Ground draws pack in pieces of 32 (five materials each).
 
 ## Uniform block and push constants
 
