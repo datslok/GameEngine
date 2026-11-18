@@ -21,7 +21,7 @@ What they share: media **add**. Extinction σ = Σ σᵢ; scattered light per un
 - **Far shadow samples** (`fogFarSampleDistance`): invert τ(s) = target. With one exponential layer it has a closed form (kept, the fast path). A sum of layers has none: Newton on τ(s) with τ'(s) = σ(s) > 0, bracketed so a bad step falls back to bisection, about 4-6 steps.
 - **Sight**: about 3 / σ. Jungle floor mist with 60-150 m of sight: σ ≈ 0.02-0.05 per metre (the valley haze is 0.0005).
 - **The forest's heights** (`forest_trees.cpp`): canopy trees 38 m forking at 18 m, emergents 55 m at 36 m, midstorey 15 m at 10 m (before each placement's scale). A pool topping at about 12 m with a 4 m edge sits under the canopy's crowns and round the midstorey's.
-- **Sun through the mist**: the fog does not dim light on its way to a froxel today (`fog.md`, Not done). Down through 10 m of σ = 0.03 the sun loses 26%; at a low sun much more. For a directional light it has a closed form per layer (the same optical depth, towards the light, to the top of the medium), one per froxel and layer.
+- **Sun through the mist**: the fog does not dim light on its way to a froxel today (`fog.md`, Not done). Down through 10 m of σ = 0.03 the sun loses 26%; at a low sun much more. For a directional light it has a closed form per layer (the same optical depth, towards the light, to the top of the medium), one per froxel and layer. For the ground it is the similarity relation (van de Hulst): droplets scatter mostly forwards (g), and a photon deflected a little still lights the ground, so the beam loses only depth × (1 − albedo × g) (delta-Eddington is a close cousin).
 
 ## Cost
 

@@ -27,7 +27,7 @@ void main() {
                            fogFarSampleDistance(medium, ray.x, ray.y, ray.z, ray.w, extra.x), 0.0));
     } else if (function == GPU_TEST_FOG_MEDIA) {
         // Inputs: the packed layers (GpuFogMedia's ten rows), (origin height, direction y, start, end), (source, height),
-        // (the far shadow sample's share, distance along the view, the way to the light's y, 0), (to the light, 0),
+        // (the far shadow sample's share, distance along the view, the way to the light's y, forward share), (to the light, 0),
         // (view direction, 0).
         FogMedia media;
 
@@ -47,11 +47,12 @@ void main() {
         vec4 shares = fogMediaShares(media, source.w, extra.y);
         testOutput(0, vec4(fogMediaDensity(media, source.w, extra.y), fogMediaOpticalDepth(media, ray.x, ray.y, ray.z, ray.w), beyond.transmittance,
                            fogMediaFarSampleDistance(media, ray.x, ray.y, ray.z, ray.w, extra.x)));
-        testOutput(1, vec4(beyond.light, fogSunTransmittance(media, source.w, extra.z)));
+        testOutput(1, vec4(beyond.light, 0.0));
         testOutput(2, shares);
         testOutput(3, fogMediaStretchShares(media, ray.x, ray.y, ray.z, ray.w));
         testOutput(4, vec4(fogMediaInScattering(media, shares, source.rgb, toLight, view), 0.0));
         testOutput(5, vec4(fogMediaAmbient(media, shares, source.rgb), 0.0));
+        testOutput(6, vec4(fogSunTransmittance(media, source.w, extra.z, extra.w), 0.0));
     } else if (function == GPU_TEST_FOG_GRID) {
         // Inputs: the view-projection's columns, its inverse's columns, (point, range), (coordinate, slices), (forward,
         // history weight), (froxel, 0), (grid size, 0).

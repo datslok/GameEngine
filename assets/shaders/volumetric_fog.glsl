@@ -128,11 +128,12 @@ vec4 fogMediaStretchShares(FogMedia media, float originHeight, float directionY,
     return total > 0.0 ? shares / total : vec4(0.0);
 }
 
-float fogSunTransmittance(FogMedia media, float height, float toLightY) {
-    float depth = 0.0;
+vec3 fogSunTransmittance(FogMedia media, float height, float toLightY, float forwardShare) {
+    vec3 depth = vec3(0.0);
 
     for (int i = 0; i < fogLayerCount(media); ++i) {
-        depth += fogOpticalDepth(media.layer[i], media.shape[i], height, toLightY, 0.0, media.albedo[i].w);
+        vec3 lost = vec3(1.0) - media.albedo[i].rgb * (forwardShare * media.layer[i].w);
+        depth += lost * fogOpticalDepth(media.layer[i], media.shape[i], height, toLightY, 0.0, media.albedo[i].w);
     }
 
     return exp(-depth);

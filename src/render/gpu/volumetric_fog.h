@@ -64,17 +64,22 @@ struct FogSettings {
     // (the user's look at the forest, Nov 14 2026). Only the picture pass reads them; glass sees that fog unshadowed.
     int farShadowSteps = 16;
 
-    // The directional lights (sun, moon) dimmed by the fog on their way down to each point of it (fogSunTransmittance),
-    // so dense mist is darker deep down and a low sun barely reaches under it. Only the fog's own light: surfaces under
-    // the mist are still lit by the undimmed sun.
+    // The directional lights (sun, moon) dimmed by the fog on their way down (fogSunTransmittance), both to each point
+    // of the fog and to each surface, so dense mist is darker deep down, the ground under it less sunlit, and a low sun
+    // barely reaches under it.
     bool sunThroughFog = true;
+
+    // How much of the light a layer scatters forwards (its albedo times its anisotropy g) counts as still arriving from
+    // the sun's direction (the similarity relation): 1 by default (the user's choice, Nov 18 2026), 0 every scattered
+    // photon lost. Droplets deflect light only a little, and a deflected photon lights the ground nearly as well.
+    float forwardShare = 1.0f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(FogSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a range, grid size, slice count, history weight or far shadow steps outside
-// volumetric_fog_shared.h's limits.
+// volumetric_fog_shared.h's limits, or a forward share outside 0..1.
 void validateFog(const FogSettings& settings);
 
 // One layer's extinction per metre at a height (its shape: scene/fog.h).
@@ -117,11 +122,13 @@ Vec3 fogMediaInScattering(std::span<const Fog> layers, const FogLayerShares& sha
 Vec3 fogMediaAmbient(std::span<const Fog> layers, const FogLayerShares& shares, const Vec3& ambient);
 
 /*
-* The share of a directional light that reaches a point in the fog through the fog above it: exp(-optical depth) along
-* the ray from the point towards the light (rising toLightY per metre), each layer to its maxDistance. Under 10 m of mist
-* at 0.03 per metre, a high sun keeps about three quarters of its light; one 5 degrees up, almost none.
+* The share of a directional light, per colour, that reaches a point (in the fog or on a surface) through the fog above
+* it: exp(-optical depth) along the ray from the point towards the light (rising toLightY per metre), each layer to its
+* maxDistance, its depth taken times 1 - forwardShare x albedo x g (the similarity relation, van de Hulst: the share
+* scattered forwards goes on nearly as it came). Under 14 m of white mist at 0.03 per metre with g 0.6, a high sun keeps
+* about 85% of its light with forwardShare 1 (66% with 0); one 5 degrees up, almost none.
 */
-float fogSunTransmittance(std::span<const Fog> layers, float height, float toLightY);
+Vec3 fogSunTransmittance(std::span<const Fog> layers, float height, float toLightY, float forwardShare);
 
 // A slice coordinate (0 at the camera, 1 at the range) as a view depth (m along the view), and back (past 1 beyond the range).
 float fogSliceDepth(float slice, float range);
@@ -292,7 +299,7 @@ float fogMediaFarSampleDistance(std::span<const Fog> layers, float originHeight,
 /*
 * The layers as the frame's record holds them (std430, scene_fog.glsl's FogMedia): per layer (density, base height,
 * scale height, anisotropy) and (albedo, farthest distance), each layer's shape (0 exponential, FOG_SHAPE_POOLED), and
-* the extent: x the layer count, y the farthest of their distances.
+* the extent: x the layer count, y the farthest of their distances, z the forward share (FogSettings, set by packFog).
 */
 struct GpuFogMedia {
     float layer[FOG_MAX_LAYERS][4];

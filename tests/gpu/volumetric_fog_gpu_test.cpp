@@ -80,7 +80,7 @@ namespace {
     * One to FOG_MAX_LAYERS layers of both shapes through their packed rows (so the packing's order is the shader's), points
     * near and past their farthest distances, rays every way, the sun every way. Inputs per case: GpuFogMedia's ten rows,
     * (origin height, direction y, start, end), (source, height), (the far sample's share, distance along the view, the
-    * way to the light's y, 0), (to the light, 0), (view direction, 0).
+    * way to the light's y, forward share), (to the light, 0), (view direction, 0).
     */
     void checkMedia(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{214};
@@ -106,18 +106,18 @@ namespace {
             inputs.push_back(GpuVec4{random.between(-5.0f, 40.0f), directionY, start, start + random.between(-10.0f, 2000.0f)});
             inputs.push_back(gpuVec4(Vec3{random.between(0.0f, 4.0f), random.between(0.0f, 4.0f), random.between(0.0f, 4.0f)}, random.between(-20.0f, 80.0f)));
             const Vec3 toLight = random.direction();
-            inputs.push_back(GpuVec4{random.between(0.0f, 1.0f), random.between(0.0f, 3500.0f), toLight.y, 0.0f});
+            inputs.push_back(GpuVec4{random.between(0.0f, 1.0f), random.between(0.0f, 3500.0f), toLight.y, random.between(0.0f, 1.0f)});
             inputs.push_back(gpuVec4(toLight, 0.0f));
             inputs.push_back(gpuVec4(random.direction(), 0.0f));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_MEDIA, inputs, 15, 6);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_MEDIA, inputs, 15, 7);
         // Newton's steps compare the GPU's depths with the CPU's: a little looser than one function.
         const FloatTolerance newtonTolerance{.absolute = 1e-3f, .relative = 1e-3f};
 
-        for (std::size_t i = 0; i < outputs.size() / 6; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 7; ++i) {
             const GpuVec4* in = &inputs[i * 15];
-            const GpuVec4* out = &outputs[i * 6];
+            const GpuVec4* out = &outputs[i * 7];
             const std::vector<Fog>& layers = cases[i];
             const GpuVec4& ray = in[10];
             const Vec3 source = vec3From(in[11]);
@@ -132,7 +132,7 @@ namespace {
             report.check("fogBeyondGrid", transcendentalTolerance, beyond.transmittance, out[0][2]);
             report.check("fogMediaFarSampleDistance", newtonTolerance, fogMediaFarSampleDistance(layers, ray[0], ray[1], ray[2], ray[3], extra[0]), out[0][3]);
             report.check("fogBeyondGrid", transcendentalTolerance, beyond.light, vec3From(out[1]));
-            report.check("fogSunTransmittance", transcendentalTolerance, fogSunTransmittance(layers, height, extra[2]), out[1][3]);
+            report.check("fogSunTransmittance", transcendentalTolerance, fogSunTransmittance(layers, height, extra[2], extra[3]), vec3From(out[6]));
             report.check("fogMediaShares", transcendentalTolerance, Vec3{shares[0], shares[1], shares[2]}, vec3From(out[2]));
             report.check("fogMediaShares", transcendentalTolerance, shares[3], out[2][3]);
             report.check("fogMediaStretchShares", transcendentalTolerance, Vec3{stretch[0], stretch[1], stretch[2]}, vec3From(out[3]));

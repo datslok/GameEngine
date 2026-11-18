@@ -1,6 +1,6 @@
 # Volumetric fog
 
-Covers: `src/scene/fog`, `src/render/gpu/volumetric_fog`, `src/render/vulkan/vulkan_fog`, `assets/shaders/volumetric_fog.glsl`, `assets/shaders/scene_fog.glsl`, `assets/shaders/scene_fog_shadows.glsl`, `assets/shaders/fog_light.comp`, `assets/shaders/fog_integrate.comp`, `assets/shaders/fog_apply.comp`
+Covers: `src/scene/fog`, `src/render/gpu/volumetric_fog`, `src/render/vulkan/vulkan_fog`, `assets/shaders/volumetric_fog.glsl`, `assets/shaders/scene_fog.glsl`, `assets/shaders/scene_fog_data.glsl`, `assets/shaders/scene_fog_shadows.glsl`, `assets/shaders/fog_light.comp`, `assets/shaders/fog_integrate.comp`, `assets/shaders/fog_apply.comp`
 
 Light the air scatters towards the eye: beams and lamps light the mist round them, distant things fade. Single scattering on a froxel grid, then a closed form past it. Shader maths rules: `.claude/rules/shader-mirror.md`; numbers in `volumetric_fog_shared.h`.
 
@@ -16,7 +16,7 @@ S: light arriving at s from each light, times the phase function and its shadow 
 
 - **`Fog` components**, one layer each (`scene/fog.h`; every one goes into `FrameLighting::fogLayers` in the world's order, the first `FOG_MAX_LAYERS` (4) count): `density` (extinction per metre at `baseHeight`; 3 / density ≈ visibility), `shape`, `scaleHeight`, `albedo` per colour, `anisotropy` (Henyey-Greenstein g, `henyeyGreensteinPhase` shared with the sky), `maxDistance` (none of the layer beyond it along a ray, so the sky shows).
 - **Shapes** (`fogDensity`): `Exponential` falls by e per scale height above the base, grows below (exponent capped at `FOG_MAX_EXPONENT`); `Pooled` is even up to `baseHeight` (its top) and falls by e per scale height above (its soft edge): mist pooled under the canopy.
-- **`FogSettings`** (`RenderSettings::fog`, F5 Fog, `validateFog`; meanings in `render/gpu/volumetric_fog.h`): `enabled` (off on Low), `range` (100 m, never past the far plane), `gridWidth`/`gridHeight`/`slices` (160 × 90 × 64; presets lower; changing them remakes the grid after a GPU wait), `historyWeight` (0.9), `probeLight`, `farShadowSteps` (16), `sunThroughFog` (on).
+- **`FogSettings`** (`RenderSettings::fog`, F5 Fog, `validateFog`; meanings in `render/gpu/volumetric_fog.h`): `enabled` (off on Low), `range` (100 m, never past the far plane), `gridWidth`/`gridHeight`/`slices` (160 × 90 × 64; presets lower; changing them remakes the grid after a GPU wait), `historyWeight` (0.9), `probeLight`, `farShadowSteps` (16), `sunThroughFog` (on), `forwardShare` (1).
 
 ## Layers
 
@@ -28,7 +28,7 @@ Layers add (research: `docs/research/FOGLAYERS.md`); each reaches to its `maxDis
 | `fogOpticalDepth` (pooled) | A straight ray crosses the top at most once: the density × the length below, plus the exponential's form above taken from that part's lower end (finite from any height) |
 | `fogMediaShares`, `fogMediaStretchShares` | Each layer's share of a point's extinction or a stretch's optical depth (a `vec4`, so `FOG_MAX_LAYERS` is 4) |
 | `fogMediaInScattering`, `fogMediaAmbient` | A light's or the ambient's scattered light: each layer's albedo and phase function weighed by its share |
-| `fogSunTransmittance` | exp(−depth) from a point towards a directional light, each layer to its `maxDistance`; read through `fogSunThrough` (1 with `sunThroughFog` off). Lights the fog only: surfaces under it get the undimmed sun |
+| `fogSunTransmittance` | Per colour, exp(−depth × (1 − `forwardShare` × albedo × g)) from a point towards a directional light, each layer to its `maxDistance`: the similarity relation (van de Hulst), the forward-scattered share still arriving. Read through `fogSunThrough` (`scene_fog_data.glsl`; 1 with `sunThroughFog` off) by the froxels, the far samples, every surface (`scene_surface.glsl`'s sun loop: main pass, captures, mirror, glass) and ray hits (`ray_hit_lighting.glsl`) |
 
 ## The grid
 
@@ -110,7 +110,7 @@ Drawn over a picture already fogged to the surface behind, so `scene_surface.gls
 - Lights without shadow maps light the fog through walls.
 - No sun shadow past the last cascade (the far map).
 - Refracting glass reads the fogged picture and adds the front fog for its covered share: that part counted twice.
-- Only directional lights are dimmed by the fog on their way; point and spot lights are not, and surfaces under dense fog get the undimmed sun.
+- Only directional lights are dimmed by the fog on their way; point and spot lights are not. The sideways-scattered share is lost, not added back as soft light, and shadows under mist stay as sharp as in clear air.
 - Without far shadow samples (glass, AO, `farShadowSteps` 0) the far fog's sun is dimmed as at the stretch's start.
 - No local fog volumes or drifting noise yet (ROADMAP, layers of fog).
 - The reflection probe's capture and probe rays see no fog.

@@ -87,6 +87,9 @@ const bool captureView = false;
 // probes, and the sun's stand-in shadow past its cascades.
 #include "scene_sky_visibility.glsl"
 
+// The sun's light through the fog above each surface (render/gpu/volumetric_fog.h, fogSunThrough).
+#include "scene_fog_data.glsl"
+
 #ifdef GLASS_SHADOW_RAYS
 /*
 * Tinted shadows (render/gpu/transparency.h), in the variants on GPUs with ray queries used while glass is in the world:
@@ -1229,7 +1232,8 @@ void main() {
                 continue;
             }
 
-            vec3 radiance = directional[i].radiance.rgb;
+            // Dimmed by the fog above, as the fog's own light is (the forward-scattered share still arriving).
+            vec3 radiance = directional[i].radiance.rgb * fogSunThrough(relativePosition.y + cameraOrigin.y, directional[i].toLight.xyz);
             int tile = directional[i].shadowTile;
 
             if (tile >= 0) {

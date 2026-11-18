@@ -80,8 +80,13 @@ namespace {
         const FogSettings defaults;
         assert(defaults.enabled && defaults.range == 100.0f && defaults.historyWeight == 0.9f && defaults.probeLight);
         assert(defaults.gridWidth == 160 && defaults.gridHeight == 90 && defaults.slices == 64);
-        assert(defaults.farShadowSteps == 16 && defaults.sunThroughFog);
+        assert(defaults.farShadowSteps == 16 && defaults.sunThroughFog && defaults.forwardShare == 1.0f);
         validateFog(defaults);
+        FogSettings forward;
+        forward.forwardShare = 1.5f;
+        assert(rejects(forward));
+        forward.forwardShare = std::numeric_limits<float>::quiet_NaN();
+        assert(rejects(forward));
 
         FogSettings wrong;
         wrong.range = 1.0f;
@@ -249,26 +254,56 @@ namespace {
     * The sun's light dimmed by the fog on its way down to a point: exp(-optical depth) from the point towards the sun,
     * out to each layer's farthest distance. Straight up from an exponential layer's base, its density times its scale
     * height; from inside the pool straight up, the depth below the top plus the scale height above; at a slant, fine
-    * sums; a low sun under the pool nearly gone; without fog none dimmed.
+    * sums; a low sun under the pool nearly gone; without fog none dimmed. All with forward share 0: every scattered
+    * photon lost (option A).
     */
     void testSunThroughFog() {
         const std::vector<Fog> layers = hazeAndPool();
         const Fog& haze = layers[0];
         const Fog& pool = layers[1];
+        const Vec3 one{1.0f, 1.0f, 1.0f};
 
-        assert(fogSunTransmittance(std::span<const Fog>{}, 5.0f, 0.5f) == 1.0f);
-        assert(near(fogSunTransmittance(std::span<const Fog>{&haze, 1}, 0.0f, 1.0f), std::exp(-0.002f * 300.0f), 1e-4f));
-        assert(near(fogSunTransmittance(std::span<const Fog>{&pool, 1}, 2.0f, 1.0f), std::exp(-(0.03f * 10.0f + 0.03f * 4.0f)), 1e-5f));
+        assert(nearVec(fogSunTransmittance(std::span<const Fog>{}, 5.0f, 0.5f, 1.0f), one, 0.0f));
+        const Vec3 straightUp = fogSunTransmittance(std::span<const Fog>{&haze, 1}, 0.0f, 1.0f, 0.0f);
+        assert(nearVec(straightUp, one * std::exp(-0.002f * 300.0f), 1e-4f));
+        assert(nearVec(fogSunTransmittance(std::span<const Fog>{&pool, 1}, 2.0f, 1.0f, 0.0f), one * std::exp(-(0.03f * 10.0f + 0.03f * 4.0f)), 1e-5f));
 
         const float slant = 0.4f;
         const auto density = [&](float height, float along) {
             return (along <= haze.maxDistance ? fogDensity(haze, height) : 0.0f) + (along <= pool.maxDistance ? fogDensity(pool, height) : 0.0f);
         };
         const float expected = static_cast<float>(summedDepth(density, 2.0f, slant, 0.0, 20000.0, 400000));
-        assert(near(-std::log(fogSunTransmittance(layers, 2.0f, slant)), expected, 1e-3f * expected));
+        assert(near(-std::log(fogSunTransmittance(layers, 2.0f, slant, 0.0f).x), expected, 1e-3f * expected));
 
-        assert(fogSunTransmittance(layers, 2.0f, 0.05f) < 0.01f);
-        assert(fogSunTransmittance(layers, 2.0f, slant) < fogSunTransmittance(layers, 30.0f, slant));
+        assert(fogSunTransmittance(layers, 2.0f, 0.05f, 0.0f).x < 0.01f);
+        assert(fogSunTransmittance(layers, 2.0f, slant, 0.0f).x < fogSunTransmittance(layers, 30.0f, slant, 0.0f).x);
+    }
+
+    /*
+    * The similarity relation (van de Hulst): a share albedo x g of what a forward-scattering layer scatters goes on
+    * nearly as it came, so the sun's beam is dimmed only by the depth times 1 - forward share x albedo x g, per colour.
+    * Share 1 with white droplets and g 0.6 keeps exp(-0.4 depth); share 0 is the full extinction; a layer absorbing red
+    * dims red more; even scattering (g 0) dims as much either way.
+    */
+    void testForwardScatteringStillArrives() {
+        Fog pool;
+        pool.shape = FogShape::Pooled;
+        pool.density = 0.03f;
+        pool.baseHeight = 12.0f;
+        pool.scaleHeight = 4.0f;
+        pool.anisotropy = 0.6f;
+        const std::span<const Fog> one{&pool, 1};
+        const float depth = 0.03f * 10.0f + 0.03f * 4.0f;
+
+        assert(nearVec(fogSunTransmittance(one, 2.0f, 1.0f, 1.0f), Vec3{1.0f, 1.0f, 1.0f} * std::exp(-0.4f * depth), 1e-5f));
+        assert(nearVec(fogSunTransmittance(one, 2.0f, 1.0f, 0.5f), Vec3{1.0f, 1.0f, 1.0f} * std::exp(-0.7f * depth), 1e-5f));
+
+        pool.albedo = Vec3{0.5f, 1.0f, 1.0f};
+        const Vec3 tinted = fogSunTransmittance(one, 2.0f, 1.0f, 1.0f);
+        assert(near(tinted.x, std::exp(-0.7f * depth), 1e-5f) && near(tinted.y, std::exp(-0.4f * depth), 1e-5f) && tinted.x < tinted.y);
+
+        pool.anisotropy = 0.0f;
+        assert(nearVec(fogSunTransmittance(one, 2.0f, 1.0f, 1.0f), fogSunTransmittance(one, 2.0f, 1.0f, 0.0f), 1e-6f));
     }
 
     // The slices: from the camera to the grid's range, thin near the camera where a metre covers much of the screen.
@@ -861,6 +896,10 @@ namespace {
         FogSettings sunUndimmed;
         sunUndimmed.sunThroughFog = false;
         assert(packFog(one, sunUndimmed, viewProjection, viewProjection, true, true, 3, 500.0f).options[3] == 0.0f);
+        assert(packed.media.extent[2] == 1.0f);
+        FogSettings halfForward;
+        halfForward.forwardShare = 0.5f;
+        assert(packFog(one, halfForward, viewProjection, viewProjection, true, true, 3, 500.0f).media.extent[2] == 0.5f);
 
         // Layers: each its medium, albedo and farthest distance and its shape; the farthest of them; past FOG_MAX_LAYERS ignored.
         std::vector<Fog> many = hazeAndPool();
@@ -899,6 +938,7 @@ void testVolumetricFog() {
     testPooledOpticalDepth();
     testLayersAdd();
     testSunThroughFog();
+    testForwardScatteringStillArrives();
     testSlices();
     testVolumeCoordinates();
     testJitter();

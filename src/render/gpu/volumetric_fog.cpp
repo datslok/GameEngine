@@ -73,7 +73,8 @@ void visit(FogSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Fog history", settings.historyWeight, {.min = 0.0f, .max = static_cast<float>(FOG_MAX_HISTORY_WEIGHT)});
     visitor.field("Fog lit by probes", settings.probeLight);
     visitor.field("Fog far shadow steps", settings.farShadowSteps, {.min = 0, .max = FOG_MAX_FAR_SHADOW_STEPS, .sliderMax = 32});
-    visitor.field("Fog dims the sun", settings.sunThroughFog);
+    visitor.field("Fog dims the sun (air and surfaces)", settings.sunThroughFog);
+    visitor.field("Fog forward share", settings.forwardShare, {.min = 0.0f, .max = 1.0f});
 }
 
 // Written so not a number fails too.
@@ -97,6 +98,10 @@ void validateFog(const FogSettings& settings) {
 
     if (settings.farShadowSteps < 0 || settings.farShadowSteps > FOG_MAX_FAR_SHADOW_STEPS) {
         throw std::invalid_argument("Volumetric fog needs 0 to FOG_MAX_FAR_SHADOW_STEPS far shadow steps");
+    }
+
+    if (!(settings.forwardShare >= 0.0f && settings.forwardShare <= 1.0f)) {
+        throw std::invalid_argument("Volumetric fog needs a forward share from 0 to 1");
     }
 }
 
@@ -201,14 +206,16 @@ Vec3 fogMediaAmbient(std::span<const Fog> layers, const FogLayerShares& shares, 
     return ambient * albedo;
 }
 
-float fogSunTransmittance(std::span<const Fog> layers, float height, float toLightY) {
-    float depth = 0.0f;
+Vec3 fogSunTransmittance(std::span<const Fog> layers, float height, float toLightY, float forwardShare) {
+    Vec3 depth;
 
     for (std::size_t i = 0; i < layerCount(layers); ++i) {
-        depth += fogOpticalDepth(layers[i], height, toLightY, 0.0f, layers[i].maxDistance);
+        const Fog& fog = layers[i];
+        const Vec3 lost = Vec3{1.0f, 1.0f, 1.0f} - fog.albedo * (forwardShare * fog.anisotropy);
+        depth = depth + lost * fogOpticalDepth(fog, height, toLightY, 0.0f, fog.maxDistance);
     }
 
-    return std::exp(-depth);
+    return Vec3{std::exp(-depth.x), std::exp(-depth.y), std::exp(-depth.z)};
 }
 
 // Even in log(depth + sliceStart): depth = s ((1 + range / s)^slice - 1).
@@ -497,6 +504,7 @@ GpuFog packFog(std::span<const Fog> layers, const FogSettings& settings, const M
     packed.grid[3] = std::min(settings.range, cameraFar);
 
     packed.media = packFogMedia(layers);
+    packed.media.extent[2] = settings.forwardShare;
 
     packed.options[0] = 1.0f;
     packed.options[1] = historyUsable ? settings.historyWeight : 0.0f;
