@@ -121,7 +121,9 @@ void testMipLevels();
 void testSrgb();
 void testFrameDescription();
 void testStillDraws();
+void testWorldCells();
 void testStillInstances();
+void testLastingBuffers();
 void testShadowMap();
 void testShadowAtlas();
 void testSoftShadow();
@@ -411,7 +413,9 @@ const RoutineTest routineTests[] = {
     {"testSrgb", testSrgb},
     {"testFrameDescription", testFrameDescription},
     {"testStillDraws", testStillDraws},
+    {"testWorldCells", testWorldCells},
     {"testStillInstances", testStillInstances},
+    {"testLastingBuffers", testLastingBuffers},
     {"testShadowMap", testShadowMap},
     {"testShadowAtlas", testShadowAtlas},
     {"testSoftShadow", testSoftShadow},

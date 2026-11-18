@@ -171,8 +171,6 @@ VkDeviceAddress UploadArray::getDeviceAddress() const {
 
 SceneBuffers::SceneBuffers(VmaAllocator allocator):
     frameData(allocator, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT),
-    instances(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    materials(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     directionalLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     pointLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     spotLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
@@ -180,7 +178,6 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     // Copied from too: cull-compare reads back the lists the GPU wrote into it (render/vulkan/vulkan_camera_culling.h).
     drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT),
     probeHitLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    previousModels(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     skyLight(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     mirrorPairs(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
@@ -199,8 +196,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
 
     const std::array<VkDescriptorBufferInfo, SceneBindingCount> bufferInfos{
         buffers.frameData.describe(),
-        buffers.instances.describe(),
-        buffers.materials.describe(),
+        views.instances,
+        views.materials,
         buffers.directionalLights.describe(),
         buffers.pointLights.describe(),
         buffers.spotLights.describe(),
@@ -219,7 +216,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         buffers.atmosphere.describe(),
         views.probeCascades,
-        buffers.previousModels.describe(),
+        views.previousModels,
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
         buffers.mirrorPairs.describe(),

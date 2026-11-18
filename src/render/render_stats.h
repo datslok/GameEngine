@@ -38,6 +38,12 @@ struct RenderStats {
 
     // Shadow views drawn this frame, kept from an earlier frame because nothing in them changed (cached), and point
     // light cube faces left out because they see nothing on screen. Shadow drawn/culled above count only drawn views.
+    // The cells holding still draws and their slots (scene/still_draws.h), and the bytes the frame copied into GPU memory
+    // kept between frames (render/vulkan/vulkan_lasting_buffer.h): standing still, only the moving draws' records.
+    std::size_t stillCells = 0;
+    std::size_t stillSlots = 0;
+    std::size_t lastingCopiedBytes = 0;
+
     std::size_t shadowTilesDrawn = 0;
     std::size_t shadowTilesCached = 0;
     std::size_t shadowTilesSkipped = 0;

@@ -53,6 +53,8 @@ VulkanCameraCulling::VulkanCameraCulling(const VulkanDevice& device, std::uint32
     scanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_scan.comp.spv", 3));
     writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_write.comp.spv", 9));
     compactPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_compact.comp.spv", 8));
+    records = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullRecord));
+    candidates = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullCandidate));
     setFramesInFlight(framesInFlight);
 }
 
@@ -62,36 +64,52 @@ void VulkanCameraCulling::setFramesInFlight(std::uint32_t count) {
 }
 
 /*
-* The still records and candidates go first in their buffers and are written only when the frame in flight holds an
-* older still part (or its buffer grew); the moving draws' follow them every frame, as do the levels, groups and views.
+* The kept records and candidates: the still part as held (the same generation), its repacked records (the next
+* generation: candidates change only when the still part was built afresh), or all of it (another generation, or a
+* buffer made afresh); the moving draws' after it every frame. The levels, groups, views and drawing order are the
+* frame in flight's own, written whole.
 */
-void VulkanCameraCulling::upload(PerFrame& frame, const CameraCullFrame& table, std::span<const GpuCameraCull> views) {
-    const std::size_t recordCount = table.stillRecords.size() + table.movingRecords.size();
-    const std::size_t candidateCount = table.stillCandidates.size() + table.movingCandidates.size();
-    bool rewriteStill = frame.heldGeneration != table.stillGeneration;
-    rewriteStill = ensureBuffer(device, frame.records, recordCount * sizeof(GpuCullRecord), storage, BufferMemory::Upload) || rewriteStill;
-    rewriteStill = ensureBuffer(device, frame.candidates, candidateCount * sizeof(GpuCullCandidate), storage, BufferMemory::Upload) || rewriteStill;
+void VulkanCameraCulling::upload(VkCommandBuffer commands, std::uint32_t frameIndex, const CameraCullFrame& table, std::span<const GpuCameraCull> views) {
+    PerFrame& frame = frames.at(frameIndex);
+    const std::size_t stillRecords = table.stillRecords.size();
+    const std::size_t stillCandidates = table.stillCandidates.size();
+    const bool held = heldGeneration != 0 && table.stillGeneration == heldGeneration;
+    const bool follows = heldGeneration != 0 && table.stillGeneration == heldGeneration + 1;
+    const std::vector<DrawRange> everyRecord{DrawRange{0, stillRecords}};
+    const std::vector<DrawRange> everyCandidate{DrawRange{0, stillCandidates}};
+
+    std::vector<LastingWrite> recordWrites;
+    const bool freshRecords = records->reserve(stillRecords + table.movingRecords.size());
+    const std::vector<DrawRange> recordRanges = freshRecords || !(held || follows) ? everyRecord : held ? std::vector<DrawRange>{} : table.stillRepacked;
+    appendLastingWrites(recordWrites, recordRanges, table.stillRecords, 0);
+    appendLastingWrites(recordWrites, {DrawRange{0, table.movingRecords.size()}}, std::span<const GpuCullRecord>{table.movingRecords}, stillRecords);
+    records->write(commands, frameIndex, recordWrites);
+
+    std::vector<LastingWrite> candidateWrites;
+    const bool freshCandidates = candidates->reserve(stillCandidates + table.movingCandidates.size());
+    const bool candidatesKept = !freshCandidates && (held || (follows && !table.stillRebuilt));
+    appendLastingWrites(candidateWrites, candidatesKept ? std::vector<DrawRange>{} : everyCandidate, table.stillCandidates, 0);
+    appendLastingWrites(candidateWrites, {DrawRange{0, table.movingCandidates.size()}}, std::span<const GpuCullCandidate>{table.movingCandidates},
+                        stillCandidates);
+    candidates->write(commands, frameIndex, candidateWrites);
+    heldGeneration = table.stillGeneration;
+
     ensureBuffer(device, frame.levels, table.meshLevels.size() * sizeof(GpuMeshLevels), storage, BufferMemory::Upload);
     ensureBuffer(device, frame.groups, table.groups.size() * sizeof(GpuCullGroup), storage, BufferMemory::Upload);
     ensureBuffer(device, frame.views, views.size_bytes(), storage, BufferMemory::Upload);
     ensureBuffer(device, frame.order, table.drawOrder.order.size() * sizeof(std::uint32_t), storage, BufferMemory::Upload);
-
-    if (rewriteStill) {
-        writeAt(frame.records, 0, table.stillRecords);
-        writeAt(frame.candidates, 0, table.stillCandidates);
-        frame.heldGeneration = table.stillGeneration;
-    }
-
-    writeAt(frame.records, table.stillRecords.size_bytes(), std::span<const GpuCullRecord>{table.movingRecords});
-    writeAt(frame.candidates, table.stillCandidates.size_bytes(), std::span<const GpuCullCandidate>{table.movingCandidates});
     writeAt(frame.levels, 0, std::span<const GpuMeshLevels>{table.meshLevels});
     writeAt(frame.groups, 0, std::span<const GpuCullGroup>{table.groups});
     writeAt(frame.views, 0, views);
     writeAt(frame.order, 0, std::span<const std::uint32_t>{table.drawOrder.order});
 
-    for (const VulkanBuffer* buffer : {&frame.records, &frame.candidates, &frame.levels, &frame.groups, &frame.views, &frame.order}) {
+    for (const VulkanBuffer* buffer : {&frame.levels, &frame.groups, &frame.views, &frame.order}) {
         buffer->flush();
     }
+}
+
+std::size_t VulkanCameraCulling::getCopiedBytes() const {
+    return records->getCopiedBytes() + candidates->getCopiedBytes();
 }
 
 
@@ -124,7 +142,7 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
     }
 
     const std::uint32_t blocks = views[0].blocks;
-    upload(frame, table, views);
+    upload(commands, frameIndex, table, views);
 
     const CullViewSizes sizes = cullViewSizes(viewCount, candidateCount, table.drawOrder);
     const VkBufferUsageFlags commandUsage = storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -166,7 +184,7 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
 
         if (blocks > 0) {
             const std::array<ComputeBinding, 8> bindings{
-                storageBufferBinding(frame.records.get()),   storageBufferBinding(frame.levels.get()), storageBufferBinding(frame.candidates.get()),
+                storageBufferBinding(records->get()),        storageBufferBinding(frame.levels.get()), storageBufferBinding(candidates->get()),
                 batchViews,                                  storageBufferBinding(frame.flags.get()),  storageBufferBinding(frame.offsets.get()),
                 storageBufferBinding(frame.blockSums.get()), storageBufferBinding(frame.counts.get()),
             };
@@ -188,7 +206,7 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
 
         if (writers > 0) {
             const std::array<ComputeBinding, 9> writeBindings{
-                batchViews,                                storageBufferBinding(frame.candidates.get()), storageBufferBinding(frame.flags.get()),
+                batchViews,                                storageBufferBinding(candidates->get()),      storageBufferBinding(frame.flags.get()),
                 storageBufferBinding(frame.offsets.get()), storageBufferBinding(frame.blockSums.get()),  storageBufferBinding(frame.groups.get()),
                 storageBufferBinding(drawList),            storageBufferBinding(frame.mainCommands.get()), storageBufferBinding(frame.motionCommands.get()),
             };

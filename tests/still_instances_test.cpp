@@ -43,8 +43,8 @@ namespace {
 
     // Two records alike once their materials are looked up in their own tables.
     bool sameRecord(const GpuInstance& a, const MaterialTable& aTable, const GpuInstance& b, const MaterialTable& bTable) {
-        const GpuMaterial& aMaterial = aTable.getEntries().at(a.material[0]);
-        const GpuMaterial& bMaterial = bTable.getEntries().at(b.material[0]);
+        const GpuMaterial& aMaterial = aTable.at(a.material[0]);
+        const GpuMaterial& bMaterial = bTable.at(b.material[0]);
         return std::memcmp(a.model, b.model, sizeof(a.model)) == 0 && std::memcmp(a.normalMatrix, b.normalMatrix, sizeof(a.normalMatrix)) == 0 &&
                std::memcmp(a.handedness, b.handedness, sizeof(a.handedness)) == 0 && a.material[1] == b.material[1] && a.material[2] == b.material[2] &&
                a.material[3] == b.material[3] && std::memcmp(&aMaterial, &bMaterial, sizeof(GpuMaterial)) == 0;
@@ -143,9 +143,74 @@ namespace {
 
         assertMatchesScratch(frame, still);
     }
+
+    /*
+    * Slots added at the end (a cell's new block) are packed alone when the frame's built ranges cover them; not covered,
+    * everything is packed. The materials the update added are named from their first.
+    */
+    void testAddedSlotsArePackedAlone() {
+        StillInstances still;
+        FrameDescription first = frameOf(5, 3, 1, 0, {DrawRange{0, 5}});
+        still.update(first, testJobs());
+        assert(still.getFirstNewMaterial() == 0);
+        const std::size_t materialsBefore = still.getMaterials().getEntries().size();
+
+        FrameDescription grown = frameOf(8, 2, 2, 1, {DrawRange{5, 3}});
+        grown.draws[6].material.roughness = 0.9f;
+        const std::vector<DrawRange> repacked = still.update(grown, testJobs());
+        assert(repacked.size() == 1 && repacked[0].first == 5 && repacked[0].count == 3);
+        assert(still.getMaterials().getEntries().size() == materialsBefore + 1 && still.getFirstNewMaterial() == materialsBefore);
+        assertMatchesScratch(grown, still);
+
+        // Nothing new: the first new material is past the last.
+        FrameDescription same = frameOf(8, 2, 3, 2, {DrawRange{1, 1}});
+        same.draws[6] = grown.draws[6];
+        still.update(same, testJobs());
+        assert(still.getFirstNewMaterial() == still.getMaterials().getEntries().size());
+        assertMatchesScratch(same, still);
+
+        FrameDescription uncovered = frameOf(11, 2, 4, 3, {DrawRange{8, 1}});
+        uncovered.draws[6] = grown.draws[6];
+        assert(repackedCount(still.update(uncovered, testJobs())) == 11 && still.getFirstNewMaterial() == 0);
+        assertMatchesScratch(uncovered, still);
+    }
+
+    /*
+    * A table over a base: materials the base holds keep its numbers, new ones are numbered after the base's and held
+    * alone, so the moving draws' table never copies the still draws'.
+    */
+    void testATableOverABase() {
+        Material a;
+        a.roughness = 0.1f;
+        Material b;
+        b.roughness = 0.2f;
+        Material c;
+        c.roughness = 0.3f;
+        MaterialTable base;
+        assert(base.add(a) == 0 && base.add(b) == 1);
+
+        MaterialTable table = MaterialTable::over(base);
+        assert(table.getFirstIndex() == 2);
+        assert(table.add(b) == 1 && table.add(c) == 2 && table.add(c) == 2 && table.add(a) == 0);
+        assert(table.getEntries().size() == 1);
+        assert(std::memcmp(&table.at(2), &table.getEntries()[0], sizeof(GpuMaterial)) == 0);
+        assert(std::memcmp(&table.at(0), &base.getEntries()[0], sizeof(GpuMaterial)) == 0);
+
+        // The moving draws' table: over the still draws', holding only what they lack.
+        StillInstances still;
+        FrameDescription frame = frameOf(5, 3, 1, 0, {DrawRange{0, 5}});
+        frame.draws[7].material.roughness = 0.95f;
+        still.update(frame, testJobs());
+        const SceneRecords records = packMovingDraws(frame, still, testJobs());
+        assert(records.materials.getFirstIndex() == still.getMaterials().getEntries().size());
+        assert(records.materials.getEntries().size() == 1);
+        assertMatchesScratch(frame, still);
+    }
 }
 
 void testStillInstances() {
+    testAddedSlotsArePackedAlone();
+    testATableOverABase();
     testOnlyBuiltDrawsArePacked();
     testWithoutStillDraws();
     testTheTableStaysBounded();

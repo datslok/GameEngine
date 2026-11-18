@@ -29,6 +29,9 @@ public:
     std::span<const std::array<float, 16>> getPreviousModels() const;
     const MaterialTable& getMaterials() const;
 
+    // The first material entry the last update added (0 when it packed the table afresh; the count when none).
+    std::size_t getFirstNewMaterial() const;
+
 private:
     void packAll(const FrameDescription& frame, JobSystem& jobs);
     void packRange(const FrameDescription& frame, const DrawRange& range, JobSystem& jobs);
@@ -37,12 +40,14 @@ private:
     std::vector<std::array<float, 16>> previousModels;
     MaterialTable materials;
     std::size_t entriesWhenWhole = 0;
+    std::size_t firstNewMaterial = 0;
     std::uint64_t packedVersion = 0;
 };
 
 /*
 * A frame's other records, packed now: the moving draws' (every draw after the still ones) instances and last-frame
-* matrices, their materials added to a copy of the still draws' table, which is the frame's.
+* matrices, and a table over the still draws' (MaterialTable::over) holding the materials it lacks, numbered after its
+* entries: the GPU holds the still table's entries, then these. The still table must outlive it.
 */
 struct SceneRecords {
     std::vector<GpuInstance> moving;

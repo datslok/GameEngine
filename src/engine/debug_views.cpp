@@ -36,12 +36,13 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 }
 
 /*
-* Eight lines of text, in the same colour as the bounding boxes: the camera's view (and a line of how many of its draws drew each level
+* Nine lines of text, in the same colour as the bounding boxes: the camera's view (and a line of how many of its draws drew each level
 * of detail, the meshes themselves first, and the thousands of triangles drawn: all, the cut-outs', the probe's), all shadow views together (each
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
 * tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
-* states, the video memory, and the eye's exposure with the upscaler.
+* states, the video memory, the still draws' cells with the bytes copied into lasting GPU buffers, and the eye's
+* exposure with the upscaler.
 */
 std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled) +
@@ -65,7 +66,10 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed) +
                                (stats.imageLights > 0 ? "  IN MIRRORS " + std::to_string(stats.imageLights) : std::string{});
 
-    std::vector<std::string> lines{camera, detail, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory),
+    // Kilobytes rounded down: standing still, a few from the moving draws.
+    const std::string cells = "CELLS " + std::to_string(stats.stillCells) + "  SLOTS " + std::to_string(stats.stillSlots) + "  UPLOADED " +
+                              std::to_string(stats.lastingCopiedBytes / 1024) + " KB";
+    std::vector<std::string> lines{camera, detail, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory), cells,
                                    exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)};
     return lines;
 }

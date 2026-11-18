@@ -18,6 +18,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -134,18 +135,33 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
 /*
 * The frame's materials, one entry per different material: draws carry their materials by value, and many share one (a
 * hundred pillars of the same stone), so add() returns the number of an identical entry when there is one.
+*
+* A table may sit over a base (the still draws' table, render/gpu/still_instances.h), which must outlive it: the base's
+* entries keep their numbers, and only materials the base lacks are held here, numbered after the base's, so the GPU
+* holds the base's entries then these.
 */
 class MaterialTable {
 public:
+    // An empty table over base.
+    static MaterialTable over(const MaterialTable& base);
+
     std::uint32_t add(const Material& material);
 
     // The same for a material already packed (packMaterial, not a blended ground) and the hash of its bytes
     // (materialHash): the index of an equal entry, or a new one.
     std::uint32_t addPacked(const GpuMaterial& packed, std::uint64_t hash);
 
+    // This table's own entries (numbered from getFirstIndex), and the entry a number names, the base's included.
     const std::vector<GpuMaterial>& getEntries() const;
+    const GpuMaterial& at(std::uint32_t index) const;
+    std::uint32_t getFirstIndex() const;
 
 private:
+    // The number of an equal entry among this table's own, if any.
+    std::optional<std::uint32_t> findOwn(const GpuMaterial& packed, std::uint64_t hash) const;
+
+    const MaterialTable* base = nullptr;
+    std::uint32_t firstIndex = 0;
     std::vector<GpuMaterial> entries;
 
     // Entries by a hash of their bytes; equal hashes are compared in full, so a collision only costs a comparison.

@@ -29,6 +29,7 @@ Makefile, flags, dependencies, packaging: `docs/architecture/build.md`.
 8. **Shader maths** lives in `.glsl` libraries mirrored in C++ and tested (`.claude/rules/shader-mirror.md`).
 9. **Branches:** one per feature, descriptive commits. Merge into `main` with `--no-ff`, push, delete the branch locally and on GitHub.
 10. Source files use CRLF; keep them.
+11. **Build for scale and performance, not ease:** pick the design whose cost grows with what is seen or changed, not with what exists, even when it is harder to build. Each plan says what its cost grows with; say plainly where a gain is negligible, and stage hard work so each step stays testable.
 
 ## Conventions
 

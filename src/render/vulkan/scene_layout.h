@@ -142,16 +142,12 @@ struct SceneBuffers {
     explicit SceneBuffers(VmaAllocator allocator);
 
     UploadArray frameData;
-    UploadArray instances;
-    UploadArray materials;
     UploadArray directionalLights;
     UploadArray pointLights;
     UploadArray spotLights;
     UploadArray shadowTiles;
     UploadArray drawList;
     UploadArray probeHitLights;
-    // Each instance's model matrix last frame (column-major, its current one when it did not move), for the velocity pass.
-    UploadArray previousModels;
 
     // The flat ambient light when there is no atmosphere (with one, the atmosphere's own buffer stands in), and the
     // atmosphere's numbers (GpuAtmosphere; present or not, render/gpu/atmosphere.h).
@@ -206,6 +202,11 @@ struct SceneImages {
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light
 // and the probes' cascades (each a stand-in without probes or an atmosphere).
 struct SceneBufferViews {
+    // Kept from frame to frame (render/vulkan/vulkan_lasting_buffer.h): every draw's instance, the materials, and each
+    // instance's model matrix last frame (column-major, its current one when it did not move) for the velocity pass.
+    VkDescriptorBufferInfo instances{};
+    VkDescriptorBufferInfo materials{};
+    VkDescriptorBufferInfo previousModels{};
     VkDescriptorBufferInfo probeStates{};
     VkDescriptorBufferInfo skyLight{};
     VkDescriptorBufferInfo probeCascades{};

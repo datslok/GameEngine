@@ -486,6 +486,8 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     StillDraws* still = nullptr;
 
     if (settings.keepStillDraws) {
+        stillDraws.setCells(settings.cells);
+
         if (assets.getLevelsVersion() != stillLevelsVersion) {
             stillDraws.invalidate();
             stillLevelsVersion = assets.getLevelsVersion();

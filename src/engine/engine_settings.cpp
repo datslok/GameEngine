@@ -36,6 +36,9 @@ void visit(EngineSettings& settings, SettingsVisitor& visitor) {
                   {.min = automaticWorkerThreads, .max = 256, .sliderMax = 64, .unit = "(-1: a core each but one)", .applies = FieldApplies::AtStartup});
     visitor.field("Cloth on GPU", settings.clothOnGpu);
     visitor.field("Keep still draws", settings.keepStillDraws);
+    visitor.group("Cells", [&] {
+        visit(settings.cells, visitor);
+    });
     visitor.field("Debug bounding boxes", settings.debugBoundingBoxes);
     visitor.field("Command server", settings.commandServer, FieldApplies::AtStartup);
     visitor.field("Command port", settings.commandPort,

@@ -1,6 +1,6 @@
 # Game interface and the frame
 
-Covers: `src/engine/game`, `src/scene/frame_description`, `src/scene/still_draws`, `src/scene/model_renderer`, `src/scene/culling`, `src/math/frustum`, `src/scene/level_of_detail`, `src/scene/mesh_level.h`, `src/scene/debug_draw`, `src/scene/debug_text`, `src/engine/debug_views`, `src/render/render_stats.h`, `src/render/gpu/video_memory`, `src/render/gpu/debug_line_vertices`, `src/render/vulkan/vulkan_debug_lines`, `assets/shaders/debug_line.frag`, `assets/shaders/debug_line.vert`
+Covers: `src/engine/game`, `src/scene/frame_description`, `src/scene/still_draws`, `src/scene/world_cells`, `src/scene/model_renderer`, `src/scene/culling`, `src/math/frustum`, `src/scene/level_of_detail`, `src/scene/mesh_level.h`, `src/scene/debug_draw`, `src/scene/debug_text`, `src/engine/debug_views`, `src/render/render_stats.h`, `src/render/gpu/video_memory`, `src/render/gpu/debug_line_vertices`, `src/render/vulkan/vulkan_debug_lines`, `assets/shaders/debug_line.frag`, `assets/shaders/debug_line.vert`
 
 What a game implements, and what the engine hands the renderer each frame. The loop that calls the hooks: [engine-core.md](engine-core.md). Rules for working here: `src/engine/CLAUDE.md`.
 
@@ -94,9 +94,13 @@ After `renderer.render`, `giveBackStillDraws` returns the list. Golden captures 
 
 `StillDraws` (`scene/still_draws`, owned by `Application`): still entities' draws kept between frames, so a frame builds only what moves. The renderer's matching cache of packed records (`StillInstances`): `gpu-scene.md`.
 
-- `update(world, alpha, jobs)` returns the kept draws first; `buildFrame` puts them at the front (`stillDraws` of them) and builds the moving draws after. `giveBack` hands the list (and its memory) back once drawn.
-- **Rebuilt whole** when a still entity is added, destroyed, hidden or shown, changes part count, stops being still, when a frame was not given back, or after `invalidate` (the engine calls it when `AssetManager::getLevelsVersion` changes, since draws hold spans of the levels; and while `keepStillDraws` is off).
-- **Rebuilt in place:** an entity marked by `markRenderChanged` (a one-frame `RenderChanged` component; once per entity inside a walk). `builtStillDraws` lists the rebuilt ranges.
+- `update(world, alpha, jobs)` returns the kept draws first; `buildFrame` puts them at the front (`stillDraws` slots) and builds the moving draws after. `giveBack` hands the list (and its memory) back once drawn.
+- **Laid out by cell** (`scene/world_cells`, GPU-driven drawing's stage 7a): the ground cut into `CellSettings::size` squares (128 m, `engine.cells.*`), keyed by 64-bit column and row (`worldCellOf`, from the entity's transform). Each cell a block of slots (`cellBlockSlots`: its draws plus `spareShare` 0.25, at least `fewestSlots` 64), cells by key, a cell's entities in joining order; spare slots hold `emptyDrawSlot()` (no mesh, hidden, no shadow, unknown bounds), which every view, ray and list passes over (`isEmptyDrawSlot`). Blocks come from `SlotBlocks`: first free run that fits, else the end.
+- **A cell rebuilt** when a still entity joins or leaves it (added, destroyed, hidden or shown, no longer still, an announced move into another cell) or one of its entities changes part count: only that cell's block. A cell outgrowing its block moves, its old block emptied; both are in `builtStillDraws`. The slot count only grows between full layouts; the built ranges cover every new slot. Finding entities that left walks the cells only when some went missing.
+- **Laid out whole** on the first frame, when a frame was not given back, with other cell settings, or after `invalidate` (the engine calls it when `AssetManager::getLevelsVersion` changes, since draws hold spans of the levels; and while `keepStillDraws` is off).
+- **Rebuilt in place:** an entity marked by `markRenderChanged` (a one-frame `RenderChanged` component; once per entity inside a walk) that stays in its cell. `builtStillDraws` lists the rebuilt ranges, sorted and joined (`joinDrawRanges`).
+- `FrameDescription::stillCells`, `stillEmptySlots` feed F4's `CELLS n  SLOTS m  UPLOADED k KB` line (with the renderer's copied bytes); DRAWN/CULLED leave the empty slots out.
+- Still walks every renderer each frame to find additions (about 0.7 ms in the forest): announced additions are on `ROADMAP.md`.
 - An entity with a `DeformingMesh` is never kept.
 - A still draw's `previousModel` is its own matrix: an announced move is a jump (no motion blur or smear).
 - Each update has a `version` naming the previous one, so the renderer knows whether only `builtStillDraws` changed.
@@ -198,4 +202,4 @@ Then, from `Application`'s profilers (pale green, `profileDebugColour`):
 
 ## Tests
 
-`frame_description_test`, `still_draws_test`, `culling_test`, `level_of_detail_test`, `debug_draw_test`, `debug_text_test`, `video_memory_test`.
+`frame_description_test`, `still_draws_test`, `world_cells_test`, `culling_test`, `level_of_detail_test`, `debug_draw_test`, `debug_text_test`, `video_memory_test`.
