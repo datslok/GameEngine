@@ -147,6 +147,7 @@ The engine's text interface: scripts, tools and AIs drive a running game by name
 | `stats` | `renderStatsLines` (the F4 readout's lines), the camera, the CPU, scene and render profilers' lines, the GPU profiler's, the cloth's while it has timings, then `PAUSED` or `RUNNING AT TICK <n>` |
 | `wait [frames]` | holds the queue for 1 to 100,000 frames; its reply goes when done, so a client knows lighting and anti-aliasing have settled |
 | `sky-points <x y z>` | `VulkanRenderer::describeSkyPoints`: the sky visibility grid's queues and each cascade's eight points round the place (state, waiting or quick, open and unsure shares, bounce). A screenshot bakes everything first, so this is the only live view |
+| `cull-compare` | `addCullCompareCommand`, refused without `passes.gpuCulling`: `VulkanRenderer::compareCulling` compares the next frame's lists, returns the last report (`gpu-driven.md`) |
 | `save-settings` | `Application::saveSettings`, as F5's Save |
 | `quit` | ends the loop after the replies are sent |
 

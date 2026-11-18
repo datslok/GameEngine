@@ -58,6 +58,7 @@
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_wind.h"
+#include "render/vulkan/vulkan_camera_culling.h"
 #include "render/vulkan/vulkan_sky_visibility.h"
 #include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
@@ -86,6 +87,16 @@ struct BatchPipelines {
 
     // The pipelines also read each mesh's last shape, at vertex binding 1 (the velocity pass).
     bool previousShapes = false;
+};
+
+/*
+* What a camera pass draws: the CPU's batches, or, while the GPU culls the camera (render/gpu/camera_culling.h), every
+* group of the frame's table in its drawing order, each by the command the GPU wrote for it (commands, one a group).
+*/
+struct PassDraws {
+    const std::vector<DrawBatch>* batches = nullptr;
+    const CameraCullFrame* groups = nullptr;
+    VkBuffer commands = VK_NULL_HANDLE;
 };
 
 /*
@@ -122,6 +133,10 @@ public:
 
     // The sky visibility grid's points round a place in the world, as text, for the sky-points command.
     std::string describeSkyPoints(const Vec3& place) const;
+
+    // cull-compare: asks for the next frame's GPU-culled lists to be compared with the CPU's, and returns the last
+    // comparison's report (empty while none has finished).
+    std::string compareCulling();
 
     // Waits for every pipeline asked for, rethrowing the first that failed to build.
     void finishPipelines();
@@ -406,6 +421,34 @@ private:
     std::unique_ptr<VulkanOcclusionCulling> occlusionCulling;
     std::optional<OcclusionCounts> lastOcclusionCounts;
 
+    // The camera's lists built on the GPU (render/gpu/camera_culling.h, passes.gpuCulling): the still draws' tables kept
+    // between frames, the passes, and what each frame in flight culled with (its groups' styles, for the triangles; the
+    // CPU's lists and the records, for a comparison asked for).
+    struct CullCompare {
+        BatchedDraws mainDraws;
+        BatchedDraws motionDraws;
+        std::vector<GpuCullRecord> records;
+        std::vector<GpuMeshLevels> levels;
+        GpuCameraCull view;
+    };
+
+    struct CameraCullCounts {
+        std::size_t drawn = 0;
+        std::array<std::size_t, meshLevelSlots> levels{};
+        std::size_t triangles = 0;
+        std::size_t cutOutTriangles = 0;
+    };
+
+    void takeCameraCull(const VulkanCameraCulling::Collected& culled, std::uint32_t frameIndex);
+
+    CameraCullTable cameraCullTable;
+    std::unique_ptr<VulkanCameraCulling> cameraCulling;
+    std::vector<std::vector<CullGroupStyle>> cullStyles;
+    std::vector<std::optional<CullCompare>> cullCompares;
+    CameraCullCounts lastCameraCull;
+    bool cullCompareAsked = false;
+    std::string cullCompareReport;
+
     // The eye's adaptation (render/gpu/eye_adaptation.h): its passes and the last reading, for the readout. It snaps
     // to its target when it starts afresh (the first frame, or switched on again) and on every frame a capture draws.
     std::unique_ptr<VulkanEyeAdaptation> eyeAdaptation;
@@ -622,12 +665,14 @@ private:
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
     // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
+    // gpuListEntries: while the GPU culls the camera, the room left for its camera and velocity lists (each that many
+    // entries, written by VulkanCameraCulling), in place of mainDraws' and motionDraws'; 0 without.
     // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
     // reads the mirrored light pass's images when there are any. occlusion: the main pass reads ambient occlusion, the
     // blurred image when occlusionBlurred, else the accumulated one when occlusionAccumulates; gathersLight: it holds bounce light, in place of the bounce fit. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
     // frameFog: the fog's record (off without fog).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
-                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
+                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws, std::size_t gpuListEntries,
                                std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
                                const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
@@ -657,7 +702,7 @@ private:
     // The coloured shadow maps at half the atlas's size, made the first frame that draws them and again when the atlas
     // changes size; made, they start cleared (white tint, no glass) and every tile is redrawn.
     void ensureGlassShadowMaps(const ShadowAtlasSize& atlas);
-    void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
+    void drawDepthPrepass(FrameContext& frame, const PassDraws& mainDraws, VkDescriptorSet sceneSet);
     // sampleProbes: the frame's light probes light the surfaces (the pipelines that sample them).
     // sky: the camera's rays when the frame has an atmosphere, whose sky is drawn over the background (none: the background alone),
     // with stars, when the frame has them, over it.
@@ -665,7 +710,7 @@ private:
     // in a pass of their own (their pipelines draw into the scene image alone).
     // glassRaySet: the frame's ray tracing set while shadowed lights are tinted through glass (the glass ray pipelines),
     // else none.
-    void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
+    void drawMainPass(FrameContext& frame, const PassDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
                       bool sampleProbes, bool reflectionSurfaces, VkDescriptorSet glassRaySet, const Vec3& background, const GpuRayDebugView* sky,
                       const StarrySky* stars);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
@@ -673,7 +718,7 @@ private:
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
-    void drawMotion(FrameContext& frame, const BatchedDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
+    void drawMotion(FrameContext& frame, const PassDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
     // The transparent draws, far to near, blended over the scene image (its depth tested, not written), sampling the
     // light probes or not, reading the reflection probe when this frame captured it, refracting glass reading the picture
     // before the glass as refraction says (opaquePicture, kept first).
@@ -699,6 +744,9 @@ private:
     // its probe events, which happen once).
     void drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings, int frames);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches, const BatchPipelines& pipelines) const;
+
+    // A camera pass's draws (PassDraws): its batches, or its groups' GPU-written commands. Returns the draw calls.
+    std::size_t drawPassDraws(VkCommandBuffer commands, const PassDraws& draws, const BatchPipelines& pipelines) const;
 
     // The triangles batches draw (each mesh's times its instances), and those of cut-outs among them: the F4 readout's.
     std::pair<std::size_t, std::size_t> batchTriangles(const std::vector<DrawBatch>& batches) const;

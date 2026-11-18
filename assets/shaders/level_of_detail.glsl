@@ -13,8 +13,8 @@ struct MeshLevels {
     float errorMetres[CULL_LEVEL_SLOTS];
     uint levels;                    // levels after the mesh itself
     uint sharesVertices;            // bit k: slot k uses the mesh's first vertices
-    uint unused0;
-    uint unused1;
+    uint changesShape;              // 1: the mesh deformed this frame
+    uint unused;
 };
 
 // A view's level choice. Must match GpuLevelView.

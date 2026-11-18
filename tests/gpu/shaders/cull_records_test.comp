@@ -1,17 +1,19 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Runs culling.glsl's and level_of_detail.glsl's functions on the cases cull_records_gpu_test.cpp sends.
+// Runs culling.glsl's, level_of_detail.glsl's and camera_culling.glsl's functions on the cases cull_records_gpu_test.cpp
+// sends.
 #include "gpu_test.glsl"
 #include "culling.glsl"
 #include "level_of_detail.glsl"
+#include "camera_culling.glsl"
 
 void main() {
     if (outsideTheCases()) {
         return;
     }
 
-    if (function == GPU_TEST_CULL_DRAW) {
+    if (function == GPU_TEST_CULL_DRAW || function == GPU_TEST_CAMERA_CANDIDATE) {
         // Inputs: the record's bounds and level sphere, (flags, hidden below error, levels, shares vertices), the four
         // slots' meshes (-1: none), their errors, the view's eye and pixels a metre, (pixel error, view flags), then the
         // frustum's six planes. Output: (slot, thinned, sphere in frustum, camera takes).
@@ -35,8 +37,8 @@ void main() {
 
         levels.levels = uint(packed.z);
         levels.sharesVertices = uint(packed.w);
-        levels.unused0 = 0u;
-        levels.unused1 = 0u;
+        levels.changesShape = 0u;
+        levels.unused = 0u;
 
         LevelView view;
         view.eye = testInput(5);
@@ -51,8 +53,29 @@ void main() {
             frustum.planes[plane] = testInput(7 + uint(plane));
         }
 
-        int slot = chooseLevelSlot(record, levels, view);
-        testOutput(0, vec4(float(slot), slotThinned(record, levels, slot) ? 1.0 : 0.0, sphereInFrustum(frustum, record.bounds) ? 1.0 : 0.0,
-                           cameraTakes(record, frustum) ? 1.0 : 0.0));
+        if (function == GPU_TEST_CULL_DRAW) {
+            int slot = chooseLevelSlot(record, levels, view);
+            testOutput(0, vec4(float(slot), slotThinned(record, levels, slot) ? 1.0 : 0.0, sphereInFrustum(frustum, record.bounds) ? 1.0 : 0.0,
+                               cameraTakes(record, frustum) ? 1.0 : 0.0));
+            return;
+        }
+
+        // One more input: (mesh changes shape, the candidate's slot, the sway's fade end, the camera's flags). Output:
+        // (the candidate's flags, whether the sway reaches it).
+        vec4 camera = testInput(13);
+        levels.changesShape = uint(camera.x);
+        CameraCull cull;
+        cull.frustum = frustum;
+        cull.levels = view;
+        cull.swayFadeEnd = camera.z;
+        cull.flags = uint(camera.w);
+        cull.candidates = 0u;
+        cull.groups = 0u;
+        cull.mainBase = 0u;
+        cull.motionBase = 0u;
+        cull.blocks = 0u;
+        cull.unused = 0u;
+        testOutput(0, vec4(float(cameraCandidateFlags(record, levels, cull, uint(camera.y))), swayReaches(record.bounds, view.eye.xyz, camera.z) ? 1.0 : 0.0,
+                           0.0, 0.0));
     }
 }

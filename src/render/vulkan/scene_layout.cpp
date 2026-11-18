@@ -158,7 +158,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     pointLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     spotLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     shadowTiles(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    // Copied from too: cull-compare reads back the lists the GPU wrote into it (render/vulkan/vulkan_camera_culling.h).
+    drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT),
     probeHitLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     previousModels(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     skyLight(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),

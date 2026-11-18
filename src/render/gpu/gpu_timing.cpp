@@ -8,6 +8,8 @@ const char* gpuPassName(GpuPass pass) {
         return "CLOTH";
     case GpuPass::DebugUi:
         return "UI";
+    case GpuPass::CameraCull:
+        return "CULL";
     case GpuPass::RayScene:
         return "TLAS";
     case GpuPass::Atmosphere:

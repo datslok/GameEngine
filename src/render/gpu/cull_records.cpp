@@ -22,7 +22,9 @@ GpuCullRecord packCullRecord(const DrawItem& draw) {
     record.flags = (draw.shadowOnly ? CULL_SHADOW_ONLY : 0u) | (draw.hidden ? CULL_HIDDEN : 0u) |
                    (isTransparent(draw.material) ? CULL_TRANSPARENT : 0u) | (draw.castsShadows ? CULL_CASTS_SHADOWS : 0u) |
                    (isCutOut(draw.material) ? CULL_CUT_OUT : 0u) | (draw.material.doubleSided ? CULL_DOUBLE_SIDED : 0u) |
-                   (draw.thinningEntry != 0 ? CULL_THINNABLE : 0u);
+                   (draw.thinningEntry != 0 ? CULL_THINNABLE : 0u) |
+                   (draw.previousModel && *draw.previousModel != draw.model ? CULL_MOVED : 0u) |
+                   (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u);
     record.mesh = draw.mesh.index;
     record.hiddenBelowError = draw.hiddenBelowError;
     return record;
@@ -153,4 +155,27 @@ int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, co
 
 bool slotThinned(const GpuCullRecord& record, const GpuMeshLevels& levels, int slot) {
     return slot >= 0 && (record.flags & CULL_THINNABLE) != 0u && (levels.sharesVertices & (1u << slot)) != 0u;
+}
+
+bool nearAChoiceEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view, const GpuFrustum& frustum) {
+    const Vec3 eye{view.eye[0], view.eye[1], view.eye[2]};
+    const bool orthographic = (view.flags & CULL_LEVELS_ORTHOGRAPHIC) != 0u;
+    const float distance = levelSphereDistance(record.levelSphere, eye);
+    const auto near = [&](float errorMetres) {
+        const float ratio = levelErrorInPixels(errorMetres, distance, view.eye[3], orthographic) / view.pixelError;
+        return std::abs(ratio - 1.0f) < 1e-4f;
+    };
+
+    bool any = record.hiddenBelowError > 0.0f && near(record.hiddenBelowError);
+
+    for (std::uint32_t slot = 1; slot <= levels.levels; ++slot) {
+        any = any || near(levels.errorMetres[slot]);
+    }
+
+    for (const auto& plane : frustum.planes) {
+        const float signedDistance = plane[0] * record.bounds[0] + plane[1] * record.bounds[1] + plane[2] * record.bounds[2] + plane[3];
+        any = any || std::abs(signedDistance + record.bounds[3]) < 1e-3f;
+    }
+
+    return any;
 }

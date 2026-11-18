@@ -41,10 +41,13 @@ void testGpuTiming() {
         assert(std::string(gpuPassName(GpuPass::Cloth)) == "CLOTH");
     }
 
-    // The ray tracing scene is built first of the scene's passes, then the light probes traced through it, then the
-    // wind's springs and the clusters' light lists, before anything that could read any of them.
+    // The camera's lists are built on the GPU first of the scene's passes, once the scene's buffers are written; then
+    // the ray tracing scene, the light probes traced through it, the wind's springs and the clusters' light lists,
+    // before anything that could read any of them.
     {
-        assert(static_cast<int>(GpuPass::DebugUi) + 1 == static_cast<int>(GpuPass::RayScene));
+        assert(static_cast<int>(GpuPass::DebugUi) + 1 == static_cast<int>(GpuPass::CameraCull));
+        assert(std::string(gpuPassName(GpuPass::CameraCull)) == "CULL");
+        assert(static_cast<int>(GpuPass::CameraCull) + 1 == static_cast<int>(GpuPass::RayScene));
         assert(static_cast<int>(GpuPass::RayScene) + 1 == static_cast<int>(GpuPass::Atmosphere));
         assert(static_cast<int>(GpuPass::Atmosphere) + 1 == static_cast<int>(GpuPass::Probes));
         assert(std::string(gpuPassName(GpuPass::Atmosphere)) == "SKY");
@@ -143,7 +146,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 11, 8, 4, 1, 2, 40, 17, 25, 8, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 11, 8, 4, 1, 2, 40, 17, 25, 8, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -159,7 +162,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1387 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1393 * nanosecondsPerTick * 1e-9));
         // Ambient occlusion's parts, each between its own stamps, add up to what its one line used to read.
         assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid), 4 * nanosecondsPerTick * 1e-9));
         assert(nearlyEqual(timings.seconds(GpuPass::AmbientOcclusion), 16 * nanosecondsPerTick * 1e-9));

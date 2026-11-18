@@ -1,0 +1,414 @@
+#include "core/command_registry.h"
+#include "cull_helpers.h"
+#include "engine/engine_commands.h"
+#include "engine/settings_file.h"
+#include "math/frustum.h"
+#include "math/mat4.h"
+#include "render/gpu/camera_culling.h"
+#include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/render_settings.h"
+#include "render/gpu/transparency.h"
+#include "render/gpu/wind.h"
+#include "scene/culling.h"
+#include "scene/level_of_detail.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <numbers>
+#include <random>
+#include <string>
+#include <vector>
+
+namespace {
+    // Every mesh's indices: a different count each, so commands name the right one.
+    std::uint32_t testIndexCount(MeshHandle mesh) {
+        return 3 * (mesh.index + 1);
+    }
+
+    struct TestView {
+        Frustum frustum;
+        LevelView levels;
+        WindSettings wind;
+        bool motion = true;
+    };
+
+    // A camera somewhere over the scene looking about, levels and impostors on or off, the sway reaching 50-400 m.
+    TestView randomView(std::mt19937& random, int index) {
+        std::uniform_real_distribution<float> unit{0.0f, 1.0f};
+        const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.6f + unit(random), 16.0f / 9.0f, 0.1f, 1000.0f + unit(random) * 4000.0f));
+        const Vec3 eye{(unit(random) - 0.5f) * 2000.0f, 10.0f + unit(random) * 100.0f, (unit(random) - 0.5f) * 2000.0f};
+        const float yaw = unit(random) * 2.0f * std::numbers::pi_v<float>;
+        const Mat4 view = Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
+
+        LevelOfDetailSettings settings;
+        settings.enabled = index % 5 != 4;
+        settings.impostors = index % 3 != 2;
+        settings.pixelError = 0.5f + unit(random) * 4.0f;
+
+        TestView test;
+        test.frustum = Frustum::fromClipMatrix(projection * view, ClipDepth::OneToZero);
+        test.levels = levelView(eye, 1080.0f + unit(random) * 1080.0f, 0.6f + unit(random) * 0.8f, settings);
+        test.wind.sway = index % 4 != 3;
+        test.wind.swayFadeEnd = 50.0f + unit(random) * 350.0f;
+        test.motion = index % 6 != 5;
+        return test;
+    }
+
+    GpuCameraCull packTestView(const TestView& view, const CullGroups& groups) {
+        GpuCameraCull packed = packCameraCull(view.frustum, view.levels, view.motion, view.wind.enabled && view.wind.sway, view.wind.swayFadeEnd);
+        packed.candidates = static_cast<std::uint32_t>(groups.candidates.size());
+        packed.groups = static_cast<std::uint32_t>(groups.groups.size());
+        packed.mainBase = 7;
+        packed.motionBase = 70000;
+        return packed;
+    }
+
+    // The draw list entries a CPU list gives (appendDrawList) and its batches as commands.
+    std::vector<std::uint32_t> entriesOf(const BatchedDraws& batched) {
+        std::vector<std::uint32_t> entries;
+        appendDrawList(entries, batched);
+        return entries;
+    }
+
+    // The commands drawing something, in group order.
+    std::vector<GpuDrawCommand> drawingCommands(const std::vector<GpuDrawCommand>& commands) {
+        std::vector<GpuDrawCommand> drawing;
+        std::copy_if(commands.begin(), commands.end(), std::back_inserter(drawing), [](const GpuDrawCommand& command) { return command.instanceCount > 0; });
+        return drawing;
+    }
+
+    // The batches as the GPU's commands: their mesh's index count, their first entry counted from base.
+    void assertCommandsMatch(const std::vector<GpuDrawCommand>& commands, const BatchedDraws& batched, std::uint32_t base) {
+        const std::vector<GpuDrawCommand> drawing = drawingCommands(commands);
+        assert(drawing.size() == batched.batches.size());
+
+        for (std::size_t batch = 0; batch < drawing.size(); ++batch) {
+            assert(drawing[batch].indexCount == testIndexCount(batched.batches[batch].mesh));
+            assert(drawing[batch].instanceCount == batched.batches[batch].instanceCount);
+            assert(drawing[batch].firstInstance == base + batched.batches[batch].firstInstance);
+            assert(drawing[batch].firstIndex == 0 && drawing[batch].vertexOffset == 0);
+        }
+    }
+
+    /*
+    * The passes' steps over every draw's candidates give batchByMesh's camera and velocity lists entry for entry (order
+    * and thinned bits), its batches as commands and levelsChosen's counts, over cameras with levels, impostors, sway and
+    * the velocity pass each on and off.
+    */
+    void testListsMatchTheCpu() {
+        std::mt19937 random{43};
+        const CullScene scene = randomCullScene(random);
+        const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
+        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testIndexCount);
+        std::vector<GpuCullRecord> records;
+
+        for (const DrawItem& draw : scene.draws) {
+            records.push_back(packCullRecord(draw));
+        }
+
+        std::size_t movingSeen = 0;
+
+        for (int index = 0; index < 18; ++index) {
+            const TestView view = randomView(random, index);
+            const GpuCameraCull packed = packTestView(view, groups);
+            const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, packed);
+
+            const std::vector<std::size_t> visible = opaqueDraws(scene.draws, visibleDraws(scene.draws, view.frustum));
+            const BatchedDraws mainDraws = batchByMesh(scene.draws, visible, 0, &view.levels);
+            assert(result.mainEntries == entriesOf(mainDraws));
+            assertCommandsMatch(result.mainCommands, mainDraws, packed.mainBase);
+
+            const std::array<std::size_t, meshLevelSlots> levels = levelsChosen(scene.draws, visible, view.levels);
+
+            for (std::size_t slot = 0; slot < meshLevelSlots; ++slot) {
+                assert(result.levels[slot] == levels[slot]);
+            }
+
+            std::vector<std::size_t> moving;
+
+            for (std::size_t draw : visible) {
+                const DrawItem& item = scene.draws[draw];
+                const bool moved = item.previousModel && *item.previousModel != item.model;
+                const bool sways = drawSways(item.sway, item.bounds.centre, item.bounds.radius, view.levels.eye, view.wind);
+
+                if (view.motion && (moved || sways)) {
+                    moving.push_back(draw);
+                }
+            }
+
+            const BatchedDraws motionDraws = batchByMesh(scene.draws, moving, 0, &view.levels);
+            assert(result.motionEntries == entriesOf(motionDraws));
+            assertCommandsMatch(result.motionCommands, motionDraws, packed.motionBase);
+            assert(result.mainCommands.size() == groups.groups.size() && result.motionCommands.size() == groups.groups.size());
+            movingSeen += moving.size();
+        }
+
+        assert(movingSeen > 100);
+    }
+
+    /*
+    * Groups follow batchByMesh's order (style, then mesh), each group's candidates in draw order; glass draws none, and
+    * a draw has one candidate a slot with a mesh. Draw numbers count from the range's first.
+    */
+    void testGroupsFollowTheBatchOrder() {
+        std::mt19937 random{47};
+        const CullScene scene = randomCullScene(random, 600);
+        const CullGroups groups = buildCullGroups(scene.draws, 100, 400, testIndexCount);
+        assert(groups.groups.size() == groups.styles.size());
+
+        std::size_t candidates = 0;
+
+        for (std::size_t draw = 100; draw < 500; ++draw) {
+            const DrawItem& item = scene.draws[draw];
+
+            if (isTransparent(item.material)) {
+                continue;
+            }
+
+            ++candidates;
+
+            for (const MeshLevel& level : item.levels) {
+                candidates += level.mesh.isValid() ? 1 : 0;
+            }
+        }
+
+        assert(groups.candidates.size() == candidates);
+        std::uint32_t next = 0;
+
+        for (std::size_t group = 0; group < groups.groups.size(); ++group) {
+            const GpuCullGroup& g = groups.groups[group];
+            const CullGroupStyle& style = groups.styles[group];
+            assert(g.firstCandidate == next && g.candidates > 0);
+            assert(g.indexCount == testIndexCount(style.mesh));
+            next += g.candidates;
+
+            if (group > 0) {
+                const CullGroupStyle& before = groups.styles[group - 1];
+                const int styleBefore = (before.cutOut ? 2 : 0) + (before.doubleSided ? 1 : 0);
+                const int styleNow = (style.cutOut ? 2 : 0) + (style.doubleSided ? 1 : 0);
+                assert(styleBefore < styleNow || (styleBefore == styleNow && before.mesh.index < style.mesh.index));
+            }
+
+            for (std::uint32_t c = g.firstCandidate; c < g.firstCandidate + g.candidates; ++c) {
+                const GpuCullCandidate& candidate = groups.candidates[c];
+                assert(candidate.draw >= 100 && candidate.draw < 500);
+                assert(c == g.firstCandidate || groups.candidates[c - 1].draw < candidate.draw);
+                const DrawItem& item = scene.draws[candidate.draw];
+                const MeshHandle mesh = candidate.slot == 0 ? item.mesh : item.levels[candidate.slot - 1].mesh;
+                assert(mesh == style.mesh && isCutOut(item.material) == style.cutOut && item.material.doubleSided == style.doubleSided);
+            }
+        }
+
+        assert(next == groups.candidates.size());
+    }
+
+    // A frame of still draws (the first stillCount) and moving ones, at a version following the one before.
+    FrameDescription stillFrame(const CullScene& scene, std::size_t stillCount, std::uint64_t version, std::uint64_t previous) {
+        FrameDescription frame{.camera = Camera{Vec3{0.0f, 1.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f}};
+        frame.draws = scene.draws;
+        frame.stillDraws = stillCount;
+        frame.stillVersion = version;
+        frame.stillPreviousVersion = previous;
+        return frame;
+    }
+
+    /*
+    * The still part is kept: the same version builds nothing, a following one with a built range of moved bounds
+    * repacks records but keeps the groups, a range whose mesh changed builds them again, a frame not following builds
+    * them afresh. The moving draws' groups come after, their candidates after the still ones; drawing order goes by
+    * style then mesh; level tables say which meshes deform; glass and flat-faced draws are listed.
+    */
+    void testTableKeepsTheStillDraws() {
+        std::mt19937 random{53};
+        CullScene scene = randomCullScene(random, 800);
+        const std::vector<FlatFace> faces(1);
+        scene.draws[3].flatFaces = faces;
+        scene.draws[650].flatFaces = faces;
+        scene.draws[3].material.alphaMode = AlphaMode::Opaque;
+        scene.draws[650].material.alphaMode = AlphaMode::Opaque;
+
+        CameraCullTable table;
+        const auto deforms = [](MeshHandle mesh) { return mesh.index == 5; };
+        CameraCullFrame first = table.update(stillFrame(scene, 600, 1, 0), testIndexCount, deforms);
+        assert(table.getStillBuilds() == 1);
+        assert(first.stillRecords.size() == 600 && first.movingRecords.size() == 200);
+        assert(first.meshLevels.size() == cullSceneMeshes && first.meshLevels[5].changesShape == 1 && first.meshLevels[4].changesShape == 0);
+        assert(std::find(first.flatFaced.begin(), first.flatFaced.end(), 3) != first.flatFaced.end());
+        assert(std::find(first.flatFaced.begin(), first.flatFaced.end(), 650) != first.flatFaced.end());
+
+        for (std::size_t draw = 0; draw < scene.draws.size(); ++draw) {
+            const bool listed = std::find(first.glass.begin(), first.glass.end(), draw) != first.glass.end();
+            assert(listed == isTransparent(scene.draws[draw].material));
+        }
+
+        // The still candidates first, then the moving ones; every group's candidates within its own part.
+        const CullGroups stillGroups = buildCullGroups(scene.draws, 0, 600, testIndexCount);
+        assert(first.stillCandidates.size() == stillGroups.candidates.size());
+        assert(first.groups.size() > stillGroups.groups.size());
+
+        for (std::size_t group = stillGroups.groups.size(); group < first.groups.size(); ++group) {
+            assert(first.groups[group].firstCandidate >= first.stillCandidates.size());
+        }
+
+        for (const GpuCullCandidate& candidate : first.movingCandidates) {
+            assert(candidate.draw >= 600);
+        }
+
+        assert(first.drawOrder.size() == first.groups.size());
+
+        for (std::size_t position = 1; position < first.drawOrder.size(); ++position) {
+            const CullGroupStyle& before = first.styles[first.drawOrder[position - 1]];
+            const CullGroupStyle& now = first.styles[first.drawOrder[position]];
+            const int styleBefore = (before.cutOut ? 2 : 0) + (before.doubleSided ? 1 : 0);
+            const int styleNow = (now.cutOut ? 2 : 0) + (now.doubleSided ? 1 : 0);
+            assert(styleBefore < styleNow || (styleBefore == styleNow && before.mesh.index <= now.mesh.index));
+        }
+
+        const std::uint64_t generation = first.stillGeneration;
+        CameraCullFrame again = table.update(stillFrame(scene, 600, 1, 0), testIndexCount, deforms);
+        assert(table.getStillBuilds() == 1 && again.stillGeneration == generation);
+
+        // A built range whose bounds moved: records repacked, groups kept.
+        scene.draws[10].bounds.centre.x += 5.0f;
+        FrameDescription moved = stillFrame(scene, 600, 2, 1);
+        moved.builtStillDraws = {DrawRange{10, 1}};
+        CameraCullFrame repacked = table.update(moved, testIndexCount, deforms);
+        assert(table.getStillBuilds() == 1 && repacked.stillGeneration != generation);
+        assert(repacked.stillRecords[10].bounds[0] == scene.draws[10].bounds.centre.x);
+
+        // A built range whose mesh changed: groups built again.
+        scene.draws[11].mesh = MeshHandle{(scene.draws[11].mesh.index + 1) % cullSceneMeshes};
+        scene.draws[11].levels = scene.levelsByMesh[scene.draws[11].mesh.index];
+        FrameDescription remeshed = stillFrame(scene, 600, 3, 2);
+        remeshed.builtStillDraws = {DrawRange{11, 1}};
+        table.update(remeshed, testIndexCount, deforms);
+        assert(table.getStillBuilds() == 2);
+
+        // Not following: afresh.
+        table.update(stillFrame(scene, 600, 9, 7), testIndexCount, deforms);
+        assert(table.getStillBuilds() == 3);
+    }
+
+    /*
+    * The same list compares equal; an entry dropped is missing, one added extra, a thinned bit flipped both; draws near
+    * an edge are counted apart; the reply says whether they agree.
+    */
+    void testComparison() {
+        std::mt19937 random{59};
+        const CullScene scene = randomCullScene(random, 1000);
+        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testIndexCount);
+        const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
+        std::vector<GpuCullRecord> records;
+
+        for (const DrawItem& draw : scene.draws) {
+            records.push_back(packCullRecord(draw));
+        }
+
+        const TestView view = randomView(random, 0);
+        const GpuCameraCull packed = packTestView(view, groups);
+        const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, packed);
+        const BatchedDraws cpu = batchByMesh(scene.draws, opaqueDraws(scene.draws, visibleDraws(scene.draws, view.frustum)), 0, &view.levels);
+        const auto never = [](std::uint32_t) { return false; };
+
+        const CullListComparison same = compareCullList(groups.styles, result.mainCommands, result.mainEntries, packed.mainBase, cpu, never);
+        assert(same.entries == cpu.order.size() && same.matching == same.entries && same.missing == 0 && same.extra == 0);
+        assert(describeCullComparison(same, same).find("agree") != std::string::npos);
+
+        // The last entry of the first drawing group changed to another draw: one missing, one extra.
+        std::vector<std::uint32_t> changed = result.mainEntries;
+        const auto drawing = std::find_if(result.mainCommands.begin(), result.mainCommands.end(), [](const GpuDrawCommand& c) { return c.instanceCount > 0; });
+        assert(drawing != result.mainCommands.end());
+        const std::uint32_t at = drawing->firstInstance - packed.mainBase + drawing->instanceCount - 1;
+        changed[at] = (changed[at] & drawListIndexMask) == 999 ? 998 : 999;
+        const CullListComparison differs = compareCullList(groups.styles, result.mainCommands, changed, packed.mainBase, cpu, never);
+        assert(differs.missing == 1 && differs.extra == 1 && differs.matching == differs.entries - 1);
+        assert(describeCullComparison(differs, same).find("DIFFER") != std::string::npos);
+
+        // Every draw near an edge: the differences are counted there, and the lists agree.
+        const auto always = [](std::uint32_t) { return true; };
+        const CullListComparison edges = compareCullList(groups.styles, result.mainCommands, changed, packed.mainBase, cpu, always);
+        assert(edges.nearAnEdge == 2);
+        assert(describeCullComparison(edges, same).find("agree") != std::string::npos);
+
+        // The thinned bit counts.
+        changed = result.mainEntries;
+        changed[at] ^= drawListThinnedBit;
+        const CullListComparison thinned = compareCullList(groups.styles, result.mainCommands, changed, packed.mainBase, cpu, never);
+        assert(thinned.missing == 1 && thinned.extra == 1);
+    }
+
+    // A level's error at the budget, or a sphere touching a plane, is near an edge; well inside, not.
+    void testEdges() {
+        DrawItem draw;
+        draw.mesh = MeshHandle{0};
+        draw.bounds = BoundingSphere{Vec3{0.0f, 0.0f, -100.0f}, 1.0f};
+        const std::vector<MeshLevel> levels{MeshLevel{MeshHandle{1}, 0.5f, false}};
+        draw.levels = levels;
+        draw.sway.kind = SwayKind::Tree;
+
+        LevelOfDetailSettings settings;
+        LevelView view = levelView(Vec3{0.0f, 0.0f, 0.0f}, 1000.0f, 1.0f, settings);
+        const Frustum frustum = Frustum::fromClipMatrix(toGpuDepthRange(Mat4::perspective(1.0f, 1.0f, 0.1f, 1000.0f)), ClipDepth::OneToZero);
+        const GpuCullRecord record = packCullRecord(draw);
+        const GpuMeshLevels table = packMeshLevels(draw.mesh, levels);
+        assert(!nearACameraEdge(record, table, packCameraCull(frustum, view, true, false, 100.0f)));
+
+        // The budget exactly the level's error in pixels 99 m away.
+        view.pixelError = errorInPixels(0.5f, 99.0f, view);
+        assert(nearACameraEdge(record, table, packCameraCull(frustum, view, true, false, 100.0f)));
+
+        // The sway reaching exactly to it.
+        view = levelView(Vec3{0.0f, 0.0f, 0.0f}, 1000.0f, 1.0f, settings);
+        assert(nearACameraEdge(record, table, packCameraCull(frustum, view, true, true, 99.0f)));
+    }
+
+    // On by default (compared in the valley, faster there); switchable while the game runs as passes.gpuCulling.
+    void testSetting() {
+        assert(RenderSettings{}.gpuCulling);
+
+        RenderSettings settings;
+        const SettingsWalk walk = [&settings](SettingsVisitor& visitor) { visit(settings, visitor); };
+        const std::vector<std::string> warnings = applySettings({{"passes.gpuCulling", "false"}}, walk, StartupFields::Keep);
+        assert(warnings.empty());
+        assert(!settings.gpuCulling);
+    }
+
+    // cull-compare refuses without GPU culling; with it, each call asks for a comparison and shows the last one.
+    void testCompareCommand() {
+        RenderSettings settings;
+        settings.gpuCulling = false;
+        CommandRegistry registry;
+        int asked = 0;
+        std::string last;
+        addCullCompareCommand(registry, settings, [&]() {
+            ++asked;
+            return last;
+        });
+
+        assert(!registry.execute("cull-compare").ok && asked == 0);
+        settings.gpuCulling = true;
+        assert(!registry.execute("cull-compare now").ok && asked == 0);
+
+        const CommandReply first = registry.execute("cull-compare");
+        assert(first.ok && asked == 1 && first.text.find("No comparison") != std::string::npos);
+
+        last = "The GPU's lists agree with the CPU's.";
+        const CommandReply second = registry.execute("cull-compare");
+        assert(second.ok && asked == 2 && second.text.find("agree") != std::string::npos);
+    }
+}
+
+/*
+* The camera's lists built by the GPU's steps (render/gpu/camera_culling.h): equal to the CPU's batchByMesh lists, the
+* still table kept, and cull-compare's comparison.
+*/
+void testCameraCulling() {
+    testListsMatchTheCpu();
+    testGroupsFollowTheBatchOrder();
+    testTableKeepsTheStillDraws();
+    testComparison();
+    testEdges();
+    testSetting();
+    testCompareCommand();
+}
