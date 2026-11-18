@@ -424,8 +424,9 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 
 ## Phase 20: Clouds and weather
 
-Added Nov 18 2026 (the user's ask: volumetric clouds, weather that differs by area as in GTA 6). Research first (Horizon Zero Dawn's Nubis, Hillaire 2016 and 2020, shipped regional weather), the plan explained, then the user's go.
+Added Nov 18 2026 (the user's ask: volumetric clouds, weather that differs by area as in GTA 6). Research first (Horizon Zero Dawn's Nubis, Hillaire 2016 and 2020, shipped regional weather), the plan explained, then the user's go. Looks over realism (the user: Red Dead Redemption 2's and The Witcher 3's skies); research on skies in `docs/research/SKY.md`.
 
+- [ ] A sky that looks great: the physical sky kept, art controls over it as curves over the hour, one set a weather (sky and haze brightness, haze distance, tints toward and away from the sun, the grade); the sun and moon art-directed (size, limb darkening, a halo, light kept after sunset)
 - [ ] Volumetric clouds: ray-marched cloud layers lit by the sun and the sky's own tables, casting shadows on the ground and into the fog; at a fraction of the screen's pixels and reprojected, so the cost grows with pixels, not with the sky's extent
 - [ ] Weather by region: a world map of cloud cover, cloud type, rain, wind and fog, blended across region borders and changing over time, deterministic from the seed and the tick; clouds, sky, fog, wind and light read it
 - [ ] Rain and wet surfaces: rain near the camera, materials darkened and smoothed by wetness, puddles, drying afterwards
