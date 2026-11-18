@@ -467,6 +467,9 @@ CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std
             buildStill(frame, placement);
             result.stillRebuilt = true;
             result.stillChanges.clear();
+            result.stillRepacked = {DrawRange{0, stillCount}};
+        } else {
+            result.stillRepacked = joinDrawRanges(frame.builtStillDraws);
         }
 
         packedVersion = frame.stillVersion;

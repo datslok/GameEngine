@@ -1,6 +1,6 @@
 # GPU scene
 
-Covers: `src/render/gpu/gpu_scene`, `src/render/gpu/still_instances`, `src/render/vulkan/vulkan_indirect_commands`, `src/render/gpu/mesh_pool`, `src/render/vulkan/vulkan_mesh_pool`, `src/render/vulkan/vulkan_mesh`, `src/render/gpu/material_uniforms`, `src/render/gpu/instance_shared.h`, `src/render/vulkan/scene_layout`, `src/render/vulkan/bindless_textures`, `assets/shaders/instances.glsl`, `assets/shaders/frame_data.glsl`, `assets/shaders/materials.glsl`, `assets/shaders/triangle.vert`, `src/render/gpu/light_uniforms`, `src/render/gpu/material_shared`, `assets/shaders/scene_lights.glsl`
+Covers: `src/render/gpu/gpu_scene`, `src/render/gpu/still_instances`, `src/render/gpu/lasting_buffers`, `src/render/vulkan/vulkan_lasting_buffer`, `src/render/vulkan/vulkan_indirect_commands`, `src/render/gpu/mesh_pool`, `src/render/vulkan/vulkan_mesh_pool`, `src/render/vulkan/vulkan_mesh`, `src/render/gpu/material_uniforms`, `src/render/gpu/instance_shared.h`, `src/render/vulkan/scene_layout`, `src/render/vulkan/bindless_textures`, `assets/shaders/instances.glsl`, `assets/shaders/frame_data.glsl`, `assets/shaders/materials.glsl`, `assets/shaders/triangle.vert`, `src/render/gpu/light_uniforms`, `src/render/gpu/material_shared`, `assets/shaders/scene_lights.glsl`
 
 Every scene pass reads its objects, materials, lights and shadow tiles from storage buffers written once a frame, so nothing is bound or pushed per object and all objects sharing a mesh are one instanced draw per view. Staged plan for keeping more of it on the GPU: `docs/research/PERSISTENTSCENE.md`. How a frame uses it: `renderer.md`.
 
@@ -21,7 +21,7 @@ std430, mirrored byte for byte in the shaders, each size checked by a `static_as
 
 - **Instance** (`packInstance(draw, material)`): world model matrix, normal matrix (`normalMatrix`), handedness and `uniformScale`, material and mesh numbers, terrain patch, instance kind (plain, impostor, follows ground), wind sway, hanging and thinning entries, the level-of-detail sphere. Each view multiplies in its own matrix on the GPU, so one record serves the camera, every shadow tile and ray tracing.
 - **Lights:** `packLighting` and the slot rule (`selectDrawableLights`): `lights.md`. Shadows filled by `attachShadows` (`lights-and-shadow-atlas.md`).
-- **Materials:** `MaterialTable::add` / `addPacked`: an FNV-1a hash of the packed bytes, then a full comparison (packing has no padding); the last 8 found checked first, since draws alternate few materials (bark, leaves).
+- **Materials:** `MaterialTable::add` / `addPacked`: an FNV-1a hash of the packed bytes, then a full comparison (packing has no padding); the last 8 found checked first, since draws alternate few materials (bark, leaves). A table `over` a base finds the base's entries first and numbers its own after them.
 - `packInstances` packs materials and instances on every core, handing out indices in draw order on one thread, so results match one-by-one adding.
 
 ## Uniform block and push constants
@@ -83,17 +83,32 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 
 ## Buffers (`SceneBuffers`)
 
-- One per frame in flight: `UploadArray`s in upload memory (frame data, instances, materials, three light kinds, shadow tiles, draw list, probe hit lights, previous models, sky light, atmosphere, mirror pairs, glass bounds, fog, sky visibility cascades, terrain patches, wind, wind anchors).
+- One per frame in flight: `UploadArray`s in upload memory (frame data, three light kinds, shadow tiles, draw list, probe hit lights, sky light, atmosphere, mirror pairs, glass bounds, fog, sky visibility cascades, terrain patches, wind, wind anchors).
 - Each grows (to twice its size or what is needed) when a frame needs more; safe because the frame's fence has passed.
-- `UploadArray::write(first, second)` writes kept and new records back to back.
 - Records that change rarely (terrain heights, hanging vertices, thinning records) live in GPU memory, copied only when they change.
+
+## Lasting buffers (`render/gpu/lasting_buffers`, `render/vulkan/vulkan_lasting_buffer`)
+
+Instances, materials and last-frame matrices (bound through `SceneBufferViews`), and the culling's records and candidates (`gpu-driven.md`), live in GPU memory every frame in flight reads, written only where they change (GPU-driven drawing's stage 7a; research `docs/research/GPUDRIVEN.md`).
+
+| Piece | What |
+|---|---|
+| `LastingWrite` | records for a buffer from record `first` on; `appendLastingWrites` makes them from ranges over a span (joined, `joinDrawRanges`) |
+| `planLastingCopies` | the writes staged one after another, a copy each, joined where both sides follow on |
+| `VulkanLastingBuffer::reserve` | room for n records (`lastingCapacity`: twice, or what is needed, at least 64); true when made afresh (then the caller writes everything); waits for the GPU first |
+| `write` | stages in the frame in flight's own upload buffer, records `vkCmdCopyBuffer` between two barriers: every earlier command (earlier frames' reads, first in the queue) before the copy, the copy before every later storage read |
+
+- **Instances, last-frame matrices** (`writeLastingRecords`): the still records `StillInstances` repacked (all when a buffer was made afresh), then the moving draws' after them every frame.
+- **Materials:** the still table's entries from `getFirstNewMaterial`, then the moving draws' table (`MaterialTable::over` the still one: only materials it lacks, numbered after it).
+- **Standing still** copies only the moving draws' records; F4's `UPLOADED` shows the bytes (with the culling's).
+- Tested in `lasting_buffers_test` (planning, ranges, capacity); the copies themselves by eye.
 
 ## Still instances (`render/gpu/still_instances`)
 
 The GPU side of still draws (`StillDraws`, `ModelRenderer::still`: `game-interface.md`).
 
 - `StillInstances` (owned by `VulkanRenderer`) keeps the still draws' instances, last-frame matrices and their own `MaterialTable`.
-- `update` repacks only `builtStillDraws`, and only when the frame follows the last one packed (`stillVersion`, `stillPreviousVersion`); otherwise (another count, a whole build, a skipped frame) it packs all; the same frame twice (capture warm-up) packs nothing.
+- `update` repacks only `builtStillDraws`, and only when the frame follows the last one packed (`stillVersion`, `stillPreviousVersion`) and its ranges cover every slot added at the end (a cell's new block); otherwise (fewer slots, uncovered new ones, a whole build, a skipped frame) it packs all; the same frame twice (capture warm-up) packs nothing.
 - Stale table entries are dropped by a whole repack once the table holds more than twice its whole packing's entries plus 64.
-- `packMovingDraws`: the moving draws' instances and matrices, their materials added to a copy of the still table, which becomes the frame's.
+- `packMovingDraws`: the moving draws' instances and matrices, their materials in a table over the still one (`MaterialTable::over`; `at` looks a number up in either).
 - Textures are checked only where something was packed. Tested in `still_instances_test`.

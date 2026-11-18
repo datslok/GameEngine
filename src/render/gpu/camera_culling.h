@@ -270,6 +270,10 @@ struct CameraCullFrame {
     // afresh (anything may have), else each draw built in place, its record as it was and as it is.
     bool stillRebuilt = false;
     std::vector<GpuCullRecord> stillChanges;
+
+    // The still records packed this frame (all of them when built afresh, none when kept), joined: what a lasting
+    // buffer of them copies (render/gpu/lasting_buffers.h).
+    std::vector<DrawRange> stillRepacked;
 };
 
 class CameraCullTable {

@@ -85,6 +85,26 @@ void buildEntityDraws(const World& world, Entity entity, const ModelRenderer& re
     }
 }
 
+std::vector<DrawRange> joinDrawRanges(std::vector<DrawRange> ranges) {
+    std::sort(ranges.begin(), ranges.end(), [](const DrawRange& a, const DrawRange& b) { return a.first < b.first; });
+    std::vector<DrawRange> joined;
+
+    for (const DrawRange& range : ranges) {
+        if (range.count == 0) {
+            continue;
+        }
+
+        if (!joined.empty() && range.first <= joined.back().first + joined.back().count) {
+            const std::size_t end = std::max(joined.back().first + joined.back().count, range.first + range.count);
+            joined.back().count = end - joined.back().first;
+        } else {
+            joined.push_back(range);
+        }
+    }
+
+    return joined;
+}
+
 /*
 * With kept draws, the still entities' come first from them (StillDraws::update) and only the others are counted and
 * built here, after them.
@@ -121,6 +141,8 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             frame.builtStillDraws = std::move(update.built);
             frame.stillVersion = update.version;
             frame.stillPreviousVersion = update.previousVersion;
+            frame.stillCells = still->getCellCount();
+            frame.stillEmptySlots = update.count - std::min(update.count, still->getFilledCount());
             kept = std::move(update.kept);
             stillCount = update.count;
         }

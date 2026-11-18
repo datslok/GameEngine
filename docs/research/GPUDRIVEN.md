@@ -79,3 +79,49 @@ Laptop, release, hidden copy, ms. ~50K draws in the forest.
 - **Tiles as views:** each redrawn tile a view of the culling passes: its own candidate test (casts shadows, shadow-only kept, hidden dropped, reach sphere, frustum, smallest caster, cascade limit; a new `culling.glsl` function mirrored by `prepareShadowDraws`' steps), levels by its texels (`tileLevelView`), its second list the movers (the far tile keeps them apart).
 - **Room:** a view's working buffers (12 B a candidate) are scratch, reusable for the next batch of views; its draw list region (4 B a draw) and commands live to the draw.
 - **Then the CPU path goes:** the renderer draws only the GPU's lists; `cull-compare` still builds the CPU's on request, as the reference.
+
+## Stage 7: chunks and cells (`scene-chunks`), gathered Nov 18 2026
+
+**Where it starts (after 5b):** GPU culling 0.1-0.2 ms for every view (~50K draws); PACK 2.8-2.95 ms, nearly all of it `writeScene` copying every instance, material and culling record into the frame's upload memory (~8 MB, ROADMAP's "lasting GPU buffers"); frames GPU-bound (the CPU waits 5.6-13.7 ms).
+
+### Two-level culling
+
+| Source | Hierarchy | Numbers |
+|---|---|---|
+| Haar & Aaltonen, SIGGRAPH 2015 (above) | AC Unity: CPU quadtree, GPU instances, chunks expanded to clusters (~64 of 64 triangles), clusters, multi-draw. RedLynx: flat GPU object culling and levels, two-phase | RedLynx, Xbox One: 250K moving objects, culling + levels 0.28 + 0.26 ms, CPU 0.2 ms **[M]**. AC Unity: ~10x the objects at ~75% of the CPU (claimed) |
+| Vale, Decima visibility, GCAP 2017 (above) | Static tiles (one a streaming group, not a fixed grid); instances sorted by filter, level range and Morton code into clusters; the CPU tests tiles and clusters, a compute job per visible cluster tests its instances | 500K-1.5M instances, 10-30 MB, 1-2 ms **[M]**. Tiles immutable (a change rebuilds one, small changes to an "orphan" tile), movers in a k-d tree |
+| van Muijden, "GPU-based procedural placement in Horizon Zero Dawn", GDC 2017 ([slides](https://www.slideshare.net/guerrillagames/gpubased-procedural-placement-in-horizon-zero-dawn)) | Placement blocks by footprint: 128 m for trees, 32 m for grass | 100K+ objects, ~250 µs GPU a frame **[M]** |
+| Karis, "Nanite", SIGGRAPH 2021 ([slides](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf)) | Flat instance culling per view, then a BVH8 over cluster groups walked by persistent threads | "A million instances easily" (claimed); persistent threads 25% faster than a dependent dispatch a level **[M]**, but rely on forward progress no API guarantees; 10M instances x 48 B = 457 MB: "instances are the new triangles" |
+| Unreal 5.4+ scene culling (`r.SceneCulling`, [cvar wiki](https://indxzero.github.io/ue544cvarwiki/articles/r.sceneculling.mincellsize), excerpts only) | A loose hierarchical grid of cells holding chunks of instances, culled before the instances (Nanite only) | Smallest cell 4096 cm (~41 m); dynamic instanced objects uncullable (tested flat) by default; chunks of ~64 **[mem, unverified]** |
+| Unity Entities Graphics ([chunks](https://docs.unity3d.com/Packages/com.unity.entities@1.3/api/Unity.Entities.EntityArchetype.ChunkCapacity.html)) | A chunk's bounds first; per-entity tests only in chunks partly in view | Chunks of 16 KB, at most 128 entities |
+| Collin, "Culling the Battlefield", GDC 2011 ([slides](https://www.slideshare.net/DICEStudio/culling-the-battlefield-data-oriented-design-in-practice)) | Trees dropped for a uniform grid, static and dynamic grids apart, brute force inside visible cells | 15K spheres 0.6-1.6 ms on one console core **[M]** |
+| Wihlidal, GDC 2016 (above) | Cluster culling | Draw count bottlenecks the command processor; 256 triangles a cluster the sweet spot on GCN (claimed) |
+
+- **Flat culling is cheap:** 250K objects in 0.28 ms on an Xbox One; the hierarchy saves memory traffic and the repeat for each view, so it pays from ~1M instances or with many views **[inference]**.
+- **Chunk size:** 64-128 instances everywhere it is given; a chunk of 64 is one subgroup. Per view: N/k chunk tests plus k for each chunk in or cut, best near k = 32-128 at 100K **[inference]**.
+- **Grid over tree** for instances (Frostbite, Unreal's loose grid): constant-time insert, no rebuild. Chunks spatially tight (Morton order inside a cell).
+- **Movers apart** in every source: a flat list tested one by one.
+- **Levels:** tested per instance after the chunk (Decima); a chunk's nearest and farthest distance can skip whole chunks to a level.
+- **Two levels need no persistent threads:** two dispatches (or a chunk's bit read first) lose one barrier.
+
+### Cells and large worlds
+
+| Source | Cells | Notes |
+|---|---|---|
+| Unreal 5 World Partition ([docs](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine)) | Default 128 m cells, 256 m loading range (docs' example 256 m, 768 m) | A 2D grid; streaming sources with priorities; an HLOD per cell; a cap on cells loading at once |
+| Marvel's Spider-Man ([interview](https://blog.playstation.com/2018/09/06/insomniac-interview-the-tech-behind-marvels-spider-man)) | ~800 tiles of 128 m | About a tile a second at top swing speed |
+| Cyberpunk 2077 ([modding wiki](https://wiki.redmodding.org/cyberpunk-2077-modding/developers/file-formats/streaming-sectors)) | Sector grids by level: outside 64/128/256 | Coarser levels in bigger cells |
+| Decima (above) | Tiles are the streaming groups | Loaded on a streaming thread, only switched on by the main thread |
+| Star Citizen ([interview](https://gamersnexus.net/gg/2622-star-citizen-sean-tracy-64bit-engine-tech-edge-blending), [object containers](https://starcitizen.tools/Object_Container_Streaming)) | Object containers (a planet, a station), zones | 64-bit positions; the GPU stays 32-bit |
+| Elite Dangerous ([80.lv](https://80.lv/articles/generating-the-universe-in-elite-dangerous/)) | Sector, layer, system and body packed in a 64-bit id | Doubles and paired floats |
+
+- **Precision:** float steps ~4 mm 32-65 km out ([Godot](https://docs.godotengine.org/en/4.3/tutorials/physics/large_world_coordinates.html)); double ~1 mm at Neptune, ~1-2 m at a light year **[inference]**: a solar system fits doubles, a galaxy needs nested frames (Star Citizen's zones, Elite's sectors).
+- **Camera-relative:** Unity HDRP about 50 km practical (transforms stay float); Cesium's relative-to-centre tiles (centre made eye-relative in double on the CPU).
+- **Hysteresis and loads a frame:** no source gives numbers; common practice an unload radius 1.2-1.5x the load radius and a cap on loads a frame **[inference]**.
+
+### What this means for the engine **[inference]**
+
+- **Cells (CPU, ~128 m):** the unit of lasting GPU memory: each cell's instances and culling records in a range of GPU buffers kept between frames, written only when the cell is built or changes, so PACK's ~8 MB copy a frame becomes the changed cells' bytes. Later the unit of streaming (phase 13) and of HLOD; integer keys so a world past float's reach fits.
+- **Chunks (GPU, ~64 draws, Morton order inside a cell):** a box each, tested once a view before the candidates; a candidate whose chunk is out stops at one read. Today's gain small (culling 0.1-0.2 ms); it keeps culling flat as instances and views grow.
+- **Movers stay flat.**
+

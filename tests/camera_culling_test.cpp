@@ -439,6 +439,10 @@ namespace {
         CameraCullFrame again = table.update(stillFrame(scene, 600, 1, 0), testPlacement, deforms);
         assert(table.getStillBuilds() == 1 && again.stillGeneration == generation);
 
+        // The still records each frame packed again, for the uploads (scene-cells): all of them first, none kept.
+        assert(first.stillRepacked.size() == 1 && first.stillRepacked[0].first == 0 && first.stillRepacked[0].count == 600);
+        assert(again.stillRepacked.empty());
+
         // A built range whose bounds moved: records repacked, groups kept.
         scene.draws[10].bounds.centre.x += 5.0f;
         FrameDescription moved = stillFrame(scene, 600, 2, 1);
@@ -446,14 +450,16 @@ namespace {
         CameraCullFrame repacked = table.update(moved, testPlacement, deforms);
         assert(table.getStillBuilds() == 1 && repacked.stillGeneration != generation);
         assert(repacked.stillRecords[10].bounds[0] == scene.draws[10].bounds.centre.x);
+        assert(repacked.stillRepacked.size() == 1 && repacked.stillRepacked[0].first == 10 && repacked.stillRepacked[0].count == 1);
 
         // A built range whose mesh changed: groups built again.
         scene.draws[11].mesh = MeshHandle{(scene.draws[11].mesh.index + 1) % cullSceneMeshes};
         scene.draws[11].levels = scene.levelsByMesh[scene.draws[11].mesh.index];
         FrameDescription remeshed = stillFrame(scene, 600, 3, 2);
         remeshed.builtStillDraws = {DrawRange{11, 1}};
-        table.update(remeshed, testPlacement, deforms);
+        const CameraCullFrame regrouped = table.update(remeshed, testPlacement, deforms);
         assert(table.getStillBuilds() == 2);
+        assert(regrouped.stillRepacked.size() == 1 && regrouped.stillRepacked[0].count == 600);
 
         // Not following: afresh.
         table.update(stillFrame(scene, 600, 9, 7), testPlacement, deforms);

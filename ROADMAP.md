@@ -365,8 +365,9 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] A persistent scene: static objects' instances uploaded once, only moving ones each frame (Unreal's GPU Scene, Unity's BatchRendererGroup). Research and plan in `docs/research/PERSISTENTSCENE.md` (the user's go, Nov 15 2026):
   - [x] Still objects: `ModelRenderer::still`, their draws kept between frames, changes announced (`still-objects`)
   - [x] Still draws' records kept: instances, last-frame matrices and a material table packed once, repacked where built (`gpu-scene-persistent`)
-  - [ ] Lasting GPU buffers updated only where they change (the 8 MB copy a frame left, about 2 ms; measured first)
+  - [x] Lasting GPU buffers updated only where they change (the 8 MB copy a frame left, about 2 ms; measured first): built by cells, GPU-driven drawing's stage 7a (`scene-cells`)
   - [ ] Views without full scans (measured first)
+  - [ ] Still entities announced when added, destroyed, hidden or shown, so `StillDraws` no longer walks every renderer each frame to find them (about 0.7 ms in the forest, growing with the world; the user, Nov 18 2026, from `scene-cells`' plan)
 - [x] Cheaper forest shadows: the understorey in the nearest two cascades, shadow bark, leaf cards cut to their twigs' outline (`understorey-shadow-cascades`)
 - [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/research/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
@@ -403,7 +404,10 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] 5. Shadow tiles as GPU views, the cache redrawn on announced changes (`gpu-cull-shadows`; research in `docs/research/GPUDRIVEN.md`, the user chose no cap on tiles a frame and the nearest cascade redrawn while things sway)
   - [x] 5b. The CPU path deleted, F4's HIDDEN (occlusion measurement) with it; `cull-compare` builds the CPU's lists on request (`cpu-culling-removed`)
   - [x] 6. One shared mesh buffer, a multi-draw per pipeline state (`mesh-megabuffer`; done before stages 4 and 5, the user's choice, Nov 18 2026, research in `docs/research/MESHPOOL.md`): the forest's 502 MB of meshes in two pools, each pass's groups packed by the GPU and drawn by one call a style; the camera's calls 7,500 to 12, RECORD 3.5 to 1.3 ms
-  - [ ] 7. Chunks of instances culled first, coarse CPU cells for streaming worlds (`scene-chunks`, required for phase 13)
+  - [ ] 7. Chunks of instances culled first, coarse CPU cells for streaming worlds (required for phase 13; research in `docs/research/GPUDRIVEN.md` "Stage 7"; the user, Nov 18 2026: built for scale, cells first, chunks by visible segments)
+    - [x] 7a. 128 m cells, each one's instances and culling records in GPU buffers kept between frames, written only when the cell changes; PACK's copy a frame becomes the changed cells' bytes (`scene-cells`, also the persistent scene's "lasting GPU buffers"): PACK 2.9 to 1.8 ms, the rest the terrain's ground materials packed each frame
+    - [ ] 7b. 64-draw chunks (Morton order inside a cell) tested once a view, then only the draws of visible (group, chunk) segments by an indirect dispatch; the lists' order fixed, no atomics, `cull-compare` exact (`scene-chunks`)
+    - Phase 13: cells loaded and unloaded by distance (hysteresis, a cap a frame), merged far models a cell, double coordinates
 - [x] Texture compression (moved from phase 12's asset cooking): BC7 for every texture, normal maps too (x, y and z kept for Toksvig), a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB; mips on the CPU, `bc7enc`, a disk cache in `build/texture_cache`, `engine.textureCompression` settings; a game's lookup textures stay exact (`texture-compression`, research in `docs/research/TEXTURECOMPRESSION.md`)
 - [x] Video memory in use on F4: the bytes the engine's resources take (VMA's allocation bytes) beside the blocks it holds, which move in 256 MB steps and hid most of texture compression's 466 MB saving (`vram-in-use`)
 - [ ] Far terrain following the camera, only if needed: the rough valley's fixed rings reach 20 km round the walk

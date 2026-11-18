@@ -6,6 +6,7 @@
 #include "render/frames_in_flight.h"
 #include "render/present_mode.h"
 #include "render/gpu/render_settings.h"
+#include "scene/world_cells.h"
 
 #include <cstdint>
 
@@ -60,6 +61,10 @@ struct EngineSettings {
     // Keep still objects' draws from frame to frame (ModelRenderer::still, scene/still_draws.h), building only what moves;
     // off builds every draw every frame, as before (for measuring). Read every frame.
     bool keepStillDraws = true;
+
+    // The cells kept still draws are laid out by (scene/world_cells.h): a change rebuilds its cells' draws only. Read
+    // every frame; a change lays every still draw out again.
+    CellSettings cells;
 
     // The debug view (F4) also boxes everything the camera draws (with the colliders). Off by default: in a forest the
     // boxes hide the readout. Read every frame.

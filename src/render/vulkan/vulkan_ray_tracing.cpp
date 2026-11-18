@@ -4,6 +4,7 @@
 #include "render/vulkan/vulkan_device.h"
 #include "render/vulkan/vulkan_mesh.h"
 #include "scene/indexed_mesh.h"
+#include "scene/still_draws.h"
 
 #include <algorithm>
 #include <array>
@@ -353,6 +354,11 @@ std::vector<GpuRayInstance> VulkanRayTracing::packInstances(const std::vector<Dr
 
     for (std::size_t index = 0; index < draws.size(); ++index) {
         const DrawItem& draw = draws[index];
+
+        // A cell's empty slot (scene/still_draws.h): nothing to meet.
+        if (isEmptyDrawSlot(draw)) {
+            continue;
+        }
 
         if (draw.mesh.index >= meshes.size()) {
             throw std::logic_error("A drawn mesh has no acceleration structure: add every mesh before drawing it");

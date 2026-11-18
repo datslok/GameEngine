@@ -38,7 +38,8 @@ Every view's lists are built by compute (the only way since `cpu-culling-removed
 |---|---|
 | Candidate (`GpuCullCandidate`, 8 B) | a draw and one level slot with a mesh; every draw not glass, shadow-only and hidden included (the GPU drops them by flag, so hiding keeps the groups) |
 | Group (`GpuCullGroup`, 16 B; `CullGroupStyle`) | the candidates of one (style, mesh), groups in `batchByMesh`'s order, candidates in draw order (`buildCullGroups`) |
-| `CameraCullTable` | still draws' records, groups, level tables, glass and flat-faced lists kept; built ranges repack records, groups rebuilt only when a draw's mesh, style, glass, flat faces or its mesh's level meshes change; the moving draws' groups made each frame after the still ones |
+| `CameraCullTable` | still draws' records, groups, level tables, glass and flat-faced lists kept; built ranges repack records, groups rebuilt only when a draw's mesh, style, glass, flat faces or its mesh's level meshes change; the moving draws' groups made each frame after the still ones; `stillRepacked` names the records packed (all when built afresh) |
+| Kept records, candidates | in lasting buffers (`gpu-scene.md`): the still records copied where repacked when the generation follows the one held (all otherwise), the still candidates only when built afresh, the moving ones every frame; levels, groups, views and drawing order in each frame's upload memory |
 | `GpuCameraCull` (240 B, one a view) | frustum, level view, sway fade end, motion and sway flags, counts, the lists' bases, its number and slices (`placeCullView`) |
 
 Four passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers are written, each one dispatch over every view (below):

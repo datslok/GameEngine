@@ -18,37 +18,57 @@ std::vector<std::array<float, 16>> packPreviousModels(std::span<const DrawItem> 
     return previous;
 }
 
+namespace {
+    // How many of the slots from first on (to end) the ranges cover, joined.
+    std::size_t coveredFrom(const std::vector<DrawRange>& ranges, std::size_t first, std::size_t end) {
+        std::size_t covered = 0;
+
+        for (const DrawRange& range : joinDrawRanges(ranges)) {
+            const std::size_t from = std::max(range.first, first);
+            const std::size_t to = std::min(range.first + range.count, end);
+            covered += to > from ? to - from : 0;
+        }
+
+        return covered;
+    }
+}
+
 /*
-* Whole when the frame does not follow the last one packed, when its count differs, or when it built every still draw;
-* otherwise its built ranges, into the kept table, unless that has gathered too many old entries.
+* Whole when the frame does not follow the last one packed, when it has fewer still draws, when its built ranges miss
+* slots added at the end (scene/still_draws.h: a cell's new block), or when it built every still draw; otherwise its
+* built ranges (the new slots among them), into the kept table, unless that has gathered too many old entries.
 */
 std::vector<DrawRange> StillInstances::update(const FrameDescription& frame, JobSystem& jobs) {
     if (frame.stillDraws == 0) {
         instances.clear();
         previousModels.clear();
         materials = MaterialTable{};
+        firstNewMaterial = 0;
         packedVersion = frame.stillVersion;
         return {};
     }
+
+    firstNewMaterial = materials.getEntries().size();
 
     if (packedVersion == frame.stillVersion && instances.size() == frame.stillDraws) {
         return {};
     }
 
-    std::size_t built = 0;
-
-    for (const DrawRange& range : frame.builtStillDraws) {
-        built += range.count;
-    }
-
-    const bool follows = packedVersion != 0 && packedVersion == frame.stillPreviousVersion && instances.size() == frame.stillDraws;
+    const std::vector<DrawRange> built = joinDrawRanges(frame.builtStillDraws);
+    const std::size_t builtCount = coveredFrom(built, 0, frame.stillDraws);
+    const std::size_t had = instances.size();
+    const bool follows = packedVersion != 0 && packedVersion == frame.stillPreviousVersion && had <= frame.stillDraws &&
+                         coveredFrom(built, had, frame.stillDraws) == frame.stillDraws - had;
     std::vector<DrawRange> packed;
 
-    if (!follows || built >= frame.stillDraws) {
+    if (!follows || builtCount >= frame.stillDraws) {
         packAll(frame, jobs);
         packed.push_back(DrawRange{0, frame.stillDraws});
     } else {
-        for (const DrawRange& range : frame.builtStillDraws) {
+        instances.resize(frame.stillDraws);
+        previousModels.resize(frame.stillDraws);
+
+        for (const DrawRange& range : built) {
             packRange(frame, range, jobs);
         }
 
@@ -56,12 +76,16 @@ std::vector<DrawRange> StillInstances::update(const FrameDescription& frame, Job
             packAll(frame, jobs);
             packed.push_back(DrawRange{0, frame.stillDraws});
         } else {
-            packed = frame.builtStillDraws;
+            packed = built;
         }
     }
 
     packedVersion = frame.stillVersion;
     return packed;
+}
+
+std::size_t StillInstances::getFirstNewMaterial() const {
+    return firstNewMaterial;
 }
 
 void StillInstances::packAll(const FrameDescription& frame, JobSystem& jobs) {
@@ -70,6 +94,7 @@ void StillInstances::packAll(const FrameDescription& frame, JobSystem& jobs) {
     instances = packInstances(still, materials, jobs);
     previousModels = packPreviousModels(still, jobs);
     entriesWhenWhole = materials.getEntries().size();
+    firstNewMaterial = 0;
 }
 
 void StillInstances::packRange(const FrameDescription& frame, const DrawRange& range, JobSystem& jobs) {
@@ -94,7 +119,7 @@ const MaterialTable& StillInstances::getMaterials() const {
 
 SceneRecords packMovingDraws(const FrameDescription& frame, const StillInstances& still, JobSystem& jobs) {
     SceneRecords records;
-    records.materials = still.getMaterials();
+    records.materials = MaterialTable::over(still.getMaterials());
     const std::span<const DrawItem> moving = std::span<const DrawItem>{frame.draws}.subspan(frame.stillDraws);
     records.moving = packInstances(moving, records.materials, jobs);
     records.movingPrevious = packPreviousModels(moving, jobs);

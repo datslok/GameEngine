@@ -66,7 +66,7 @@ Required by Vulkan 1.3 and used here as pointers for builds and shader reads.
 
 **Top level, one per frame in flight** (with its own scratch, instance and mesh-table `UploadArray`s and descriptor set; `setFramesInFlight` remakes them between frames):
 
-- `packInstances(draws)`: every draw, throwing for a mesh without a structure.
+- `packInstances(draws)`: every draw but the cells' empty slots (`isEmptyDrawSlot`), throwing for a mesh without a structure.
 - `buildScene(commands, frameIndex, instances)`: writes mesh table and instances, grows the structure (from 256 instances, doubling or to what is needed), rebuilds from scratch every frame (never stale, no bookkeeping for movers), barriers to fragment and compute ray queries, rewrites the set.
 - Timed as `GpuPass::RayScene` (TLAS in F4).
 

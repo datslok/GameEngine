@@ -58,6 +58,7 @@
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_camera_culling.h"
+#include "render/vulkan/vulkan_lasting_buffer.h"
 #include "render/vulkan/vulkan_mesh_pool.h"
 #include "render/vulkan/vulkan_sky_visibility.h"
 #include "render/vulkan/vulkan_reflections.h"
@@ -347,6 +348,15 @@ private:
     // The still draws' instance records, last-frame matrices and materials, kept from frame to frame and packed again
     // only where a frame built still draws again (render/gpu/still_instances.h).
     StillInstances stillInstances;
+
+    // Every draw's instance, the materials and last-frame matrices in GPU memory kept from frame to frame, copied only
+    // where they changed (render/vulkan/vulkan_lasting_buffer.h): the still records' changes, then the moving ones'.
+    std::unique_ptr<VulkanLastingBuffer> lastingInstances;
+    std::unique_ptr<VulkanLastingBuffer> lastingMaterials;
+    std::unique_ptr<VulkanLastingBuffer> lastingPreviousModels;
+
+    // The bytes the last frame copied into lasting buffers (F4's CELLS line).
+    std::size_t lastingCopiedBytes = 0;
 
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
     // without and with the light probes (probe_capture.frag), each for cut-outs too, indexed by capturePipelineIndex. On GPUs with ray queries each again
@@ -685,6 +695,10 @@ private:
                                bool occlusionAccumulates, bool gathersLight,
                                bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility,
                                const ContactShadowFrame& contact);
+
+    // The lasting instances, last-frame matrices and materials brought up to date (copies recorded in the frame's
+    // commands): the still records repacked this frame, then the moving draws' records.
+    void writeLastingRecords(const FrameContext& frame, const std::vector<DrawRange>& repacked, const SceneRecords& records);
 
     // Whether a frame reads the sky visibility grid: the setting on, a static level, and no light probes (which know the
     // sky's reach themselves).

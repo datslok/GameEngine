@@ -141,6 +141,9 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     cameraCulling = std::make_unique<VulkanCameraCulling>(device, framesInFlight);
+    lastingInstances = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuInstance));
+    lastingMaterials = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuMaterial));
+    lastingPreviousModels = std::make_unique<VulkanLastingBuffer>(device, sizeof(std::array<float, 16>));
     meshPool = std::make_unique<VulkanMeshPool>(device, uploads);
     cullFrameStyles.resize(framesInFlight);
     cullFrameViews.resize(framesInFlight);
@@ -1564,7 +1567,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const std::vector<std::size_t> glassSeen = visibleDraws(description.draws, cullFrame.glass, cameraFrustum);
     const std::vector<std::size_t> mirrorCandidates = visibleDraws(description.draws, cullFrame.flatFaced, cameraFrustum);
     stats.drawn = lastCameraCull.drawn + glassSeen.size();
-    stats.culled = description.draws.size() - std::min(stats.drawn, description.draws.size());
+    // The cells' empty slots are no draws (scene/still_draws.h).
+    const std::size_t realDraws = description.draws.size() - std::min(description.stillEmptySlots, description.draws.size());
+    stats.culled = realDraws - std::min(stats.drawn, realDraws);
     cpuClock.lap(CpuStage::Frustum, profilerSeconds());
 
     // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
@@ -1608,8 +1613,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // (render/gpu/transparency.h): by rays while ray tracing is on, exactly, else through the coloured shadow maps, made
     // the first time they are drawn (before the shadows are prepared: new maps redraw every tile).
     validateTransparency(settings.transparency);
-    const bool glassInWorld =
-        std::any_of(description.draws.begin(), description.draws.end(), [](const DrawItem& draw) { return isTransparent(draw.material); });
+    // The culling table lists every glass draw (still ones kept), so this does not walk every draw.
+    const bool glassInWorld = !cullFrame.glass.empty();
     const bool glassShadows = tracesRays(settings, rayTracing != nullptr) && settings.transparency.glassShadows && glassInWorld;
     const bool colouredShadows = glassShadowPipeline && drawsColouredShadowMaps(settings.transparency, glassInWorld, glassShadows);
 
@@ -1881,6 +1886,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, cullFrame, cullViews, frames[frame.frameIndex].scene->drawList.describe().buffer,
                         comparing);
     endGpuPass(frame, GpuPass::CameraCull);
+    stats.stillCells = description.stillCells;
+    stats.stillSlots = description.stillDraws;
+    stats.lastingCopiedBytes = lastingCopiedBytes + cameraCulling->getCopiedBytes();
     cullFrameStyles[frame.frameIndex] = cullFrame.styles;
     cullFrameDraws[frame.frameIndex] = description.draws.size();
     cullCompares[frame.frameIndex].reset();
@@ -2339,8 +2347,9 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 
     /*
     * The still draws' records come kept from earlier frames (render/gpu/still_instances.h), packed again only where the
-    * frame built them; the moving draws' are packed now, their materials added to a copy of the still table. Textures
-    * are checked where something was packed: a kept record's were checked when it was.
+    * frame built them; the moving draws' are packed now, their materials in a table over the still one. Textures are
+    * checked where something was packed: a kept record's were checked when it was. Then copied into the lasting
+    * buffers where they changed (writeLastingRecords).
     */
     const std::vector<DrawRange> repacked = stillInstances.update(description, jobs);
     const SceneRecords records = packMovingDraws(description, stillInstances, jobs);
@@ -2399,15 +2408,13 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.glassBounds.write(&glassBounds, sizeof(glassBounds));
     buffers.fog.write(&frameFog, sizeof(frameFog));
     buffers.skyVisibilityCascades.write(packProbeCascades(skyCascades, cameraOrigin));
-    buffers.instances.write(stillInstances.getInstances(), std::span<const GpuInstance>{records.moving});
-    buffers.materials.write(records.materials.getEntries());
+    writeLastingRecords(frame, repacked, records);
     buffers.directionalLights.write(lights.directional);
     buffers.pointLights.write(lights.points);
     buffers.spotLights.write(lights.spots);
     buffers.shadowTiles.write(shadows.tileData);
     // The CPU's entries only (glass, its shadows); the GPU's regions are written by the culling.
     buffers.drawList.writeRuns(drawList);
-    buffers.previousModels.write(stillInstances.getPreviousModels(), std::span<const std::array<float, 16>>{records.movingPrevious});
 
     // The terrain's patches (at least one record, so the buffer is never empty).
     std::vector<GpuTerrainPatch> patches(std::max<std::size_t>(description.terrainPatches.size(), 1));
@@ -2451,6 +2458,9 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     };
 
     SceneBufferViews views;
+    views.instances = lastingInstances->describe();
+    views.materials = lastingMaterials->describe();
+    views.previousModels = lastingPreviousModels->describe();
     views.probeStates = !probes.empty() ? ddgi->describeProbeStates(frame.frameIndex) : VkDescriptorBufferInfo{noProbeStates.get(), 0, VK_WHOLE_SIZE};
     views.probeCascades = !probes.empty() ? ddgi->describeProbeCascades(frame.frameIndex) : VkDescriptorBufferInfo{noProbeCascades.get(), 0, VK_WHOLE_SIZE};
     views.skyLight = description.lighting.atmosphere ? atmosphere->describeSkyLight() : buffers.skyLight.describe();
@@ -2458,6 +2468,40 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.hangingVertices = VkDescriptorBufferInfo{hangingRecords.empty() ? noHangingVertices.get() : hangingVertices.get(), 0, VK_WHOLE_SIZE};
     views.thinningCards = VkDescriptorBufferInfo{thinningRecords.empty() ? noThinningCards.get() : thinningCards.get(), 0, VK_WHOLE_SIZE};
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
+}
+
+/*
+* The instances, last-frame matrices and materials kept in GPU memory brought up to date: the still records the frame
+* packed again (repacked; every one when a buffer was made afresh), the still table's new materials, then the moving
+* draws' records and their own materials after the still ones', copied every frame (they grow with what moves).
+*/
+void VulkanRenderer::writeLastingRecords(const FrameContext& frame, const std::vector<DrawRange>& repacked, const SceneRecords& records) {
+    const std::span<const GpuInstance> stillRecords = stillInstances.getInstances();
+    const std::span<const std::array<float, 16>> stillPrevious = stillInstances.getPreviousModels();
+    const std::size_t stillCount = stillRecords.size();
+    const std::size_t drawCount = stillCount + records.moving.size();
+    const std::vector<DrawRange> everyStill{DrawRange{0, stillCount}};
+    const std::vector<DrawRange> movingRange{DrawRange{0, records.moving.size()}};
+
+    std::vector<LastingWrite> instanceWrites;
+    appendLastingWrites(instanceWrites, lastingInstances->reserve(drawCount) ? everyStill : repacked, stillRecords, 0);
+    appendLastingWrites(instanceWrites, movingRange, std::span<const GpuInstance>{records.moving}, stillCount);
+    lastingInstances->write(frame.commands, frame.frameIndex, instanceWrites);
+
+    std::vector<LastingWrite> previousWrites;
+    appendLastingWrites(previousWrites, lastingPreviousModels->reserve(drawCount) ? everyStill : repacked, stillPrevious, 0);
+    appendLastingWrites(previousWrites, movingRange, std::span<const std::array<float, 16>>{records.movingPrevious}, stillCount);
+    lastingPreviousModels->write(frame.commands, frame.frameIndex, previousWrites);
+
+    const std::vector<GpuMaterial>& stillMaterials = stillInstances.getMaterials().getEntries();
+    const std::vector<GpuMaterial>& movingMaterials = records.materials.getEntries();
+    const std::size_t firstNew = lastingMaterials->reserve(stillMaterials.size() + movingMaterials.size()) ? 0 : stillInstances.getFirstNewMaterial();
+    std::vector<LastingWrite> materialWrites;
+    appendLastingWrites(materialWrites, {DrawRange{firstNew, stillMaterials.size() - firstNew}}, std::span<const GpuMaterial>{stillMaterials}, 0);
+    appendLastingWrites(materialWrites, {DrawRange{0, movingMaterials.size()}}, std::span<const GpuMaterial>{movingMaterials}, stillMaterials.size());
+    lastingMaterials->write(frame.commands, frame.frameIndex, materialWrites);
+
+    lastingCopiedBytes = lastingInstances->getCopiedBytes() + lastingPreviousModels->getCopiedBytes() + lastingMaterials->getCopiedBytes();
 }
 
 /*

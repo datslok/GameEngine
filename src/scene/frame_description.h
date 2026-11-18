@@ -145,6 +145,9 @@ struct DrawRange {
     std::size_t count = 0;
 };
 
+// The ranges sorted by first, those that overlap or touch joined, empty ones left out.
+std::vector<DrawRange> joinDrawRanges(std::vector<DrawRange> ranges);
+
 class StillDraws;
 
 /*
@@ -167,6 +170,10 @@ struct FrameDescription {
     // from them, knows builtStillDraws is all that changed only when it packed that one (render/gpu/still_instances.h).
     std::uint64_t stillVersion = 0;
     std::uint64_t stillPreviousVersion = 0;
+
+    // The cells the still draws are laid out by (scene/world_cells.h), and how many of their slots are empty, for F4.
+    std::size_t stillCells = 0;
+    std::size_t stillEmptySlots = 0;
 
     // Where the action is: when there are more lights than the renderer can use, the brightest ones here win.
     // The camera's position unless the game names a better point (a MOBA camera floats far above the ground it shows).

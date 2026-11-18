@@ -3,6 +3,7 @@
 #include "render/gpu/camera_culling.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/vulkan_compute.h"
+#include "render/vulkan/vulkan_lasting_buffer.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "volk/volk.h"
 
@@ -36,9 +37,10 @@ struct PassDraws {
 * the probe faces and the mirror drawn this frame: the dispatch's second dimension), write each view's region of the
 * frame's draw list (and the camera's velocity region), one indirect command a group for each, and each list's commands
 * packed style by style with their counts, for one vkCmdDrawIndexedIndirectCount a style (the shared mesh buffer,
-* render/vulkan/vulkan_mesh_pool.h). Each view works in its own slices of the working buffers (placeCullView). Each
-* frame in flight has its own tables in upload memory (the still part rewritten only when its generation changes), its
-* own working buffers and commands in GPU memory, and a read-back copy of the counts and commands (and, for
+* render/vulkan/vulkan_mesh_pool.h). Each view works in its own slices of the working buffers (placeCullView). The
+* records and candidates are kept in GPU memory every frame reads (render/vulkan/vulkan_lasting_buffer.h): the still
+* records copied where repacked, the still candidates when built afresh, the moving ones every frame. Each frame in
+* flight has its own other tables in upload memory, its own working buffers and commands in GPU memory, and a read-back copy of the counts and commands (and, for
 * cull-compare, the lists) the CPU reads once the frame has finished, so F4's counts show a frame or two late.
 */
 class VulkanCameraCulling {
@@ -76,16 +78,16 @@ public:
     // Once the frame's commands have finished (its fence passed). Each is returned once; none when it culled nothing.
     std::optional<Collected> collect(std::uint32_t frameIndex);
 
+    // Bytes the last cull copied into the kept records and candidates.
+    std::size_t getCopiedBytes() const;
+
 private:
     struct PerFrame {
-        // Upload memory: the tables and the views.
-        VulkanBuffer records;
+        // Upload memory: the levels, groups, views and drawing order.
         VulkanBuffer levels;
-        VulkanBuffer candidates;
         VulkanBuffer groups;
         VulkanBuffer views;
         VulkanBuffer order;
-        std::uint64_t heldGeneration = 0; // the still part the records and candidates hold (0: none)
 
         // GPU memory: the passes' working buffers and the commands, a slice a view.
         VulkanBuffer flags;
@@ -109,7 +111,7 @@ private:
         bool listsPending = false;
     };
 
-    void upload(PerFrame& frame, const CameraCullFrame& table, std::span<const GpuCameraCull> views);
+    void upload(VkCommandBuffer commands, std::uint32_t frameIndex, const CameraCullFrame& table, std::span<const GpuCameraCull> views);
 
     const VulkanDevice& device;
     std::unique_ptr<ComputePipeline> flagPass;
@@ -117,4 +119,9 @@ private:
     std::unique_ptr<ComputePipeline> writePass;
     std::unique_ptr<ComputePipeline> compactPass;
     std::vector<PerFrame> frames;
+
+    // Every draw's record and every candidate, kept; the still part's generation they hold (0: none).
+    std::unique_ptr<VulkanLastingBuffer> records;
+    std::unique_ptr<VulkanLastingBuffer> candidates;
+    std::uint64_t heldGeneration = 0;
 };

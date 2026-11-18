@@ -146,23 +146,44 @@ std::uint64_t materialHash(const GpuMaterial& packed) {
     return hash.value;
 }
 
+MaterialTable MaterialTable::over(const MaterialTable& base) {
+    MaterialTable table;
+    table.base = &base;
+    table.firstIndex = base.firstIndex + static_cast<std::uint32_t>(base.entries.size());
+    return table;
+}
+
+std::optional<std::uint32_t> MaterialTable::findOwn(const GpuMaterial& packed, std::uint64_t hash) const {
+    const auto [first, last] = byHash.equal_range(hash);
+
+    for (auto entry = first; entry != last; ++entry) {
+        if (std::memcmp(&entries[entry->second - firstIndex], &packed, sizeof(packed)) == 0) {
+            return entry->second;
+        }
+    }
+
+    return std::nullopt;
+}
+
+// The recent entries first, then the base's (and its bases'), then this table's own; numbers are the GPU's (base first).
 std::uint32_t MaterialTable::addPacked(const GpuMaterial& packed, std::uint64_t hash) {
     for (std::size_t slot = 0; slot < recentFilled; ++slot) {
-        if (recentHashes[slot] == hash && std::memcmp(&entries[recentIndices[slot]], &packed, sizeof(packed)) == 0) {
+        if (recentHashes[slot] == hash && std::memcmp(&at(recentIndices[slot]), &packed, sizeof(packed)) == 0) {
             return recentIndices[slot];
         }
     }
 
-    std::uint32_t index = static_cast<std::uint32_t>(entries.size());
-    bool found = false;
-    const auto [first, last] = byHash.equal_range(hash);
+    std::optional<std::uint32_t> found;
 
-    for (auto entry = first; entry != last && !found; ++entry) {
-        if (std::memcmp(&entries[entry->second], &packed, sizeof(packed)) == 0) {
-            index = entry->second;
-            found = true;
-        }
+    for (const MaterialTable* below = base; below != nullptr && !found; below = below->base) {
+        found = below->findOwn(packed, hash);
     }
+
+    if (!found) {
+        found = findOwn(packed, hash);
+    }
+
+    const std::uint32_t index = found.value_or(firstIndex + static_cast<std::uint32_t>(entries.size()));
 
     if (!found) {
         entries.push_back(packed);
@@ -204,6 +225,18 @@ std::vector<GpuInstance> packInstances(std::span<const DrawItem> draws, Material
 
 const std::vector<GpuMaterial>& MaterialTable::getEntries() const {
     return entries;
+}
+
+const GpuMaterial& MaterialTable::at(std::uint32_t index) const {
+    if (index < firstIndex) {
+        return base->at(index);
+    }
+
+    return entries.at(index - firstIndex);
+}
+
+std::uint32_t MaterialTable::getFirstIndex() const {
+    return firstIndex;
 }
 
 /*
