@@ -10,8 +10,14 @@ const char* cpuStageName(CpuStage stage) {
         return "WAIT";
     case CpuStage::Setup:
         return "SETUP";
-    case CpuStage::Camera:
-        return "CAMERA";
+    case CpuStage::Frustum:
+        return "FRUSTUM";
+    case CpuStage::Levels:
+        return "LEVELS";
+    case CpuStage::Batch:
+        return "BATCH";
+    case CpuStage::Moving:
+        return "MOVING";
     case CpuStage::Lights:
         return "LIGHTS";
     case CpuStage::Shadows:

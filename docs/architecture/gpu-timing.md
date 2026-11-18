@@ -28,7 +28,7 @@ API-free, tested in `gpu_timing_test`.
 
 ## CPU stages (`render/cpu_timing`)
 
-- `CpuStage`: SKYBAKE, WAIT, SETUP, CAMERA, LIGHTS, SHADOWS, CAPTURES, LINES, PACK, RECORD, SUBMIT (meanings: the header).
+- `CpuStage`: SKYBAKE, WAIT, SETUP, FRUSTUM, LEVELS, BATCH, MOVING (the camera's draws in four parts), LIGHTS, SHADOWS, CAPTURES, LINES, PACK, RECORD, SUBMIT (meanings: the header).
 - `CpuStageClock`: `start`, then `lap(stage, now)` credits the time since the last lap to that stage, so a stage met twice adds up; `finish` gives `CpuStageTimings` into `RenderStats::cpu`.
 - Shown as RENDER by stage (`makeCpuStageProfiler`, `recordCpuStageTimings`) beside the engine's SCENE by part (`SceneStage`). Tested in `cpu_timing_test`.
 
