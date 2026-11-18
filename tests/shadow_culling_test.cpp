@@ -60,15 +60,8 @@ namespace {
     void testShadowListsMatchTheCpu() {
         std::mt19937 random{71};
         const CullScene scene = randomCullScene(random);
-        const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
-        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), shadowTestPlacement);
-        const CullDrawOrder order = cullDrawOrder(groups.styles);
-        std::vector<GpuCullRecord> records;
-
-        for (const DrawItem& draw : scene.draws) {
-            records.push_back(packCullRecord(draw));
-        }
-
+        CullSceneTables both;
+        buildCullSceneTables(both, scene, shadowTestPlacement);
         std::size_t drawn = 0;
         std::size_t moved = 0;
 
@@ -76,21 +69,27 @@ namespace {
             const ShadowTile tile = randomTile(random);
             LevelOfDetailSettings settings;
             settings.enabled = index % 5 != 4;
-            GpuCameraCull view = packShadowCull(tile, settings);
-            assert((view.flags & CAMERA_CULL_SHADOW) != 0u);
-            assert(((view.flags & CAMERA_CULL_MOTION) != 0u) == tile.separateMovers);
-            placeCullView(view, 0, static_cast<std::uint32_t>(groups.candidates.size()), order);
-            view.mainBase = 0;
-            view.motionBase = 0;
-
-            const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, order.order, view);
             const std::vector<std::size_t> found = shadowTileCasters(scene.draws, castersInReach(scene.draws, tile.reach), tile);
             const ShadowCasterSplit split = tile.separateMovers ? splitMovingCasters(scene.draws, found) : ShadowCasterSplit{found, {}};
             const LevelView levels = tileLevelView(tile, settings);
-            assert(result.mainEntries == orderOf(batchByMesh(scene.draws, split.still, 0, &levels)));
-            assert(result.motionEntries == orderOf(batchByMesh(scene.draws, split.moving, 0, &levels)));
-            drawn += result.mainEntries.size();
-            moved += result.motionEntries.size();
+
+            // Through the flat groups and the chunked table alike.
+            for (int form = 0; form < 2; ++form) {
+                const CullTables tables = form == 0 ? both.flatTables() : both.chunkedTables();
+                const CullDrawOrder& order = form == 0 ? both.flatOrder : both.chunked.drawOrder;
+                GpuCameraCull view = packShadowCull(tile, settings);
+                assert((view.flags & CAMERA_CULL_SHADOW) != 0u);
+                assert(((view.flags & CAMERA_CULL_MOTION) != 0u) == tile.separateMovers);
+                placeCullView(view, 0, static_cast<std::uint32_t>(tables.candidates.size()), static_cast<std::uint32_t>(tables.segments.size()), order);
+                view.mainBase = 0;
+                view.motionBase = 0;
+                const CameraCullResult result = cullCameraOnCpu(tables, order.order, view);
+                assert(result.mainEntries == orderOf(batchByMesh(scene.draws, split.still, 0, &levels)));
+                assert(result.motionEntries == orderOf(batchByMesh(scene.draws, split.moving, 0, &levels)));
+            }
+
+            drawn += split.still.size();
+            moved += split.moving.size();
         }
 
         assert(drawn > 1000 && moved > 0);

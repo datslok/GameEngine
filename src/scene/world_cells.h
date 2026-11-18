@@ -23,6 +23,10 @@ struct CellSettings {
     // The smallest block a cell is given, in draws.
     int fewestSlots = 64;
 
+    // Slots a chunk holds (GPU-driven drawing's stage 7b): blocks are whole chunks, so a slot's chunk is slot / chunkSlots,
+    // culled as one before its draws. 64 as one GPU subgroup.
+    int chunkSlots = 64;
+
     bool operator==(const CellSettings&) const = default;
 };
 
@@ -43,8 +47,17 @@ struct CellKey {
 // The cell holding a point (its x and z), with cells size metres a side.
 CellKey worldCellOf(const Vec3& position, float size);
 
-// The draws a cell with needed draws is given room for: needed and its spare share, at least the fewest.
+// The draws a cell with needed draws is given room for: needed and its spare share, at least the fewest, in whole chunks.
 std::size_t cellBlockSlots(std::size_t needed, const CellSettings& settings);
+
+// x's 16 low bits in the even places of the result, z's in the odd ones (a Morton or Z-order code).
+std::uint32_t interleaveBits(std::uint32_t x, std::uint32_t z);
+
+/*
+* A point's Morton code inside a cell: its x and z across the cell as 16 bits each (points outside held to the edges),
+* interleaved. Sorting a cell's objects by it keeps runs of slots close together on the ground, so chunks stay tight.
+*/
+std::uint32_t cellMortonCode(const Vec3& position, const CellKey& cell, float size);
 
 /*
 * Runs of slots handed out and given back (the cells' blocks in the still draws): the first free run long enough, lowest

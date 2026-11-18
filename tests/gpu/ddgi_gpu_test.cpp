@@ -437,6 +437,11 @@ namespace {
         BindlessTextures textures;
         SceneLayout sceneLayout;
         SceneBuffers buffers;
+
+        // The instances and materials, which the renderer keeps in lasting buffers (render/vulkan/vulkan_lasting_buffer.h):
+        // written whole here, as upload arrays.
+        UploadArray instances;
+        UploadArray materials;
         VulkanRayTracing rayTracing;
         std::unique_ptr<VulkanTexture> white;
         VulkanBuffer clusterMasks;
@@ -452,6 +457,8 @@ namespace {
             textures(device, 16),
             sceneLayout(device.getDevice(), textures.getLayout()),
             buffers(device.getAllocator()),
+            instances(device.getAllocator(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+            materials(device.getAllocator(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
             rayTracing(device, 1),
             clusterMasks(device.getAllocator(), 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu)
         {
@@ -482,11 +489,11 @@ namespace {
         // with the camera at the origin.
         VkDescriptorSet writeFrame(const std::vector<DrawItem>& draws, const FrameLighting& lighting, std::span<const ProbeCascade> cascades,
                                    const VulkanDdgi& ddgi, const GlobalIlluminationSettings& settings) {
-            MaterialTable materials;
-            std::vector<GpuInstance> instances;
+            MaterialTable table;
+            std::vector<GpuInstance> packed;
 
             for (const DrawItem& draw : draws) {
-                instances.push_back(packInstance(draw, materials.add(draw.material)));
+                packed.push_back(packInstance(draw, table.add(draw.material)));
             }
 
             const GpuLights lights = packLighting(lighting, Vec3{});
@@ -500,8 +507,8 @@ namespace {
             buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
             const GpuAtmosphere noAtmosphere{};
             buffers.atmosphere.write(&noAtmosphere, sizeof(noAtmosphere));
-            buffers.instances.write(instances);
-            buffers.materials.write(materials.getEntries());
+            instances.write(packed);
+            materials.write(table.getEntries());
             buffers.directionalLights.write(lights.directional);
             buffers.pointLights.write(lights.points);
             buffers.spotLights.write(lights.spots);
@@ -511,7 +518,13 @@ namespace {
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             return writeSceneSet(descriptors, sceneLayout, buffers,
                                  SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance(), dummy, dummy, dummy, dummy, dummy, dummy, dummy, dummy, dummy, dummy, dummy, dummy},
-                                 clusterMasks, SceneBufferViews{ddgi.describeProbeStates(0), buffers.skyLight.describe(), ddgi.describeProbeCascades(0)});
+                                 clusterMasks,
+                                 SceneBufferViews{.instances = instances.describe(),
+                                                  .materials = materials.describe(),
+                                                  .previousModels = instances.describe(),
+                                                  .probeStates = ddgi.describeProbeStates(0),
+                                                  .skyLight = buffers.skyLight.describe(),
+                                                  .probeCascades = ddgi.describeProbeCascades(0)});
         }
 
         // Whether the last frame written lists a fast light for the probe rays' hits.

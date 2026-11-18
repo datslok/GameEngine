@@ -2,11 +2,15 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* The GPU culling, pass 1 of 4 (render/vulkan/vulkan_camera_culling.h): one invocation a candidate (a draw and one of
-* its level slots) and view (the dispatch's y: the camera, a probe face, the mirror) flags whether the view and the
-* velocity pass draw it with that slot (cameraCandidateFlags), then the workgroup sums its flags (an exclusive prefix sum
-* in shared memory, Hillis and Steele's), keeping each candidate's offset within the block and the block's totals for
-* pass 2, in the view's slices. The draws drawn at each level are counted too.
+* The GPU culling, flags pass (render/vulkan/vulkan_camera_culling.h): dispatched indirectly over the view's visible
+* candidates only (those in segments whose chunk passed, in segment order; the dispatch's y the view). Each workgroup's
+* candidates lie in a few consecutive visible segments: one invocation finds the first (a binary search of the visible
+* segment list), the workgroup loads the next ones into shared memory (each holds at least one candidate, so a
+* workgroup's worth covers its candidates), and each invocation finds its own segment there. Each then flags whether
+* the view and the velocity pass draw its candidate with that slot (cameraCandidateFlags), keeping the candidate's place
+* in the list in the flags' upper bits, and the workgroup sums its flags (an exclusive prefix sum in shared memory,
+* Hillis and Steele's), keeping each candidate's offset within the block and the block's totals for the scan, in the
+* view's slices. The draws drawn at each level are counted too.
 */
 #include "camera_culling.glsl"
 
@@ -28,6 +32,7 @@ layout(std430, set = 0, binding = 3) readonly buffer Views {
     CameraCull views[];
 };
 
+// A visible candidate's CAMERA_CULL_* flags, its place in the candidate list above them (<< CAMERA_CULL_FLAG_BITS).
 layout(std430, set = 0, binding = 4) writeonly buffer Flags {
     uint flags[];
 };
@@ -37,7 +42,7 @@ layout(std430, set = 0, binding = 5) writeonly buffer Offsets {
     uvec2 offsets[];
 };
 
-// Each block's totals, summed in place by pass 2.
+// Each block's totals, summed in place by the scan.
 layout(std430, set = 0, binding = 6) writeonly buffer BlockSums {
     uvec2 blockSums[];
 };
@@ -47,28 +52,94 @@ layout(std430, set = 0, binding = 7) buffer Counts {
     uint counts[];
 };
 
+layout(std430, set = 0, binding = 8) readonly buffer Segments {
+    CullSegment segments[];
+};
+
+// x the segment, y its first place among the visible candidates; by place among the visible segments.
+layout(std430, set = 0, binding = 9) readonly buffer VisibleSegments {
+    uvec2 visibleSegments[];
+};
+
+layout(std430, set = 0, binding = 10) readonly buffer Work {
+    CullViewWork work[];
+};
+
 shared uvec2 sums[CAMERA_CULL_GROUP_SIZE];
 shared uint levelCounts[CULL_LEVEL_SLOTS];
+shared uvec2 window[CAMERA_CULL_GROUP_SIZE];
+shared uint windowFirst;
+
+// The last visible segment starting at or before place: the visible list is in place order.
+uint firstSegmentAt(CameraCull view, uint visible, uint place) {
+    uint low = 0u;
+    uint high = visible;
+
+    while (high - low > 1u) {
+        uint middle = (low + high) / 2u;
+
+        if (visibleSegments[view.segmentSlices.x + middle].y <= place) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+
+    return low;
+}
 
 void main() {
     uint local = gl_LocalInvocationIndex;
-    uint candidateIndex = gl_GlobalInvocationID.x;
     CameraCull view = views[gl_WorkGroupID.y];
-    uint slice = view.slices.x + candidateIndex;
+    CullViewWork viewWork = work[view.view];
+    uint first = gl_WorkGroupID.x * CAMERA_CULL_GROUP_SIZE;
+
+    // The dispatch covers the batch's most; a view with fewer leaves the rest of its workgroups idle (whole workgroups,
+    // so no barrier below is skipped by part of one).
+    if (first >= viewWork.visibleCandidates) {
+        return;
+    }
 
     if (local < CULL_LEVEL_SLOTS) {
         levelCounts[local] = 0u;
     }
 
+    if (local == 0u) {
+        windowFirst = firstSegmentAt(view, viewWork.visibleSegments, first);
+    }
+
+    barrier();
+    uint windowCount = min(CAMERA_CULL_GROUP_SIZE, viewWork.visibleSegments - windowFirst);
+
+    if (local < windowCount) {
+        window[local] = visibleSegments[view.segmentSlices.x + windowFirst + local];
+    }
+
     barrier();
 
+    uint place = first + local;
+    uint slice = view.slices.x + place;
     uint candidateFlags = 0u;
 
-    if (candidateIndex < view.candidates) {
+    if (place < viewWork.visibleCandidates) {
+        uint low = 0u;
+        uint high = windowCount;
+
+        while (high - low > 1u) {
+            uint middle = (low + high) / 2u;
+
+            if (window[middle].y <= place) {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+
+        uint candidateIndex = segments[window[low].x].firstCandidate + (place - window[low].y);
         CullCandidate candidate = candidates[candidateIndex];
         CullRecord record = records[candidate.draw];
         candidateFlags = cameraCandidateFlags(record, meshLevels[record.mesh], view, candidate.slot);
-        flags[slice] = candidateFlags;
+        flags[slice] = candidateFlags | (candidateIndex << CAMERA_CULL_FLAG_BITS);
 
         if ((candidateFlags & CAMERA_CULL_DRAWN) != 0u) {
             atomicAdd(levelCounts[candidate.slot], 1u);
@@ -87,7 +158,7 @@ void main() {
         barrier();
     }
 
-    if (candidateIndex < view.candidates) {
+    if (place < viewWork.visibleCandidates) {
         offsets[slice] = sums[local] - value;
     }
 

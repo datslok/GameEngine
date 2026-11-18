@@ -1,0 +1,72 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The GPU culling's segment scan (GPU-driven drawing's stage 7b, render/vulkan/vulkan_camera_culling.h): one workgroup a
+* view (the dispatch's y) turns the segment blocks' totals into each block's first place (an exclusive prefix sum, a
+* workgroup's worth of blocks at a time, carried on), writes the totals after the last block, the view's work (its
+* visible candidates and segments, and their workgroups), and raises its batch's indirect dispatches to its workgroups:
+* the flags pass's to its visible candidates', the write pass's to those or the groups' (the CPU starts them at 0 and
+* at the groups').
+*/
+#include "camera_culling.glsl"
+
+layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Views {
+    CameraCull views[];
+};
+
+// The blocks' totals in, their first places out; one more after them for the totals. Each view's in its slice.
+layout(std430, set = 0, binding = 1) buffer SegmentBlockSums {
+    uvec2 segmentBlockSums[];
+};
+
+// A CullViewWork a view, by its number.
+layout(std430, set = 0, binding = 2) writeonly buffer Work {
+    CullViewWork work[];
+};
+
+// The batch's indirect dispatches (CAMERA_CULL_DISPATCH_WORDS): the flags pass's x y z, then the write pass's.
+layout(std430, set = 0, binding = 3) buffer Dispatches {
+    uint dispatches[];
+};
+
+shared uvec2 sums[CAMERA_CULL_GROUP_SIZE];
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    CameraCull view = views[gl_WorkGroupID.y];
+    uint slice = view.segmentSlices.y;
+    uvec2 carried = uvec2(0u);
+
+    // The loop's bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
+    for (uint first = 0u; first < view.segmentBlocks; first += CAMERA_CULL_GROUP_SIZE) {
+        uint block = first + local;
+        uvec2 value = block < view.segmentBlocks ? segmentBlockSums[slice + block] : uvec2(0u);
+        sums[local] = value;
+        barrier();
+
+        for (uint offset = 1u; offset < CAMERA_CULL_GROUP_SIZE; offset *= 2u) {
+            uvec2 before = local >= offset ? sums[local - offset] : uvec2(0u);
+            barrier();
+            sums[local] += before;
+            barrier();
+        }
+
+        if (block < view.segmentBlocks) {
+            segmentBlockSums[slice + block] = carried + sums[local] - value;
+        }
+
+        carried += sums[CAMERA_CULL_GROUP_SIZE - 1];
+        barrier();
+    }
+
+    if (local == 0u) {
+        segmentBlockSums[slice + view.segmentBlocks] = carried;
+        uint blocks = (carried.x + CAMERA_CULL_GROUP_SIZE - 1u) / CAMERA_CULL_GROUP_SIZE;
+        work[view.view] = CullViewWork(carried.x, carried.y, blocks, 0u);
+        atomicMax(dispatches[0], blocks);
+        atomicMax(dispatches[3], blocks);
+    }
+}

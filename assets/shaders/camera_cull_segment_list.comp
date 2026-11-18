@@ -1,0 +1,51 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The GPU culling's visible segment list (GPU-driven drawing's stage 7b, render/vulkan/vulkan_camera_culling.h): one
+* invocation a segment and view (the dispatch's y). A segment passed the segment pass exactly when the visible segments
+* before the next one are one more than before it (read from the scanned sums, so the chunk test is never made twice);
+* one that passed writes its number and its first place among the visible candidates at its place among the visible
+* segments, in segment order. The flags pass finds each visible candidate's segment in this list.
+*/
+#include "camera_culling.glsl"
+
+layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Views {
+    CameraCull views[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer SegmentOffsets {
+    uvec2 segmentOffsets[];
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer SegmentBlockFirst {
+    uvec2 segmentBlockFirst[];
+};
+
+// x the segment, y its first place among the view's visible candidates; by place among its visible segments.
+layout(std430, set = 0, binding = 3) writeonly buffer VisibleSegments {
+    uvec2 visibleSegments[];
+};
+
+// A segment's first places among the visible candidates (x) and segments (y); past the last, the totals.
+uvec2 segmentPlace(CameraCull view, uint segment) {
+    return segment >= view.segments ? segmentBlockFirst[view.segmentSlices.y + view.segmentBlocks]
+                                    : segmentBlockFirst[view.segmentSlices.y + segment / CAMERA_CULL_GROUP_SIZE] + segmentOffsets[view.segmentSlices.x + segment];
+}
+
+void main() {
+    uint segmentIndex = gl_GlobalInvocationID.x;
+    CameraCull view = views[gl_WorkGroupID.y];
+
+    if (segmentIndex >= view.segments) {
+        return;
+    }
+
+    uvec2 place = segmentPlace(view, segmentIndex);
+
+    if (segmentPlace(view, segmentIndex + 1u).y > place.y) {
+        visibleSegments[view.segmentSlices.x + place.y] = uvec2(segmentIndex, place.x);
+    }
+}

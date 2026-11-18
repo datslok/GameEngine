@@ -42,7 +42,8 @@ bool isEmptyDrawSlot(const DrawItem& draw);
 * once the frame is drawn the engine gives the list back (giveBack), and the next frame starts from it.
 *
 * Laid out by cell (scene/world_cells.h, docs/research/GPUDRIVEN.md stage 7): each cell a block of slots with spare room
-* (cellBlockSlots), cells by column then row, a cell's entities in the order they joined it, its spare slots empty
+* (cellBlockSlots, whole chunks), cells by column then row, a cell's entities in Morton order (cellMortonCode, sorted
+* again on every rebuild of the cell), its spare slots empty
 * (emptyDrawSlot). A still entity added, destroyed, hidden or shown, given more or fewer parts, no longer still, or
 * moved into another cell (announced) rebuilds the blocks of the cells it leaves and joins, nothing else; a cell that
 * outgrows its block moves to the first free run that fits (SlotBlocks), its old block emptied. An announced change
@@ -87,8 +88,9 @@ public:
     std::size_t getCount() const;
     std::size_t getCellCount() const;
 
-    // The slots holding draws (the rest are empty).
+    // The slots holding draws (the rest are empty), and the slots a chunk holds.
     std::size_t getFilledCount() const;
+    std::size_t getChunkSlots() const;
 
 private:
     // A kept entity, by its index: its generation, its cell, its first draw and its parts, and the update that last saw it.
@@ -110,7 +112,7 @@ private:
     };
 
     void buildAll(const World& world, const std::vector<std::uint8_t>& kept, float alpha, JobSystem& jobs);
-    void buildCell(const World& world, Cell& cell, float alpha, JobSystem& jobs);
+    void buildCell(const World& world, const CellKey& key, Cell& cell, float alpha, JobSystem& jobs);
     void emptySlots(std::size_t first, std::size_t count);
     CellKey cellOfEntity(const World& world, Entity entity, float alpha) const;
 

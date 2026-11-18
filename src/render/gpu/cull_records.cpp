@@ -31,6 +31,62 @@ GpuCullRecord packCullRecord(const DrawItem& draw) {
     return record;
 }
 
+/*
+* The members' flags gathered, their spheres' box, then the margin: CULL_CHUNK_MARGIN metres and a share of the farthest
+* coordinate, more than the GPU's and CPU's rounding can move a plane test, so a chunk culled never held a draw kept.
+*/
+GpuCullChunk packCullChunk(std::span<const GpuCullRecord> members) {
+    GpuCullChunk chunk{};
+    float low[3] = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    float high[3] = {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
+    bool anyBox = false;
+
+    for (const GpuCullRecord& record : members) {
+        if (record.mesh == cullNoMesh || (record.flags & CULL_TRANSPARENT) != 0u) {
+            continue;
+        }
+
+        if ((record.flags & (CULL_SHADOW_ONLY | CULL_HIDDEN)) == 0u) {
+            chunk.flags |= CULL_CHUNK_SEEN;
+        }
+
+        if ((record.flags & CULL_CASTS_SHADOWS) != 0u && (record.flags & CULL_HIDDEN) == 0u) {
+            chunk.flags |= CULL_CHUNK_CASTS;
+        }
+
+        if (record.bounds[3] < 0.0f) {
+            chunk.flags |= CULL_CHUNK_ALWAYS;
+            continue;
+        }
+
+        for (int axis = 0; axis < 3; ++axis) {
+            low[axis] = std::min(low[axis], record.bounds[axis] - record.bounds[3]);
+            high[axis] = std::max(high[axis], record.bounds[axis] + record.bounds[3]);
+        }
+
+        anyBox = true;
+    }
+
+    if (!anyBox) {
+        return chunk;
+    }
+
+    float farthest = 0.0f;
+
+    for (int axis = 0; axis < 3; ++axis) {
+        farthest = std::max({farthest, std::abs(low[axis]), std::abs(high[axis])});
+    }
+
+    const float margin = static_cast<float>(CULL_CHUNK_MARGIN) + static_cast<float>(CULL_CHUNK_RELATIVE_MARGIN) * farthest;
+
+    for (int axis = 0; axis < 3; ++axis) {
+        chunk.minimum[axis] = low[axis] - margin;
+        chunk.maximum[axis] = high[axis] + margin;
+    }
+
+    return chunk;
+}
+
 // Slot 0 is the mesh itself, always sharing its own vertices; the rest follow the levels, coarsest last.
 GpuMeshLevels packMeshLevels(MeshHandle mesh, std::span<const MeshLevel> levels) {
     if (levels.size() >= CULL_LEVEL_SLOTS) {

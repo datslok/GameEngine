@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -111,15 +112,17 @@ CullGroups buildCullGroups(std::span<const DrawItem> draws, std::size_t first, s
             const MeshHandle mesh{key.mesh};
             const MeshPlacement placed = placement(mesh);
             GpuCullGroup group;
-            group.firstCandidate = static_cast<std::uint32_t>(position);
+            group.firstSegment = static_cast<std::uint32_t>(groups.segments.size());
+            group.segments = 1;
             group.indexCount = placed.indexCount;
             group.firstIndex = placed.firstIndex;
             group.vertexOffset = static_cast<std::int32_t>(placed.firstVertex);
             groups.groups.push_back(group);
             groups.styles.push_back(CullGroupStyle{mesh, (key.style & 2) != 0, (key.style & 1) != 0, placed.pooled});
+            groups.segments.push_back(GpuCullSegment{static_cast<std::uint32_t>(position), 0, cullNoChunk, 0});
         }
 
-        ++groups.groups.back().candidates;
+        ++groups.segments.back().candidates;
         groups.candidates.push_back(key.candidate);
     }
 
@@ -187,11 +190,13 @@ GpuCameraCull packCaptureCull(const CaptureCullView& capture) {
 }
 
 // Every view's slices the same size, so a view's start is its number times one view's size.
-void placeCullView(GpuCameraCull& view, std::uint32_t index, std::uint32_t candidates, const CullDrawOrder& order) {
-    const CullViewSizes one = cullViewSizes(1, candidates, order);
+void placeCullView(GpuCameraCull& view, std::uint32_t index, std::uint32_t candidates, std::uint32_t segments, const CullDrawOrder& order) {
+    const CullViewSizes one = cullViewSizes(1, candidates, segments, order);
     view.candidates = candidates;
     view.groups = static_cast<std::uint32_t>(order.order.size());
     view.blocks = (candidates + cameraCullGroupSize - 1) / cameraCullGroupSize;
+    view.segments = segments;
+    view.segmentBlocks = (segments + cameraCullGroupSize - 1) / cameraCullGroupSize;
     view.view = index;
 
     for (std::size_t run = 0; run < cullStyles; ++run) {
@@ -204,12 +209,63 @@ void placeCullView(GpuCameraCull& view, std::uint32_t index, std::uint32_t candi
     view.slices[CAMERA_CULL_SLICE_BLOCKS] = static_cast<std::uint32_t>(inBatch * one.blocks);
     view.slices[CAMERA_CULL_SLICE_COMMANDS] = static_cast<std::uint32_t>(index * one.commands);
     view.slices[CAMERA_CULL_SLICE_PLACES] = static_cast<std::uint32_t>(index * one.places);
+    view.segmentSlices[CAMERA_CULL_SEGMENT_SLICE_OFFSETS] = static_cast<std::uint32_t>(inBatch * one.segments);
+    view.segmentSlices[CAMERA_CULL_SEGMENT_SLICE_BLOCKS] = static_cast<std::uint32_t>(inBatch * one.segmentBlocks);
 }
 
-CullViewSizes cullViewSizes(std::size_t views, std::uint32_t candidates, const CullDrawOrder& order) {
+CullViewSizes cullViewSizes(std::size_t views, std::uint32_t candidates, std::uint32_t segments, const CullDrawOrder& order) {
     const std::size_t blocks = (static_cast<std::size_t>(candidates) + cameraCullGroupSize - 1) / cameraCullGroupSize;
+    const std::size_t segmentBlocks = (static_cast<std::size_t>(segments) + cameraCullGroupSize - 1) / cameraCullGroupSize;
     const std::size_t scratch = std::min(views, cullScratchViews);
-    return CullViewSizes{scratch * candidates, scratch * (blocks + 1), views * order.order.size(), views * (static_cast<std::size_t>(order.pooled) + 1)};
+    return CullViewSizes{scratch * candidates,
+                         scratch * (blocks + 1),
+                         views * order.order.size(),
+                         views * (static_cast<std::size_t>(order.pooled) + 1),
+                         scratch * segments,
+                         scratch * (segmentBlocks + 1)};
+}
+
+bool boxInFrustum(const GpuFrustum& frustum, const float minimum[3], const float maximum[3]) {
+    for (const auto& plane : frustum.planes) {
+        const float x = plane[0] >= 0.0f ? maximum[0] : minimum[0];
+        const float y = plane[1] >= 0.0f ? maximum[1] : minimum[1];
+        const float z = plane[2] >= 0.0f ? maximum[2] : minimum[2];
+
+        if (plane[0] * x + plane[1] * y + plane[2] * z + plane[3] < 0.0f) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// The reach: the box's nearest point to the light's centre, within its radius (squared, as shadowTakes's spheres).
+bool chunkInView(const GpuCullChunk& chunk, const GpuCameraCull& view) {
+    const bool shadow = (view.flags & CAMERA_CULL_SHADOW) != 0u;
+
+    if ((chunk.flags & (shadow ? CULL_CHUNK_CASTS : CULL_CHUNK_SEEN)) == 0u) {
+        return false;
+    }
+
+    if ((chunk.flags & CULL_CHUNK_ALWAYS) != 0u) {
+        return true;
+    }
+
+    if (shadow && view.reach[3] >= 0.0f) {
+        float distanceSquared = 0.0f;
+
+        for (int axis = 0; axis < 3; ++axis) {
+            const float nearest = std::clamp(view.reach[axis], chunk.minimum[axis], chunk.maximum[axis]);
+            const float gap = view.reach[axis] - nearest;
+            distanceSquared += gap * gap;
+        }
+
+        if (distanceSquared > view.reach[3] * view.reach[3]) {
+            return false;
+        }
+    }
+
+    return boxInFrustum(view.frustum, chunk.minimum, chunk.maximum);
 }
 
 bool swayReaches(const float bounds[4], const Vec3& eye, float fadeEnd) {
@@ -282,26 +338,40 @@ std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLev
 * As the three passes do it: each candidate's flags; their exclusive prefix sums (the GPU's are in blocks, which add
 * up to the same numbers); each flagged candidate's entry at its sum; each group's command from the sums at its two ends.
 */
-CameraCullResult cullCameraOnCpu(std::span<const GpuCullRecord> records, std::span<const GpuMeshLevels> levels, std::span<const GpuCullGroup> groups,
-                                 std::span<const GpuCullCandidate> candidates, std::span<const std::uint32_t> drawOrder, const GpuCameraCull& view) {
-    std::vector<std::uint32_t> flags(candidates.size());
-    std::vector<std::uint32_t> mainSums(candidates.size() + 1, 0);
-    std::vector<std::uint32_t> motionSums(candidates.size() + 1, 0);
+CameraCullResult cullCameraOnCpu(const CullTables& tables, std::span<const std::uint32_t> drawOrder, const GpuCameraCull& view) {
+    // Each segment's first place among the visible candidates (the total after the last), and the visible candidates.
+    std::vector<std::uint32_t> segmentStarts(tables.segments.size() + 1, 0);
+    std::vector<std::uint32_t> visible;
+
+    for (std::size_t segment = 0; segment < tables.segments.size(); ++segment) {
+        const GpuCullSegment& run = tables.segments[segment];
+        const bool seen = run.chunk == cullNoChunk || chunkInView(tables.chunks[run.chunk], view);
+        segmentStarts[segment + 1] = segmentStarts[segment] + (seen ? run.candidates : 0u);
+
+        for (std::uint32_t candidate = 0; seen && candidate < run.candidates; ++candidate) {
+            visible.push_back(run.firstCandidate + candidate);
+        }
+    }
+
+    std::vector<std::uint32_t> flags(visible.size());
+    std::vector<std::uint32_t> mainSums(visible.size() + 1, 0);
+    std::vector<std::uint32_t> motionSums(visible.size() + 1, 0);
     CameraCullResult result;
 
-    for (std::size_t c = 0; c < candidates.size(); ++c) {
-        const GpuCullRecord& record = records[candidates[c].draw];
-        flags[c] = cameraCandidateFlags(record, levels[record.mesh], view, candidates[c].slot);
+    for (std::size_t c = 0; c < visible.size(); ++c) {
+        const GpuCullCandidate& candidate = tables.candidates[visible[c]];
+        const GpuCullRecord& record = tables.records[candidate.draw];
+        flags[c] = cameraCandidateFlags(record, tables.levels[record.mesh], view, candidate.slot);
         mainSums[c + 1] = mainSums[c] + ((flags[c] & CAMERA_CULL_DRAWN) != 0u ? 1u : 0u);
         motionSums[c + 1] = motionSums[c] + ((flags[c] & CAMERA_CULL_MOVING) != 0u ? 1u : 0u);
-        result.levels[candidates[c].slot] += (flags[c] & CAMERA_CULL_DRAWN) != 0u ? 1u : 0u;
+        result.levels[candidate.slot] += (flags[c] & CAMERA_CULL_DRAWN) != 0u ? 1u : 0u;
     }
 
     result.mainEntries.resize(mainSums.back());
     result.motionEntries.resize(motionSums.back());
 
-    for (std::size_t c = 0; c < candidates.size(); ++c) {
-        const std::uint32_t entry = candidates[c].draw | ((flags[c] & CAMERA_CULL_THINNED) != 0u ? drawListThinnedBit : 0u);
+    for (std::size_t c = 0; c < visible.size(); ++c) {
+        const std::uint32_t entry = tables.candidates[visible[c]].draw | ((flags[c] & CAMERA_CULL_THINNED) != 0u ? drawListThinnedBit : 0u);
 
         if ((flags[c] & CAMERA_CULL_DRAWN) != 0u) {
             result.mainEntries[mainSums[c]] = entry;
@@ -312,9 +382,9 @@ CameraCullResult cullCameraOnCpu(std::span<const GpuCullRecord> records, std::sp
         }
     }
 
-    for (const GpuCullGroup& group : groups) {
-        const std::size_t first = group.firstCandidate;
-        const std::size_t end = first + group.candidates;
+    for (const GpuCullGroup& group : tables.groups) {
+        const std::size_t first = segmentStarts[group.firstSegment];
+        const std::size_t end = segmentStarts[group.firstSegment + group.segments];
         result.mainCommands.push_back(GpuDrawCommand{group.indexCount, mainSums[end] - mainSums[first], group.firstIndex, group.vertexOffset,
                                                      view.mainBase + mainSums[first]});
         result.motionCommands.push_back(GpuDrawCommand{group.indexCount, motionSums[end] - motionSums[first], group.firstIndex, group.vertexOffset,
@@ -451,25 +521,65 @@ std::string describeCullComparison(std::span<const NamedCullComparison> lists) {
     return reply + (allAgree ? "The GPU's lists agree with the CPU's." : "The GPU's lists DIFFER from the CPU's.");
 }
 
+CameraCullFrame::Joined CameraCullFrame::join() const {
+    Joined joined;
+    joined.records.assign(stillRecords.begin(), stillRecords.end());
+    joined.records.insert(joined.records.end(), movingRecords.begin(), movingRecords.end());
+    joined.candidates.assign(stillCandidates.begin(), stillCandidates.end());
+    joined.candidates.insert(joined.candidates.end(), movingCandidates.begin(), movingCandidates.end());
+    joined.segments.assign(stillSegments.begin(), stillSegments.end());
+    joined.segments.insert(joined.segments.end(), movingSegments.begin(), movingSegments.end());
+    return joined;
+}
+
+CullTables CameraCullFrame::tables(const Joined& joined) const {
+    return CullTables{joined.records, meshLevels, stillChunks, groups, joined.segments, joined.candidates};
+}
+
+namespace {
+    // A group's key: its style above its mesh, so keys sort as batchByMesh's groups do.
+    std::uint64_t groupKey(int style, std::uint32_t mesh) {
+        return (static_cast<std::uint64_t>(style) << 32u) | mesh;
+    }
+
+    // Room a chunk's candidates take: a quarter spare, so a change rarely moves the run.
+    std::size_t candidateRoom(std::size_t count) {
+        constexpr std::size_t fewest = 8;
+        return std::max(count + count / 4, fewest);
+    }
+
+    // Sorted indices joined into ranges of consecutive ones.
+    std::vector<DrawRange> rangesOf(const std::set<std::size_t>& indices) {
+        std::vector<DrawRange> ranges;
+
+        for (const std::size_t index : indices) {
+            if (!ranges.empty() && ranges.back().first + ranges.back().count == index) {
+                ++ranges.back().count;
+            } else {
+                ranges.push_back(DrawRange{index, 1});
+            }
+        }
+
+        return ranges;
+    }
+}
+
 /*
-* Kept when the frame is the one packed; built ranges repacked when it follows it; otherwise built afresh. The moving
-* draws' part is made every frame.
+* Kept when the frame is the one packed; built ranges repacked when it follows it (with the same chunk size); otherwise
+* built afresh. The moving draws' part is made every frame, after the still part.
 */
 CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement,
                                         const std::function<bool(MeshHandle)>& changesShape) {
     const std::size_t stillCount = std::min(frame.stillDraws, frame.draws.size());
+    const std::size_t frameChunkSlots = std::max<std::size_t>(frame.stillChunkSlots, 1);
     CameraCullFrame result;
 
-    if (packedVersion != frame.stillVersion || records.size() != stillCount || (stillCount == 0 && generation == 0)) {
-        const bool follows = packedVersion != 0 && packedVersion == frame.stillPreviousVersion && records.size() == stillCount && stillCount > 0;
+    if (packedVersion != frame.stillVersion || records.size() != stillCount || chunkSlots != frameChunkSlots || (stillCount == 0 && generation == 0)) {
+        const bool follows = packedVersion != 0 && packedVersion == frame.stillPreviousVersion && records.size() <= stillCount && stillCount > 0 &&
+                             chunkSlots == frameChunkSlots;
 
-        if (!follows || !repackRanges(frame, result.stillChanges)) {
-            buildStill(frame, placement);
-            result.stillRebuilt = true;
-            result.stillChanges.clear();
-            result.stillRepacked = {DrawRange{0, stillCount}};
-        } else {
-            result.stillRepacked = joinDrawRanges(frame.builtStillDraws);
+        if (!follows || !repackRanges(frame, placement, result)) {
+            buildStill(frame, placement, result);
         }
 
         packedVersion = frame.stillVersion;
@@ -478,7 +588,10 @@ CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std
 
     const std::size_t movingCount = frame.draws.size() - stillCount;
     result.stillRecords = records;
-    result.stillCandidates = still.candidates;
+    result.stillChunks = chunks;
+    result.chunkSlots = chunkSlots;
+    result.stillCandidates = candidates;
+    result.stillSegments = segments;
     result.stillGeneration = generation;
     result.movingRecords.reserve(movingCount);
 
@@ -487,16 +600,22 @@ CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std
     }
 
     CullGroups moving = buildCullGroups(frame.draws, stillCount, movingCount, placement);
-    const std::uint32_t stillCandidates = static_cast<std::uint32_t>(still.candidates.size());
+    const std::uint32_t candidateOffset = static_cast<std::uint32_t>(candidates.size());
+    const std::uint32_t segmentOffset = static_cast<std::uint32_t>(segments.size());
+
+    for (GpuCullSegment& segment : moving.segments) {
+        segment.firstCandidate += candidateOffset;
+    }
 
     for (GpuCullGroup& group : moving.groups) {
-        group.firstCandidate += stillCandidates;
+        group.firstSegment += segmentOffset;
     }
 
     result.movingCandidates = std::move(moving.candidates);
-    result.groups = still.groups;
+    result.movingSegments = std::move(moving.segments);
+    result.groups = groups;
     result.groups.insert(result.groups.end(), moving.groups.begin(), moving.groups.end());
-    result.styles = still.styles;
+    result.styles = styles;
     result.styles.insert(result.styles.end(), moving.styles.begin(), moving.styles.end());
 
     result.drawOrder = cullDrawOrder(result.styles);
@@ -518,8 +637,13 @@ std::size_t CameraCullTable::getStillBuilds() const {
     return stillBuilds;
 }
 
-void CameraCullTable::buildStill(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement) {
+std::size_t CameraCullTable::getChunkBuilds() const {
+    return chunkBuilds;
+}
+
+void CameraCullTable::buildStill(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement, CameraCullFrame& result) {
     const std::size_t stillCount = std::min(frame.stillDraws, frame.draws.size());
+    chunkSlots = std::max<std::size_t>(frame.stillChunkSlots, 1);
     records.clear();
     keys.clear();
     records.reserve(stillCount);
@@ -530,51 +654,250 @@ void CameraCullTable::buildStill(const FrameDescription& frame, const std::funct
         keys.push_back(candidateKey(frame.draws[draw]));
     }
 
-    still = buildCullGroups(frame.draws, 0, stillCount, placement);
+    const std::size_t chunkCount = (stillCount + chunkSlots - 1) / chunkSlots;
+    chunks.assign(chunkCount, GpuCullChunk{});
+    chunkCandidates.assign(chunkCount, ChunkCandidates{});
+    candidates.clear();
+    candidateRuns.clear();
+
+    for (std::size_t chunk = 0; chunk < chunkCount; ++chunk) {
+        const std::size_t first = chunk * chunkSlots;
+        chunks[chunk] = packCullChunk(std::span<const GpuCullRecord>{records}.subspan(first, std::min(chunkSlots, stillCount - first)));
+        buildChunkCandidates(frame, chunk);
+    }
+
+    buildSegments(placement);
     stillLevels.clear();
     tableLevels(frame.draws, 0, stillCount, stillLevels);
     stillGlass.clear();
     stillFlatFaced.clear();
     listGlassAndFlat(frame.draws, 0, stillCount, stillGlass, stillFlatFaced);
     ++stillBuilds;
+
+    result.stillRebuilt = true;
+    result.stillChanges.clear();
+    result.stillRepacked = {DrawRange{0, stillCount}};
+    result.chunksRepacked = {DrawRange{0, chunkCount}};
+    result.candidatesRepacked = {DrawRange{0, candidates.size()}};
+    result.segmentsChanged = true;
 }
 
 /*
-* Each built draw's record packed again, its old and new records added to changes; false (build everything) where its
-* candidates or lists would change: its key, or its mesh's levels' meshes.
+* Each built draw's record packed again (its old and new records into the changes; a new slot's new one only), each
+* chunk it is in packed again, and the candidates of chunks where a draw's key changed built again, then the segments
+* and groups. False (build everything) when a range misses a new slot or reaches past the still draws, or when a mesh's
+* levels' meshes changed (every chunk drawing that mesh would change).
 */
-bool CameraCullTable::repackRanges(const FrameDescription& frame, std::vector<GpuCullRecord>& changes) {
-    for (const DrawRange& range : frame.builtStillDraws) {
-        if (range.first + range.count > records.size()) {
+bool CameraCullTable::repackRanges(const FrameDescription& frame, const std::function<MeshPlacement(MeshHandle)>& placement, CameraCullFrame& result) {
+    const std::size_t stillCount = std::min(frame.stillDraws, frame.draws.size());
+    const std::size_t had = records.size();
+    const std::vector<DrawRange> ranges = joinDrawRanges(frame.builtStillDraws);
+    std::size_t newCovered = 0;
+
+    for (const DrawRange& range : ranges) {
+        if (range.first + range.count > stillCount) {
             return false;
         }
 
+        const std::size_t from = std::max(range.first, had);
+        newCovered += range.first + range.count > from ? range.first + range.count - from : 0;
+    }
+
+    if (newCovered != stillCount - had) {
+        return false;
+    }
+
+    // The meshes' levels first: a changed level set means a full build, before anything is touched.
+    for (const DrawRange& range : ranges) {
         for (std::size_t draw = range.first; draw < range.first + range.count; ++draw) {
             const DrawItem& item = frame.draws[draw];
 
-            if (candidateKey(item) != keys[draw]) {
+            if (item.mesh.isValid() && item.mesh.index < stillLevels.size() && stillLevels[item.mesh.index].meshes[0] == item.mesh.index &&
+                !sameMeshes(packMeshLevels(item.mesh, item.levels), stillLevels[item.mesh.index])) {
                 return false;
             }
-
-            if (item.mesh.isValid()) {
-                if (item.mesh.index >= stillLevels.size()) {
-                    return false;
-                }
-
-                const GpuMeshLevels packed = packMeshLevels(item.mesh, item.levels);
-
-                if (!sameMeshes(packed, stillLevels[item.mesh.index])) {
-                    return false;
-                }
-
-                stillLevels[item.mesh.index] = packed;
-            }
-
-            changes.push_back(records[draw]);
-            records[draw] = packCullRecord(item);
-            changes.push_back(records[draw]);
         }
     }
 
+    records.resize(stillCount);
+    keys.resize(stillCount, ~std::uint64_t{0});
+    const std::size_t chunkCount = (stillCount + chunkSlots - 1) / chunkSlots;
+    chunks.resize(chunkCount);
+    chunkCandidates.resize(chunkCount);
+    std::set<std::size_t> touchedChunks;
+    std::set<std::size_t> rekeyedChunks;
+    bool listsChanged = false;
+
+    for (const DrawRange& range : ranges) {
+        for (std::size_t draw = range.first; draw < range.first + range.count; ++draw) {
+            const DrawItem& item = frame.draws[draw];
+
+            if (item.mesh.isValid()) {
+                if (item.mesh.index >= stillLevels.size()) {
+                    stillLevels.resize(item.mesh.index + 1);
+                }
+
+                stillLevels[item.mesh.index] = packMeshLevels(item.mesh, item.levels);
+            }
+
+            if (draw < had) {
+                result.stillChanges.push_back(records[draw]);
+            }
+
+            records[draw] = packCullRecord(item);
+            result.stillChanges.push_back(records[draw]);
+            const std::uint64_t key = candidateKey(item);
+
+            if (draw >= had || key != keys[draw]) {
+                rekeyedChunks.insert(draw / chunkSlots);
+                listsChanged = true;
+                keys[draw] = key;
+            }
+
+            touchedChunks.insert(draw / chunkSlots);
+        }
+    }
+
+    for (const std::size_t chunk : touchedChunks) {
+        const std::size_t first = chunk * chunkSlots;
+        chunks[chunk] = packCullChunk(std::span<const GpuCullRecord>{records}.subspan(first, std::min(chunkSlots, stillCount - first)));
+    }
+
+    std::vector<DrawRange> candidateRanges;
+
+    for (const std::size_t chunk : rekeyedChunks) {
+        buildChunkCandidates(frame, chunk);
+        candidateRanges.push_back(DrawRange{chunkCandidates[chunk].first, chunkCandidates[chunk].count});
+    }
+
+    if (!rekeyedChunks.empty()) {
+        buildSegments(placement);
+    }
+
+    // The glass and flat-faced lists: the ranges' entries dropped and listed again, kept in draw order.
+    if (listsChanged) {
+        const auto inRanges = [&ranges](std::size_t draw) {
+            return std::any_of(ranges.begin(), ranges.end(), [draw](const DrawRange& range) { return draw >= range.first && draw < range.first + range.count; });
+        };
+        std::erase_if(stillGlass, inRanges);
+        std::erase_if(stillFlatFaced, inRanges);
+
+        for (const DrawRange& range : ranges) {
+            listGlassAndFlat(frame.draws, range.first, range.count, stillGlass, stillFlatFaced);
+        }
+
+        std::sort(stillGlass.begin(), stillGlass.end());
+        std::sort(stillFlatFaced.begin(), stillFlatFaced.end());
+    }
+
+    result.stillRepacked = ranges;
+    result.chunksRepacked = rangesOf(touchedChunks);
+    result.candidatesRepacked = joinDrawRanges(std::move(candidateRanges));
+    result.segmentsChanged = !rekeyedChunks.empty();
     return true;
+}
+
+/*
+* A chunk's candidates, as buildCullGroups makes them (every draw not glass, each slot with a mesh) sorted by group then
+* draw, into the chunk's run (a new one, with spare room, when they no longer fit), and its segments: one a run of a key.
+*/
+void CameraCullTable::buildChunkCandidates(const FrameDescription& frame, std::size_t chunk) {
+    struct Keyed {
+        std::uint64_t key = 0;
+        GpuCullCandidate candidate;
+    };
+
+    const std::size_t first = chunk * chunkSlots;
+    const std::size_t end = std::min(first + chunkSlots, records.size());
+    std::vector<Keyed> keyed;
+
+    for (std::size_t draw = first; draw < end; ++draw) {
+        const DrawItem& item = frame.draws[draw];
+
+        if (isTransparent(item.material) || !item.mesh.isValid()) {
+            continue;
+        }
+
+        if (item.levels.size() >= meshLevelSlots) {
+            throw std::invalid_argument("A mesh has at most three levels besides itself");
+        }
+
+        const int style = drawStyle(item.material);
+        const std::uint32_t index = static_cast<std::uint32_t>(draw);
+        keyed.push_back(Keyed{groupKey(style, item.mesh.index), GpuCullCandidate{index, 0}});
+
+        for (std::size_t level = 0; level < item.levels.size(); ++level) {
+            if (item.levels[level].mesh.isValid()) {
+                keyed.push_back(Keyed{groupKey(style, item.levels[level].mesh.index), GpuCullCandidate{index, static_cast<std::uint32_t>(level + 1)}});
+            }
+        }
+    }
+
+    std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) { return a.key < b.key; });
+    ChunkCandidates& run = chunkCandidates[chunk];
+
+    if (keyed.size() > run.room) {
+        if (run.room > 0) {
+            candidateRuns.giveBack(run.first, run.room);
+        }
+
+        run.room = candidateRoom(keyed.size());
+        run.first = candidateRuns.take(run.room);
+
+        if (candidates.size() < candidateRuns.end()) {
+            candidates.resize(candidateRuns.end());
+        }
+    }
+
+    run.count = keyed.size();
+    run.segments.clear();
+
+    for (std::size_t position = 0; position < keyed.size(); ++position) {
+        candidates[run.first + position] = keyed[position].candidate;
+
+        if (position == 0 || keyed[position].key != keyed[position - 1].key) {
+            run.segments.emplace_back(keyed[position].key, GpuCullSegment{static_cast<std::uint32_t>(run.first + position), 0, static_cast<std::uint32_t>(chunk), 0});
+        }
+
+        ++run.segments.back().second.candidates;
+    }
+
+    ++chunkBuilds;
+}
+
+/*
+* Every chunk's segments gathered in chunk order and sorted by key (stable, so each key's stay in chunk order): the
+* segment table, and a group a key, in batchByMesh's order.
+*/
+void CameraCullTable::buildSegments(const std::function<MeshPlacement(MeshHandle)>& placement) {
+    std::vector<std::pair<std::uint64_t, GpuCullSegment>> gathered;
+
+    for (const ChunkCandidates& run : chunkCandidates) {
+        gathered.insert(gathered.end(), run.segments.begin(), run.segments.end());
+    }
+
+    std::stable_sort(gathered.begin(), gathered.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    segments.clear();
+    groups.clear();
+    styles.clear();
+
+    for (std::size_t position = 0; position < gathered.size(); ++position) {
+        const std::uint64_t key = gathered[position].first;
+
+        if (position == 0 || key != gathered[position - 1].first) {
+            const int style = static_cast<int>(key >> 32u);
+            const MeshHandle mesh{static_cast<std::uint32_t>(key & 0xFFFFFFFFu)};
+            const MeshPlacement placed = placement(mesh);
+            GpuCullGroup group;
+            group.firstSegment = static_cast<std::uint32_t>(segments.size());
+            group.indexCount = placed.indexCount;
+            group.firstIndex = placed.firstIndex;
+            group.vertexOffset = static_cast<std::int32_t>(placed.firstVertex);
+            groups.push_back(group);
+            styles.push_back(CullGroupStyle{mesh, (style & 2) != 0, (style & 1) != 0, placed.pooled});
+        }
+
+        ++groups.back().segments;
+        segments.push_back(gathered[position].second);
+    }
 }

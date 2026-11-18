@@ -142,6 +142,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             frame.stillVersion = update.version;
             frame.stillPreviousVersion = update.previousVersion;
             frame.stillCells = still->getCellCount();
+            frame.stillChunkSlots = still->getChunkSlots();
             frame.stillEmptySlots = update.count - std::min(update.count, still->getFilledCount());
             kept = std::move(update.kept);
             stillCount = update.count;

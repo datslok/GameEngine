@@ -218,7 +218,7 @@ StillDraws::Update StillDraws::update(const World& world, float alpha, JobSystem
                 }
             }
 
-            buildCell(world, cell, alpha, jobs);
+            buildCell(world, key, cell, alpha, jobs);
             cell.used = needed;
             filled += needed;
             result.built.push_back(DrawRange{cell.first, cell.slots});
@@ -269,9 +269,12 @@ void StillDraws::buildAll(const World& world, const std::vector<std::uint8_t>& k
     filled = 0;
 
     std::vector<CellKey> keys(entities.size());
+    std::vector<std::uint32_t> codes(entities.size(), 0);
     jobs.parallelFor(entities.size(), entitiesPerPiece, [&](std::size_t index) {
         if (kept[index] != 0) {
-            keys[index] = cellOfEntity(world, entities[index], alpha);
+            const Vec3 position = getRenderTransform(world, entities[index], alpha).position;
+            keys[index] = worldCellOf(position, cellSettings.size);
+            codes[index] = cellMortonCode(position, keys[index], cellSettings.size);
         }
     });
 
@@ -283,7 +286,9 @@ void StillDraws::buildAll(const World& world, const std::vector<std::uint8_t>& k
         }
     }
 
-    std::stable_sort(byCell.begin(), byCell.end(), [&](std::size_t a, std::size_t b) { return keys[a] < keys[b]; });
+    std::stable_sort(byCell.begin(), byCell.end(), [&](std::size_t a, std::size_t b) {
+        return keys[a] != keys[b] ? keys[a] < keys[b] : codes[a] < codes[b];
+    });
 
     for (std::size_t start = 0; start < byCell.size();) {
         const CellKey key = keys[byCell[start]];
@@ -330,8 +335,24 @@ void StillDraws::buildAll(const World& world, const std::vector<std::uint8_t>& k
     });
 }
 
-// The cell's entities placed one after another from its first slot and built on jobs, its slots after them emptied.
-void StillDraws::buildCell(const World& world, Cell& cell, float alpha, JobSystem& jobs) {
+/*
+* The cell's entities put in Morton order (stable, so equal codes keep their order), placed one after another from its
+* first slot and built on jobs, its slots after them emptied.
+*/
+void StillDraws::buildCell(const World& world, const CellKey& key, Cell& cell, float alpha, JobSystem& jobs) {
+    std::vector<std::pair<std::uint32_t, Entity>> coded;
+    coded.reserve(cell.entities.size());
+
+    for (const Entity entity : cell.entities) {
+        coded.emplace_back(cellMortonCode(getRenderTransform(world, entity, alpha).position, key, cellSettings.size), entity);
+    }
+
+    std::stable_sort(coded.begin(), coded.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    for (std::size_t member = 0; member < coded.size(); ++member) {
+        cell.entities[member] = coded[member].second;
+    }
+
     std::size_t next = cell.first;
 
     for (const Entity entity : cell.entities) {
@@ -428,4 +449,8 @@ std::size_t StillDraws::getCellCount() const {
 
 std::size_t StillDraws::getFilledCount() const {
     return filled;
+}
+
+std::size_t StillDraws::getChunkSlots() const {
+    return static_cast<std::size_t>(std::max(cellSettings.chunkSlots, 1));
 }
