@@ -167,11 +167,7 @@ Everything here also serves later phases:
 - compute pipelines run the cloth solver,
 - and physically based materials carry fabric shading.
 
-Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log):
-
-- SDL_GPU replaced by the engine's own Vulkan 1.3 renderer before global illumination;
-- work that does not touch the graphics API first (6a);
-- DDGI traced with hardware ray queries first, a software tracer as the lower quality setting (moved to phase 14 on Oct 23 2026).
+Re-planned Oct 18 2026: the engine's own Vulkan 1.3 renderer in place of SDL_GPU before global illumination (the build log).
 
 **Done before the re-plan**
 - [x] HDR render target and tone mapping (`hdr-tone-mapping`)
@@ -208,13 +204,8 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log):
 - [x] Make the docs easy for people to read (`docs-readability`)
 - [x] Bring the stale parts of `docs/ARCHITECTURE.md` up to date (`architecture-stale`)
 
-**6d. Global illumination: DDGI** ("Dynamic Diffuse Global Illumination", Majercik et al. 2019, built in the form of its 2021 production follow-up, "Scaling Probe-Based Real-Time Dynamic Global Illumination for Production").
+**6d. Global illumination: DDGI** (Majercik et al. 2019 and its 2021 production follow-up; research in [docs/research/ILLUMINATION.md](docs/research/ILLUMINATION.md))
 
-Today light stops at the first surface it hits, so a room lit through one window is black wherever the sunbeam does not land, and the ambient light is a flat stand-in for all the light bouncing around. DDGI measures that bounced light at points in space each frame and lets every surface look it up.
-
-Research notes, exact formulas and the reference code's numbers: [docs/research/ILLUMINATION.md](docs/research/ILLUMINATION.md)
-
-- Needs first: the HDR target and tone mapping above (bounce light routinely adds up to more than 1 and would clip to white), compute pipelines, and the Vulkan renderer (for ray queries)
 - [x] Probe grid: probe volumes placed by each game, octahedral irradiance and distance atlases written from compute (`ddgi-probes`)
 - [x] Hardware ray queries: acceleration structures per mesh and per frame, instance masks, and a debug view (`ray-queries`)
 - [x] Quality presets set the light probes' rays: Low 32, Medium 64, High 128 (the default), Ultra 256, instead of a separate RTX preset (`gi-quality-presets`)
@@ -228,7 +219,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/research/
 - [x] Scene events: the game signals big changes and the probes in their region restart their average (`ddgi-scene-events`)
 - [x] Leak prevention: Chebyshev visibility from each probe's distance moments (`ddgi-sampling`)
 - [x] Probe relocation and probe states: probes move off the static level, and only those a surface reads are traced (`ddgi-probe-relocation`)
-- [x] Sampling in `triangle.frag`: 8 corner probes, trilinear, visibility and wrap weights, the self-shadow bias; the specular part reads the probes in the mirror direction until reflections (`ddgi-sampling`)
+- [x] Sampling in `triangle.frag`: 8 corner probes, trilinear, visibility and wrap weights (`ddgi-sampling`)
 - [x] Debug view: a ball at each probe showing its stored light (`ddgi-probes`)
 - [x] Sky and atmosphere (Hillaire 2020): a physically based sky and air lit by the sun, which probes' escaping rays see (`sky-atmosphere`)
 - [x] Night sky: the moon in its real place and phase (a second sky lit by it, its shadows) and the real stars (`night-sky`)
@@ -238,19 +229,14 @@ Research notes, exact formulas and the reference code's numbers: [docs/research/
 - [x] Cascades for large worlds: nested grids following the camera, scrolled as circular buffers, scrolled-in probes seeded from the coarser cascades (`ddgi-cascades`)
 - [x] The demo's light probes: cascades round the camera, the course static, the flying lamps fast (`demo-probes`)
 - [x] Up to 1024 rays a probe, the update streaming them through shared memory and rays kept only for the traced probes (`ddgi-more-rays`)
-- [ ] Golden images that land on one of two pictures
-  - The light lab's `street-night` sometimes differs from its reference by the same 73 pixels (5 beyond tolerance, up to 29 half-float steps), in a full `make golden` and on `main` before `demo-probes` too.
-  - The demo's `lamp-field` by 22 (several runs on Oct 22 2026) and its `floodlights` scene image once.
-  - Both have many lights at probe rays' hits, so look there first (`keepBrightestLight` ties, the order lights reach a hit, the relocation records read back a frame in flight later).
-  - Details in the build log's `demo-probes` entry
+- [ ] Golden images that land on one of two pictures (`street-night`, `lamp-field`; the build log's `demo-probes` entry): look first at many lights at probe rays' hits (`keepBrightestLight` ties, the order lights reach a hit)
 
 **6e. Image quality**
 - [x] Motion vectors and temporal anti-aliasing (TAA) (`taa`)
 - [x] DLSS and FSR as options, on TAA's motion vectors and jitter (`render-scale`, `fsr`, `dlss`)
   - [x] A render scale, with TAA upscaling (TAAU) (`render-scale`)
   - [x] Full-screen motion vectors and FSR 3.1, behind an upscaler setting, with its sharpening (`fsr`)
-  - [x] DLSS through NVIDIA Streamline, after a trial with MinGW (`dlss`)
-  - With TAA in place, soft shadows, DDGI sampling and screen-space effects can use far fewer samples and let the history average them.
+  - [x] DLSS through NVIDIA Streamline (`dlss`)
 - [x] Normal map filtering (Toksvig) (`toksvig`)
 - [x] Reflections: screen-space reflections, a reflection probe round the camera for what the screen does not show, and ray-traced reflections on RT GPUs (`ssr`, `reflection-probe`, `mirror-and-fps`)
   - A lattice of probes round the camera (for what the camera's own point cannot see) if gaps show.
@@ -309,9 +295,9 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - [x] Motion blur: McGuire 2012's reconstruction filter from the shutter angle, off by default (`motion-blur`)
   - [x] Depth of field: a thin lens's circle of confusion and scatter-as-gather at half resolution, off by default (`depth-of-field`)
   - [x] Frosted glass through the same gather: each point behind the pane spreading by its own distance behind the glass (`frosted-gather`)
-- [x] A typical GPU setup: the High preset, ray tracing off, DLSS at Quality (FSR, else TAA, where DLSS is missing), one switch, command or launch option to view it; `preset` as a command; ray-traced settings greyed out on GPUs without ray queries (`typical-gpu`)
+- [x] A typical GPU setup: the High preset, ray tracing off, DLSS at Quality, one switch to view it (`typical-gpu`)
 
-**Milestone:** with the typical GPU setup, the light lab and the demo look finished by day and at night, at a frame rate a mid-range GPU holds, with no feature that needs ray queries. Met Nov 13 2026, checked by the user's eye. The fog's history in seconds was dropped: a fixed share a frame trails at low frame rates where one in seconds would shimmer, the worse of the two.
+**Milestone:** with the typical GPU setup, the light lab and the demo look finished by day and at night, at a frame rate a mid-range GPU holds, with no feature that needs ray queries. Met Nov 13 2026, checked by the user's eye.
 
 ---
 
@@ -334,89 +320,73 @@ The docs cut down and kept down, taken ahead of the forest at the user's request
 
 ## Phase 18: A jungle valley showcase ← current
 
-A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a scale meant to be felt: a jungle valley kilometres across with mist lying in it, sandstone pillars hundreds of metres tall, islands of rock and forest floating above it, and colossal machines built by someone long gone, half reclaimed by the green. Realistic, not stylised: scanned CC0 plants, rocks and textures on generated pillars, islands, structures and trees, judged with the typical GPU setup on.
-
-- Added Nov 13 2026 at the user's request, before phase 17, as a 400 m forest with a clearing.
-- Re-planned the same day after concept art and the user's references (floating mountains, karst pillars, overgrown megastructures): "something large and epic, i want the scale to be felt huge", with floating islands.
-- The scale is mostly an engine problem (drawing less far away), so the level of detail, impostor, occlusion culling and texture compression items moved here from phases 12 and 14, and a rough valley comes first to measure what is needed.
-- Re-ordered Nov 14 2026 after the rough valley (the user's look: the haze turns blue, 7.4 ms of GPU with the typical setup, "looks a bit square in some places"): the ground's paint, then distant shadows, then the content; the scale items wait until the content makes the frame heavy.
+A fourth game (`--game forest`): a jungle valley kilometres across with mist, sandstone pillars hundreds of metres tall, floating islands of rock and forest, and colossal machines half reclaimed by the green. Realistic: scanned CC0 plants, rocks and textures on generated pillars, islands, structures and trees, judged with the typical GPU setup on. Added Nov 13 2026 before phase 17; how it was re-planned: `docs/buildlog/phase-18-1.md` (`valley-replan`, `rough-valley`).
 
 **Items**
 
 - [x] Assets: 30 CC0 assets fetched by `tools/fetch_forest_assets.py` (`forest-assets`)
 - [x] Ground blending: up to four layers sharpened by their height maps (`forest-assets`)
 - [x] The game: terrain, clearing, path, blended ground, sun, valley mist, stand-ins (`forest-assets`)
-- [x] The rough valley: the land in rings to 20 km, grey pillars, floating islands, the Ring and the Monolith at real size (`rough-valley`)
-- [x] The ground's paint without squares: a texture per ring, turned noise, cubic reads (`ground-paint`)
+- [x] The rough valley: rings of land to 20 km, grey pillars, floating islands, the Ring and the Monolith at real size (`rough-valley`)
+- [x] The ground's paint without squares (`ground-paint`)
 - [x] Distant shadows: the sun's far shadow map, 5 km round the camera (`far-shadows`)
-- [x] More assets: 15 more CC0 assets, layered rock, concrete, panels, painted metal, grating, ivy, a broad-leaved plant and a leaf (`more-assets`)
-- [x] The far mist in the pillars' shadows: the fog past the grid shaded by the sun's shadows along each pixel's ray (`fog-far-shadows`)
-- [x] The sky visibility grid's cascades blended over half their reach, no line round the camera on lumpy ground (`sky-cascade-blend`)
-- [x] The pillars and floating islands: carved strata rock without visible repeats, roots and vines, hanging moss, drifting rocks (`rock-strata`, `island-roots`, `hanging-moss`, `drifting-rocks`; the crowns moved to the forest item)
-- [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), on the valley floor and as crowns on the pillars' tops and the islands, the jungle understorey (broad-leaved plants grown from `Leaf001` on generated stems, as no CC0 library has palms, bananas or tree ferns), logs and rocks, scattered by a seeded Poisson disk
-  - In stages (the user's go, Nov 14 2026): `tree-growth` (space colonisation in a crown's envelope, Leonardo's rule for the radii, tubes of bark with buttress lobes, leaf cards with crown normals; jungle emergents, a few round the clearing), light through leaves (diffuse transmission, its own branch), `forest-floor` (the floor, the pillars' tops and islands, trunk colliders, leaves in the sky visibility bake, the frame measured), `understorey`.
-  - **Re-planned after the user's look at the first emergents (Nov 14 2026: "i was thinking a lush jungle like crysis"):** sparse see-through crowns on bare ground do not read as jungle, which is density and layers. One patch of real jungle along the path past the Ring first, every layer in it, judged as a whole: denser, darker crowns with leaning, tapering trunks (on `tree-growth`); a mid-canopy species packed between the giants so the canopy closes; the understorey (broad leaves and ferns); vines and ground cover in the patch; then light through leaves and wind. The rest of the valley after.
-  - **The jungle patch in stages (research in `docs/research/JUNGLE.md`, the user's go Nov 14 2026):** [x] `jungle-canopy` (canopy trees to 38 m, emergents of 55 m over them, real-sized leaves), [x] `jungle-midstorey` (a slender 10-20 m species every 8-10 m), [x] `understorey-scans` (scanned ferns, calatheas and anthuriums at 1.3-1.7 m, about 10,000 along the path; four times the crown cover above them), [x] generated palms (2-6 m, `jungle-palms`), [x] vines and epiphytes (research in `docs/research/VINES.md`: [x] lianas, `jungle-vines`; [x] climbers, `jungle-climbers`; [x] epiphytes, `jungle-epiphytes`), [x] light through leaves (`leaf-transmission`), [ ] wind.
-  - **Sight lines (the user, Nov 14 2026):** some of the Monolith and the Ring stays in view from the path, the meadow and the clearing at all times: a tree whose crown meets a sight line from the path to them is not planted.
-- [x] Smooth moving shadows in the far shadow map (`far-shadow-movers`)
-- [x] Staggered far cascades: the far two take turns redrawing while the camera turns (`cascade-stagger`)
-- [x] Building the frame on every core: the motion history flat, the draws and instances built in parallel (`frame-build-speed`)
-- [x] Big copies off the frame: the terrain's draws into room kept for them, the sky bake reading a grid copy brought up to date, only new planes walked (`frame-copies`)
-- [ ] A persistent scene: static objects' instances uploaded once, only moving ones each frame (Unreal's GPU Scene, Unity's BatchRendererGroup). Research and plan in `docs/research/PERSISTENTSCENE.md` (the user's go, Nov 15 2026):
-  - [x] Still objects: `ModelRenderer::still`, their draws kept between frames, changes announced (`still-objects`)
-  - [x] Still draws' records kept: instances, last-frame matrices and a material table packed once, repacked where built (`gpu-scene-persistent`)
-  - [x] Lasting GPU buffers updated only where they change (the 8 MB copy a frame left, about 2 ms; measured first): built by cells, GPU-driven drawing's stage 7a (`scene-cells`)
+- [x] 15 more CC0 assets (`more-assets`)
+- [x] The far mist in the pillars' shadows (`fog-far-shadows`)
+- [x] The sky visibility grid's cascades blended (`sky-cascade-blend`)
+- [x] Pillars and floating islands: strata rock, roots and vines, hanging moss, drifting rocks (`rock-strata`, `island-roots`, `hanging-moss`, `drifting-rocks`)
+- [ ] The forest: grown trees on the floor, the pillars' tops and the islands, the understorey, logs and rocks (research in `docs/research/TREES.md`, `docs/research/JUNGLE.md`)
+  - [x] Grown trees (`tree-growth`)
+  - [x] The jungle patch along the path: canopy and emergents (`jungle-canopy`), midstorey (`jungle-midstorey`), scanned understorey (`understorey-scans`), palms (`jungle-palms`), lianas, climbers, epiphytes (`jungle-vines`, `jungle-climbers`, `jungle-epiphytes`), light through leaves (`leaf-transmission`), wind (below)
+  - [ ] The rest of the valley, keeping the sight lines to the Monolith and the Ring
+- [x] Smooth moving shadows in the far map (`far-shadow-movers`)
+- [x] Staggered far cascades (`cascade-stagger`)
+- [x] The frame built on every core (`frame-build-speed`)
+- [x] Big copies off the frame (`frame-copies`)
+- [ ] A persistent scene (research in `docs/research/PERSISTENTSCENE.md`)
+  - [x] Still objects (`still-objects`)
+  - [x] Still draws' records kept (`gpu-scene-persistent`)
+  - [x] Lasting GPU buffers by cells (`scene-cells`)
   - [ ] Views without full scans (measured first)
-  - [x] The terrain's blended-ground materials packed once a run of patches, their layers on every core, not ground and layers one by one on one thread for every patch (`ground-material-runs`; measured in `scene-cells`: 1.55 of PACK's 1.8 ms for 699 patches): PACK 1.8 to 0.7 ms
-  - [x] Still entities announced, not searched for: a frame looks only at what changed and what moves (`still-announced`)
-- [x] Cheaper forest shadows: the understorey in the nearest two cascades, shadow bark, leaf cards cut to their twigs' outline (`understorey-shadow-cascades`)
-- [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/research/SHADOWCACHE.md`)
+  - [x] The terrain's ground materials packed once a run (`ground-material-runs`)
+  - [x] Still entities announced, not searched for (`still-announced`)
+- [x] Cheaper forest shadows (`understorey-shadow-cascades`)
+- [ ] Coarser leaves in the far cascades (`docs/research/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
-- [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`, the user's go Nov 15 2026): a few shared flat patches lifted onto the land by the vertex shaders, each 8 x 8 m cell choosing its density, thinning with distance; no shadows cast
-  - [x] Ground-following meshes: the vertex shaders lift them onto the land, their spheres lifted on the CPU (`ground-cover-patches`)
-  - [x] Grass in the open: clumped curved blades wherever the ground is painted grass near the path (`meadow-grass`)
-  - [x] The forest floor: fallen leaves, tree seedlings and small ferns under the canopy (`forest-floor-cover`)
+- [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`): ground-following patches (`ground-cover-patches`), meadow grass (`meadow-grass`), the forest floor (`forest-floor-cover`)
 - [ ] The structures, half reclaimed
-  - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
-  - Big searchlights sweeping the land (the user, Nov 14 2026): spot lights with shadows near the camera, and for beams kilometres long, more than the fog's 100 m grid can light, a beam of their own through the height fog (its closed form along the cone).
-  - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, searchlights sweeping beams through the mist, vines hanging hundreds of metres.
-- [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured. After Horizon Zero Dawn's global wind force field (research in `docs/research/WIND.md`, the user's pick and go Nov 16 2026):
-  - [x] The wind force field: springs per category round the camera, stepped each frame in a compute pass (`wind-field`)
-  - [x] Swaying plants: trees, plants, climbers, epiphytes, grass and floor cover in every vertex shader, the nearest cascade swaying (`wind-sway`)
-  - [x] Hanging things: lianas, roots, vines and moss swinging on the fourth category (`wind-hanging`)
-  - [x] Wind follow-ups: the lower layers' flutter slower and in step (`wind-flutter`); longer hanging things swinging slower, as chains do (`wind-chain-swing`)
-- [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer) (research in `docs/research/LOD.md`)
-  - [x] Levels chosen per view by their error in pixels: trees, plants and rock shapes (`tree-lod`)
-  - [x] Shadows from the same levels, each tile choosing by its own texels (`shadow-lod`)
-  - [x] The terrain's own level of detail, CDLOD (`terrain-lod`)
-- [x] Impostors: far trees and plants as cards baked from their meshes (`tree-impostors`, `impostor-switch`, `plant-impostors`)
-- [ ] Pop-in (the user, Nov 17 2026: "quite bad", next session's first item): the switches between mesh levels of detail look jarring (the impostor switches are fine, the user says); hide them (cross-fades by dithering, closer levels, morphing, hysteresis); research how shipped games hide it first. Done in `lod-pop-in`: researched (`docs/research/LOD.md`, Hiding the switches), levels by the output height, the trees' leaf cards thinned one by one (the user: "looks good"); the palms' leaflets likewise in `palm-thinning` (the user: "looks good"); left for later: the scanned small plants still pop (a dithered fade), and the trees' bark if it shows
-- [x] Leaf shimmer (the user, Nov 18 2026: "some of the leaves on the trees are kinda shimmering"): the trees' leaves fluttering through the sun flecks each on its own at 3 Hz; only the wind stopped it, no pass did; now 1 Hz in step over 8 m, chosen by eye (`tree-flutter`)
-- [ ] Occlusion culling (moved from phase 14): culling in compute against last frame's depth pyramid (Hi-Z), so what hides behind the Monolith or a pillar is not drawn (research in `docs/research/OCCLUSION.md`, the user's go Nov 17 2026)
-  - [x] Measured first: a farthest-depth pyramid from the prepass, the camera's draws tested against it, F4 counting what would be hidden; drawing unchanged (`occlusion-measure`): in the forest 22-93% of the camera's draws hide but only 2-19% of their triangles (small things behind ridges and trunks), so GPU culling would save about 0.3-0.5 ms; numbers in `docs/research/OCCLUSION.md`
-  - [ ] Two-phase culling: last frame's visible drawn first, the rest tested against their pyramid, survivors drawn by indirect draws (`occlusion-culling`). Not worth it now (measured: about 2% of the GPU frame); again if a scene hides more triangles
-  - [ ] Only if the numbers ask: shadow casters culled by what the camera sees (receiver masks), solid stand-ins for dense crowns
-  - [x] The camera's CPU work measured in parts (FRUSTUM, LEVELS, BATCH, MOVING on F4; `camera-timing`); CPU-side occlusion by readback dropped for GPU-driven drawing (the user, Nov 18 2026)
-- [ ] GPU-driven drawing (the user, Nov 18 2026: to fill the whole valley and build larger worlds): the GPU culls, chooses levels and batches every view into indirect draws, the CPU only coarse regions; research and a staged plan first (Decima, RedLynx, Unreal's GPU Scene, niagara) in `docs/research/GPUDRIVEN.md`. The user's choices (Nov 18 2026): the CPU path deleted after stage 5; F4's counts a frame or two late; the shared mesh buffer late; worlds as big as possible (the space simulator of phase 13), so the chunks stage is required
-  - [x] 1. Indirect draws: each batch drawn by `vkCmdDrawIndexedIndirect` from a command the CPU writes, nothing else changed (`indirect-draws`)
-  - [x] 2. Culling records and a level table on the GPU, copied each frame as the instances are (the user chose two steps; the persistent scene's lasting GPU buffers then remove both copies); level and frustum maths in shader libraries with C++ mirrors (`cull-records`)
-  - [x] 3. The camera's and velocity pass's lists built on the GPU behind a setting, `cull-compare` against the CPU's (`gpu-cull-camera`): on by default, lists equal the CPU's, the camera's CPU work 9-10 ms → 0.2 ms at the rim and Ring
-  - [x] 4. Reflection probe faces and the mirror as GPU views (`gpu-cull-captures`): views of the camera's culling, the dispatch's second dimension, each in its own slices; one call a style a capture
-  - [x] 5. Shadow tiles as GPU views, the cache redrawn on announced changes (`gpu-cull-shadows`; research in `docs/research/GPUDRIVEN.md`, the user chose no cap on tiles a frame and the nearest cascade redrawn while things sway)
-  - [x] 5b. The CPU path deleted, F4's HIDDEN (occlusion measurement) with it; `cull-compare` builds the CPU's lists on request (`cpu-culling-removed`)
-  - [x] 6. One shared mesh buffer, a multi-draw per pipeline state (`mesh-megabuffer`; done before stages 4 and 5, the user's choice, Nov 18 2026, research in `docs/research/MESHPOOL.md`): the forest's 502 MB of meshes in two pools, each pass's groups packed by the GPU and drawn by one call a style; the camera's calls 7,500 to 12, RECORD 3.5 to 1.3 ms
-  - [x] 7. Chunks of instances culled first, coarse CPU cells for streaming worlds (required for phase 13; research in `docs/research/GPUDRIVEN.md` "Stage 7"; the user, Nov 18 2026: built for scale, cells first, chunks by visible segments)
-    - [x] 7a. 128 m cells, each one's instances and culling records in GPU buffers kept between frames, written only when the cell changes; PACK's copy a frame becomes the changed cells' bytes (`scene-cells`, also the persistent scene's "lasting GPU buffers"): PACK 2.9 to 1.8 ms, the rest the terrain's ground materials packed each frame
-    - [x] 7b. 64-slot chunks (blocks whole chunks, chunk = slot / 64; a cell's objects in Morton order on every rebuild) tested once a view, then only the candidates of visible (group, chunk) segments by an indirect dispatch, each workgroup finding its segments from a shared-memory window; candidates kept a cell at a time; the lists' order fixed, no atomics, `cull-compare` exact (`scene-chunks`; the user's choices, Nov 18 2026)
-    - Phase 13: cells loaded and unloaded by distance (hysteresis, a cap a frame), merged far models a cell, double coordinates, and a cell test a view above the chunks' (skipping all of a cell's chunks)
-- [x] Texture compression (moved from phase 12's asset cooking): BC7 for every texture, normal maps too (x, y and z kept for Toksvig), a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB; mips on the CPU, `bc7enc`, a disk cache in `build/texture_cache`, `engine.textureCompression` settings; a game's lookup textures stay exact (`texture-compression`, research in `docs/research/TEXTURECOMPRESSION.md`)
-- [x] Video memory in use on F4: the bytes the engine's resources take (VMA's allocation bytes) beside the blocks it holds, which move in 256 MB steps and hid most of texture compression's 466 MB saving (`vram-in-use`)
-- [x] DLSS Quality by default (render scale 0.67), not DLAA (`dlss-quality-default`)
-- [ ] The GPU-bound frame (later, the user's choice Nov 18 2026): each pass measured, then the levers ranked in `docs/research/WORLDSCALE.md` (budgets a view, foliage thinned by distance, cheaper far materials, variable rate shading)
-- [ ] Far terrain following the camera, only if needed: the rough valley's fixed rings reach 20 km round the walk
-- [ ] Aerial perspective: the air between the camera and far scenery from the sky's own tables (Hillaire 2020's aerial perspective volume), so distant things turn blue by distance; the fog's grid near, this beyond it (only if the haze looks wrong later: the rough valley showed it already turns blue)
+  - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons; the Ring: 400 m across, on edge, sunk to its waist; far towers in the haze
+  - Searchlights sweeping the land (the user, Nov 14 2026): shadowed spot lights near, and beams kilometres long through the height fog by its closed form along the cone
+  - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, vines hanging hundreds of metres
+- [ ] Wind (research in `docs/research/WIND.md`); left: its shadow cache cost measured
+  - [x] The wind field (`wind-field`), swaying plants (`wind-sway`), hanging things (`wind-hanging`), follow-ups (`wind-flutter`, `wind-chain-swing`)
+- [ ] Level of detail (research in `docs/research/LOD.md`): by error in pixels (`tree-lod`), shadows from the same levels (`shadow-lod`), the terrain's CDLOD (`terrain-lod`)
+- [x] Impostors (`tree-impostors`, `impostor-switch`, `plant-impostors`)
+- [ ] Pop-in: done for the trees' and palms' cards (`lod-pop-in`, `palm-thinning`); left: a dithered fade for the small scanned plants, and the trees' bark if it shows
+- [x] Leaf shimmer: the trees' flutter slower and in step (`tree-flutter`)
+- [ ] Occlusion culling (research in `docs/research/OCCLUSION.md`)
+  - [x] Measured first (`occlusion-measure`): about 2% of the GPU frame to gain
+  - [ ] Two-phase culling (`occlusion-culling`), only if a scene hides more triangles
+  - [ ] Only if the numbers ask: shadow casters culled by what the camera sees, solid stand-ins for dense crowns
+  - [x] The camera's CPU work measured in parts (`camera-timing`)
+- [ ] GPU-driven drawing (research in `docs/research/GPUDRIVEN.md`)
+  - [x] 1. Indirect draws (`indirect-draws`)
+  - [x] 2. Culling records and a level table on the GPU (`cull-records`)
+  - [x] 3. The camera's lists built on the GPU (`gpu-cull-camera`)
+  - [x] 4. Reflection probe faces and the mirror as GPU views (`gpu-cull-captures`)
+  - [x] 5. Shadow tiles as GPU views (`gpu-cull-shadows`)
+  - [x] 5b. The CPU path deleted (`cpu-culling-removed`)
+  - [x] 6. One shared mesh buffer (`mesh-megabuffer`; research in `docs/research/MESHPOOL.md`)
+  - [x] 7a. 128 m cells kept on the GPU (`scene-cells`)
+  - [x] 7b. 64-slot chunks culled first (`scene-chunks`)
+  - Phase 13 adds: cells loaded by distance, merged far models a cell, double coordinates, a cell test above the chunks'
+- [x] Texture compression: BC7 everywhere (`texture-compression`; research in `docs/research/TEXTURECOMPRESSION.md`)
+- [x] Video memory in use on F4 (`vram-in-use`)
+- [x] DLSS Quality by default (`dlss-quality-default`)
+- [ ] The GPU-bound frame (later, the user's choice Nov 18 2026): each pass measured, then the levers in `docs/research/WORLDSCALE.md`
+- [ ] Far terrain following the camera, only if needed
+- [ ] Aerial perspective from the sky's tables, only if the haze looks wrong
 - [ ] Golden views, tests, packaging with the downloaded assets, docs
-  - [x] The golden views' scene builds out of the routine suite (72 s of its 154), into the slow tests the golden skill runs first (`golden-views-slow`)
+  - [x] The golden views' scene in the slow tests (`golden-views-slow`)
 
 **Milestone:** with the typical GPU setup, the scale is felt from the valley's rim (pillars, floating islands and the Monolith layered into kilometres of haze), and walking down through the jungle to the Monolith's foot looks lush and alive (wind in leaves and vines, light through the canopy, mist in the valley) by day and at dusk, at a frame rate a mid-range GPU holds (measured on the laptop's RTX 4070, 8 GB).
 
@@ -424,12 +394,12 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 
 ## Phase 20: Clouds and weather
 
-Added Nov 18 2026 (the user's ask: volumetric clouds, weather that differs by area as in GTA 6). Research first (Horizon Zero Dawn's Nubis, Hillaire 2016 and 2020, shipped regional weather), the plan explained, then the user's go. Looks over realism (the user: Red Dead Redemption 2's and The Witcher 3's skies); research on skies in `docs/research/SKY.md`.
+Added Nov 18 2026 (the user: volumetric clouds, weather differing by area as in GTA 6; looks over realism, as Red Dead Redemption 2's and The Witcher 3's skies). Research on skies and clouds in `docs/research/SKY.md`; the rest researched first, the plan explained, then the user's go.
 
-- [ ] A sky that looks great: the physical sky kept, art controls over it as curves over the hour, one set a weather (sky and haze brightness, haze distance, tints toward and away from the sun, the grade); the sun and moon art-directed (size, limb darkening, a halo, light kept after sunset)
-- [ ] Volumetric clouds: ray-marched cloud layers lit by the sun and the sky's own tables, casting shadows on the ground and into the fog; at a fraction of the screen's pixels and reprojected, so the cost grows with pixels, not with the sky's extent
-- [ ] Weather by region: a world map of cloud cover, cloud type, rain, wind and fog, blended across region borders and changing over time, deterministic from the seed and the tick; clouds, sky, fog, wind and light read it
-- [ ] Rain and wet surfaces: rain near the camera, materials darkened and smoothed by wetness, puddles, drying afterwards
+- [ ] A sky that looks great: art controls over the physical sky as curves over the hour, one set a weather; the sun and moon art-directed
+- [ ] Volumetric clouds, shadowing the ground and the fog, the cost growing with pixels
+- [ ] Weather by region: a world map of cloud cover and type, rain, wind and fog, blended across borders, deterministic from the seed and the tick
+- [ ] Rain and wet surfaces: rain near the camera, wet darker materials, puddles, drying
 
 **Milestone:** from the valley's rim, a storm rolls in over one side of the valley while the other stays in sun, and walking into it the clouds, rain, wind and wet ground change together.
 
@@ -437,43 +407,15 @@ Added Nov 18 2026 (the user's ask: volumetric clouds, weather that differs by ar
 
 ## Phase 17: Ray tracing and path tracing
 
-The top of the quality ladder, once the path without ray tracing is finished. Always optional, off by default, for GPUs with ray queries. DDGI comes off hold here if it is still wanted.
+The top of the quality ladder, once the path without ray tracing is finished. Always optional, off by default, for GPUs with ray queries. DDGI comes off hold here if it is still wanted. Plan notes: `docs/research/ILLUMINATION.md` (Planned), `docs/research/LUMEN.md`.
 
 **Items**
 
-- [ ] The sun's bounce without probes' blotches (moved here from phase 16 on Nov 12 2026, the user's choice: bounced sunlight is for the ray-traced path)
-  - With ray tracing the probes carry it already; this is for rooms lit only by sunlight bounced off a patch next door.
-  - Tried on the CPU grid, on the unmerged `sun-bounce` branch: a shadow ray from every hit (blotchy, 4 times the bake's time) and aiming at sunlit spots found down the sun's beam (smoother, 2.5 times; spikes from light seen through doors the point's rays missed, and a defensive mixture against them leaves more noise). Read docs/BUILDLOG.md, `sun-bounce`, before taking it up again.
-- [ ] More hardware ray tracing: ray-traced shadows and ReSTIR
-  - Ray-traced shadows (exact soft shadows from area lights), ray-traced reflections, then ReSTIR-style sampling of many lights or a path-traced reference mode.
-  - **Always optional:** settings in `RenderSettings` (so the debug UI and a player's options menu can reach them) switch each ray-traced feature on or off while the game runs, falling back to shadow maps, reflection probes and the software-traced probes.
-  - The game is designed, tuned and tested on the non-ray-traced path first, so it looks right without it
-  - **Foliage for rays** (added Nov 14 2026, from `jungle-canopy`'s shadow leaves): split `castsShadows` into shadow maps and rays, so the leaves seen are solid to rays (shadows, bounce, reflections) while their shadow leaves (`ModelRenderer::shadowOnly`, ray mask 0 for now) stay in the maps only; rays rebuild nothing a frame, so the full leaves cost no drawing there. Measure the cut-out test at each leaf hit (about 400k cards in the jungle patch); if it is slow, give the shadow leaves a ray mask bit of their own that only shadow rays include.
-- [ ] DDGI at the valley's scale (added Nov 14 2026, the user's question: how would DDGI work at this scale)
-  - **The gap:** the six cascades reach about 116 m (0.5 to 16 m apart); past them the flat sky light. In the jungle valley (phase 18) almost everything is further: pillars 300 m tall, islands 400-700 m up, kilometres across, so DDGI would light only the camera's surroundings.
-  - **Far cascades:** keep doubling, 32, 64, 128, 256 m apart; four more 21 x 13 x 21 grids (about 23,000 probes) reach about 5 km across and over 3 km up.
-  - **Updated rarely:** far light changes only with the sun or something huge, so far cascades update every few seconds; their probes in open air mostly sleep (the probe states already trace only those near surfaces or moving things).
-  - **Rays:** against the valley's rock (about 3 million triangles), roots and moss; the cut-out moss and leaves left out of bounce rays (an alpha test at every card hit), as the glowing stand-ins for lamps are. Estimated, not measured: 8,192 probes x 256 rays, about 2 million rays a frame, 1-2 ms on the RTX 4070 Laptop.
-  - **Leaks, the weakness:** a 256 m cell is wider than a 40 m pillar, so one cell holds its sunlit and shaded sides and the shaded side gets about their mean. Soft bounce tolerates it (sharp sun shadows come from the shadow maps); it shows under the islands, lit by the ground's bounce, and in narrow gaps between pillars; the fine cascades take over near the camera.
-  - **Worth it for:** the sunlit floor's warm bounce onto the pillars' and islands' undersides (flat sky light alone leaves them grey), the mist lit by it (the fog reads the probes), deep shade among clusters of pillars.
-  - **As others do it:** RTXGI's scrolling cascades with rarely updated far ones; Lumen's near detail, far field and stand-in meshes beyond (`docs/research/LUMEN.md`). Test it in the valley.
-- [ ] Lumen-like global illumination (as in Unreal Engine 5; research, numbers and a staged plan in `docs/research/LUMEN.md`, read Oct 20 2026)
-  - **The idea:** probes placed on the visible surfaces themselves, one every 16 pixels plus more at depth and normal edges, 8x8 octahedral, each tracing its own rays, filtered 3x3 in probe space and over time, so light near a surface is what that surface sees.
-  - **What it fixes:** probe parallax. A probe sits a little off the surface and sees what the surface cannot.
-    - So beside a lit doorway at night the outside wall glows within a probe spacing of the opening (found Oct 20 2026: the lamp-lit jambs and room seen at grazing angles by the probes in front of the wall; wider on Low, narrower on Ultra), and the back room's ceiling glows beside its doorway.
-    - Also indirect shadows smaller than the probe spacing.
-  - **In stages:**
-    1. prerequisites: 6e's motion vectors and TAA (which average away the probes' jittered placement and directions), a normal target in the depth prepass, a hierarchical depth buffer;
-    2. diffuse screen probes with full-length ray queries, hits shaded as the probe rays' are (no surface cache needed with hardware rays), the main pass reading a per-pixel GI image;
-    3. importance sampling from last frame's probes and the BRDF;
-    4. short-range AO to 16 pixels after the temporal filter;
-    5. reflections from the same rays, rough surfaces from the probes.
-  - DDGI's cascades stay as the far field (Lumen's world radiance cache) and as the Low setting.
-  - Presets probes every 32, 16 and 8 px (Lumen's ladder, each level about half the next's cost).
-  - Estimated 1-2 ms on the RTX 5080 at High, to be measured
-- [ ] Path-traced mode: every pixel traces random light paths through the scene with several bounces, which gets every shadow, bounce, reflection and soft light right with nothing approximated
-  - Real time only with one or two paths a pixel, so it needs ReSTIR's reuse of good samples across pixels and frames and a strong denoiser (and upscaling); high-end GPUs only.
-  - Worth it first as a reference: golden views path-traced to convergence offline show what the real-time lighting should look like, so its errors (probe parallax, leaks, missing occlusion) can be measured rather than judged by eye
+- [ ] The sun's bounce without probes' blotches (moved from phase 16; what was tried is on `sun-bounce`)
+- [ ] More hardware ray tracing: ray-traced shadows, ReSTIR, foliage solid to rays
+- [ ] DDGI at the valley's scale: far cascades updated rarely
+- [ ] Lumen-like global illumination: screen probes on the visible surfaces, in stages
+- [ ] Path-traced mode, first as an offline reference for the golden views
 
 **Milestone:** path-traced golden views converged offline stand beside the real-time picture, the differences measured; the path-traced mode runs live on a high-end GPU.
 
@@ -481,19 +423,13 @@ The top of the quality ladder, once the path without ray tracing is finished. Al
 
 ## Phase 7: Cloth simulation (parked)
 
-The physics half of the dressmaking game: fabric that drapes, folds and piles up without passing through itself, ending with a first dress sewn from two panels hanging on a mannequin. It comes early because it is the other thing we most want to see.
-
-- It builds on phase 5's particle store and collision shapes and phase 6's compute pipelines.
-- Cloth code lives in its own module on top of the core, like the FPS and MOBA code.
-- The pattern editor, garments on moving characters and the game itself follow in phase 10, once phase 9 has skinned characters to dress.
-- The solver's plan and research: `docs/research/CLOTHGPU.md` (read it first).
-- **Parked on Nov 6 2026** (the user's choice) for phases 16 and 17. Its unmerged work stays on the `gpu-self-collision` branch; self-collision is to be rebuilt later with a more real-time friendly system, not finished as it stands.
+The physics half of the dressmaking game: fabric that drapes, folds and piles up without passing through itself, ending with a dress sewn from two panels on a mannequin. Cloth lives in its own module on top of the core; the plan and research: `docs/research/CLOTHGPU.md` (read it first). **Parked on Nov 6 2026** (the user's choice) for phases 16 and 17; self-collision on the GPU to be rebuilt, not finished as it stands on `gpu-self-collision`.
 
 **Items**
 
 - [x] Job system: a work-stealing thread pool with `parallelFor` (`job-system`)
 - [x] Cloth lab: a test ground with a station for each milestone, `--game clothlab` (`cloth-lab`)
-- [x] Dynamic meshes: deforming meshes drawn blended between ticks, normals and tangents recomputed (`dynamic-meshes`)
+- [x] Dynamic meshes: deforming meshes drawn blended between ticks (`dynamic-meshes`)
 - [x] Particle store: the points as plain arrays, lumped masses, pins, the step (`cloth-particles`)
 - [x] XPBD solver: substeps, compliance, stretch constraints, a hanging sheet (`xpbd-cloth`)
 - [x] Dragging cloth with the mouse (`cloth-grab`)
@@ -501,117 +437,81 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] Collision with bodies: spheres, capsules and boxes, with friction (`cloth-collision`)
 - [x] The solver on every core, bit for bit the one-thread result (`cloth-parallel`)
 - [x] A tick budget: an overloaded simulation runs in slow motion (`tick-budget`)
-- [x] Isometric bending (Bergou et al. 2006), the hinge kept for creases (`isometric-bending`)
-- [x] The yardstick: a 1 m sheet at four resolutions, its stretch, sag and cost (`cloth-yardstick`)
-- [x] Cloth on the GPU: the solver (`gpu-cloth-solver`), in the game with the late readback (`gpu-cloth-in-game`), its time in F4 (`cloth-gpu-timing`)
-- [x] Vertex block descent with Galerkin coarse levels, on the CPU and the GPU, opt-in (`hierarchical-cloth`, `gpu-block-descent`, `gpu-cloth-levels`, `cloth-point-lanes`); its cost cuts parked in phase 10
-- [x] Tethers: a string from each point to its nearest pins, on by default (`cloth-tethers`)
-- [x] GPU cloth ticks inside the tick budget, and F4's cloth line saying when a frame had too many passes to time (`gpu-tick-budget`)
-- [x] The mannequin: `human.obj` in a cloth lab station with a signed distance field (5 mm samples) the cloth collides with on the CPU and the GPU, a sheet dropped over its shoulders (`mannequin`)
-- [x] A dress sewn from two panels on the mannequin, pinned at its shoulders and tethered along each panel, on the CPU and the GPU (`two-panel-dress`)
-- [x] The dress-sized test: XPBD fails it held by contact or pinned and tethered, so garments need more (`dress-yardstick`)
-- [x] Cheaper substeps: 30 a tick, the fewest edge colours, bending optionally less often (`cheaper-substeps`)
-- [x] Self-collision on the CPU: contacts a thickness apart and Planar-DAT's cut, the cloth lab's pile sheet (`cloth-self-collision`)
-- [ ] Self-collision on the GPU, parked, to be rebuilt with a more real-time friendly system (what was tried is on `gpu-self-collision`), on by default then: a spatial hash built in parallel, coloured contacts, the cut as an atomic minimum (`docs/research/CLOTHGPU.md`, The plan, step 5). Its tests: the dress (a crossings column in the dress test), the pile
-  - Watch for the swaying hem found in `cheaper-substeps`: the 0.7 cm pinned dress's back hem kept swinging about 6 cm through 20 s, fed by something (not the tethers, nor the sewing). Gone with `dress-ease`'s roomier dress (19 mm in its last second), so it hangs on the drape; suspects if it returns: the skirt passing through itself, friction on the legs
-- [ ] Fabric properties: a few presets
-  - Different stiffness along the threads (warp and weft) than across them (the bias).
-  - Bending stiffness (silk vs denim), mass per area, friction
-- [ ] Optional, later: IPC or codimensional IPC (incremental potential contact) as an offline reference for judging garments: guaranteed intersection-free, about a thousand times too slow for real time
+- [x] Isometric bending (Bergou et al. 2006) (`isometric-bending`)
+- [x] The yardstick: a 1 m sheet at four resolutions (`cloth-yardstick`)
+- [x] Cloth on the GPU (`gpu-cloth-solver`, `gpu-cloth-in-game`, `cloth-gpu-timing`)
+- [x] Vertex block descent with Galerkin coarse levels, opt-in (`hierarchical-cloth`, `gpu-block-descent`, `gpu-cloth-levels`, `cloth-point-lanes`)
+- [x] Tethers, on by default (`cloth-tethers`)
+- [x] GPU cloth ticks inside the tick budget (`gpu-tick-budget`)
+- [x] The mannequin with a signed distance field (`mannequin`)
+- [x] A dress sewn from two panels on the mannequin (`two-panel-dress`)
+- [x] The dress-sized test: XPBD fails it, so garments need more (`dress-yardstick`)
+- [x] Cheaper substeps (`cheaper-substeps`)
+- [x] Self-collision on the CPU: the cloth lab's pile sheet (`cloth-self-collision`)
+- [ ] Self-collision on the GPU, rebuilt in a more real-time friendly form, then on by default
+- [ ] Fabric properties: a few presets (silk, denim)
+- [ ] Optional, later: IPC as an offline reference for judging garments
 
 **Milestone:**
 
 - a sheet pinned at two corners drapes over a sphere;
 - a dress sewn from two panels hangs on the mannequin;
-- a sheet dropped onto itself folds into a pile with no intersections (the self-collision stress test);
+- a sheet dropped onto itself folds into a pile with no intersections;
 - a silk sheet and a denim sheet fall visibly differently.
 
 ## Phase 8: Active ragdolls
 
-Euphoria-style characters: a simulated body held up by joint motors and kept standing by balance controllers, so a shove makes it stagger, step, fall with its hands out and get up again.
-
-- **The plan:** layers 1-5 of the plan in `docs/research/RAGDOLLPLAN.md` (read it first: it holds the papers' formulas and numbers and how each layer fits the engine). Layer 6, following animation clips, comes in phase 9 with skeletal animation.
-- **Why here:** placed straight after cloth because the rigid-body solver is phase 7's XPBD with rotation and inertia added; quaternions come from phase 6a.
-- **Units:** real-world values throughout, as in the papers: gravity 9.81 for ragdolls (the character controller keeps its Overwatch 17.5), SI masses, torques and push forces, so the papers' results can be reproduced.
-- **Drawing:** until phase 9 the body is drawn as its capsules, a mannequin.
+Euphoria-style characters: a simulated body held up by joint motors and kept standing by balance controllers, so a shove makes it stagger, step, fall with its hands out and get up again. The plan: layers 1-5 of `docs/research/RAGDOLLPLAN.md` (read it first); layer 6 comes with phase 9. Real-world units, as in the papers (gravity 9.81; the character controller keeps its Overwatch 17.5). Drawn as capsules until phase 9.
 
 **Items**
 
-- [ ] Rigid bodies (`rigid-bodies`, moved here from phase 14's rigid-body dynamics)
-  - A `RigidBody` component: mass, body-frame inertia, velocity, angular velocity, a compound of capsules.
-  - An XPBD substep solver (Müller et al. 2020; 10 substeps per tick, 1.2 kHz), with gyroscopic torque.
-  - Capsule contacts against the static level from `contact(capsule, triangle)`, restitution 0 and friction 0.8.
-  - Capsules only: there is no oriented box. `Mesh::capsule` to draw them.
-  - Shapes behind one interface, so phase 15 can add boxes and convex hulls for destruction
-  - Tests: momentum and angular momentum conserved in flight, the tennis-racket theorem's tumble, a dropped capsule rests without jitter, and the same run twice is bit-identical
-- [ ] Joints (`joints`): ball and hinge `Joint`s with swing-twist limits and soft limits
-  - Capsule-against-capsule self-collision between unjoined parts.
-  - The ragdoll builder from `RagdollBodySettings` (1.8 m and 70 kg by default, anthropometric proportions, feet as two parallel capsules for a flat sole).
-  - Each part is an entity with a capsule `Collider`, so picking finds ragdolls with no new code
-- [ ] Joint drives (`joint-drives`): an inertia-scaled PD servo per joint
-  - Stiffness as a natural frequency and damping as a damping ratio (GTA V's units).
-  - Applied as equal and opposite torques on the two bodies, capped, and scaled by a global strength and health
-- [ ] Gravity compensation (`gravity-compensation`): feed-forward torques from virtual forces (τ = Jᵀ F) that hold the body up, so the drives stay soft
-  - Faded out when the centre of mass leaves the feet's support area, so a falling body goes limp
+- [ ] Rigid bodies: XPBD substeps with rotation, capsule contacts, shapes behind one interface for phase 15 (`rigid-bodies`)
+- [ ] Joints: ball and hinge, swing-twist and soft limits, the ragdoll builder (`joints`)
+- [ ] Joint drives: an inertia-scaled PD servo per joint (`joint-drives`)
+- [ ] Gravity compensation by virtual forces, faded out when falling (`gravity-compensation`)
 - [ ] Standing balance and stepping (`standing-balance`, `stepping`)
-  - The torso held upright in world space with the stance hip taking the balance of the torques (SIMBICON).
-  - Foot placement from the inverted-pendulum capture point (Coros 2010), two-bone IK, a step state machine, and failure detection.
-  - Headless test: a 300 N push for 0.1 s at the chest leaves it standing 3 s later
-- [ ] Behaviours and supervisor (`falling`, `behaviour-supervisor`)
-  - Behaviours that score the situation and write targets for the body parts they own (balance, stagger, catch fall, arms windmill, head look, get up), run by a supervisor.
-  - Handover between a character's kinematic capsule and its ragdoll and back
-- [ ] Debug view and demo: R spawns a ragdoll in front of the camera, E shoves what the view ray hits
-  - F4 draws the capsules, joint frames, centre of mass, support area, next foot target and the active behaviours
+- [ ] Behaviours and supervisor, and the handover between capsule and ragdoll (`falling`, `behaviour-supervisor`)
+- [ ] Debug view and demo: R spawns a ragdoll, E shoves what the view ray hits
 
 **Milestone:** shove a capsule mannequin off the obstacle course's steps: it staggers, takes recovery steps, falls with its hands out and gets back up.
 
 ## Phase 9: Animation, UI and audio
 
-- [ ] Parent/child entity hierarchy: attach entities to others and to skeleton joints (a weapon to a hand, a hat to a head, a turret to a vehicle)
-  - Skeletal animation is the first thing that needs it, and phase 12's first-person weapon uses it
-- [ ] Skeletal animation from glTF skins: joints, playing and blending clips
-  - Skinning in a compute shader once per frame into a vertex buffer that the main pass, every shadow view, ray tracing and cloth collision all read.
-  - Skinning in the vertex shader would repeat the work in every shadow tile
+- [ ] Parent/child entity hierarchy: entities attached to others and to skeleton joints
+- [ ] Skeletal animation from glTF skins, skinned in compute once a frame for every view
 - [ ] Ragdolls follow animation (layer 6 of `docs/research/RAGDOLLPLAN.md`)
-  - A table from skeleton bones to ragdoll bodies, clip poses as the joint drives' targets (a powered ragdoll).
-  - Skinned characters drawn from the bodies, softening and shaped impulses on a hit.
-  - Then a smooth blend back into a matching clip or get-up animation
-- [ ] Text rendering with a bitmap font (debug overlays already have a stroke font, `debugText`, good for numbers but not for real UI)
-- [ ] HUD: crosshair, health bars above units, ability cooldowns
-  - Start with flat-coloured screen-space shapes drawn after phase 6's tone mapping (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`.
-  - Turn the demo's MOBA destination marker (an emissive plane for now) into a HUD ring of constant pixel size
-- [ ] In-game stats in the debug UI (phase 6a): entity count, and phase 5's frame, tick and per-system timings
-- [ ] Key bindings: games read actions (`MoveForward`, `LockCamera`) instead of keys, and players can rebind them
-- [ ] Audio with SDL3: play sounds, volume, simple 3D panning by distance and direction
+- [ ] Text rendering with a bitmap font
+- [ ] HUD: crosshair, health bars above units, ability cooldowns: screen-space shapes after tone mapping, a tested `worldToScreen`; the MOBA marker as a ring of constant pixel size
+- [ ] In-game stats in the debug UI: entity count, frame, tick and per-system timings
+- [ ] Key bindings: games read actions, players rebind them
+- [ ] Audio with SDL3: sounds, volume, 3D panning
 
 **Milestone:** an animated character that walks and idles with something held in its hand, with a HUD, sounds and a debug overlay.
 
 ## Phase 10: Garments and a dressmaking game
 
-A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them into garments and see them hang and move on a body. Needs phase 9's skinned characters and phase 6's physically based materials.
+A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them into garments and see them hang and move on a body. Needs phase 9's skinned characters. Plan notes: `docs/research/CLOTHGPU.md`.
 
 **Garments**
-- [ ] Garments from any panels: phase 7's two-panel dress (outlines cut into flat meshes, seams pulled shut) for the pattern editor's panels and seams, with darts, gathers and sleeves
-- [ ] Tethers for worn garments: anchors on a moving body (a shoulder seam, a waistband), each point tied to the nearest point of each region, with the distance along the sewn pattern across seams (exact geodesics, Xin & Wang 2009); within one flat piece, round its armholes, phase 7's dress already measures it (`ClothRestPaths`)
-- [ ] If garments held by contact stretch (phase 7's dress decides): vertex block descent's coarse levels made cheap enough: the two finest levels skipped, the line search's reduction in one pass, the move folded into the next level's gradient, a workgroup per coarse point for its gather. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019)
-- [ ] A coarse simulation mesh driving a fine render mesh: the cloth solved on a few thousand points, each drawn vertex following its nearest simulated triangle (what shipped games do; 1,500 points instead of 10,000 is about 7 times less work, barely visible)
-- [ ] Dressing an animated character: the cloth collides with the skinned body as it moves (its distance field following the bones, the surface's velocity in the friction)
+- [ ] Garments from any panels, with darts, gathers and sleeves
+- [ ] Tethers for worn garments: anchors on a moving body, distances along the sewn pattern
+- [ ] If garments held by contact stretch: vertex block descent's coarse levels made cheap
+- [ ] A coarse simulation mesh driving a fine render mesh
+- [ ] Dressing an animated character
 
 **Rendering**
-- [ ] Weave detail with phase 6a's normal maps
-- [ ] Fabric shading: a sheen term for the soft rim highlight of cloth (glTF's KHR_materials_sheen), on top of physically based materials (moved here from phase 16)
+- [ ] Weave detail with normal maps
+- [ ] Fabric shading: a sheen term (KHR_materials_sheen)
 
 **Game**
-- [ ] Pattern editor: draw and edit panel outlines, choose which edges are sewn together
+- [ ] Pattern editor: panel outlines and which edges are sewn
 - [ ] Fabric choice, colours and prints per panel
 
 **Milestone:** a garment drawn in the pattern editor hangs on the mannequin and swings as it turns; then it follows an animated character as it walks.
 
 ## Phase 11: Networking
 
-Builds on the fixed tick and the headless simulation. Commands go up, snapshots come down.
-
-Deferred until there is a playable FPS slice (phase 12) worth playing together. The deterministic, headless simulation keeps it possible, and phase 6a's determinism test keeps it that way.
+Builds on the fixed tick and the headless simulation: commands go up, snapshots come down. Deferred until there is a playable FPS slice (phase 12); the determinism test keeps it possible.
 
 - [ ] Serialization of commands and snapshots into compact byte buffers
 - [ ] UDP sockets, connections, and a small reliability layer for messages that must arrive
@@ -627,20 +527,14 @@ Deferred until there is a playable FPS slice (phase 12) worth playing together. 
 ## Phase 12: Genre demos
 
 **Engine**
-- [ ] Asset cooking (before large scenes): an offline step in `tools/` that turns source models and images into ready-to-load files
-  - Texture compression (BC7 and BC5) moved to phase 18 on Nov 13 2026; cooking would then save its results instead of compressing at load.
-  - Meshes in vertex-cache order (meshoptimizer); their levels of detail come with phase 18's item.
-  - Tangents precomputed
-- Level of detail moved to phase 18 on Nov 13 2026 (instancing itself moved to phase 6c)
-- [ ] Cloth level of detail and sleeping, for many characters' capes and skirts: distant cloth runs fewer substeps or keeps its last pose, and cloth at rest stops being simulated until something touches or moves it
+- [ ] Asset cooking: an offline step saving compressed textures, vertex-cache-ordered meshes and tangents
+- [ ] Cloth level of detail and sleeping, for many characters' capes and skirts
 
 **FPS**
-- [ ] Hitscan and projectile weapons, recoil and spread
-  - Projectiles and grenades (phase 5's particles) must also hit moving things, characters and props, not only the static level.
-  - Sweep the sphere against the moving colliders' shapes too (a sphere or capsule is a raycast against the shape grown by the radius, like `sweepSphere`; a box needs a rounded-box sweep)
+- [ ] Hitscan and projectile weapons, recoil and spread; projectiles hitting moving things too (a sphere swept against each shape grown by its radius)
 - [ ] Health, damage, death and respawn
-- [ ] Decals: bullet holes, scorch marks, signs and dirt projected onto surfaces, listed per screen tile as the lights are (moved here from phase 16)
-- [ ] First-person weapon model (attached with phase 9's hierarchy) and camera feel (bob, field of view)
+- [ ] Decals: bullet holes, scorch marks, signs and dirt, listed per screen tile as the lights are
+- [ ] First-person weapon model and camera feel (bob, field of view)
 
 **MOBA**
 - [ ] Pathfinding: A* on a grid first, then a navigation mesh
@@ -653,31 +547,18 @@ Deferred until there is a playable FPS slice (phase 12) worth playing together. 
 
 ## Phase 13: Orbital simulation (a solar system)
 
-A fourth kind of world: the Sun, planets and moons at real scale, moving under gravity. Like cloth, it lives in its own module on top of the core.
-
-It needs phase 5's particles and release build but no collision, animation or networking, so it can move earlier whenever we want it sooner.
+The Sun, planets and moons at real scale, moving under gravity, in its own module. Needs no collision, animation or networking, so it can move earlier. Plan notes: `docs/research/ORBITAL.md`.
 
 **Precision and rendering**
-- [ ] Double-precision vectors (`DVec3`) for simulation positions
-  - A float keeps about 7 significant digits, so at Neptune's distance (4.5 billion km) positions would snap in steps of hundreds of kilometres; a double's 16 digits give about a millimetre.
-  - Float `Vec3` stays for rendering and everything else; phase 5's per-particle functions (`fly`, `bounceVelocity`) become templates over the vector type
-- [ ] Camera-relative rendering in double (floating origin)
-  - Phase 6a makes rendering camera-relative in float; here the subtraction happens in double before the small difference becomes a float.
-  - So the GPU only ever sees numbers near zero and far-away objects do not jitter
-- [ ] Depth at planetary scale: phase 6a's reversed-Z, plus a logarithmic depth or split near and far passes if a nearby spacecraft and a planet millions of kilometres behind it still do not both sort correctly
+- [ ] Double-precision positions (`DVec3`) for the simulation
+- [ ] Camera-relative rendering in double (a floating origin)
+- [ ] Depth at planetary scale
 
 **Simulation**
-- [ ] N-body gravity with a symplectic integrator (leapfrog / velocity Verlet)
-  - Ordinary integrators slowly pump energy into or out of an orbit, so planets spiral outwards or fall into the Sun; symplectic ones keep the energy error bounded forever.
-  - Tested: total energy stays within a small band over many orbits
-- [ ] Its own simulation clock with time warp: many substeps per 120 Hz tick so a year can pass in seconds
-  - The step size adapts to how close bodies come to each other.
-  - A naively varied step breaks the symplectic guarantee and the energy drifts again, so the adaptivity has to keep it (for example a time-symmetric step choice, or fixed-step substepping only for the bodies in a close pass)
-- [ ] "On rails" Keplerian orbits for distant bodies: the position comes from the exact ellipse at any time, with no integration error and almost no cost
-  - A body switches to full simulation when the player comes near (and back when they leave), so a spacecraft's thrust or a close pass can change its path
-- [ ] Barnes-Hut (or the fast multipole method) for thousands of bodies, such as an asteroid belt
-  - A distant cluster pulls like a single mass at its centre, as a far galaxy does, turning the O(n²) pair sum into O(n log n).
-  - Drawn with phase 6c's instancing
+- [ ] N-body gravity with a symplectic integrator
+- [ ] Its own clock with time warp
+- [ ] "On rails" Keplerian orbits for distant bodies
+- [ ] Barnes-Hut for thousands of bodies
 
 **Milestone:** the Sun, planets and Moon orbit stably for 100 simulated years at high time warp, and you can fly the free camera from Earth to Neptune without jitter.
 
@@ -687,115 +568,50 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 
 ### Physics
 
-- [ ] More rigid-body dynamics, extending phase 8's solver (bodies, joints and capsule contacts come with the ragdolls)
-  - Oriented boxes with box contacts (separating axes), stacking and piles of crates (or with phase 15's convex bodies, whichever comes first).
-  - **Particles colliding with each other** (grenades knocking each other about) are part of this. They were left out of phase 5 because piles need this phase's iterative contact solver:
-    - find pairs with the uniform grid over each particle's swept box;
-    - detect the touch by sweeping in relative motion (a ray against a sphere of the summed radii, so fast crossings are not missed);
-    - respond by running the relative velocity through `bounceVelocity` and sharing the change by mass (an equal and opposite impulse, so momentum is conserved), with the two materials' restitution and friction averaged
-- [ ] A lathe (`lathe`): a spinning part turned smaller by a tool, the material cut off flying away as chips (the user's idea, Oct 30 2026)
-  - The part kept as its profile r(z), a surface of revolution, as CNC lathe simulators keep it: the tool sets r(z) = min(r(z), its own profile), and the mesh is rebuilt by revolving the profile into rings (normals from dr/dz).
-  - Chips carry the removed volume, pi (r_old^2 - r_new^2) dz a sample, times the density, leaving along the tangent at the surface speed omega r: fragments for brittle materials (particles, then phase 15's convex bodies), later a curling ribbon for ductile metals (a stiff, curled strip on the cloth solver).
-  - Optional: the cutting force F = k_c x depth of cut x feed a turn (k_c about 1500-2000 N/mm^2 for steel, **from memory**: check it before writing tests), its power F v slowing the spindle.
-  - The general follow-up, for parts that do not spin, milling and carving: the tool subtracted from a signed distance field, d = max(d_part, -d_tool), remeshed by surface nets.
-  - Tests: a profile cut to a set radius revolves into a closed mesh of that radius, the chips' mass equals the removed volume's, a tool clear of the part removes nothing
+- [ ] More rigid-body dynamics: oriented boxes, stacking, particles colliding with each other (`docs/research/DESTRUCTION.md`, Planned)
+- [ ] A lathe: a spinning part turned smaller, chips flying (`lathe`; `docs/research/LATHE.md`)
 
 ### Lighting and shadows
 
-- [ ] A software tracer for GPUs without ray tracing, as the lower quality setting
-  - **What:** a global signed distance field round the camera: clipmaps of sparse 8^3 bricks holding a narrow band of distances, built in compute from the scene's triangles with an eikonal fill, the static level cached apart from what moves.
-  - **Tracing:** sphere marching in place of the probe rays' ray queries, its hits lit from a coarse volume of the scene's albedo and emissive times the probes' light, checked against the ray-traced result.
-  - Probes only need blurry diffuse light, so coarse geometry is enough.
-  - **Why not voxels:** chosen over a voxel grid (Oct 20 2026). Epic tried voxels for Lumen (cone tracing, then bit bricks) and dropped them as leaky and slow for exactly this, and AMD's Brixelizer builds the same at run time.
-  - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/research/LUMEN.md`
-  - **Moved here from 6d** (Oct 23 2026, the user's choice): a large piece of work that only GPUs without ray tracing would use; image quality (6e) comes first.
-  - **On hold with DDGI** (Nov 6 2026, the user's choice): it feeds the probes, so phase 16 uses screen-space GI instead. It is the way to fix closed rooms on these GPUs if that is ever wanted.
-  - **Expected, not measured:** close to the ray-traced look, since the probes' light is blurry anyway; leaks through walls thinner than the field's voxels unless thickened, thin objects (the light lab's fence) lost at the coarse levels, coarser colour bleeding at hits, and moving objects stamped in each frame. Perhaps 0.5-2 ms for the default's rays on a GTX 1060-class GPU; slower than ray queries on an RTX card.
-- [ ] Physical light units and a camera exposure for all lights
-  - Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers).
-  - The exposure would map the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen.
-  - The night's look waits for it too: night vision's thresholds (now off by default), lower contrast at night (rods see less of it; the ground under a dim moon is crushed in the tone curve's toe while the sky shows), and the sky round a low or crescent moon (partly the sun's twilight) against the dark ground.
-  - Until then the demo's moon glow and moonlight, and the light lab's sun and sky, are separate artistic dials
-- [ ] The sky visibility grid's lamps (phase 16's stage 3, optional): each point keeping its brightest few lamps found by shadow rays, refreshed in a region when one switches, so lamps bounce light without probes
-- [ ] Anisotropic highlights (brushed metal, hair, satin): GGX stretched along the tangent, glTF's KHR_materials_anisotropy
-- [ ] Subsurface scattering for skin, when the engine has characters with skin: light entering and leaving the skin a little way off, softening it (a screen-space blur by a diffusion profile, or a pre-integrated skin lookup)
-- [ ] Tighter clusters: depth bounds per tile from the prepass and smaller far tiles, since far clusters list 16 or more lamps where 4-8 reach; only if many lights ever cost more than a distance check each
-- [ ] Shadow redraw budget: at most N shadow tiles drawn per frame, most important first, far lights refreshed less often, so switching on many lights at once or turning quickly does not cost one long frame
-- [ ] Separate shadow caches for still and moving casters: keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame, so one spinning object no longer forces whole tiles to redraw (the far map first, phase 18's `far-shadow-movers`; the cascades and lamps' tiles still redraw whole)
-- [ ] Virtual shadow maps (as in Unreal Engine 5) for the sun, in place of cascades or beside them as the top setting
-  - **How:** one huge virtual shadow map (16384 x 16384 per clipmap level, nested levels each twice the last's size around the camera) cut into 128 x 128 pages. Only the pages that pixels on screen actually look up are drawn, into a pool of physical pages, and kept between frames until something in them moves.
-  - **Gain:** about one shadow texel per screen pixel at every distance, with no cascade seams, and caching makes still scenes nearly free.
-  - **Needs:** a pass marking the pages the depth buffer touches, a page table the shaders read through, GPU-driven culling and drawing per page, and invalidation from moving casters.
-  - A large project; after DDGI (6d) and TAA (6e), and only if ray-traced sun shadows turn out too slow on typical GPUs
-  - **For the jungle valley (the user's question, Nov 14 2026):** it would replace the cascades and the far map; the far map's 2.7 m texels drop drifting rocks under two texels, which pages fine near the camera would keep. Unreal draws its pages with Nanite; without GPU-driven culling and drawing per page (phase 18's occlusion culling is a first step) the per-page draws dominate, and foliage moving in the wind invalidates pages constantly. Research in `docs/research/SHADOWCACHE.md`.
+- [ ] A software tracer for GPUs without ray tracing: a global signed distance field, sphere-marched (on hold with DDGI; `docs/research/LUMEN.md`)
+- [ ] Physical light units and a camera exposure for all lights (`docs/research/ILLUMINATION.md`, Planned)
+- [ ] The sky visibility grid's lamps (phase 16's stage 3)
+- [ ] Anisotropic highlights (KHR_materials_anisotropy)
+- [ ] Subsurface scattering for skin, when the engine has characters
+- [ ] Tighter clusters, only if many lights ever cost more than a distance check each
+- [ ] Shadow redraw budget, separate still and moving caches, virtual shadow maps (`docs/research/SHADOWCACHE.md`, Planned)
 
 ### Performance and scale
 
-- [ ] Reuse per-frame memory
-  - The frame's draw list, the shadow tile lists and the debug lines are rebuilt in fresh vectors every frame; keep and clear them instead.
-  - The demo rebuilds its `CollisionScene` on every `pick` (hover and a click can both pick in one frame); rebuild it once per frame.
-  - Minor each, so only if phase 6b's timings point at them (the renderer timing breakdown, cheaper caster culling and instancing that used to be listed here moved to phases 6b and 6c)
-- [ ] GPU-driven rendering beyond phase 6c
-  - Hi-Z occlusion culling moved to phase 18 on Nov 13 2026; still here: writing indirect draws with a GPU-written count (bounds go into the GPU instance records then).
-  - Meshlets (meshoptimizer) and mesh shaders where the GPU has them.
-  - A visibility buffer if scenes ever get dense enough to need it
-- [ ] Open-world scale: streaming textures and meshes in and out by distance (impostors moved to phase 18 on Nov 13 2026), and a render graph that orders passes and places barriers from what each pass reads and writes, once the hand-placed barriers of phase 6b no longer keep up
-- [ ] The sky grid denoised: each point blended with its neighbours that see it (`skyCornerSees`, so never through a wall), weighted by how sure each is (its escaped rays), as bakers denoise lightmaps (added Nov 12 2026, after the deep rays near openings)
-- [ ] The sky grid's rays aimed at openings: doors and windows found automatically (rays that escaped, clustered by direction, or the level's gaps between rooms), more rays sent through them and weighted back (importance sampling, as bakers' portals), with no hand-placed volumes (added Nov 12 2026)
-- [ ] Sky visibility baked offline and streamed, for big worlds (added Nov 11 2026)
-  - The grid only bakes against the static level, which does not change, so a level can be baked once, automatically (no hand-placed volumes), saved, and streamed in tiles by distance with the world, as open-world games do with their probe grids and sky occlusion.
-  - Bake geometry, not light: what is baked (how much sky each place sees) is combined with the sun and sky at run time, so the time of day stays free.
-  - Sparse, adaptive storage, following surfaces rather than volume: fine points (0.5-1 m) near walls, streets and interiors, coarse ones (several metres) over open ground and air, none inside solid buildings (bricks allocated only near geometry, or an octree subdividing only where the value changes; a uniform 0.5 m grid over the light lab's 800 x 800 m would be about 2.4 GB). Coarse tiles loaded first, read ahead along the camera's velocity.
-  - The runtime store (`SkyCellStore`, `ao-temporal`) is its first half: points kept by their place in the world; this writes that store to disk.
-  - The runtime bake stays for what changes (phase 15's falling buildings, re-baked locally by the background bake).
-  - Offline, it can afford thousands of rays a point (bakers use about 512 to 4,000 a texel), and the two cures below.
-  - Agreed Nov 11 2026 (option C: the background bake first, `ao-bounce-unfog`, then this as its own project): what it stores is geometry and albedo (the sky's reach and the bounce per unit of sky light), so it is baked once per level; the sun's bounce (phase 16 stage 2) depends on the sun's place and stays a runtime layer on top. Plan it with a research write-up first (formats, sparse layouts, streaming, what shipped engines store), as for the other big systems.
+- [ ] Reuse per-frame memory (the demo's `CollisionScene` rebuilt on every `pick`), only if the timings point at it
+- [ ] Meshlets and mesh shaders, a visibility buffer (`docs/research/WORLDSCALE.md`)
+- [ ] Open-world streaming of textures and meshes, and a render graph
+- [ ] The sky grid denoised, its rays aimed at openings, baked offline and streamed (`docs/research/ILLUMINATION.md`, Planned)
 
 ### Tools and the rest
 
-- [ ] Slang trial: one shader source compiled to both SPIR-V and C++, which could replace the hand-written CPU mirrors of the shader libraries
+- [ ] Slang trial: one shader source for SPIR-V and C++, replacing the hand-written mirrors
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
-- [x] Commands from the command line: every setting, pause and step, the camera, screenshots and stats, sent to a running game or run as a script (`command-line-control`)
-- [ ] Level editor or scene file format
-  - Every editing operation (placing, moving and deleting things, saving a level) a command in the `CommandRegistry` (`core/command_registry`), the editor's buttons issuing them, so a script or an AI can do whatever its windows can, and undo is built on the same list
-- [ ] API reference with Doxygen: a `make docs` target generating HTML into `build/docs/`, with Graphviz include and dependency diagrams (they show the source layering)
-  - Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up.
-  - Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API
+- [x] Commands from the command line (`command-line-control`)
+- [ ] Level editor or scene file format, every edit a command (undo on the same list)
+- [ ] API reference with Doxygen (`make docs`, comments as `/** */`)
 - [ ] Scripting for gameplay code
 
 ## Phase 15: Destruction and a flying superhero
 
-A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it, and bring down whole buildings that fall by real physics. Buildings are chunks bonded together, carrying their weight down to the ground; break the right supports and the load shifts, the next supports overload, and it comes down floor by floor.
-
-- **The plan and research:** `docs/research/DESTRUCTION.md` (read it first): the feel of speed, rigid bodies for debris, fracture, why buildings collapse (bond stress, progressive collapse, real materials' numbers), dust and light.
-- **When:** numbered after phase 14 to keep the other phases' numbers; it can start any time after phase 8's rigid bodies, and is better after phase 9's audio (sound is half of feeling fast).
-- **Units:** real-world values, as for cloth and ragdolls: gravity 9.81, real sizes and material strengths (concrete 20-40 MPa in compression), so big things fall as slowly as they should.
+A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it, and bring down whole buildings that fall by real physics: chunks bonded together carry the weight down; break the right supports and it comes down floor by floor. The plan and research: `docs/research/DESTRUCTION.md` (read it first). Any time after phase 8's rigid bodies, better after phase 9's audio. Real-world units (concrete 20-40 MPa in compression).
 
 **Items**
 
-- [ ] Convex rigid bodies (`convex-bodies`): boxes, then convex hulls, on phase 8's XPBD bodies
-  - Contacts by separating axes (boxes) and GJK with EPA (hulls), friction, sleeping and islands.
-  - Speculative contacts, so fast debris does not pass through floors.
-  - Tests: a box resting on a slope at its friction angle, a stack standing still, momentum through collisions, bit-identical runs
-- [ ] Fracture (`voronoi-fracture`): each building's blocks cut into Voronoi chunks at load, more seeds where hits are likely
-  - The bond graph: chunks sharing a face are bonded (its area and normal); chunks on the ground are supports; intact parts clustered into one body (as Unreal's Chaos does).
-  - Tests: the cells fill the block (volumes sum), each is convex, bonds only across shared faces
-- [ ] Blade cuts (`blade-cuts`): aim a plane in slow motion and whatever it crosses splits along it, the halves falling as rigid bodies (the user's idea, Oct 30 2026, after Metal Gear Rising's Blade Mode)
-  - `clipMeshByPlane`, shared with `voronoi-fracture`: vertices sorted by their signed distance d to the plane, each crossing edge split at t = d_a / (d_a - d_b) with its positions, UVs and normals blended, the cut's loops capped (ear clipping, since a cap need not be convex) with an inside material and UVs projected onto the plane.
-  - Each half's mass, centre of mass and inertia from its closed surface (the divergence theorem), its collision one convex hull or several; new meshes uploaded and given acceleration structures as they appear, the pieces capped in number and the tiny ones removed.
-  - Slow motion by scaling the time fed to the simulation, the aiming at full speed; a command cuts along a given plane.
-  - Tests: the halves' volumes sum to the whole's, each half is closed (every edge shared by two triangles), a box's halves have their hand-calculated centres of mass and inertia, a plane missing the mesh leaves it whole
-- [ ] The stress solver (`stress-solver`): statics on the bond graph, K u = f by conjugate gradients, warm-started
-  - Each bond's force split into compression or tension along its normal and shear across it, as stress over its area (as NVIDIA Blast does).
-  - An intact building is kinematic and costs nothing until something changes it; impacts are forces over their duration.
-  - Tests against hand calculations: a column's base carries the weight above, a cantilever's root the bending moment w L^2 / 2, a beam on two supports splits its load by the lever rule, a removed support's load moves to the others
-- [ ] Breaking (`bond-breaking`): elastic and fatal limits (damage between them), pieces cut off from the ground found by union-find and turned into falling clusters, the excess force into the pieces' speed
-  - Tests: a ten-storey frame stands with a quarter of its base columns gone and collapses with half (the worked example in `docs/research/DESTRUCTION.md`)
-- [ ] On the GPU (`gpu-destruction`): thousands of chunks and the stress solve as passes, measured on a ladder of building sizes
-- [ ] Debris and dust: small debris as particles that hit the world but not each other; dust as density in the volumetric fog's grid, lit for free; each collapse a `ProbeEvent`
-- [ ] Flight (`flight-controller`): hover, cruise, boost and a quick stop, turns limited by sideways acceleration so speed widens the arcs, every move a sweep
-  - The feel: field of view widening with speed, camera shake, motion blur from TAA's velocity image, wind streaks, a vapour cone and sonic boom near Mach 1, hit-stop on big impacts.
-- [ ] A destruction lab (`games/destructionlab/`): a few buildings of different structures (a concrete frame, a brick house, a steel tower) to fly at and judge
-- [ ] A city, once the lab's buildings work: streaming, levels of detail and a floating origin (phase 12's, phase 13's and phase 14's items)
+- [ ] Convex rigid bodies: boxes, then convex hulls (`convex-bodies`)
+- [ ] Fracture: Voronoi chunks at load and the bond graph (`voronoi-fracture`)
+- [ ] Blade cuts: a plane aimed in slow motion splits what it crosses (`blade-cuts`)
+- [ ] The stress solver: statics on the bond graph by conjugate gradients (`stress-solver`)
+- [ ] Breaking: damage, union-find for the pieces cut off (`bond-breaking`)
+- [ ] On the GPU: thousands of chunks and the stress solve (`gpu-destruction`)
+- [ ] Debris and dust: debris as particles, dust in the fog's grid
+- [ ] Flight: hover, cruise, boost, quick stop, and the feel of speed (`flight-controller`)
+- [ ] A destruction lab: a concrete frame, a brick house, a steel tower (`games/destructionlab/`)
+- [ ] A city, once the lab's buildings work
 
 **Milestone:** fly into the base of a ten-storey concrete building at the speed of sound; its load shifts, the next columns fail, and it comes down floor by floor in about three seconds, in a cloud of dust.

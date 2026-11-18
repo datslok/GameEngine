@@ -121,3 +121,12 @@ Gathered on Nov 14, 2026, after the jungle's canopy (`jungle-canopy`) cost 23 ms
 **Staggering:** the far two cascades take turns, one redrawn on even frames and the other on odd ones, so every frame does the same work. A cascade not redrawn keeps the box it was drawn with, matrix and all, so its shadows stay exactly in place: only its edge lags a frame behind the turn, and the next cascade or the far map covers what it misses meanwhile. Moving casters in it (the drifting rocks) move in its map at half the rate. The near two, whose shadows the eye watches, stay every frame.
 
 **Coarser leaves in coarser cascades:** a third leaf mesh per tree with fewer, bigger cards still, drawn only into the far cascades and the far map, whose texels are tens of centimetres to metres wide. The engine needs a draw's shadow mesh chosen per tile (a far-cascade mesh beside the seen and shadow ones).
+
+## Planned (moved from ROADMAP.md, Nov 18 2026)
+
+- **Shadow redraw budget:** at most N shadow tiles a frame, most important first, far lights refreshed less often, so switching many lights on or turning quickly costs no long frame.
+- **Separate caches for still and moving casters:** a copy of each tile with only the still world, the moving things drawn over a copy each frame (done for the far map in `far-shadow-movers`; the cascades and lamps' tiles still redraw whole).
+- **Virtual shadow maps** (Unreal 5) for the sun, in place of cascades or as the top setting:
+  - 16384² a clipmap level, nested levels each twice the last's size, cut into 128² pages; only pages pixels look up drawn into a physical pool and kept until something in them moves. About one texel a pixel at every distance, no seams; still scenes nearly free.
+  - Needs a page-marking pass from depth, a page table, GPU-driven culling and drawing per page (`GPUDRIVEN.md`, done), invalidation from moving casters.
+  - For the valley (the user's question, Nov 14 2026): it would replace the cascades and the far map (whose 2.7 m texels drop drifting rocks under two texels). Foliage swaying in the wind invalidates pages constantly (`WORLDSCALE.md`: Unreal's fixes).

@@ -182,3 +182,14 @@ Each step is a branch of its own, explained first, tests first. It starts after 
 - [Geo-Mod 2.0 (Red Faction wiki, secondary)](https://www.redfactionwiki.com/wiki/GeoMod_2.0)
 - [Teardown's structural integrity prototype (80 Level, secondary)](https://80.lv/articles/this-real-time-voxel-building-demolition-is-so-satisfying/)
 - From memory, to check: Larish & Flach 1990 (optic flow and edge rate); McGuire, Hennessy, Bukowski & Osman 2012 (motion blur reconstruction filter); Macklin, Müller, Chentanez & Kim 2014 (unified particle physics, FleX); Catto's continuous collision talks; Bazant & Zhou 2002 (progressive collapse of the World Trade Center); the material table.
+
+## Planned (moved from ROADMAP.md, Nov 18 2026)
+
+- **Convex bodies:** contacts by separating axes (boxes) and GJK with EPA (hulls), friction, sleeping and islands; speculative contacts so fast debris does not pass through floors. Tests: a box resting on a slope at its friction angle, a stack standing still, momentum through collisions, bit-identical runs.
+- **Particles colliding with each other** (grenades knocking each other, phase 14): pairs from the uniform grid over each particle's swept box; the touch by sweeping in relative motion (a ray against a sphere of the summed radii); the relative velocity through `bounceVelocity`, the change shared by mass (momentum kept), restitution and friction averaged.
+- **Blade cuts** (`blade-cuts`; the user, Oct 30 2026, after Metal Gear Rising's Blade Mode): aim a plane in slow motion; what it crosses splits, the halves falling as rigid bodies.
+  - `clipMeshByPlane`, shared with `voronoi-fracture`: vertices by signed distance d to the plane, each crossing edge split at t = d_a / (d_a - d_b) with positions, UVs and normals blended; the cut's loops capped by ear clipping (a cap need not be convex), an inside material, UVs projected onto the plane.
+  - Each half's mass, centre of mass and inertia from its closed surface (divergence theorem), its collision one or several convex hulls; new meshes uploaded with acceleration structures, pieces capped in number, tiny ones removed.
+  - Slow motion by scaling the simulation's time, aiming at full speed; a command cuts along a given plane.
+  - Tests: halves' volumes sum to the whole's, each half closed (every edge shared by two triangles), a box's halves' hand-calculated centres of mass and inertia, a plane missing the mesh leaves it whole.
+- **Flight's feel:** field of view widening with speed, camera shake, motion blur, wind streaks, a vapour cone and sonic boom near Mach 1, hit-stop on big impacts.

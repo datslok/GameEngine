@@ -614,3 +614,11 @@ The dress (`two-panel-dress`, Oct 26 2026): two panels cut from a pattern into 1
 - Huang et al., "StiffGIPC". [arXiv 2411.06224](https://arxiv.org/abs/2411.06224); Li et al. 2021, "Codimensional Incremental Potential Contact". [arXiv 2012.04457](https://arxiv.org/abs/2012.04457)
 - JGS2, SIGGRAPH 2025. [arXiv 2506.06494](https://arxiv.org/abs/2506.06494)
 - MysteryPancake, Houdini-VBD (third-party port and its authors' answers). [GitHub](https://github.com/MysteryPancake/Houdini-VBD)
+
+## Planned (moved from ROADMAP.md, Nov 18 2026)
+
+- **GPU self-collision, rebuilt:** its tests the dress (a crossings column in the dress test) and the pile. Watch for the swaying hem found in `cheaper-substeps` (the 0.7 cm pinned dress's back hem swinging about 6 cm through 20 s, not the tethers nor the sewing; gone with `dress-ease`'s roomier dress); suspects if it returns: the skirt passing through itself, friction on the legs.
+- **Fabric presets:** stiffness along the threads (warp and weft) unlike across them (the bias); bending stiffness (silk vs denim), mass per area, friction.
+- **Garments held by contact, if they stretch** (phase 10): vertex block descent's coarse levels made cheap: the two finest levels skipped, the line search's reduction in one pass, the move folded into the next level's gradient, a workgroup per coarse point; still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019).
+- **Dressing an animated character** (phase 10): the body's distance field following the bones, the surface's velocity in the friction.
+- **Cloth level of detail and sleeping** (phase 12): distant cloth fewer substeps or its last pose; cloth at rest unsimulated until touched.
