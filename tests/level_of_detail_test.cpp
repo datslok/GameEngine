@@ -5,6 +5,7 @@
 #include "render/gpu/render_settings.h"
 #include "render/render_stats.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/level_fade.h"
 #include "scene/frame_description.h"
 #include "scene/level_of_detail.h"
 #include "scene/mesh.h"
@@ -305,7 +306,111 @@ namespace {
         assert(chooseLevel(treeLevels, 1e6f, noCardsView) == 1);
     }
 
-    // The settings: on, a budget of pixels, both live; a budget not above 0 is refused.
+    /*
+    * The square view switches the 1 cm level in at 2.5 m and the 10 cm one at 25 m (from the sphere's surface). With a
+    * fade band of 0.2, a draw that fades draws both levels over the fifth of each distance before its switch, the share
+    * running 0 to 1 across it by the coarser level's error, and one level everywhere else. Draws that do not fade, views
+    * without a band (captures) and orthographic views (shadow tiles) never fade.
+    */
+    void testAFadingDrawCrossesTheBand() {
+        LevelView view = cameraLevelView(Vec3{}, 1000.0f, 1.5707963f, LevelOfDetailSettings{.enabled = true, .pixelError = 2.0f, .fadeBand = 0.2f});
+        assert(view.fadeBand == 0.2f);
+        assert(levelView(Vec3{}, 1000.0f, 1.5707963f, LevelOfDetailSettings{.fadeBand = 0.2f}).fadeBand == 0.0f);
+
+        // 22.5 m out: halfway through the band before 25 m, where 10 cm covers 2.22 pixels and 2 / 2.22 = 0.9.
+        DrawItem draw = drawAt(Vec3{0.0f, 0.0f, -23.5f});
+        assert(!levelFade(draw, view).fading);
+        draw.fadesLevels = true;
+        const LevelFade halfway = levelFade(draw, view);
+        assert(halfway.fading && halfway.finer == MeshHandle{7} && halfway.coarser == MeshHandle{8});
+        assert(near(halfway.share, 0.5f, 1e-3f));
+        assert(halfway.finer == chosenMesh(draw, view));
+
+        // Outside the bands, one level; through a band the share only grows.
+        for (const float distance : {1.5f, 2.6f, 19.0f, 26.0f, 60.0f}) {
+            assert(!levelFade(drawAt(Vec3{0.0f, 0.0f, -1.0f - distance}), view).fading);
+            DrawItem outside = drawAt(Vec3{0.0f, 0.0f, -1.0f - distance});
+            outside.fadesLevels = true;
+            assert(!levelFade(outside, view).fading);
+        }
+
+        float last = -1.0f;
+
+        for (float distance = 20.05f; distance < 25.0f; distance += 0.1f) {
+            DrawItem inside = drawAt(Vec3{0.0f, 0.0f, -1.0f - distance});
+            inside.fadesLevels = true;
+            const LevelFade fade = levelFade(inside, view);
+            assert(fade.fading && fade.share > last && fade.share >= 0.0f && fade.share <= 1.0f);
+            last = fade.share;
+        }
+
+        assert(last > 0.95f);
+
+        // The first band, before 2.5 m: the mesh itself into the 1 cm level.
+        DrawItem nearer = drawAt(Vec3{0.0f, 0.0f, -3.25f});
+        nearer.fadesLevels = true;
+        const LevelFade first = levelFade(nearer, view);
+        assert(first.fading && first.finer == MeshHandle{3} && first.coarser == MeshHandle{7} && near(first.share, 0.5f, 1e-3f));
+
+        // A capture's view and an orthographic one fade nothing; nor does a band of 0.
+        assert(!levelFade(draw, levelView(Vec3{}, 1000.0f, 1.5707963f, LevelOfDetailSettings{})).fading);
+        LevelView flat = view;
+        flat.orthographic = true;
+        assert(!levelFade(draw, flat).fading);
+        LevelView noBand = view;
+        noBand.fadeBand = 0.0f;
+        assert(!levelFade(draw, noBand).fading);
+
+        // Batched, the fading draw is drawn twice, once with each level, the two entries marked as the finer and coarser.
+        const std::vector<DrawItem> draws{draw};
+        const BatchedDraws batched = batchByMesh(draws, {0}, 0, &view);
+        assert(batched.batches.size() == 2 && batched.order.size() == 2 && batched.marks.size() == 2);
+        assert(batched.batches[0].mesh == MeshHandle{7} && batched.batches[1].mesh == MeshHandle{8});
+        assert(batched.marks[0] == levelFadeField(halfway.share, false) << drawListFadeShift);
+        assert(batched.marks[1] == levelFadeField(halfway.share, true) << drawListFadeShift);
+
+        // The readout counts both levels drawn.
+        const std::array<std::size_t, meshLevelSlots> counts = levelsChosen(draws, {0}, view);
+        assert(counts[0] == 0 && counts[1] == 1 && counts[2] == 1);
+    }
+
+    /*
+    * A plant fading into its card: the plant's last level draws nothing from the card's error on, so in the band before
+    * it the plant keeps its level (fading out, no coarser mesh) while its card fades in (no finer one), by the same share.
+    */
+    void testAPlantFadesIntoItsCard() {
+        const std::vector<MeshLevel> plantLevels{MeshLevel{MeshHandle{7}, 0.01f}, MeshLevel{MeshHandle{}, 0.1f}};
+        const std::vector<std::vector<MeshLevel>> table{{}, {}, {}, plantLevels};
+        std::vector<MeshLevelOptions> options(10);
+        const Aabb box{Vec3{-0.5f, 0.0f, -0.5f}, Vec3{0.5f, 1.0f, 0.5f}};
+        options[3] = MeshLevelOptions{.chooseBounds = box, .fadesLevels = true};
+        options[9] = MeshLevelOptions{.hiddenBelowError = 0.1f, .chooseBounds = box, .fadesLevels = true};
+        const LevelView view = cameraLevelView(Vec3{}, 1000.0f, 1.5707963f, LevelOfDetailSettings{.enabled = true, .pixelError = 2.0f, .fadeBand = 0.2f});
+
+        std::vector<DrawItem> draws(2);
+        draws[0].mesh = MeshHandle{3};
+        draws[1].mesh = MeshHandle{9};
+
+        for (DrawItem& draw : draws) {
+            draw.model = Mat4::translation(0.0f, 0.0f, -23.0f);
+            draw.bounds = BoundingSphere{Vec3{0.0f, 0.5f, -23.0f}, 1.0f};
+        }
+
+        attachMeshLevels(draws, table, options);
+        assert(draws[0].fadesLevels && draws[1].fadesLevels);
+        const LevelFade plant = levelFade(draws[0], view);
+        const LevelFade card = levelFade(draws[1], view);
+        assert(plant.fading && plant.finer == MeshHandle{7} && !plant.coarser.isValid());
+        assert(card.fading && !card.finer.isValid() && card.coarser == MeshHandle{9});
+        assert(plant.share == card.share && plant.share > 0.0f && plant.share < 1.0f);
+
+        // Batched: the plant's level marked finer, its card coarser, with one field step between them only by the bit.
+        const BatchedDraws batched = batchByMesh(draws, {0, 1}, 0, &view);
+        assert(batched.order.size() == 2);
+        assert((batched.marks[0] ^ batched.marks[1]) == drawListFadeCoarse << drawListFadeShift);
+    }
+
+    // The settings: on, a budget of pixels, a fade band, all live; a budget not above 0, or a band outside 0 to 0.9, is refused.
     void testTheSettingsAreChecked() {
         validateLevelOfDetail(LevelOfDetailSettings{});
         bool threw = false;
@@ -314,6 +419,19 @@ namespace {
         } catch (const std::invalid_argument&) {
             threw = true;
         }
+        // A fade band from 0 to 0.9 only.
+        for (const float band : {-0.1f, 0.95f}) {
+            bool refused = false;
+
+            try {
+                validateLevelOfDetail(LevelOfDetailSettings{.fadeBand = band});
+            } catch (const std::invalid_argument&) {
+                refused = true;
+            }
+
+            assert(refused);
+        }
+
         assert(threw);
 
         // Settable by its settings.cfg key, as every setting is (the command line's set and get).
@@ -324,6 +442,7 @@ namespace {
         assert(setSetting(walk, "levelOfDetail.pixelError", "6").outcome == SettingOutcome::Set);
         assert(setSetting(walk, "levelOfDetail.enabled", "false").outcome == SettingOutcome::Set);
         assert(setSetting(walk, "levelOfDetail.impostors", "false").outcome == SettingOutcome::Set);
+        assert(setSetting(walk, "levelOfDetail.fadeBand", "0.3").outcome == SettingOutcome::Set && settings.levelOfDetail.fadeBand == 0.3f);
         assert(!settings.levelOfDetail.impostors && LevelOfDetailSettings{}.impostors);
         assert(!settings.levelOfDetail.enabled);
         assert(settings.levelOfDetail.pixelError == 6.0f);
@@ -344,6 +463,8 @@ namespace {
 
 void testLevelOfDetail() {
     testAnImpostorTakesOverWhereATreeEnds();
+    testAFadingDrawCrossesTheBand();
+    testAPlantFadesIntoItsCard();
     testTheReadoutCountsEachLevel();
     testAnErrorCoversPixelsByDistance();
     testTheCoarsestLevelWithinTheBudgetIsChosen();

@@ -22,7 +22,8 @@ namespace {
 
     /*
     * Choosing from the packed records gives the CPU's mesh for every draw, in perspective views near and far, with
-    * levels and impostors on and off, and orthographic (the sun's tiles); and thins exactly the draws batchByMesh would.
+    * levels and impostors on and off, and orthographic (the sun's tiles); thins exactly the draws batchByMesh would; and
+    * fades the draws levelFade fades, with or without a band.
     */
     void testLevelsMatchTheCpu() {
         std::mt19937 random{29};
@@ -31,14 +32,16 @@ namespace {
         const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
         int drawnNothing = 0;
         int coarser = 0;
+        int fading = 0;
 
         for (int viewIndex = 0; viewIndex < 24; ++viewIndex) {
             LevelOfDetailSettings settings;
             settings.enabled = viewIndex % 6 != 5;
             settings.impostors = viewIndex % 4 != 3;
             settings.pixelError = 0.5f + unit(random) * 4.0f;
-            LevelView view = levelView(Vec3{(unit(random) - 0.5f) * 3000.0f, 2.0f + unit(random) * 200.0f, (unit(random) - 0.5f) * 3000.0f},
-                                       1080.0f + unit(random) * 1080.0f, 0.6f + unit(random) * 0.8f, settings);
+            settings.fadeBand = viewIndex % 3 == 2 ? 0.0f : 0.05f + unit(random) * 0.5f;
+            LevelView view = cameraLevelView(Vec3{(unit(random) - 0.5f) * 3000.0f, 2.0f + unit(random) * 200.0f, (unit(random) - 0.5f) * 3000.0f},
+                                             1080.0f + unit(random) * 1080.0f, 0.6f + unit(random) * 0.8f, settings);
             view.orthographic = viewIndex % 5 == 4;
 
             if (view.orthographic) {
@@ -65,13 +68,25 @@ namespace {
                 }
 
                 assert(slotThinned(record, levels, slot) == expectedThinned);
+
+                // Fading as the CPU fades it: the same two meshes (a level without one, none) and the same share.
+                const LevelFade fade = levelFade(draw, view);
+                const GpuLevelFade packedFade = levelFadeSlots(record, levels, packedView);
+                assert(packedFade.fading == fade.fading);
+
+                if (fade.fading) {
+                    assert(slotMesh(levels, packedFade.finer) == fade.finer && slotMesh(levels, packedFade.coarser) == fade.coarser);
+                    assert(packedFade.finer == slot && packedFade.share == fade.share);
+                    fading += 1;
+                }
+
                 drawnNothing += slot == cullNoSlot ? 1 : 0;
                 coarser += slot > 0 ? 1 : 0;
             }
         }
 
-        // The cases were really met: draws drawing nothing and draws drawn coarser.
-        assert(drawnNothing > 1000 && coarser > 1000);
+        // The cases were really met: draws drawing nothing, draws drawn coarser, draws fading.
+        assert(drawnNothing > 1000 && coarser > 1000 && fading > 100);
     }
 
     /*
@@ -132,6 +147,10 @@ namespace {
         assert(packCullRecord(moving).flags == (CULL_CASTS_SHADOWS | CULL_MOVED | CULL_SWAYS));
         moving.previousModel = moving.model;
         assert(packCullRecord(moving).flags == (CULL_CASTS_SHADOWS | CULL_SWAYS));
+
+        // Fading levels (DrawItem::fadesLevels).
+        moving.fadesLevels = true;
+        assert(packCullRecord(moving).flags == (CULL_CASTS_SHADOWS | CULL_SWAYS | CULL_FADES));
 
         const std::vector<MeshLevel> four(4, MeshLevel{MeshHandle{1}, 0.1f, false});
         bool refused = false;

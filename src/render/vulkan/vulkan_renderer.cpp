@@ -1294,8 +1294,8 @@ VulkanRenderer::CullCompare VulkanRenderer::cpuReferenceLists(const FrameDescrip
         const std::string name = "Shadow tile " + std::to_string(tile);
         BatchedDraws still = batchByMesh(draws, split.still, 0, &tileLevels);
         BatchedDraws moved = batchByMesh(draws, split.moving, 0, &tileLevels);
-        still.thinned.clear();
-        moved.thinned.clear();
+        still.marks.clear();
+        moved.marks.clear();
         compare.lists.push_back(CullCompare::List{view, false, name, std::move(still)});
         compare.lists.push_back(CullCompare::List{view, true, name + " movers", std::move(moved)});
     }
@@ -1634,7 +1634,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // every switch a third closer (docs/research/LOD.md, Hiding the switches).
     validateLevelOfDetail(settings.levelOfDetail);
     cpuClock.lap(CpuStage::Lights, profilerSeconds());
-    const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
+    const LevelView cameraLevels = cameraLevelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
     cameraThinning = thinningErrorPerMetre(cameraLevels);
     stats.drawnByLevel = lastCameraCull.levels;
     stats.drawnTriangles = lastCameraCull.triangles;
@@ -2383,6 +2383,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.materialOptions[2] = static_cast<float>(std::clamp(settings.materials.parallaxSteps, parallaxFewestSteps, parallaxMostSteps));
     frameData.materialOptions[3] = settings.materials.lightThroughLeaves ? 1.0f : 0.0f;
     frameData.levelOptions[0] = cameraThinning;
+    // The frame, turning the level fades' dither (level_fade.glsl) for temporal anti-aliasing to blend; held without it.
+    frameData.levelOptions[1] = temporalAntiAliasing(settings.upscaling) ? static_cast<float>(taaFrame % noiseCycleFrames) : 0.0f;
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
     // (kept small: the shaders turn it into a float offset of the noise).

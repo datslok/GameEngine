@@ -66,6 +66,9 @@ struct DrawItem {
     float hiddenBelowError = 0.0f;
     BoundingSphere levelBounds{};
 
+    // Its levels cross-faded in the camera's view (MeshLevelOptions::fadesLevels, set by attachMeshLevels).
+    bool fadesLevels = false;
+
     // Drawn by no view and met by no ray, but part of the static level (ModelRenderer::hidden).
     bool hidden = false;
 

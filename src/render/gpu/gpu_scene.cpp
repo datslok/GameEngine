@@ -1,6 +1,7 @@
 #include "render/gpu/gpu_scene.h"
 #include "core/hash.h"
 #include "render/gpu/column_major.h"
+#include "render/gpu/level_fade.h"
 #include "render/gpu/shadow_map.h"
 #include "render/gpu/wind.h"
 
@@ -329,21 +330,27 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
         int style = 0;
         std::uint32_t mesh = 0;
         std::size_t index = 0;
-        bool thinned = false;
+        std::uint32_t marks = 0;
     };
 
     std::vector<Keyed> keyed;
     keyed.reserve(chosen.size());
-
-    for (std::size_t position = 0; position < chosen.size(); ++position) {
-        const std::size_t index = chosen[position];
-        const MeshHandle mesh = levels != nullptr ? chosenMesh(draws[index], *levels) : draws[index].mesh;
-
-        if (!mesh.isValid()) {
-            continue;
+    const auto add = [&](std::size_t index, MeshHandle mesh, std::uint32_t fade) {
+        if (mesh.isValid()) {
+            const std::uint32_t thinned = drawnThinned(draws[index], mesh) ? drawListThinnedBit : 0u;
+            keyed.push_back(Keyed{style(index), mesh.index, index, thinned | (fade << drawListFadeShift)});
         }
+    };
 
-        keyed.push_back(Keyed{style(index), mesh.index, index, drawnThinned(draws[index], mesh)});
+    for (const std::size_t index : chosen) {
+        const LevelFade fade = levels != nullptr ? levelFade(draws[index], *levels) : LevelFade{};
+
+        if (fade.fading) {
+            add(index, fade.finer, levelFadeField(fade.share, false));
+            add(index, fade.coarser, levelFadeField(fade.share, true));
+        } else {
+            add(index, levels != nullptr ? chosenMesh(draws[index], *levels) : draws[index].mesh, 0u);
+        }
     }
 
     std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) {
@@ -352,7 +359,7 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
 
     BatchedDraws batched;
     batched.order.reserve(keyed.size());
-    batched.thinned.reserve(keyed.size());
+    batched.marks.reserve(keyed.size());
 
     for (std::size_t position = 0; position < keyed.size(); ++position) {
         const DrawItem& draw = draws[keyed[position].index];
@@ -361,7 +368,7 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
         const bool doubleSided = draw.material.doubleSided;
         const DrawBatch* last = batched.batches.empty() ? nullptr : &batched.batches.back();
         batched.order.push_back(keyed[position].index);
-        batched.thinned.push_back(keyed[position].thinned);
+        batched.marks.push_back(keyed[position].marks);
 
         if (last == nullptr || last->mesh != mesh || last->cutOut != cutOut || last->doubleSided != doubleSided) {
             batched.batches.push_back(DrawBatch{mesh, firstInstance + static_cast<std::uint32_t>(position), 0, cutOut, doubleSided});
@@ -376,7 +383,7 @@ BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<s
 void appendDrawList(std::vector<std::uint32_t>& list, const BatchedDraws& batched) {
     for (std::size_t position = 0; position < batched.order.size(); ++position) {
         const std::uint32_t instance = static_cast<std::uint32_t>(batched.order[position]);
-        list.push_back(position < batched.thinned.size() && batched.thinned[position] ? instance | drawListThinnedBit : instance);
+        list.push_back(position < batched.marks.size() ? instance | batched.marks[position] : instance);
     }
 }
 

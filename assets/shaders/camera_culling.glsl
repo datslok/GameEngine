@@ -1,12 +1,13 @@
 // The camera's GPU culling, included with #include "camera_culling.glsl": mirrors render/gpu/camera_culling.h
-// (swayReaches, cameraCandidateFlags, boxInFrustum, chunkInView), which equal the CPU's visibleDraws, chosenMesh and
-// drawSways (a chunk culled never holds a draw taken). Pure functions.
+// (swayReaches, cameraCandidateFlags, cameraCandidateFade, cameraCandidateEntry, boxInFrustum, chunkInView), which equal
+// the CPU's visibleDraws, chosenMesh, levelFade and drawSways (a chunk culled never holds a draw taken). Pure functions.
 #ifndef CAMERA_CULLING_GLSL
 #define CAMERA_CULLING_GLSL
 
 #include "render/gpu/camera_culling_shared.h"
 #include "culling.glsl"
 #include "level_of_detail.glsl"
+#include "level_fade.glsl"
 
 // A draw drawn with one of its meshes: its draw (instance) number and the level slot. Must match GpuCullCandidate.
 struct CullCandidate {
@@ -159,10 +160,10 @@ bool shadowTakes(CullRecord record, CameraCull view) {
 }
 
 /*
-* A candidate's CAMERA_CULL_* flags: drawn where the camera takes the draw and chooses this slot; moving where the
-* velocity pass is built and the draw moved, its mesh deformed or it sways within reach; thinned as slotThinned says.
-* A shadow tile: drawn where shadowTakes and the slot is chosen, moving instead where it keeps moved casters apart;
-* never thinned.
+* A candidate's CAMERA_CULL_* flags: drawn where the camera takes the draw and chooses this slot, or, fading
+* (levelFadeSlots), where the slot is either of the two drawn; moving where the velocity pass is built and the draw
+* moved, its mesh deformed or it sways within reach; thinned as slotThinned says; fading. A shadow tile: drawn where
+* shadowTakes and the slot is chosen, moving instead where it keeps moved casters apart; never thinned, never fading.
 */
 uint cameraCandidateFlags(CullRecord record, MeshLevels levels, CameraCull view, uint slot) {
     bool shadow = (view.flags & CAMERA_CULL_SHADOW) != 0u;
@@ -171,18 +172,23 @@ uint cameraCandidateFlags(CullRecord record, MeshLevels levels, CameraCull view,
         return 0u;
     }
 
-    int chosen = chooseLevelSlot(record, levels, view.levels);
-
-    if (chosen != int(slot)) {
-        return 0u;
-    }
-
     if (shadow) {
+        if (chooseLevelSlot(record, levels, view.levels) != int(slot)) {
+            return 0u;
+        }
+
         bool apart = (view.flags & CAMERA_CULL_MOTION) != 0u && (record.flags & CULL_MOVED) != 0u;
         return apart ? CAMERA_CULL_MOVING : CAMERA_CULL_DRAWN;
     }
 
-    uint flags = CAMERA_CULL_DRAWN;
+    LevelFade fade = levelFadeSlots(record, levels, view.levels);
+    bool chosen = fade.fading ? fade.finer == int(slot) || fade.coarser == int(slot) : chooseLevelSlot(record, levels, view.levels) == int(slot);
+
+    if (!chosen) {
+        return 0u;
+    }
+
+    uint flags = CAMERA_CULL_DRAWN | (fade.fading ? CAMERA_CULL_FADES : 0u);
     bool sways = (view.flags & CAMERA_CULL_SWAY) != 0u && (record.flags & CULL_SWAYS) != 0u &&
                  swayReaches(record.bounds, view.levels.eye.xyz, view.swayFadeEnd);
 
@@ -190,11 +196,26 @@ uint cameraCandidateFlags(CullRecord record, MeshLevels levels, CameraCull view,
         flags |= CAMERA_CULL_MOVING;
     }
 
-    if (slotThinned(record, levels, chosen)) {
+    if (slotThinned(record, levels, int(slot))) {
         flags |= CAMERA_CULL_THINNED;
     }
 
     return flags;
+}
+
+// The candidate's fade field (level_fade.glsl): 0 where it does not fade (cameraCandidateFade).
+uint cameraCandidateFade(CullRecord record, MeshLevels levels, CameraCull view, uint slot) {
+    if ((view.flags & CAMERA_CULL_SHADOW) != 0u) {
+        return 0u;
+    }
+
+    LevelFade fade = levelFadeSlots(record, levels, view.levels);
+    return fade.fading ? levelFadeField(fade.share, fade.coarser == int(slot)) : 0u;
+}
+
+// The draw list entry a flagged candidate writes: its draw, the thinned bit, its fade field (cameraCandidateEntry).
+uint cameraCandidateEntry(uint draw, uint flags, uint fade) {
+    return draw | ((flags & CAMERA_CULL_THINNED) != 0u ? DRAW_LIST_THINNED_BIT : 0u) | (fade << DRAW_LIST_FADE_SHIFT);
 }
 
 #endif

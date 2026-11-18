@@ -16,6 +16,7 @@
 #include "terrain_data.glsl"
 #include "wind_data.glsl"
 #include "card_thinning_data.glsl"
+#include "level_fade.glsl"
 
 // Each instance's model matrix last frame (its current one when it did not move), as instances numbers them.
 layout(std430, set = 1, binding = 21) readonly buffer PreviousModels {
@@ -37,12 +38,15 @@ layout(location = 1) out vec4 previousClip;
 // For a cut-out's holes (motion.frag): its texture coordinates and material.
 layout(location = 2) out vec2 textureUv;
 layout(location = 3) flat out uint materialIndex;
+// Its level fade (level_fade.glsl): the pixels its level keeps in the depth prepass, so the motion is its own there.
+layout(location = 4) flat out uint levelFade;
 
 invariant gl_Position;
 
 void main() {
     uint entry = drawList[gl_InstanceIndex];
     uint instance = drawnInstance(entry);
+    levelFade = drawListFade(entry);
 
     // Thinned cards (card_thinning_data.glsl) shaped exactly as triangle.vert shapes them, now and last frame alike.
     vec3 shaped = thinnedVertex(instances[instance], entry, gl_VertexIndex - gl_BaseVertexARB, position, vec3(0.0), cameraOrigin.xyz, levelOptions.x);

@@ -7,13 +7,15 @@
 // Threads a workgroup, one candidate each: a block of the prefix sum.
 #define CAMERA_CULL_GROUP_SIZE 256
 
-// A candidate's flags (cameraCandidateFlags): the camera draws it with this slot's mesh, the velocity pass too, thinned.
+// A candidate's flags (cameraCandidateFlags): the camera draws it with this slot's mesh, the velocity pass too, thinned,
+// fading (its entry's fade field, cameraCandidateFade, worked out again by the write pass).
 #define CAMERA_CULL_DRAWN 1u
 #define CAMERA_CULL_MOVING 2u
 #define CAMERA_CULL_THINNED 4u
+#define CAMERA_CULL_FADES 8u
 
 // The flags pass keeps a visible candidate's place in the candidate list above its flags' bits.
-#define CAMERA_CULL_FLAG_BITS 3u
+#define CAMERA_CULL_FLAG_BITS 4u
 
 // GpuCameraCull::flags: the velocity pass's list is built (temporal anti-aliasing on; for a shadow tile, the casters
 // that moved in the second list, kept apart from the still ones); things sway this frame; a shadow tile (shadowTakes).

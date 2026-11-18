@@ -1,0 +1,29 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs level_fade.glsl's functions on the cases level_fade_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "level_fade.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_LEVEL_FADE_FIELD) {
+        // Input: (share, coarse). Output: (the field).
+        testOutput(0, vec4(float(levelFadeField(a.x, a.y > 0.5))));
+    } else if (function == GPU_TEST_LEVEL_FADE_KEEPS) {
+        // Input: (field, noise). Output: (threshold, keeps).
+        uint field = uint(a.x);
+        testOutput(0, vec4(field == 0u ? 0.0 : levelFadeThreshold(field), levelFadeKeeps(field, a.y) ? 1.0 : 0.0, 0.0, 0.0));
+    } else if (function == GPU_TEST_LEVEL_FADE_NOISE) {
+        // Input: (pixel x, pixel y, frame). Output: (the noise).
+        testOutput(0, vec4(levelFadeNoise(a.xy, uint(a.z))));
+    } else if (function == GPU_TEST_DRAW_LIST_FADE) {
+        // Input: the entry's low and high 16 bits. Output: (the field).
+        testOutput(0, vec4(float(drawListFade(uint(a.x) | (uint(a.y) << 16u)))));
+    }
+}

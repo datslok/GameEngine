@@ -132,16 +132,16 @@ Each view draws the coarsest of a mesh's levels whose error covers at most `pixe
 
 - **Levels:** `MeshLevel` {mesh, `errorMetres`, `sharesVertices`}, coarsest last, at most three (`meshLevelSlots` = 4 with the mesh); a last level without a mesh draws nothing.
 - **Attaching:** `attachMeshLevels` gives each draw its levels' span and options, `chooseBounds` placed by the draw's matrix into `levelBounds`. `DrawItem::mesh` stays the mesh itself for bounds, rays, flat faces, the sky bake.
-- **`LevelView`:** eye, `pixelsPerMetre` = height / (2 tan(fov / 2)), `pixelError`, `enabled`, `impostors`, `orthographic` (the sun's tiles: distance does not count). `levelView(eye, heightPixels, fov, settings)`.
-- **`errorInPixels`:** e · pixelsPerMetre / d (infinite at d ≤ 0); e · pixelsPerMetre orthographic.
-- **`chooseLevel`:** walks the levels until one does not fit, or (impostors off) one has no mesh. Off: level 0.
-- **`levelDistance`:** to the sphere's surface (0 inside), so a big tree's near side is never coarse. `drawLevel` uses `levelBounds` when set, else `bounds`; unknown bounds keep the mesh.
-- **`chosenMesh`:** the drawn mesh, or an invalid handle where the draw draws nothing (an impostor too near, levels or impostors off; a tree past its last level). Batching leaves those out.
-- **`levelsChosen`:** counts per level for the readout's LEVELS.
-- **`thinningErrorPerMetre`:** pixelError / pixelsPerMetre, the allowance card thinning spends (0 orthographic or off); card thinning doc.
+- **`LevelView`:** eye, `pixelsPerMetre` = height / (2 tan(fov / 2)), `pixelError`, `enabled`, `impostors`, `orthographic` (sun tiles: distance ignored), `fadeBand`. `levelView(eye, heightPixels, fov, settings)`; `cameraLevelView` fades.
+- **`errorInPixels`:** e · pixelsPerMetre / d (infinite at d ≤ 0); orthographic, e · pixelsPerMetre.
+- **`chooseLevel`:** walks the levels until one does not fit or (impostors off) has no mesh. Off: level 0.
+- **`levelDistance`:** to the sphere's surface (0 inside), so a big tree's near side is not coarse. `drawLevel` uses `levelBounds` when set, else `bounds`; unknown bounds keep the mesh.
+- **`chosenMesh`:** the drawn mesh, or an invalid handle where it draws nothing (an impostor too near, levels or impostors off; a tree past its last level). Batching skips those.
+- **`levelsChosen`:** counts per level for the readout's LEVELS (fading: both levels).
+- **`thinningErrorPerMetre`:** pixelError / pixelsPerMetre, card thinning's allowance (0 orthographic or off).
 - The camera chooses by its **output** height (`RenderStats::outputHeight`), not the render height, so upscaling does not pull switches closer. Other views' choices (velocity pass, probe faces, mirror, shadow tiles by their texels): renderer.md.
-- **Switching** is instant; TAA softens it.
-- **Settings:** `LevelOfDetailSettings` (`RenderSettings::levelOfDetail`, F5 Level of detail): `enabled`, `pixelError` (2), `impostors`; live. `validateLevelOfDetail` rejects a budget not above 0.
+- **Switching** is instant (TAA softens it) but for fading draws (`levelFade`, level-of-detail.md).
+- **Settings:** `LevelOfDetailSettings` (`RenderSettings::levelOfDetail`, F5 Level of detail): `enabled`, `pixelError` (2), `impostors`, `fadeBand` (0.2); live. `validateLevelOfDetail` rejects a budget not above 0, a band outside 0-0.9.
 
 ## Debug drawing
 

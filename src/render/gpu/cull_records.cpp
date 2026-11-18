@@ -1,4 +1,5 @@
 #include "render/gpu/cull_records.h"
+#include "render/gpu/level_fade.h"
 #include "scene/material.h"
 
 #include <algorithm>
@@ -24,7 +25,7 @@ GpuCullRecord packCullRecord(const DrawItem& draw) {
                    (isCutOut(draw.material) ? CULL_CUT_OUT : 0u) | (draw.material.doubleSided ? CULL_DOUBLE_SIDED : 0u) |
                    (draw.thinningEntry != 0 ? CULL_THINNABLE : 0u) |
                    (draw.previousModel && *draw.previousModel != draw.model ? CULL_MOVED : 0u) |
-                   (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u);
+                   (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u) | (draw.fadesLevels ? CULL_FADES : 0u);
     record.mesh = draw.mesh.index;
     record.hiddenBelowError = draw.hiddenBelowError;
     record.shadowCascades = draw.shadowCascades;
@@ -117,6 +118,7 @@ GpuLevelView packLevelView(const LevelView& view) {
     packed.pixelError = view.pixelError;
     packed.flags = (view.enabled ? CULL_LEVELS_ENABLED : 0u) | (view.impostors ? CULL_LEVELS_IMPOSTORS : 0u) |
                    (view.orthographic ? CULL_LEVELS_ORTHOGRAPHIC : 0u);
+    packed.fadeBand = view.fadeBand;
     return packed;
 }
 
@@ -172,11 +174,11 @@ float levelSphereDistance(const float sphere[4], const Vec3& eye) {
 }
 
 /*
-* chosenMesh, step for step: an impostor is drawn only where its own error fits (never with levels or impostors off);
-* then the levels walk coarser until one does not fit, or (impostors off) one draws nothing; the slot chosen may still
-* hold no mesh (a tree past its last level).
+* chosenMesh's walk, step for step, under a budget: an impostor is drawn only where its own error fits (never with
+* levels or impostors off); then the levels walk coarser until one does not fit, or (impostors off) one draws nothing;
+* the slot it ends on may hold no mesh (a tree past its last level).
 */
-int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view) {
+int levelSlotWithin(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view, float budget) {
     const bool enabled = (view.flags & CULL_LEVELS_ENABLED) != 0u;
     const bool impostors = (view.flags & CULL_LEVELS_IMPOSTORS) != 0u;
     const bool orthographic = (view.flags & CULL_LEVELS_ORTHOGRAPHIC) != 0u;
@@ -185,8 +187,8 @@ int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, co
 
     if (record.hiddenBelowError > 0.0f) {
         if (!enabled || !impostors || record.levelSphere[3] < 0.0f ||
-            levelErrorInPixels(record.hiddenBelowError, levelSphereDistance(record.levelSphere, eye), pixelsPerMetre, orthographic) > view.pixelError) {
-            return cullNoSlot;
+            levelErrorInPixels(record.hiddenBelowError, levelSphereDistance(record.levelSphere, eye), pixelsPerMetre, orthographic) > budget) {
+            return -1;
         }
     }
 
@@ -198,7 +200,7 @@ int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, co
         for (std::uint32_t level = 0; level < levels.levels; ++level) {
             const std::uint32_t slot = level + 1;
 
-            if (levelErrorInPixels(levels.errorMetres[slot], distance, pixelsPerMetre, orthographic) > view.pixelError ||
+            if (levelErrorInPixels(levels.errorMetres[slot], distance, pixelsPerMetre, orthographic) > budget ||
                 (!impostors && levels.meshes[slot] == cullNoMesh)) {
                 break;
             }
@@ -207,7 +209,42 @@ int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, co
         }
     }
 
-    return levels.meshes[chosen] == cullNoMesh ? cullNoSlot : static_cast<int>(chosen);
+    return static_cast<int>(chosen);
+}
+
+namespace {
+    // A slot from the walk as drawn: none for an impostor not drawn or a slot without a mesh.
+    int drawnSlot(const GpuMeshLevels& levels, int slot) {
+        return slot < 0 || levels.meshes[slot] == cullNoMesh ? cullNoSlot : slot;
+    }
+}
+
+int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view) {
+    return drawnSlot(levels, levelSlotWithin(record, levels, view, view.pixelError));
+}
+
+// levelFade, step for step: the walk under the budget and under the band's wider one, the share by the coarser's error.
+GpuLevelFade levelFadeSlots(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view) {
+    const bool enabled = (view.flags & CULL_LEVELS_ENABLED) != 0u;
+    const bool orthographic = (view.flags & CULL_LEVELS_ORTHOGRAPHIC) != 0u;
+
+    if ((record.flags & CULL_FADES) == 0u || !(view.fadeBand > 0.0f) || orthographic || !enabled) {
+        return GpuLevelFade{};
+    }
+
+    const float keep = 1.0f - view.fadeBand;
+    const int finer = levelSlotWithin(record, levels, view, view.pixelError);
+    const int coarser = levelSlotWithin(record, levels, view, view.pixelError / keep);
+
+    if (finer == coarser) {
+        return GpuLevelFade{};
+    }
+
+    const Vec3 eye{view.eye[0], view.eye[1], view.eye[2]};
+    const float error = finer < 0 ? record.hiddenBelowError : levels.errorMetres[coarser];
+    const float pixels = levelErrorInPixels(error, levelSphereDistance(record.levelSphere, eye), view.eye[3], false);
+    const float share = std::clamp((view.pixelError / pixels - keep) / view.fadeBand, 0.0f, 1.0f);
+    return GpuLevelFade{.fading = true, .finer = drawnSlot(levels, finer), .coarser = drawnSlot(levels, coarser), .share = share};
 }
 
 bool slotThinned(const GpuCullRecord& record, const GpuMeshLevels& levels, int slot) {
@@ -218,15 +255,28 @@ bool nearAChoiceEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, c
     const Vec3 eye{view.eye[0], view.eye[1], view.eye[2]};
     const bool orthographic = (view.flags & CULL_LEVELS_ORTHOGRAPHIC) != 0u;
     const float distance = levelSphereDistance(record.levelSphere, eye);
-    const auto near = [&](float errorMetres) {
-        const float ratio = levelErrorInPixels(errorMetres, distance, view.eye[3], orthographic) / view.pixelError;
+    // A fading draw's band starts where an error covers pixelError / (1 - band).
+    const bool fades = (record.flags & CULL_FADES) != 0u && view.fadeBand > 0.0f && !orthographic;
+    const auto nearBudget = [&](float errorMetres, float budget) {
+        const float ratio = levelErrorInPixels(errorMetres, distance, view.eye[3], orthographic) / budget;
         return std::abs(ratio - 1.0f) < 1e-4f;
+    };
+    const auto near = [&](float errorMetres) {
+        return nearBudget(errorMetres, view.pixelError) || (fades && nearBudget(errorMetres, view.pixelError / (1.0f - view.fadeBand)));
     };
 
     bool any = record.hiddenBelowError > 0.0f && near(record.hiddenBelowError);
 
     for (std::uint32_t slot = 1; slot <= levels.levels; ++slot) {
         any = any || near(levels.errorMetres[slot]);
+    }
+
+    // A share on a step of the fade's field may round into either.
+    const GpuLevelFade fade = levelFadeSlots(record, levels, view);
+
+    if (fade.fading) {
+        const float steps = fade.share * static_cast<float>(drawListFadeSteps);
+        any = any || std::abs(steps - std::round(steps)) < 1e-3f;
     }
 
     for (const auto& plane : frustum.planes) {

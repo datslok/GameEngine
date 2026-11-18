@@ -54,7 +54,7 @@ VulkanCameraCulling::VulkanCameraCulling(const VulkanDevice& device, std::uint32
     segmentListPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_segment_list.comp.spv", 4));
     flagPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_flags.comp.spv", 11));
     scanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_scan.comp.spv", 4));
-    writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_write.comp.spv", 12));
+    writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_write.comp.spv", 14));
     compactPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/camera_cull_compact.comp.spv", 8));
     records = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullRecord));
     chunks = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuCullChunk));
@@ -305,11 +305,12 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
         bufferBarrier(commands, frame.blockSums.get(), computeWrite, computeReadWrite);
 
         // The writes (indirect: the visible candidates' or the groups' workgroups, whichever are more).
-        const std::array<ComputeBinding, 12> writeBindings{
+        const std::array<ComputeBinding, 14> writeBindings{
             batchViews,                                     storageBufferBinding(candidates->get()),         storageBufferBinding(frame.flags.get()),
             storageBufferBinding(frame.offsets.get()),      storageBufferBinding(frame.blockSums.get()),     storageBufferBinding(frame.groups.get()),
             storageBufferBinding(drawList),                 storageBufferBinding(frame.mainCommands.get()),  storageBufferBinding(frame.motionCommands.get()),
             storageBufferBinding(frame.segmentOffsets.get()), storageBufferBinding(frame.segmentBlockSums.get()), storageBufferBinding(frame.work.get()),
+            storageBufferBinding(records->get()),            storageBufferBinding(frame.levels.get()),
         };
         bindComputeSet(commands, device.getDevice(), descriptors, *writePass, writeBindings);
         vkCmdDispatchIndirect(commands, frame.dispatches.get(), dispatchOffset + 3 * sizeof(std::uint32_t));

@@ -72,6 +72,7 @@ namespace {
             draw.sway.kind = i % 3 == 1 ? SwayKind::Plant : SwayKind::Still;
             draw.castsShadows = i % 7 != 3;
             draw.shadowCascades = i % 5 == 1 ? 1 + i % 3 : 0;
+            draw.fadesLevels = i % 3 != 2;
 
             if (i % 8 == 2) {
                 draw.previousModel = Mat4::translation(0.0f, 1.0f, 0.0f);
@@ -90,8 +91,9 @@ namespace {
             settings.enabled = i % 11 != 0;
             settings.impostors = i % 7 != 0;
             settings.pixelError = random.between(0.5f, 4.0f);
-            LevelView view = levelView(Vec3{random.between(-1500.0f, 1500.0f), random.between(2.0f, 200.0f), random.between(-1500.0f, 1500.0f)},
-                                       random.between(1080.0f, 2160.0f), random.between(0.6f, 1.4f), settings);
+            settings.fadeBand = i % 4 == 3 ? 0.0f : random.between(0.05f, 0.5f);
+            LevelView view = cameraLevelView(Vec3{random.between(-1500.0f, 1500.0f), random.between(2.0f, 200.0f), random.between(-1500.0f, 1500.0f)},
+                                             random.between(1080.0f, 2160.0f), random.between(0.6f, 1.4f), settings);
             view.orthographic = i % 10 == 0;
 
             const Vec3 eye = view.eye;
@@ -140,14 +142,15 @@ namespace {
         inputs.push_back(meshes);
         inputs.push_back(errors);
         inputs.push_back(GpuVec4{c.view.eye[0], c.view.eye[1], c.view.eye[2], c.view.eye[3]});
-        inputs.push_back(gpuVec4(c.view.pixelError, static_cast<float>(c.view.flags)));
+        inputs.push_back(gpuVec4(c.view.pixelError, static_cast<float>(c.view.flags), c.view.fadeBand));
 
         for (const auto& plane : c.frustum.planes) {
             inputs.push_back(GpuVec4{plane[0], plane[1], plane[2], plane[3]});
         }
     }
 
-    // A candidate's flags and the sway's reach, against the C++ mirror, case by case (the draw cases plus one input).
+    // A candidate's flags, the sway's reach, the shadow tiles' test and its fade field, against the C++ mirror, case by
+    // case (the draw cases plus three inputs).
     void checkCandidates(GpuFunctionRunner& runner, GpuCheckReport& report) {
         const std::vector<Case> cases = randomCases();
         std::vector<GpuVec4> inputs;
@@ -172,6 +175,7 @@ namespace {
             report.check("cameraCandidateFlags", exactTolerance, static_cast<float>(cameraCandidateFlags(c.record, c.levels, view, c.slot)), outputs[i][0]);
             report.check("swayReaches", exactTolerance, swayReaches(c.record.bounds, eye, c.swayFadeEnd) ? 1.0f : 0.0f, outputs[i][1]);
             report.check("shadowTakes", exactTolerance, shadowTakes(c.record, view) ? 1.0f : 0.0f, outputs[i][2]);
+            report.check("cameraCandidateFade", exactTolerance, static_cast<float>(cameraCandidateFade(c.record, c.levels, view, c.slot)), outputs[i][3]);
         }
     }
 
@@ -262,10 +266,59 @@ namespace {
     }
 }
 
+namespace {
+    // Each draw's fade (both slots and the share), against the C++ mirror; the share as close as the distance's square
+    // root rounds (a few parts in a million of the band's width).
+    void checkFadeSlots(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const std::vector<Case> cases = randomCases();
+        std::vector<GpuVec4> inputs;
+
+        for (const Case& c : cases) {
+            appendInputs(inputs, c);
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_LEVEL_FADE_SLOTS, inputs, 13, 1);
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            if (nearAThreshold(cases[i])) {
+                continue;
+            }
+
+            const GpuLevelFade fade = levelFadeSlots(cases[i].record, cases[i].levels, cases[i].view);
+            report.check("levelFadeSlots fading", exactTolerance, fade.fading ? 1.0f : 0.0f, outputs[i][0]);
+            report.check("levelFadeSlots finer", exactTolerance, static_cast<float>(fade.finer), outputs[i][1]);
+            report.check("levelFadeSlots coarser", exactTolerance, static_cast<float>(fade.coarser), outputs[i][2]);
+            report.check("levelFadeSlots share", FloatTolerance{.absolute = 1e-4f, .relative = 0.0f}, fade.share, outputs[i][3]);
+        }
+    }
+
+    // Entries of draws up to the instance limit, with and without the thinned bit, and every fade field.
+    void checkEntries(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        std::vector<GpuVec4> inputs;
+        std::vector<std::uint32_t> expected;
+
+        for (std::uint32_t field = 0; field < 128u; ++field) {
+            const std::uint32_t draw = (field * 131071u) % 16777216u;
+            const std::uint32_t flags = field % 2 == 0 ? CAMERA_CULL_DRAWN : CAMERA_CULL_DRAWN | CAMERA_CULL_THINNED | CAMERA_CULL_FADES;
+            inputs.push_back(gpuVec4(static_cast<float>(draw), static_cast<float>(flags), static_cast<float>(field)));
+            expected.push_back(cameraCandidateEntry(draw, flags, field));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CANDIDATE_ENTRY, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            report.check("cameraCandidateEntry low", exactTolerance, static_cast<float>(expected[i] & 0xffffu), outputs[i][0]);
+            report.check("cameraCandidateEntry high", exactTolerance, static_cast<float>(expected[i] >> 16u), outputs[i][1]);
+        }
+    }
+}
+
 void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("culling.glsl, level_of_detail.glsl");
     checkDraws(runner, report);
+    checkFadeSlots(runner, report);
     report.section("camera_culling.glsl");
     checkCandidates(runner, report);
     checkChunks(runner, report);
+    checkEntries(runner, report);
 }

@@ -14,6 +14,7 @@
 #define CULL_THINNABLE 64u    // its leaf cards can be thinned (DrawItem::thinningEntry)
 #define CULL_MOVED 128u       // its matrix changed since last frame (DrawItem::previousModel): the velocity pass redraws it
 #define CULL_SWAYS 256u       // it sways in the wind (DrawItem::sway not still), where the sway reaches
+#define CULL_FADES 512u       // its levels cross-fade in the camera's view (DrawItem::fadesLevels)
 
 // The meshes a draw can be drawn with: its own and up to three levels (scene/mesh_level.h, meshLevelSlots).
 #define CULL_LEVEL_SLOTS 4

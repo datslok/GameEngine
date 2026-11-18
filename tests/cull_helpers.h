@@ -24,7 +24,8 @@ inline constexpr std::uint32_t cullSceneMeshes = 12;
 /*
 * Random draws over a few kilometres: meshes with no levels or up to three (the last sometimes drawing nothing, as a
 * tree's does), some sharing the mesh's vertices; impostors; unknown bounds; shadow-only, hidden, glass, cut-out,
-* double-sided and thinnable draws; a shared level sphere for some, as a tree's parts have; some swaying, some moved.
+* double-sided and thinnable draws; a shared level sphere for some, as a tree's parts have; some swaying, some moved,
+* some fading.
 */
 inline CullScene randomCullScene(std::mt19937& random, int drawCount = 3000) {
     std::uniform_real_distribution<float> unit{0.0f, 1.0f};
@@ -67,6 +68,7 @@ inline CullScene randomCullScene(std::mt19937& random, int drawCount = 3000) {
         draw.material.doubleSided = unit(random) < 0.3f;
         draw.thinningEntry = unit(random) < 0.3f ? 1 + static_cast<std::uint32_t>(i) : 0;
         draw.sway.kind = unit(random) < 0.4f ? SwayKind::Tree : SwayKind::Still;
+        draw.fadesLevels = unit(random) < 0.4f;
 
         if (unit(random) < 0.1f) {
             draw.previousModel = unit(random) < 0.5f ? draw.model : Mat4::translation(0.0f, 0.1f, 0.0f);

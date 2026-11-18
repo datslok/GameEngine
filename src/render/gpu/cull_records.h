@@ -47,12 +47,14 @@ struct GpuMeshLevels {
 
 static_assert(sizeof(GpuMeshLevels) == 48, "GpuMeshLevels must match level_of_detail.glsl's MeshLevels");
 
-// A view's level choice (LevelView): eye in the world and pixels a metre away (xyz, w), the pixel error, CULL_LEVELS_* flags.
+// A view's level choice (LevelView): eye in the world and pixels a metre away (xyz, w), the pixel error, CULL_LEVELS_* flags,
+// the fade band (0 none).
 struct GpuLevelView {
     float eye[4];
     float pixelError = 1.0f;
     std::uint32_t flags = 0;
-    std::uint32_t unused[2] = {0, 0};
+    float fadeBand = 0.0f;
+    std::uint32_t unused = 0;
 };
 
 static_assert(sizeof(GpuLevelView) == 32, "GpuLevelView must match level_of_detail.glsl's LevelView");
@@ -111,9 +113,24 @@ float levelSphereDistance(const float sphere[4], const Vec3& eye);
 // nothing (an impostor not yet far enough, a tree past its last level).
 int chooseLevelSlot(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view);
 
+// The slot the levels' walk ends on under a budget of pixels, which may hold no mesh; -1 for an impostor not drawn there.
+int levelSlotWithin(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view, float budget);
+
+// A draw crossing a switch in the view's fade band (levelFade): its finer and coarser slots (cullNoSlot: none drawn)
+// and the share of the band crossed.
+struct GpuLevelFade {
+    bool fading = false;
+    int finer = cullNoSlot;
+    int coarser = cullNoSlot;
+    float share = 0.0f;
+};
+
+GpuLevelFade levelFadeSlots(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view);
+
 // Whether that slot is drawn with its cards thinned (DrawItem::thinningEntry, and the slot sharing the mesh's vertices).
 bool slotThinned(const GpuCullRecord& record, const GpuMeshLevels& levels, int slot);
 
 // Whether a draw's choice in a view is within rounding of changing: a level's (or an impostor's) error within 1e-4 of
-// the pixel budget, or its sphere within a millimetre of a plane, where the GPU's square root may round either way.
+// the pixel budget (or, fading, of the band's wider one), a fade's share within 1e-3 of a step of its field, or its
+// sphere within a millimetre of a plane, where the GPU's square root may round either way.
 bool nearAChoiceEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view, const GpuFrustum& frustum);

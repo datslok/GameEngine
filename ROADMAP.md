@@ -365,7 +365,8 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] The wind field (`wind-field`), swaying plants (`wind-sway`), hanging things (`wind-hanging`), follow-ups (`wind-flutter`, `wind-chain-swing`)
 - [ ] Level of detail (research in `docs/research/LOD.md`): by error in pixels (`tree-lod`), shadows from the same levels (`shadow-lod`), the terrain's CDLOD (`terrain-lod`)
 - [x] Impostors (`tree-impostors`, `impostor-switch`, `plant-impostors`)
-- [ ] Pop-in: done for the trees' and palms' cards (`lod-pop-in`, `palm-thinning`); left: a dithered fade for the small scanned plants, and the trees' bark if it shows
+- [ ] Pop-in: done for the trees' and palms' cards (`lod-pop-in`, `palm-thinning`); left: the trees' bark if it shows
+  - [x] The scanned plants' levels cross-faded by a dither over a band of distance (`plant-fades`)
 - [x] Leaf shimmer: the trees' flutter slower and in step (`tree-flutter`)
 - [ ] Occlusion culling (research in `docs/research/OCCLUSION.md`)
   - [x] Measured first (`occlusion-measure`): about 2% of the GPU frame to gain

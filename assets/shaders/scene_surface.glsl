@@ -46,6 +46,8 @@ layout(location = 6) flat in vec3 viewerPosition;
 // the world.
 layout(location = 7) in vec3 framePosition;
 layout(location = 8) flat in mat3 frameAxes;
+// The level fade (level_fade.glsl): the depth prepass keeps its share of the pixels, and the main pass shades only those.
+layout(location = 11) flat in uint levelFade;
 
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"

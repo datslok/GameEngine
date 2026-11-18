@@ -3,10 +3,11 @@
 
 /*
 * The GPU culling's write pass (render/vulkan/vulkan_camera_culling.h): each flagged visible candidate writes its draw
-* list entry at its place (its block's first place plus its offset), with its thinned bit; each group writes its
-* indirect commands from the places at its two ends (its first segment's first visible candidate, and past its last
-* segment's). Dispatched indirectly, one invocation a visible candidate or group, whichever are more, and view (the
-* dispatch's y), in that view's slices and draw list regions.
+* list entry at its place (its block's first place plus its offset), with its thinned bit and fade field (the fading
+* ones' worked out again from their records); each group writes its indirect commands from the places at its two ends
+* (its first segment's first visible candidate, and past its last segment's). Dispatched indirectly, one invocation a
+* visible candidate or group, whichever are more, and view (the dispatch's y), in that view's slices and draw list
+* regions.
 */
 #include "render/gpu/instance_shared.h"
 #include "camera_culling.glsl"
@@ -62,6 +63,15 @@ layout(std430, set = 0, binding = 11) readonly buffer Work {
     CullViewWork work[];
 };
 
+// The draws' records and the meshes' levels, for the fade field of the candidates flagged fading (cameraCandidateEntry).
+layout(std430, set = 0, binding = 12) readonly buffer Records {
+    CullRecord records[];
+};
+
+layout(std430, set = 0, binding = 13) readonly buffer Levels {
+    MeshLevels meshLevels[];
+};
+
 // A visible candidate's place in both of the view's lists; past the last, the totals.
 uvec2 placeOf(CameraCull view, CullViewWork viewWork, uint visible) {
     return visible >= viewWork.visibleCandidates ? blockFirst[view.slices.y + viewWork.candidateBlocks]
@@ -85,7 +95,15 @@ void main() {
 
         if (candidateFlags != 0u) {
             uvec2 place = placeOf(view, viewWork, index);
-            uint entry = candidates[packedFlags >> CAMERA_CULL_FLAG_BITS].draw | ((candidateFlags & CAMERA_CULL_THINNED) != 0u ? DRAW_LIST_THINNED_BIT : 0u);
+            CullCandidate candidate = candidates[packedFlags >> CAMERA_CULL_FLAG_BITS];
+            uint fade = 0u;
+
+            if ((candidateFlags & CAMERA_CULL_FADES) != 0u) {
+                CullRecord record = records[candidate.draw];
+                fade = cameraCandidateFade(record, meshLevels[record.mesh], view, candidate.slot);
+            }
+
+            uint entry = cameraCandidateEntry(candidate.draw, candidateFlags, fade);
 
             if ((candidateFlags & CAMERA_CULL_DRAWN) != 0u) {
                 drawList[view.mainBase + place.x] = entry;

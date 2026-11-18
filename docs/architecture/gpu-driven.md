@@ -10,9 +10,9 @@ Read by the camera's culling (below); `CULL_MOVED`, `CULL_SWAYS` and `GpuMeshLev
 
 | Record | Bytes | One per | Holds |
 |---|---|---|---|
-| `GpuCullRecord` | 48 | draw (the instance's index) | bounding sphere, level sphere (`levelBounds`, else bounds), `CULL_*` flags (shadow-only, hidden, transparent, casts shadows, cut-out, double-sided, thinnable), mesh number, impostor's `hiddenBelowError` |
+| `GpuCullRecord` | 48 | draw (the instance's index) | bounding sphere, level sphere (`levelBounds`, else bounds), `CULL_*` flags (shadow-only, hidden, transparent, casts shadows, cut-out, double-sided, thinnable, fades), mesh number, impostor's `hiddenBelowError` |
 | `GpuMeshLevels` | 48 | mesh | four slots (the mesh, then its levels coarsest last; `CULL_NO_MESH` draws nothing), each slot's error, the level count, which slots share the mesh's vertices |
-| `GpuLevelView` | 32 | view | eye and pixels a metre away, pixel error, `CULL_LEVELS_*` (enabled, impostors, orthographic) |
+| `GpuLevelView` | 32 | view | eye and pixels a metre away, pixel error, `CULL_LEVELS_*` (enabled, impostors, orthographic), fade band (0 none: every view but the camera) |
 | `GpuFrustum` | 96 | view | six inward planes |
 
 Packed by `packCullRecord`, `packMeshLevels` (throws past three levels), `packLevelView`, `packFrustum`.
@@ -24,11 +24,12 @@ Packed by `packCullRecord`, `packMeshLevels` (throws past three levels), `packLe
 | `sphereInFrustum` | `culling.glsl` | `Frustum::intersectsSphere` (unknown bounds always in) |
 | `cameraTakes` | `culling.glsl` | `visibleDraws` then `opaqueDraws` |
 | `levelErrorInPixels`, `levelSphereDistance` | `level_of_detail.glsl` | `errorInPixels`, `levelDistance` |
-| `chooseLevelSlot` | `level_of_detail.glsl` | `chosenMesh`: the impostor rule, then the walk to the coarsest fitting level; no slot where nothing is drawn |
+| `levelSlotWithin`, `chooseLevelSlot` | `level_of_detail.glsl` | `chosenMesh`: the impostor rule, then the walk to the coarsest level fitting a budget; no slot where nothing is drawn |
+| `levelFadeSlots` | `level_of_detail.glsl` | `levelFade`: the finer and coarser slots (either none) and the share (level-of-detail.md, Level fades) |
 | `slotThinned` | `level_of_detail.glsl` | `batchByMesh`'s thinned mark |
 
-- `cull_records_test`: random scenes and views (perspective and orthographic, levels and impostors on and off): every draw's slot, thinning and camera choice equal the CPU functions'.
-- `cull_records_gpu_test` (`make gputest`): the GLSL against the mirror (also `camera_culling.glsl`), cases near an edge (`nearAChoiceEdge`, `nearACameraEdge`: within 1e-4 of a level threshold, 1 mm of a plane or of the sway's reach) left out, since the GPU's square root may round either way there.
+- `cull_records_test`: random scenes and views (perspective and orthographic, levels, impostors and fades on and off): every draw's slot, thinning, fade and camera choice equal the CPU functions'.
+- `cull_records_gpu_test` (`make gputest`): the GLSL against the mirror (also `camera_culling.glsl`), cases near an edge (`nearAChoiceEdge`, `nearACameraEdge`: within 1e-4 of a level threshold or a fade band's start, 1e-3 of a fade field's step, 1 mm of a plane or of the sway's reach) left out, since the GPU's square root may round either way there.
 
 ## The lists on the GPU (`gpu-cull-camera`)
 
@@ -50,9 +51,9 @@ Seven passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers a
 1. `camera_cull_segments`: a thread a segment, `chunkInView` (no chunk: always); a 256-wide prefix sum of (candidates, 1) of those passing.
 2. `camera_cull_segment_scan`: one workgroup a view sums the segment blocks; writes the view's work and raises its batch's indirect dispatches (`atomicMax`; the CPU starts the flags pass's at 0 and the write pass's at the groups' workgroups by `vkCmdUpdateBuffer`).
 3. `camera_cull_segment_list`: each visible segment (its visible-segment count one less than the next's, so the chunk test is never made twice) writes (segment, first visible candidate) at its place: the visible list, in segment order.
-4. `camera_cull_flags` (indirect, the batch's most visible candidates' workgroups): a workgroup's 256 visible candidates lie in at most 256 consecutive visible segments: one thread finds the first by binary search, the workgroup loads the next into shared memory, each thread searches there. Then `cameraCandidateFlags` (drawn: taken and this slot chosen; moving: moved, mesh deformed or swaying within reach, with the velocity pass on; thinned), the candidate's list place kept above the flags (`CAMERA_CULL_FLAG_BITS`); a 256-wide Hillis-Steele prefix sum per workgroup; level counts.
+4. `camera_cull_flags` (indirect, the batch's most visible candidates' workgroups): a workgroup's 256 visible candidates lie in at most 256 consecutive visible segments: one thread finds the first by binary search, the workgroup loads the next into shared memory, each thread searches there. Then `cameraCandidateFlags` (drawn: taken and this slot chosen, or either slot of a draw fading; moving: moved, mesh deformed or swaying within reach, with the velocity pass on; thinned; fading), the candidate's list place kept above the flags (`CAMERA_CULL_FLAG_BITS`); a 256-wide Hillis-Steele prefix sum per workgroup; level counts.
 5. `camera_cull_scan`: one workgroup a view sums its block totals (its work's blocks) into each block's first place, a carry between rounds; totals after the last.
-6. `camera_cull_write` (indirect): each flagged visible candidate writes `draw | thinned bit` at its place; each group its two commands (its mesh's `firstIndex` and `vertexOffset` in the shared mesh buffer) from the places at its first segment's first visible candidate and past its last.
+6. `camera_cull_write` (indirect): each flagged visible candidate writes `cameraCandidateEntry` (draw, thinned bit, fade field: `cameraCandidateFade`, read from its record only for one flagged fading) at its place; each group its two commands (its mesh's `firstIndex` and `vertexOffset` in the shared mesh buffer) from the places at its first segment's first visible candidate and past its last.
 7. `camera_cull_compact`: one workgroup packs each list's commands that draw something, style run by style run of the drawing order (`cullDrawOrder`: pooled groups by style then mesh, then deforming ones), by a prefix sum, and writes each style's count (`packCullCommands` mirrors it).
 
 **Views (`gpu-cull-captures`, `gpu-cull-shadows`):** the camera, then each probe face and the mirror drawn this frame, then each shadow tile drawn, are the dispatch's second dimension (`gl_WorkGroupID.y`), any number: passes 1-6 run in batches of `CAMERA_CULL_SCRATCH_VIEWS` (16) reusing the segment offsets, visible lists, flags, offsets and block sums (the views bound from the batch's first, each batch's dispatches 256 B apart), the packing over all at once.

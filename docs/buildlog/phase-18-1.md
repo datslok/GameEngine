@@ -1,6 +1,6 @@
-# Build log: Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 1 of 2)
+# Build log: Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 1 of 3)
 
-## Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 1 of 2)
+## Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 1 of 3)
 
 - `forest-assets` (Nov 13 2026): the forest's scanned assets. The user asked for something lush, realistic and free (CC0), so a survey of Poly Haven and ambientCG came first, as a shortlist page; the user took the recommended set ("sounds good").
   - **What:** 30 assets, 142 files, 157 MB at 1K. 17 Poly Haven models (ferns, plants, shrubs, nettles, a stump, dead trunks, a root, mossy rocks, boulders), 8 Poly Haven textures (forest floor, muddy leaves, mossy rock, two barks, three sci-fi metals), and 5 ambientCG sets (grass and moss grounds, three leaf and foliage atlases).

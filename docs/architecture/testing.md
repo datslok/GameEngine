@@ -88,6 +88,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `dither.glsl` | `core/srgb`, `core/dither` | `dither_gpu_test.cpp` |
 | `culling.glsl`, `level_of_detail.glsl` | `render/gpu/cull_records` | `cull_records_gpu_test.cpp` |
 | `camera_culling.glsl` | `render/gpu/camera_culling` | `cull_records_gpu_test.cpp` |
+| `level_fade.glsl` | `render/gpu/level_fade` | `level_fade_gpu_test.cpp` |
 | `overlay.glsl` | `render/gpu/overlay_composite` | `overlay_gpu_test.cpp` |
 | `clusters.glsl` | `render/gpu/clusters` | `clusters_gpu_test.cpp` |
 | `cascades.glsl` | `render/gpu/cascades` | `cascades_gpu_test.cpp` |

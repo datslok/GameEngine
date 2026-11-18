@@ -16,7 +16,7 @@ std430, mirrored byte for byte in the shaders, each size checked by a `static_as
 | `GpuPointLight` | 48 | `light_uniforms.h` | seated point light (`maxPointLights` 1024) |
 | `GpuSpotLight` | 128 | `light_uniforms.h` | seated spotlight (`maxSpotLights` 256), image lights' windows included |
 | `ShadowTileData` | 112 | `render/gpu/shadow_map.h` | shadow tile (`lights-and-shadow-atlas.md`) |
-| draw list entry | 4 | `instance_shared.h` | instance drawn in a view; top bit `DRAW_LIST_THINNED_BIT` = drawn thinned (`scene/card_thinning`) |
+| draw list entry | 4 | `instance_shared.h` | instance drawn in a view (low 24 bits); top bit `DRAW_LIST_THINNED_BIT` = drawn thinned (`scene/card_thinning`); 7 bits between, its level fade (`DRAW_LIST_FADE_*`, level-of-detail.md) |
 | `GpuThinningRecord` | 16 | `gpu_scene.h` | card thinning header and vertex |
 
 - **Instance** (`packInstance(draw, material)`): world model matrix, normal matrix (`normalMatrix`), handedness and `uniformScale`, material and mesh numbers, terrain patch, instance kind (plain, impostor, follows ground), wind sway, hanging and thinning entries, the level-of-detail sphere. Each view multiplies in its own matrix on the GPU, so one record serves the camera, every shadow tile and ray tracing.

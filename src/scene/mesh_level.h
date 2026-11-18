@@ -24,11 +24,13 @@ struct MeshLevel {
 * How a mesh's level is chosen beyond its levels (AssetManager::setMeshLevelOptions): an impostor is drawn only where
 * hiddenBelowError fits (the error its tree's parts end on, a last level without a mesh), and a tree's parts and its
 * impostor choose by one box in their own frame (chooseBounds), so they switch at the same place; else by each draw's
-* own bounds.
+* own bounds. A mesh that fades has its levels (and its impostor) cross-faded by a dither over the camera's fade band
+* (LevelOfDetailSettings::fadeBand) rather than swapped in one frame.
 */
 struct MeshLevelOptions {
     float hiddenBelowError = 0.0f;
     std::optional<Aabb> chooseBounds;
+    bool fadesLevels = false;
 };
 
 // The mesh itself and at most three coarser levels: Horizon Zero Dawn's trees and SpeedTree's typical chains have 3-4
