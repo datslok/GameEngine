@@ -25,4 +25,14 @@
 #define CAMERA_CULL_COUNT_MOVING 5
 #define CAMERA_CULL_COUNTS 8
 
+// The views culled in one dispatch (the camera, six probe faces, a mirror): the dispatch's second dimension.
+#define CAMERA_CULL_MAX_VIEWS 8
+
+// GpuCameraCull::slices: where the view's part of each shared working buffer starts (flags and offsets by candidate,
+// block sums with the totals after them, commands and packed commands by group, packed places with the total after).
+#define CAMERA_CULL_SLICE_FLAGS 0
+#define CAMERA_CULL_SLICE_BLOCKS 1
+#define CAMERA_CULL_SLICE_COMMANDS 2
+#define CAMERA_CULL_SLICE_PLACES 3
+
 #endif

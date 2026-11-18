@@ -144,6 +144,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     cameraCulling = std::make_unique<VulkanCameraCulling>(device, framesInFlight);
     meshPool = std::make_unique<VulkanMeshPool>(device, uploads);
     cullFrameStyles.resize(framesInFlight);
+    cullFrameCaptures.resize(framesInFlight);
     cullCompares.resize(framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -1168,23 +1169,39 @@ std::string VulkanRenderer::compareCulling() {
 }
 
 /*
-* A finished frame's GPU culling: F4's counts from its counts and commands (each group's triangles, cut-outs apart), and
-* when it was compared, its lists against the CPU's of the same frame, differences near an edge told apart.
+* A finished frame's GPU culling: F4's counts from its counts and commands (each group's triangles, cut-outs apart; the
+* probe faces' triangles), and when it was compared, every list against the CPU's of the same frame, differences near an
+* edge told apart.
 */
 void VulkanRenderer::takeCameraCull(const VulkanCameraCulling::Collected& culled, std::uint32_t frameIndex) {
     const std::vector<CullGroupStyle>& styles = cullFrameStyles.at(frameIndex);
+    const std::vector<int>& captures = cullFrameCaptures.at(frameIndex);
     lastCameraCull = CameraCullCounts{};
-    lastCameraCull.drawn = culled.counts.values[CAMERA_CULL_COUNT_DRAWN];
 
-    for (std::size_t slot = 0; slot < meshLevelSlots; ++slot) {
-        lastCameraCull.levels[slot] = culled.counts.values[slot];
+    if (culled.counts.empty() || culled.mainCommands.empty()) {
+        return;
     }
 
-    for (std::size_t group = 0; group < culled.mainCommands.size() && group < styles.size(); ++group) {
-        const GpuDrawCommand& command = culled.mainCommands[group];
-        const std::size_t triangles = static_cast<std::size_t>(command.indexCount / 3) * command.instanceCount;
-        lastCameraCull.triangles += triangles;
-        lastCameraCull.cutOutTriangles += styles[group].cutOut ? triangles : 0;
+    lastCameraCull.drawn = culled.counts[0].values[CAMERA_CULL_COUNT_DRAWN];
+
+    for (std::size_t slot = 0; slot < meshLevelSlots; ++slot) {
+        lastCameraCull.levels[slot] = culled.counts[0].values[slot];
+    }
+
+    for (std::size_t view = 0; view < culled.mainCommands.size(); ++view) {
+        const bool probeFace = view > 0 && view - 1 < captures.size() && captures[view - 1] < cubeFaceCount;
+
+        for (std::size_t group = 0; group < culled.mainCommands[view].size() && group < styles.size(); ++group) {
+            const GpuDrawCommand& command = culled.mainCommands[view][group];
+            const std::size_t triangles = static_cast<std::size_t>(command.indexCount / 3) * command.instanceCount;
+
+            if (view == 0) {
+                lastCameraCull.triangles += triangles;
+                lastCameraCull.cutOutTriangles += styles[group].cutOut ? triangles : 0;
+            } else if (probeFace) {
+                lastCameraCull.probeTriangles += triangles;
+            }
+        }
     }
 
     std::optional<CullCompare>& compare = cullCompares.at(frameIndex);
@@ -1193,19 +1210,29 @@ void VulkanRenderer::takeCameraCull(const VulkanCameraCulling::Collected& culled
         return;
     }
 
-    const auto nearEdge = [&compare](std::uint32_t draw) {
-        if (draw >= compare->records.size()) {
-            return false;
+    std::vector<NamedCullComparison> lists;
+
+    for (std::size_t view = 0; view < compare->views.size() && view < culled.mainEntries.size(); ++view) {
+        const GpuCameraCull& record = compare->views[view];
+        const auto nearEdge = [&compare, &record](std::uint32_t draw) {
+            if (draw >= compare->records.size()) {
+                return false;
+            }
+
+            const GpuCullRecord& drawRecord = compare->records[draw];
+            return drawRecord.mesh < compare->levels.size() && nearACameraEdge(drawRecord, compare->levels[drawRecord.mesh], record);
+        };
+
+        lists.push_back(NamedCullComparison{compare->names[view], compareCullList(styles, culled.mainCommands[view], culled.mainEntries[view],
+                                                                                  record.mainBase, compare->viewDraws[view], nearEdge)});
+
+        if (view == 0) {
+            lists.push_back(NamedCullComparison{
+                "Velocity", compareCullList(styles, culled.motionCommands, culled.motionEntries, record.motionBase, compare->motionDraws, nearEdge)});
         }
+    }
 
-        const GpuCullRecord& record = compare->records[draw];
-        return record.mesh < compare->levels.size() && nearACameraEdge(record, compare->levels[record.mesh], compare->view);
-    };
-
-    const CullListComparison camera = compareCullList(styles, culled.mainCommands, culled.mainEntries, compare->view.mainBase, compare->mainDraws, nearEdge);
-    const CullListComparison motion =
-        compareCullList(styles, culled.motionCommands, culled.motionEntries, compare->view.motionBase, compare->motionDraws, nearEdge);
-    cullCompareReport = describeCullComparison(camera, motion);
+    cullCompareReport = describeCullComparison(lists);
     compare.reset();
 }
 
@@ -1599,7 +1626,17 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     ProbeCaptureStep probeStep{};
     const float probeFar = settings.reflections.probeFar;
     // The probe's six faces, then the flat mirror's view, which draws the same way.
+    // Each capture drawn this frame, in that order: which (a face, or cubeFaceCount the mirror) and its view.
+    struct CaptureCull {
+        int capture = 0;
+        CaptureCullView view;
+    };
+
+    std::vector<CaptureCull> captureViews;
     std::array<BatchedDraws, cubeFaceCount + 1> captureDraws;
+    // What each capture draws (the GPU's commands are filled in once it culls), and where its list starts.
+    std::array<PassDraws, cubeFaceCount + 1> capturePasses{};
+    std::array<std::uint32_t, cubeFaceCount + 1> captureBases{};
     std::uint32_t firstCaptureEntry = static_cast<std::uint32_t>(motionBase + motionEntries);
 
     // The probe's images are bound by the reflection pass even with the probe off, so they exist whenever it runs.
@@ -1619,16 +1656,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             probeCycleOrigin = cameraOrigin;
         }
 
+        // A face is probeSize pixels across a quarter turn, so it draws coarser levels than the camera.
         for (int face = probeStep.firstFace; face < probeStep.firstFace + probeStep.faceCount; ++face) {
-            const Mat4 worldView = cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), probeFar) *
-                                   Mat4::translation(-probeCycleOrigin.x, -probeCycleOrigin.y, -probeCycleOrigin.z);
-            const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero)));
-            // A face is probeSize pixels across a quarter turn, so it draws coarser levels than the camera.
-            const LevelView faceLevels = levelView(probeCycleOrigin, static_cast<float>(reflectionProbe->getSize()), 0.25f * fullTurnRadians, settings.levelOfDetail);
-            probeThinning = thinningErrorPerMetre(faceLevels);
-            captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstCaptureEntry, &faceLevels);
-            stats.probeTriangles += batchTriangles(captureDraws[static_cast<std::size_t>(face)].batches).first;
-            firstCaptureEntry += static_cast<std::uint32_t>(captureDraws[static_cast<std::size_t>(face)].order.size());
+            captureViews.push_back(CaptureCull{face, probeFaceCullView(face, probeCycleOrigin, probeFar, static_cast<float>(reflectionProbe->getSize()),
+                                                                       settings.levelOfDetail)});
+            probeThinning = thinningErrorPerMetre(captureViews.back().view.levels);
         }
     }
 
@@ -1644,24 +1676,39 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const Mat4 mirrorViewProjection = mirror ? planarViewProjection(motionViewProjection, planeRelativeTo(*mirror, cameraOrigin)) : Mat4::identity();
 
     if (mirror) {
-        const Mat4 worldView = mirrorViewProjection * Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
-        const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, planarFrustum(worldView, *mirror)));
-        const LevelView mirrorLevels = levelView(cameraOrigin, static_cast<float>(mirrorSize.height), camera.getVerticalFov(), settings.levelOfDetail);
-        mirrorThinning = thinningErrorPerMetre(mirrorLevels);
-        captureDraws[cubeFaceCount] = batchByMesh(description.draws, inView, firstCaptureEntry, &mirrorLevels);
+        captureViews.push_back(CaptureCull{cubeFaceCount, mirrorCullView(mirrorViewProjection, cameraOrigin, *mirror, static_cast<float>(mirrorSize.height),
+                                                                         camera.getVerticalFov(), settings.levelOfDetail)});
+        mirrorThinning = thinningErrorPerMetre(captureViews.back().view.levels);
     }
+
+    // Each capture's list: the CPU's (also for a comparison), or a region as big as the draws for the GPU to write, its
+    // view culled with the camera's below.
+    for (const CaptureCull& capture : captureViews) {
+        BatchedDraws& draws = captureDraws[static_cast<std::size_t>(capture.capture)];
+
+        if (cpuLists) {
+            const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, capture.view.frustum));
+            draws = batchByMesh(description.draws, inView, gpuCulling ? 0 : firstCaptureEntry, &capture.view.levels);
+        }
+
+        captureBases[static_cast<std::size_t>(capture.capture)] = firstCaptureEntry;
+
+        if (gpuCulling) {
+            firstCaptureEntry += static_cast<std::uint32_t>(gpuListEntries);
+        } else {
+            stats.probeTriangles += capture.capture < cubeFaceCount ? batchTriangles(draws.batches).first : 0;
+            firstCaptureEntry += static_cast<std::uint32_t>(draws.order.size());
+            capturePasses[static_cast<std::size_t>(capture.capture)] = PassDraws{&draws.batches};
+        }
+    }
+
+    stats.probeTriangles += gpuCulling ? lastCameraCull.probeTriangles : 0;
 
     cpuClock.lap(CpuStage::Captures, profilerSeconds());
 
     // The transparent draws the camera sees, far to near, their entries last in the draw list.
-    std::uint32_t transparentEntry = static_cast<std::uint32_t>(motionBase + motionEntries);
-
-    for (const BatchedDraws& face : captureDraws) {
-        transparentEntry += static_cast<std::uint32_t>(face.order.size());
-    }
-
     const SortedTransparentDraws transparent = sortTransparentDraws(description.draws, transparentDraws(description.draws, seen), cameraOrigin,
-                                                                    transparentEntry);
+                                                                    firstCaptureEntry);
 
     // Glass binds the reflection probe's light even while it does not read it: a one-texel probe stands in when there
     // has never been one (reflections off), replaced when reflections make the real one.
@@ -1780,7 +1827,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     cpuClock.lap(CpuStage::Setup, profilerSeconds());
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     cpuClock.lap(CpuStage::Lines, profilerSeconds());
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, gpuListEntries, captureDraws, transparent, settings, probes,
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, gpuListEntries, captureDraws,
+                                                gpuCulling ? captureViews.size() : 0, transparent, settings, probes,
                                                 hitLights, mirrorPairs, occlusion, occlusionBlurred, occlusionAccumulates, gathersLight, glassShadows, frameFog,
                                                 readsSkyVisibility, contact);
     cpuClock.lap(CpuStage::Pack, profilerSeconds());
@@ -1797,26 +1845,48 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     PassDraws motionPass{&motionDraws.batches};
 
     if (gpuCulling) {
+        // The camera first, then each capture drawn this frame, all culled by one dispatch a pass.
         beginGpuPass(frame, GpuPass::CameraCull);
-        GpuCameraCull cullView = packCameraCull(cameraFrustum, cameraLevels, temporal, sway != nullptr, settings.wind.swayFadeEnd);
-        cullView.mainBase = 0;
-        cullView.motionBase = motionBase;
-        cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, *cullFrame, cullView, frames[frame.frameIndex].scene->drawList.describe().buffer,
+        std::vector<GpuCameraCull> cullViews{packCameraCull(cameraFrustum, cameraLevels, temporal, sway != nullptr, settings.wind.swayFadeEnd)};
+        cullViews[0].mainBase = 0;
+        cullViews[0].motionBase = motionBase;
+        std::vector<int>& captures = cullFrameCaptures[frame.frameIndex];
+        captures.clear();
+
+        for (const CaptureCull& capture : captureViews) {
+            GpuCameraCull view = packCaptureCull(capture.view);
+            view.mainBase = captureBases[static_cast<std::size_t>(capture.capture)];
+            view.motionBase = view.mainBase;
+            cullViews.push_back(view);
+            captures.push_back(capture.capture);
+        }
+
+        cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, *cullFrame, cullViews, frames[frame.frameIndex].scene->drawList.describe().buffer,
                             comparing);
         endGpuPass(frame, GpuPass::CameraCull);
         cullFrameStyles[frame.frameIndex] = cullFrame->styles;
         cullCompares[frame.frameIndex].reset();
 
         if (comparing) {
-            CullCompare compare{mainDraws, motionDraws, {cullFrame->stillRecords.begin(), cullFrame->stillRecords.end()}, cullFrame->meshLevels, cullView};
+            CullCompare compare{{mainDraws}, motionDraws, {"Camera"}, cullViews, {cullFrame->stillRecords.begin(), cullFrame->stillRecords.end()},
+                                cullFrame->meshLevels};
             compare.records.insert(compare.records.end(), cullFrame->movingRecords.begin(), cullFrame->movingRecords.end());
+
+            for (const CaptureCull& capture : captureViews) {
+                compare.viewDraws.push_back(captureDraws[static_cast<std::size_t>(capture.capture)]);
+                compare.names.push_back(capture.capture < cubeFaceCount ? "Probe face " + std::to_string(capture.capture) : std::string{"Mirror"});
+            }
+
             cullCompares[frame.frameIndex] = std::move(compare);
         }
 
-        mainPass = PassDraws{nullptr, &*cullFrame, cameraCulling->getMainCommands(frame.frameIndex), cameraCulling->getPackedMain(frame.frameIndex),
-                             cameraCulling->getDrawCounts(frame.frameIndex), 0};
-        motionPass = PassDraws{nullptr, &*cullFrame, cameraCulling->getMotionCommands(frame.frameIndex), cameraCulling->getPackedMotion(frame.frameIndex),
-                               cameraCulling->getDrawCounts(frame.frameIndex), static_cast<std::uint32_t>(cullStyles)};
+        mainPass = cameraCulling->mainDraws(frame.frameIndex, *cullFrame, 0);
+        motionPass = cameraCulling->motionDraws(frame.frameIndex, *cullFrame);
+
+        for (std::size_t view = 0; view < captureViews.size(); ++view) {
+            capturePasses[static_cast<std::size_t>(captureViews[view].capture)] =
+                cameraCulling->mainDraws(frame.frameIndex, *cullFrame, static_cast<std::uint32_t>(view + 1));
+        }
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
@@ -2004,7 +2074,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The reflection probe, captured where the camera is this frame.
     if (captureProbe) {
         beginGpuPass(frame, GpuPass::ReflectionProbe);
-        drawProbeCapture(frame, probeStep, captureDraws, sceneSet, traceProbes, captureTracesRays, probeFar, description.lighting.background,
+        drawProbeCapture(frame, probeStep, capturePasses, sceneSet, traceProbes, captureTracesRays, probeFar, description.lighting.background,
                          air.has_value());
         probeNextFace = probeStep.nextFace;
         endGpuPass(frame, GpuPass::ReflectionProbe);
@@ -2014,7 +2084,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (mirror) {
         beginGpuPass(frame, GpuPass::PlanarReflection);
         const RenderSize size = planarReflection->getSize();
-        drawPlanarReflection(frame, captureDraws[cubeFaceCount], sceneSet, traceProbes, captureTracesRays, mirrorViewProjection,
+        drawPlanarReflection(frame, capturePasses[cubeFaceCount], sceneSet, traceProbes, captureTracesRays, mirrorViewProjection,
                              planarClipPlane(planeRelativeTo(*mirror, cameraOrigin)), reflectAcrossPlane(Vec3{}, planeRelativeTo(*mirror, cameraOrigin)),
                              mirroredRays(packRayDebugView(camera, RayDebugView::Off, size.width, size.height), *mirror), description.lighting.background, air.has_value());
 
@@ -2265,7 +2335,7 @@ void VulkanRenderer::bakeSkyVisibility(const FrameDescription& description, cons
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
                                            const BatchedDraws& motionDraws, std::size_t gpuListEntries, std::span<const BatchedDraws> captureDraws,
-                                           const SortedTransparentDraws& transparent, const RenderSettings& settings,
+                                           std::size_t gpuCaptureLists, const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
                                            bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
@@ -2309,8 +2379,13 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
     appendCameraList(motionDraws);
 
-    for (const BatchedDraws& face : captureDraws) {
-        appendDrawList(drawList, face);
+    // The captures' lists in capture order (faces, then the mirror), as their bases were counted; the GPU's regions empty.
+    if (gpuListEntries > 0) {
+        drawList.insert(drawList.end(), gpuCaptureLists * gpuListEntries, 0u);
+    } else {
+        for (const BatchedDraws& face : captureDraws) {
+            appendDrawList(drawList, face);
+        }
     }
 
     for (std::size_t index : transparent.order) {
@@ -3041,7 +3116,7 @@ void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparen
 * shader measures from the camera, so each face's view is moved by the camera's offset from it. The probe's own passes
 * follow the cycle's last face (finishCapture).
 */
-void VulkanRenderer::drawProbeCapture(FrameContext& frame, const ProbeCaptureStep& step, std::span<const BatchedDraws> captureDraws,
+void VulkanRenderer::drawProbeCapture(FrameContext& frame, const ProbeCaptureStep& step, std::span<const PassDraws> captureDraws,
                                       VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays, float farPlane, const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
     const std::uint32_t size = reflectionProbe->getSize();
@@ -3061,7 +3136,7 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, const ProbeCaptureSte
         bindCaptureScene(frame, layout, sceneSet, traceRays);
         const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane) * fromCamera, noClipPlane(), Vec3{}, probeThinning);
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-        stats.drawCalls += drawBatches(commands, captureDraws[static_cast<std::size_t>(face)].batches, capturing);
+        stats.drawCalls += drawPassDraws(commands, captureDraws[static_cast<std::size_t>(face)], capturing);
 
         if (sky) {
             atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(),
@@ -3091,7 +3166,7 @@ void VulkanRenderer::bindCaptureScene(FrameContext& frame, VkPipelineLayout layo
 * scene's draws in the mirror's own view, the sky over the background through the camera's rays mirrored, then the
 * picture's blurrier levels (finishDraw).
 */
-void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
+void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const PassDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
                                           const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, const GpuRayDebugView& skyRays,
                                           const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
@@ -3108,7 +3183,7 @@ void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraw
     bindCaptureScene(frame, layout, sceneSet, traceRays);
     const GpuCaptureView view = packCaptureView(viewProjection, clipPlane, eye, mirrorThinning);
     vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-    stats.drawCalls += drawBatches(commands, draws.batches, capturing);
+    stats.drawCalls += drawPassDraws(commands, draws, capturing);
 
     if (sky) {
         atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(), skyRays);
@@ -3241,7 +3316,7 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
         }
 
         state.use(commands, (run & 2) != 0, (run & 1) != 0);
-        vkCmdDrawIndexedIndirectCount(commands, draws.packed, VkDeviceSize{order.runFirst[run]} * sizeof(GpuDrawCommand), draws.counts,
+        vkCmdDrawIndexedIndirectCount(commands, draws.packed, (VkDeviceSize{draws.commandFirst} + order.runFirst[run]) * sizeof(GpuDrawCommand), draws.counts,
                                       (draws.countOffset + run) * sizeof(std::uint32_t), order.runCount[run], sizeof(GpuDrawCommand));
         ++calls;
     }
@@ -3251,7 +3326,7 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
         const CullGroupStyle& style = draws.groups->styles[group];
         state.use(commands, style.cutOut, style.doubleSided);
         bindMesh(commands, style.mesh, pipelines.previousShapes);
-        vkCmdDrawIndexedIndirect(commands, draws.commands, static_cast<VkDeviceSize>(group) * sizeof(GpuDrawCommand), 1, sizeof(GpuDrawCommand));
+        vkCmdDrawIndexedIndirect(commands, draws.commands, (VkDeviceSize{draws.commandFirst} + group) * sizeof(GpuDrawCommand), 1, sizeof(GpuDrawCommand));
         ++calls;
     }
 
@@ -3854,6 +3929,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     occlusionCulling->setFramesInFlight(count);
     cameraCulling->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
+    cullFrameCaptures.assign(count, {});
     cullCompares.assign(count, std::nullopt);
 
     if (rayTracing) {

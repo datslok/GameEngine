@@ -6,6 +6,8 @@
 #include "math/mat4.h"
 #include "render/gpu/camera_culling.h"
 #include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/planar_reflection.h"
+#include "render/gpu/reflection_probe.h"
 #include "render/gpu/render_settings.h"
 #include "render/gpu/transparency.h"
 #include "render/gpu/wind.h"
@@ -198,6 +200,107 @@ namespace {
     }
 
     /*
+    * A capture's view (each probe face from its cycle's origin, and a mirror) through the passes' steps gives
+    * batchByMesh's list over that view's own frustum and levels, entry for entry, and no velocity list: what the CPU
+    * drew for each capture.
+    */
+    void testCaptureViewsMatchTheCpu() {
+        std::mt19937 random{53};
+        const CullScene scene = randomCullScene(random);
+        const std::vector<GpuMeshLevels> tables = packCullSceneLevels(scene);
+        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testPlacement);
+        const CullDrawOrder order = cullDrawOrder(groups.styles);
+        std::vector<GpuCullRecord> records;
+
+        for (const DrawItem& draw : scene.draws) {
+            records.push_back(packCullRecord(draw));
+        }
+
+        std::uniform_real_distribution<float> unit{0.0f, 1.0f};
+        std::size_t drawn = 0;
+
+        const auto assertViewMatches = [&](const CaptureCullView& capture) {
+            GpuCameraCull packed = packCaptureCull(capture);
+            assert((packed.flags & (CAMERA_CULL_MOTION | CAMERA_CULL_SWAY)) == 0u);
+            packed.candidates = static_cast<std::uint32_t>(groups.candidates.size());
+            packed.groups = static_cast<std::uint32_t>(groups.groups.size());
+            packed.mainBase = 123;
+            packed.motionBase = 123;
+
+            for (std::size_t run = 0; run < cullStyles; ++run) {
+                packed.runFirst[run] = order.runFirst[run];
+                packed.runCount[run] = order.runCount[run];
+            }
+
+            const CameraCullResult result = cullCameraOnCpu(records, tables, groups.groups, groups.candidates, order.order, packed);
+            const std::vector<std::size_t> visible = opaqueDraws(scene.draws, visibleDraws(scene.draws, capture.frustum));
+            const BatchedDraws cpu = batchByMesh(scene.draws, visible, 0, &capture.levels);
+            assert(result.mainEntries == entriesOf(cpu));
+            assertCommandsMatch(result.mainCommands, cpu, packed.mainBase);
+            assertPacked(result.mainCommands, result.packedMain, result.mainCounts, order);
+            assert(result.motionEntries.empty() && drawingCommands(result.motionCommands).empty());
+            drawn += result.mainEntries.size();
+        };
+
+        for (int round = 0; round < 3; ++round) {
+            LevelOfDetailSettings settings;
+            settings.enabled = round != 2;
+            settings.pixelError = 0.5f + unit(random) * 4.0f;
+            const Vec3 origin{(unit(random) - 0.5f) * 2000.0f, 10.0f + unit(random) * 100.0f, (unit(random) - 0.5f) * 2000.0f};
+
+            for (int face = 0; face < cubeFaceCount; ++face) {
+                assertViewMatches(probeFaceCullView(face, origin, 500.0f + unit(random) * 1500.0f, 128.0f + 384.0f * unit(random), settings));
+            }
+
+            // A mirror ahead of the camera facing it: the camera-relative view through it, as the renderer makes it.
+            const float yaw = unit(random) * 2.0f * std::numbers::pi_v<float>;
+            const Vec3 forward{std::cos(yaw), 0.0f, std::sin(yaw)};
+            const MirrorPlane mirror{forward * -1.0f, (forward * -1.0f).dot(origin + forward * 20.0f)};
+            const float fov = 0.6f + unit(random) * 0.8f;
+            const Mat4 relative = toGpuDepthRange(Mat4::perspective(fov, 16.0f / 9.0f, 0.1f, 3000.0f)) *
+                                  Mat4::lookAt(Vec3{}, forward, Vec3{0.0f, 1.0f, 0.0f});
+            const Mat4 mirrorView = planarViewProjection(relative, planeRelativeTo(mirror, origin));
+            assertViewMatches(mirrorCullView(mirrorView, origin, mirror, 540.0f, fov, settings));
+        }
+
+        assert(drawn > 1000);
+    }
+
+    /*
+    * Views placed one after another in the passes' shared buffers: each takes its counts, the drawing order's runs and
+    * slices as big as one view needs, the next view's starting where its own end, so no two views share a word.
+    */
+    void testViewsHaveTheirOwnSlices() {
+        std::mt19937 random{61};
+        const CullScene scene = randomCullScene(random, 1000);
+        const CullGroups groups = buildCullGroups(scene.draws, 0, scene.draws.size(), testPlacement);
+        const CullDrawOrder order = cullDrawOrder(groups.styles);
+        const std::uint32_t candidates = static_cast<std::uint32_t>(groups.candidates.size());
+        const std::uint32_t blocks = (candidates + cameraCullGroupSize - 1) / cameraCullGroupSize;
+
+        GpuCameraCull first{};
+        GpuCameraCull second{};
+        placeCullView(first, 0, candidates, order);
+        placeCullView(second, 1, candidates, order);
+        assert(first.candidates == candidates && first.groups == order.order.size() && first.blocks == blocks);
+        assert(first.view == 0 && second.view == 1);
+
+        for (std::size_t run = 0; run < cullStyles; ++run) {
+            assert(second.runFirst[run] == order.runFirst[run] && second.runCount[run] == order.runCount[run]);
+        }
+
+        assert(first.slices[CAMERA_CULL_SLICE_FLAGS] == 0 && second.slices[CAMERA_CULL_SLICE_FLAGS] == candidates);
+        assert(first.slices[CAMERA_CULL_SLICE_BLOCKS] == 0 && second.slices[CAMERA_CULL_SLICE_BLOCKS] == blocks + 1);
+        assert(first.slices[CAMERA_CULL_SLICE_COMMANDS] == 0 && second.slices[CAMERA_CULL_SLICE_COMMANDS] == first.groups);
+        assert(first.slices[CAMERA_CULL_SLICE_PLACES] == 0 && second.slices[CAMERA_CULL_SLICE_PLACES] == order.pooled + 1);
+
+        // What every view's slices take together, for sizing the buffers.
+        const CullViewSizes sizes = cullViewSizes(2, candidates, order);
+        assert(sizes.flags == 2 * candidates && sizes.blocks == 2 * (blocks + 1));
+        assert(sizes.commands == 2 * first.groups && sizes.places == 2 * (order.pooled + 1));
+    }
+
+    /*
     * Groups follow batchByMesh's order (style, then mesh), each group's candidates in draw order; glass draws none, and
     * a draw has one candidate a slot with a mesh. Draw numbers count from the range's first.
     */
@@ -381,7 +484,8 @@ namespace {
 
         const CullListComparison same = compareCullList(groups.styles, result.mainCommands, result.mainEntries, packed.mainBase, cpu, never);
         assert(same.entries == cpu.order.size() && same.matching == same.entries && same.missing == 0 && same.extra == 0);
-        assert(describeCullComparison(same, same).find("agree") != std::string::npos);
+        const std::vector<NamedCullComparison> agreeing{{"Camera", same}, {"Velocity", same}};
+        assert(describeCullComparison(agreeing).find("agree") != std::string::npos);
 
         // The last entry of the first drawing group changed to another draw: one missing, one extra.
         std::vector<std::uint32_t> changed = result.mainEntries;
@@ -391,13 +495,16 @@ namespace {
         changed[at] = (changed[at] & drawListIndexMask) == 999 ? 998 : 999;
         const CullListComparison differs = compareCullList(groups.styles, result.mainCommands, changed, packed.mainBase, cpu, never);
         assert(differs.missing == 1 && differs.extra == 1 && differs.matching == differs.entries - 1);
-        assert(describeCullComparison(differs, same).find("DIFFER") != std::string::npos);
+        const std::vector<NamedCullComparison> faceDiffers{{"Camera", same}, {"Probe face 2", differs}};
+        const std::string differing = describeCullComparison(faceDiffers);
+        assert(differing.find("DIFFER") != std::string::npos && differing.find("Probe face 2: ") != std::string::npos);
 
         // Every draw near an edge: the differences are counted there, and the lists agree.
         const auto always = [](std::uint32_t) { return true; };
         const CullListComparison edges = compareCullList(groups.styles, result.mainCommands, changed, packed.mainBase, cpu, always);
         assert(edges.nearAnEdge == 2);
-        assert(describeCullComparison(edges, same).find("agree") != std::string::npos);
+        const std::vector<NamedCullComparison> nearEdges{{"Camera", edges}, {"Mirror", same}};
+        assert(describeCullComparison(nearEdges).find("agree") != std::string::npos);
 
         // The thinned bit counts.
         changed = result.mainEntries;
@@ -473,6 +580,8 @@ namespace {
 */
 void testCameraCulling() {
     testListsMatchTheCpu();
+    testCaptureViewsMatchTheCpu();
+    testViewsHaveTheirOwnSlices();
     testGroupsFollowTheBatchOrder();
     testTableKeepsTheStillDraws();
     testComparison();

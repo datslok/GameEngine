@@ -2,17 +2,18 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* The camera's GPU culling, pass 3 of 3 (render/vulkan/vulkan_camera_culling.h): each flagged candidate writes its draw
-* list entry at its place (its block's first place plus its offset), with its thinned bit; each group writes its
-* indirect commands from the places at its two ends. One invocation a candidate or group, whichever are more.
+* The GPU culling, pass 3 of 4 (render/vulkan/vulkan_camera_culling.h): each flagged candidate writes its draw list
+* entry at its place (its block's first place plus its offset), with its thinned bit; each group writes its indirect
+* commands from the places at its two ends. One invocation a candidate or group, whichever are more, and view (the
+* dispatch's y), in that view's slices and draw list regions.
 */
 #include "render/gpu/instance_shared.h"
 #include "camera_culling.glsl"
 
 layout(local_size_x = CAMERA_CULL_GROUP_SIZE) in;
 
-layout(std430, set = 0, binding = 0) readonly buffer View {
-    CameraCull view;
+layout(std430, set = 0, binding = 0) readonly buffer Views {
+    CameraCull views[];
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer Candidates {
@@ -35,7 +36,7 @@ layout(std430, set = 0, binding = 5) readonly buffer Groups {
     CullGroup groups[];
 };
 
-// The frame's draw list (instances.glsl's), its camera and velocity regions written here.
+// The frame's draw list (instances.glsl's), each view's regions written here.
 layout(std430, set = 0, binding = 6) writeonly buffer DrawList {
     uint drawList[];
 };
@@ -48,19 +49,21 @@ layout(std430, set = 0, binding = 8) writeonly buffer MotionCommands {
     DrawCommand motionCommands[];
 };
 
-// A candidate's place in both lists; past the last candidate, the totals.
-uvec2 placeOf(uint candidate) {
-    return candidate >= view.candidates ? blockFirst[view.blocks] : blockFirst[candidate / CAMERA_CULL_GROUP_SIZE] + offsets[candidate];
+// A candidate's place in both of the view's lists; past the last candidate, the totals.
+uvec2 placeOf(CameraCull view, uint candidate) {
+    return candidate >= view.candidates ? blockFirst[view.slices.y + view.blocks]
+                                        : blockFirst[view.slices.y + candidate / CAMERA_CULL_GROUP_SIZE] + offsets[view.slices.x + candidate];
 }
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
+    CameraCull view = views[gl_WorkGroupID.y];
 
     if (index < view.candidates) {
-        uint candidateFlags = flags[index];
+        uint candidateFlags = flags[view.slices.x + index];
 
         if (candidateFlags != 0u) {
-            uvec2 place = placeOf(index);
+            uvec2 place = placeOf(view, index);
             uint entry = candidates[index].draw | ((candidateFlags & CAMERA_CULL_THINNED) != 0u ? DRAW_LIST_THINNED_BIT : 0u);
 
             if ((candidateFlags & CAMERA_CULL_DRAWN) != 0u) {
@@ -75,9 +78,10 @@ void main() {
 
     if (index < view.groups) {
         CullGroup group = groups[index];
-        uvec2 start = placeOf(group.firstCandidate);
-        uvec2 end = placeOf(group.firstCandidate + group.candidates);
-        mainCommands[index] = DrawCommand(group.indexCount, end.x - start.x, group.firstIndex, group.vertexOffset, view.mainBase + start.x);
-        motionCommands[index] = DrawCommand(group.indexCount, end.y - start.y, group.firstIndex, group.vertexOffset, view.motionBase + start.y);
+        uvec2 start = placeOf(view, group.firstCandidate);
+        uvec2 end = placeOf(view, group.firstCandidate + group.candidates);
+        uint command = view.slices.z + index;
+        mainCommands[command] = DrawCommand(group.indexCount, end.x - start.x, group.firstIndex, group.vertexOffset, view.mainBase + start.x);
+        motionCommands[command] = DrawCommand(group.indexCount, end.y - start.y, group.firstIndex, group.vertexOffset, view.motionBase + start.y);
     }
 }

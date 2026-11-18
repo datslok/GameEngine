@@ -34,7 +34,7 @@ struct DrawCommand {
     uint firstInstance;
 };
 
-// The frame's camera. Must match GpuCameraCull.
+// A view culled: the camera, a probe face or the mirror. Must match GpuCameraCull.
 struct CameraCull {
     CullFrustum frustum;
     LevelView levels;
@@ -42,12 +42,13 @@ struct CameraCull {
     uint flags;        // CAMERA_CULL_MOTION, CAMERA_CULL_SWAY
     uint candidates;
     uint groups;
-    uint mainBase;     // the camera's first entry in the draw list
+    uint mainBase;     // the view's first entry in the draw list
     uint motionBase;   // the velocity pass's
     uint blocks;       // workgroups of candidates
-    uint unused;
+    uint view;         // its number in the dispatch: its counts' and packed counts' place
     uvec4 runFirst;    // each style's pooled groups' first place in the drawing order
     uvec4 runCount;    // and how many
+    uvec4 slices;      // CAMERA_CULL_SLICE_* (x flags, y blocks, z commands, w places): its parts of the working buffers
 };
 
 // Whether part of a sphere is nearer the eye than the sway's fade end (drawSways; unknown bounds count from the centre).

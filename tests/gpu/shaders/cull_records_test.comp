@@ -74,7 +74,8 @@ void main() {
         cull.mainBase = 0u;
         cull.motionBase = 0u;
         cull.blocks = 0u;
-        cull.unused = 0u;
+        cull.view = 0u;
+        cull.slices = uvec4(0u);
         testOutput(0, vec4(float(cameraCandidateFlags(record, levels, cull, uint(camera.y))), swayReaches(record.bounds, view.eye.xyz, camera.z) ? 1.0 : 0.0,
                            0.0, 0.0));
     }

@@ -399,7 +399,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] 1. Indirect draws: each batch drawn by `vkCmdDrawIndexedIndirect` from a command the CPU writes, nothing else changed (`indirect-draws`)
   - [x] 2. Culling records and a level table on the GPU, copied each frame as the instances are (the user chose two steps; the persistent scene's lasting GPU buffers then remove both copies); level and frustum maths in shader libraries with C++ mirrors (`cull-records`)
   - [x] 3. The camera's and velocity pass's lists built on the GPU behind a setting, `cull-compare` against the CPU's (`gpu-cull-camera`): on by default, lists equal the CPU's, the camera's CPU work 9-10 ms → 0.2 ms at the rim and Ring
-  - [ ] 4. Reflection probe faces and the mirror as GPU views (`gpu-cull-captures`)
+  - [x] 4. Reflection probe faces and the mirror as GPU views (`gpu-cull-captures`): views of the camera's culling, the dispatch's second dimension, each in its own slices; one call a style a capture
   - [ ] 5. Shadow tiles as GPU views, the cache redrawn on announced changes; then the CPU path deleted (`gpu-cull-shadows`)
   - [x] 6. One shared mesh buffer, a multi-draw per pipeline state (`mesh-megabuffer`; done before stages 4 and 5, the user's choice, Nov 18 2026, research in `docs/research/MESHPOOL.md`): the forest's 502 MB of meshes in two pools, each pass's groups packed by the GPU and drawn by one call a style; the camera's calls 7,500 to 12, RECORD 3.5 to 1.3 ms
   - [ ] 7. Chunks of instances culled first, coarse CPU cells for streaming worlds (`scene-chunks`, required for phase 13)
