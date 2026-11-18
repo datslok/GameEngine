@@ -367,6 +367,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] Still draws' records kept: instances, last-frame matrices and a material table packed once, repacked where built (`gpu-scene-persistent`)
   - [x] Lasting GPU buffers updated only where they change (the 8 MB copy a frame left, about 2 ms; measured first): built by cells, GPU-driven drawing's stage 7a (`scene-cells`)
   - [ ] Views without full scans (measured first)
+  - [x] The terrain's blended-ground materials packed once a run of patches, their layers on every core, not ground and layers one by one on one thread for every patch (`ground-material-runs`; measured in `scene-cells`: 1.55 of PACK's 1.8 ms for 699 patches): PACK 1.8 to 0.7 ms
   - [ ] Still entities announced when added, destroyed, hidden or shown, so `StillDraws` no longer walks every renderer each frame to find them (about 0.7 ms in the forest, growing with the world; the user, Nov 18 2026, from `scene-cells`' plan)
 - [x] Cheaper forest shadows: the understorey in the nearest two cascades, shadow bark, leaf cards cut to their twigs' outline (`understorey-shadow-cascades`)
 - [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/research/SHADOWCACHE.md`)
