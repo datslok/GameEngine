@@ -43,7 +43,7 @@ void Application::registerCommands() {
     });
     addCameraCommands(commands, game, world);
     addDebugViewCommand(commands, game);
-    addCullCompareCommand(commands, settings.render, [this] {
+    addCullCompareCommand(commands, [this] {
         return renderer.compareCulling();
     });
     game.addCommands(commands, world);

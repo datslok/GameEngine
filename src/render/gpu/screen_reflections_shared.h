@@ -12,7 +12,7 @@
 #define SSR_MAX_PYRAMID_LEVELS 16
 
 // What a depth pyramid level keeps of the 2x2 texels below it (GpuPyramidPass target.w): the nearest, for the reflections'
-// march, or the farthest, for occlusion culling (render/gpu/occlusion_culling.h).
+// march, or the farthest, for testing what a depth hides (occlusion culling, docs/research/OCCLUSION.md).
 #define DEPTH_PYRAMID_NEAREST 0
 #define DEPTH_PYRAMID_FARTHEST 1
 

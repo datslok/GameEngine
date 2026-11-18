@@ -142,6 +142,25 @@ void UploadArray::writeParts(const void* first, std::size_t firstBytes, const vo
     }
 }
 
+// Grown buffers lose their contents, which is fine: every place is written each frame, by the CPU or the GPU.
+void UploadArray::writeRuns(const DrawListLayout& layout) {
+    const std::size_t bytes = static_cast<std::size_t>(layout.size()) * sizeof(std::uint32_t);
+
+    if (bytes > buffer.getSize()) {
+        const std::size_t grown = std::max(bytes, 2 * static_cast<std::size_t>(buffer.getSize()));
+        buffer = VulkanBuffer{allocator, grown, usage, BufferMemory::Upload};
+    }
+
+    for (const DrawListLayout::Run& run : layout.getRuns()) {
+        std::memcpy(static_cast<std::byte*>(buffer.getMapped()) + static_cast<std::size_t>(run.first) * sizeof(std::uint32_t), run.entries.data(),
+                    run.entries.size() * sizeof(std::uint32_t));
+    }
+
+    if (!layout.getRuns().empty()) {
+        buffer.flush();
+    }
+}
+
 VkDescriptorBufferInfo UploadArray::describe() const {
     return VkDescriptorBufferInfo{buffer.get(), 0, VK_WHOLE_SIZE};
 }

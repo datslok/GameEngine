@@ -81,19 +81,18 @@ A tile's image depends only on its view and its casters, so unchanged tiles are 
 
 - `ShadowTileMemory`: per square, the matrix and signature last drawn there. `isCurrent`, `remember` (forgets squares the new one overlaps), `forgetAll` (after any render error, or atlas contents lost).
 - `shadowCasterSignature`: FNV-1a over each caster's mesh, model matrix, shape and, with levels, the level drawn; `tintedShadowSignature` adds the glass that tints it (identical without glass); `swayingShadowSignature` (`render/gpu/wind`) makes a swaying tile redraw every frame.
-- **With GPU culling** (`passes.gpuCulling`, default): the fingerprint covers only the moving draws and glass; still changes come from the scene's announcements and the GPU finds the casters (`gpu-driven.md`, Shadow tiles).
+- **What the fingerprint covers:** only the moving draws and glass; still changes come from the scene's announcements and the GPU finds the casters (`gpu-driven.md`, Shadow tiles).
 - **Still and moving casters** (`separateMovers`, the far map): its still casters cached in a separate "Still shadow" image; each frame the movers' patches (`shadowPatch`, `splitMovingCasters`, `movedSinceLastFrame`) are copied back from it and the movers drawn over them.
 
 ## Preparing and drawing
 
-`prepareShadowDraws` (CPU, before recording; with GPU culling `prepareGpuShadowDraws` instead, `gpu-driven.md`):
+`prepareShadowDraws` (CPU, before recording; `gpu-driven.md`, Shadow tiles):
 
 1. Skip size-0 tiles.
-2. `castersInReach(draws, tile.reach)`: bounding sphere against the light's range sphere, computed once per run of tiles sharing a reach (a point light's faces). A caster wholly beyond the range cannot block where the light shines.
-3. `shadowTileCasters`: `shadowCasters(draws, candidates, frustum)` for the tile's view, then `castersAtLeast(smallestCaster)` and `castersForCascade`.
-4. Levels of detail by the tile's own texels (`tileLevelView`), so a cached picture stays right as the camera walks.
-5. Signature against `ShadowTileMemory`; unchanged tiles without movers are counted cached and skipped.
-6. Casters batched (`batchByMesh`) into the draw list after the main pass's entries.
+2. The tile's needs (`shadowTileNeeds`): its key (moving draws it takes, glass, levels, sway) against `ShadowTileMemory`, and the still changes touching it; unchanged tiles without movers are counted cached and skipped.
+3. A drawn tile: a view of the GPU culling, room for its lists in the draw list, its glass batched there by the CPU.
+
+The CPU's reference for a tile's casters (`shadowTileCasters`: `castersInReach`, `shadowCasters` for its view, `castersAtLeast(smallestCaster)`, `castersForCascade`, levels by `tileLevelView`) is what the tests and `cull-compare` check the GPU against.
 
 `drawShadows`:
 

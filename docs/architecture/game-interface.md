@@ -167,7 +167,6 @@ Then, independently, `drawWindField` while `WindSettings::showField` is on (wind
 |---|---|
 | `DRAWN  CULLED  CALLS` | Camera draws, culled, draw calls (prepass included) |
 | `LEVELS a b c d  TRIS  CUT  PROBE` | `drawnByLevel` (mesh itself first); thousands of triangles drawn, of cut-outs, of reflection probe faces this frame |
-| `HIDDEN n OF m p PCT  TRIS aK OF bK q PCT` | While `measureOcclusion`: the camera's draws and triangles the prepass's depth would hide (`occlusion-culling.md`), a frame or two late |
 | `SHADOW DRAWN  CULLED  CALLS` | Over drawn shadow views |
 | `LIGHTS  IN VIEW  LIT  SHADOWED  IN MIRRORS` | Point lights; image lights only when any |
 | `TILES DRAWN  CACHED  SKIPPED  SUN TO` | Shadow tiles; `sunShadowDistance` when a sun is shadowed |

@@ -284,6 +284,37 @@ void appendDrawList(std::vector<std::uint32_t>& list, const BatchedDraws& batche
     }
 }
 
+std::uint32_t DrawListLayout::reserve(std::size_t count) {
+    const std::uint32_t first = entries;
+    entries += static_cast<std::uint32_t>(count);
+    return first;
+}
+
+// Entries straight after the last run continue it, so each write is one copy.
+std::uint32_t DrawListLayout::append(std::span<const std::uint32_t> list) {
+    const std::uint32_t first = entries;
+
+    if (list.empty()) {
+        return first;
+    }
+
+    if (runs.empty() || runs.back().first + runs.back().entries.size() != first) {
+        runs.push_back(Run{first, {}});
+    }
+
+    runs.back().entries.insert(runs.back().entries.end(), list.begin(), list.end());
+    entries += static_cast<std::uint32_t>(list.size());
+    return first;
+}
+
+std::uint32_t DrawListLayout::size() const {
+    return entries;
+}
+
+const std::vector<DrawListLayout::Run>& DrawListLayout::getRuns() const {
+    return runs;
+}
+
 std::vector<GpuThinningRecord> packCardThinning(const IndexedMesh& mesh) {
     if (mesh.thinningCards.empty()) {
         return {};

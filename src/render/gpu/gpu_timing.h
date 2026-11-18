@@ -14,7 +14,7 @@
 enum class GpuPass {
     Cloth,
     DebugUi,
-    CameraCull,   // the camera's and velocity pass's lists built on the GPU (render/gpu/camera_culling.h), while engine.render.passes.gpuCulling is on
+    CameraCull,   // every view's lists built on the GPU (render/gpu/camera_culling.h): the camera, velocity pass, captures, shadow tiles
     RayScene,
     Atmosphere,
     Probes,
@@ -23,7 +23,6 @@ enum class GpuPass {
     Shadows,
     Fog,          // the fog's grid lit and integrated (render/gpu/volumetric_fog.h)
     DepthPrepass,
-    Occlusion,    // occlusion culling: the farthest-depth pyramid of the prepass and the camera's draws tested against it (render/gpu/occlusion_culling.h)
     ColourPyramid, // last frame's picture's blurrier levels, built here while ambient occlusion gathers light from them
     AmbientOcclusion, // ambient occlusion from the prepass's depth (render/gpu/ambient_occlusion.h): the pass itself
     AoHistory,    // its temporal accumulation

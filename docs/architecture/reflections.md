@@ -48,7 +48,7 @@ With reflections on, the main pass writes three more targets at the render size 
 
 | Pyramid | Shader | Format | Level 0 | Each level up |
 |---|---|---|---|---|
-| Depth (`VulkanDepthPyramid`) | `depth_pyramid.comp` | R32F, full chain, at most `SSR_MAX_PYRAMID_LEVELS` (16) | this frame's depth | `DepthReduction`: nearest (reversed-Z: largest) of the 2x2 below for the reflections; farthest (smallest) for occlusion culling (`occlusion-culling.md`), its own pyramid |
+| Depth (`VulkanDepthPyramid`) | `depth_pyramid.comp` | R32F, full chain, at most `SSR_MAX_PYRAMID_LEVELS` (16) | this frame's depth | `DepthReduction`: nearest (reversed-Z: largest) of the 2x2 below for the reflections; farthest (smallest) kept for testing what a depth hides (`docs/research/OCCLUSION.md`) |
 | Colour (`VulkanColourPyramid`) | `colour_pyramid.comp` | RGBA16F, same levels | last frame's finished picture (`finishedScene`: TAA's history, FSR's or DLSS's output) resampled to the render size | average of the 2x2 below |
 
 - An odd level's far edge also takes the leftover texel (`pyramidLastFine`), so every texel has a cell above it (`pyramidCell` clamps).

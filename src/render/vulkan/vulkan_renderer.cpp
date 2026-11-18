@@ -140,8 +140,6 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     depthOfField = std::make_unique<VulkanDepthOfField>(device, nearestSampler.get(), linearSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
-    occlusionCulling = std::make_unique<VulkanOcclusionCulling>(device, nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout(),
-                                                                framesInFlight);
     cameraCulling = std::make_unique<VulkanCameraCulling>(device, framesInFlight);
     meshPool = std::make_unique<VulkanMeshPool>(device, uploads);
     cullFrameStyles.resize(framesInFlight);
@@ -863,7 +861,6 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     fsr->ensureSize(width, height);
     dlss->ensureSize(width, height);
     reflections->ensureSize(scene);
-    occlusionCulling->ensureSize(scene);
 
     if (mirroredLights && mirroredLights->hasImages()) {
         mirroredLights->ensureSize(scene);
@@ -987,10 +984,6 @@ FrameContext VulkanRenderer::beginFrame() {
 
     if (const std::optional<GpuEyeAdaptation> adapted = eyeAdaptation->collect(frameIndex)) {
         lastEyeAdaptation = adapted;
-    }
-
-    if (const std::optional<OcclusionCounts> counted = occlusionCulling->collect(frameIndex)) {
-        lastOcclusionCounts = counted;
     }
 
     if (const std::optional<VulkanCameraCulling::Collected> culled = cameraCulling->collect(frameIndex)) {
@@ -1249,6 +1242,64 @@ void VulkanRenderer::takeCameraCull(const VulkanCameraCulling::Collected& culled
     compare.reset();
 }
 
+/*
+* cull-compare's reference, from the CPU's culling functions: the camera's opaque draws in view batched by mesh, the
+* velocity pass's (those that moved, sway within reach or changed shape), each capture's in its own view, and each
+* drawn shadow tile's casters (shadowTileCasters, split where it keeps its movers apart) without thinned marks, since
+* shadow shaders thin nothing. Lists are numbered by their views as culled.
+*/
+VulkanRenderer::CullCompare VulkanRenderer::cpuReferenceLists(const FrameDescription& description, const CameraCullFrame& table,
+                                                              const std::vector<GpuCameraCull>& views, const Frustum& cameraFrustum, const LevelView& cameraLevels,
+                                                              bool motion, const WindSettings* sway, const std::vector<CaptureCull>& captures,
+                                                              const ShadowDraws& shadowDraws, const LevelOfDetailSettings& levelSettings) const {
+    const std::vector<DrawItem>& draws = description.draws;
+    const std::vector<std::size_t> visible = opaqueDraws(draws, visibleDraws(draws, cameraFrustum));
+    std::vector<std::size_t> moving;
+
+    if (motion) {
+        for (std::size_t index : visible) {
+            const DrawItem& draw = draws[index];
+            const bool moved = draw.previousModel && *draw.previousModel != draw.model;
+            const bool swaying = sway != nullptr && drawSways(draw.sway, draw.bounds.centre, draw.bounds.radius, cameraOrigin, *sway);
+
+            if (moved || swaying || meshes.at(draw.mesh.index)->changedShape()) {
+                moving.push_back(index);
+            }
+        }
+    }
+
+    CullCompare compare{{{0, false, "Camera", batchByMesh(draws, visible, 0, &cameraLevels)}, {0, true, "Velocity", batchByMesh(draws, moving, 0, &cameraLevels)}},
+                        views, {table.stillRecords.begin(), table.stillRecords.end()}, table.meshLevels};
+    compare.records.insert(compare.records.end(), table.movingRecords.begin(), table.movingRecords.end());
+
+    for (std::size_t view = 0; view < captures.size(); ++view) {
+        const CaptureCull& capture = captures[view];
+        const std::vector<std::size_t> inView = opaqueDraws(draws, visibleDraws(draws, capture.view.frustum));
+        compare.lists.push_back(CullCompare::List{static_cast<std::uint32_t>(view + 1), false,
+                                                  capture.capture < cubeFaceCount ? "Probe face " + std::to_string(capture.capture) : std::string{"Mirror"},
+                                                  batchByMesh(draws, inView, 0, &capture.view.levels)});
+    }
+
+    const std::uint32_t firstShadowView = static_cast<std::uint32_t>(1 + captures.size());
+
+    for (std::size_t tile = 0; tile < shadowDraws.tiles.size(); ++tile) {
+        const ShadowTile& shadowTile = *shadowDraws.tiles[tile].tile;
+        const std::vector<std::size_t> found = shadowTileCasters(draws, castersInReach(draws, shadowTile.reach), shadowTile);
+        const ShadowCasterSplit split = shadowTile.separateMovers ? splitMovingCasters(draws, found) : ShadowCasterSplit{found, {}};
+        const LevelView tileLevels = tileLevelView(shadowTile, levelSettings);
+        const std::uint32_t view = firstShadowView + static_cast<std::uint32_t>(tile);
+        const std::string name = "Shadow tile " + std::to_string(tile);
+        BatchedDraws still = batchByMesh(draws, split.still, 0, &tileLevels);
+        BatchedDraws moved = batchByMesh(draws, split.moving, 0, &tileLevels);
+        still.thinned.clear();
+        moved.thinned.clear();
+        compare.lists.push_back(CullCompare::List{view, false, name, std::move(still)});
+        compare.lists.push_back(CullCompare::List{view, true, name + " movers", std::move(moved)});
+    }
+
+    return compare;
+}
+
 std::string VulkanRenderer::describeSkyPoints(const Vec3& place) const {
     return skyVisibility->describePoints(place);
 }
@@ -1498,27 +1549,21 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
         [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
 
-    // What the camera sees, settled first: the mirror is chosen from it, and the shadows need the mirror.
-    // Glass and blended surfaces are left out of every opaque view and drawn last, sorted (render/gpu/transparency.h).
-    // While the GPU culls the camera (render/gpu/camera_culling.h), the CPU looks only at the glass (sorted here) and the
-    // mirror's candidates, and its counts come from the GPU a frame or two late; a comparison asked for (cull-compare)
-    // has the CPU make its own lists too, this frame, to compare once the GPU's are read back.
+    // What the camera sees, settled first: the mirror is chosen from it, and the shadows need the mirror. The GPU culls
+    // every view (render/gpu/camera_culling.h); the CPU looks only at the glass (left out of every opaque view and drawn
+    // last, sorted: render/gpu/transparency.h) and the mirror's candidates, and the counts come from the GPU a frame or
+    // two late. A comparison asked for (cull-compare) has the CPU make its own lists this frame, to compare once the
+    // GPU's are read back.
     cpuClock.lap(CpuStage::Setup, profilerSeconds());
-    const bool gpuCulling = settings.gpuCulling;
-    const bool comparing = gpuCulling && cullCompareAsked;
-    const bool cpuLists = !gpuCulling || comparing;
+    const bool comparing = cullCompareAsked;
     cullCompareAsked = false;
-    std::optional<CameraCullFrame> cullFrame;
+    const CameraCullFrame cullFrame = cameraCullTable.update(
+        description, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
+        [this](MeshHandle mesh) { return mesh.index < meshes.size() && meshes[mesh.index] && meshes[mesh.index]->changedShape(); });
 
-    if (gpuCulling) {
-        cullFrame = cameraCullTable.update(
-            description, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
-            [this](MeshHandle mesh) { return mesh.index < meshes.size() && meshes[mesh.index] && meshes[mesh.index]->changedShape(); });
-    }
-
-    const std::vector<std::size_t> seen = cpuLists ? visibleDraws(description.draws, cameraFrustum) : visibleDraws(description.draws, cullFrame->glass, cameraFrustum);
-    const std::vector<std::size_t> visible = cpuLists ? opaqueDraws(description.draws, seen) : visibleDraws(description.draws, cullFrame->flatFaced, cameraFrustum);
-    stats.drawn = gpuCulling ? lastCameraCull.drawn + transparentDraws(description.draws, seen).size() : seen.size();
+    const std::vector<std::size_t> glassSeen = visibleDraws(description.draws, cullFrame.glass, cameraFrustum);
+    const std::vector<std::size_t> mirrorCandidates = visibleDraws(description.draws, cullFrame.flatFaced, cameraFrustum);
+    stats.drawn = lastCameraCull.drawn + glassSeen.size();
     stats.culled = description.draws.size() - std::min(stats.drawn, description.draws.size());
     cpuClock.lap(CpuStage::Frustum, profilerSeconds());
 
@@ -1529,7 +1574,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool screenReflections = temporal && settings.reflections.enabled;
     const bool rayReflections = tracesRays(settings, rayTracing != nullptr) && settings.reflections.rayTraced && reflections->tracesRays();
     lastMirror = screenReflections && !rayReflections && settings.reflections.planarMirrors > 0
-                     ? choosePlanarMirror(description.draws, visible, cameraOrigin, settings.reflections.planarMaxRoughness, lastMirror)
+                     ? choosePlanarMirror(description.draws, mirrorCandidates, cameraOrigin, settings.reflections.planarMaxRoughness, lastMirror)
                      : std::nullopt;
     const std::optional<MirrorPlane> mirror = lastMirror;
 
@@ -1576,39 +1621,31 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         stats.sunShadowDistance = std::min({settings.shadows.directionalDistance, camera.getFarPlane(), fittedSunDistance});
     }
 
-    // What every view draws is settled before anything is recorded: the camera's visible draws and each changed shadow
-    // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
-    // Each view draws the levels of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass
-    // redraws the camera's with the same levels, so its depths match the main pass's. The camera's are chosen by the
-    // output's height, not the render's: the upscalers rebuild the output's detail from jittered frames, and chosen by
-    // the render's, DLSS Quality pulled every switch a third closer (docs/research/LOD.md, Hiding the switches).
+    // What every view draws is laid out before anything is recorded (the frame's draw list: the GPU's regions and the
+    // CPU's glass entries), so the scene buffers can be written once and the passes only draw. Each view draws the levels
+    // of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass redraws the camera's with the
+    // same levels, so its depths match the main pass's. The camera's are chosen by the output's height, not the render's:
+    // the upscalers rebuild the output's detail from jittered frames, and chosen by the render's, DLSS Quality pulled
+    // every switch a third closer (docs/research/LOD.md, Hiding the switches).
     validateLevelOfDetail(settings.levelOfDetail);
     cpuClock.lap(CpuStage::Lights, profilerSeconds());
     const LevelView cameraLevels = levelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
     cameraThinning = thinningErrorPerMetre(cameraLevels);
-    stats.drawnByLevel = gpuCulling ? lastCameraCull.levels : levelsChosen(description.draws, visible, cameraLevels);
-    cpuClock.lap(CpuStage::Levels, profilerSeconds());
-    const BatchedDraws mainDraws = cpuLists ? batchByMesh(description.draws, visible, 0, &cameraLevels) : BatchedDraws{};
-    std::tie(stats.drawnTriangles, stats.drawnCutOutTriangles) =
-        gpuCulling ? std::pair{lastCameraCull.triangles, lastCameraCull.cutOutTriangles} : batchTriangles(mainDraws.batches);
-    // The GPU's lists each get room for every draw (a draw is drawn at most once in each).
-    const std::size_t gpuListEntries = gpuCulling ? description.draws.size() : 0;
-    const std::size_t mainEntries = gpuCulling ? gpuListEntries : mainDraws.order.size();
-    cpuClock.lap(CpuStage::Batch, profilerSeconds());
+    stats.drawnByLevel = lastCameraCull.levels;
+    stats.drawnTriangles = lastCameraCull.triangles;
+    stats.drawnCutOutTriangles = lastCameraCull.cutOutTriangles;
+
+    // Every GPU list gets room for every draw (a draw is drawn at most once in each); the camera's first.
+    const std::size_t listEntries = description.draws.size();
+    DrawListLayout drawList;
+    drawList.reserve(listEntries);
 
     // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway and the velocity pass.
     validateWind(settings.wind);
     const WindSettings* sway = description.wind && settings.wind.enabled && settings.wind.sway ? &settings.wind : nullptr;
-    // While the GPU culls, it finds the drawn tiles' casters and its counts show a frame or two late.
-    ShadowDraws shadowDraws =
-        gpuCulling ? prepareGpuShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainEntries), colouredShadows, settings.levelOfDetail, sway,
-                                           *cullFrame, gpuListEntries)
-                   : prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainEntries), colouredShadows, settings.levelOfDetail, sway);
-
-    if (gpuCulling) {
-        stats.shadowDrawn += lastCameraCull.shadowDrawn;
-        stats.shadowCulled += lastCameraCull.shadowCulled;
-    }
+    ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame);
+    stats.shadowDrawn += lastCameraCull.shadowDrawn;
+    stats.shadowCulled += lastCameraCull.shadowCulled;
 
     // The shaders read a tile's coloured shadow map only where it holds glass.
     for (std::size_t tile = 0; tile < shadows.tileData.size(); ++tile) {
@@ -1617,29 +1654,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     cpuClock.lap(CpuStage::Shadows, profilerSeconds());
 
-    // The visible objects that moved since last frame, drawn again by the velocity pass: their entries follow the
-    // shadow tiles' in the draw list.
-    std::vector<std::size_t> moving;
-
-    if (temporal && cpuLists) {
-        for (std::size_t index : visible) {
-            const DrawItem& draw = description.draws[index];
-
-            const bool moved = draw.previousModel && *draw.previousModel != draw.model;
-            // Something swaying moves every frame, though its matrix does not.
-            const bool swaying = sway != nullptr && drawSways(draw.sway, draw.bounds.centre, draw.bounds.radius, cameraOrigin, *sway);
-
-            if (moved || swaying || meshes.at(draw.mesh.index)->changedShape()) {
-                moving.push_back(index);
-            }
-        }
-    }
-
-    // The GPU's velocity list follows the shadows'; a comparison's CPU list counts from 0, as the GPU's read back does.
-    const std::uint32_t motionBase = static_cast<std::uint32_t>(mainEntries + shadowDraws.drawList.size());
-    const BatchedDraws motionDraws = batchByMesh(description.draws, moving, gpuCulling ? 0 : motionBase, &cameraLevels);
-    const std::size_t motionEntries = gpuCulling ? gpuListEntries : motionDraws.order.size();
-    cpuClock.lap(CpuStage::Moving, profilerSeconds());
+    // The velocity pass's list (the visible objects that moved, swayed or changed shape) follows the shadow tiles'.
+    const std::uint32_t motionBase = drawList.reserve(listEntries);
 
     // The probe round the camera is captured while reflections run, a few faces a frame (probeCaptureStep), each from the
     // place its cycle started. Each face drawn draws what its own view holds, those entries following the velocity
@@ -1647,19 +1663,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool captureProbe = screenReflections && settings.reflections.probe;
     ProbeCaptureStep probeStep{};
     const float probeFar = settings.reflections.probeFar;
-    // The probe's six faces, then the flat mirror's view, which draws the same way.
-    // Each capture drawn this frame, in that order: which (a face, or cubeFaceCount the mirror) and its view.
-    struct CaptureCull {
-        int capture = 0;
-        CaptureCullView view;
-    };
-
+    // The probe's six faces, then the flat mirror's view, which draws the same way: each one drawn this frame, which (a
+    // face, or cubeFaceCount the mirror) and its view.
     std::vector<CaptureCull> captureViews;
-    std::array<BatchedDraws, cubeFaceCount + 1> captureDraws;
-    // What each capture draws (the GPU's commands are filled in once it culls), and where its list starts.
+    // What each capture draws (the GPU's commands, filled in once it culls), and where its list starts.
     std::array<PassDraws, cubeFaceCount + 1> capturePasses{};
     std::array<std::uint32_t, cubeFaceCount + 1> captureBases{};
-    std::uint32_t firstCaptureEntry = static_cast<std::uint32_t>(motionBase + motionEntries);
 
     // The probe's images are bound by the reflection pass even with the probe off, so they exist whenever it runs.
     if (screenReflections && reflectionProbe->getSize() == 0) {
@@ -1703,34 +1712,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         mirrorThinning = thinningErrorPerMetre(captureViews.back().view.levels);
     }
 
-    // Each capture's list: the CPU's (also for a comparison), or a region as big as the draws for the GPU to write, its
-    // view culled with the camera's below.
+    // Each capture's list: a region as big as the draws, its view culled with the camera's below.
     for (const CaptureCull& capture : captureViews) {
-        BatchedDraws& draws = captureDraws[static_cast<std::size_t>(capture.capture)];
-
-        if (cpuLists) {
-            const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, capture.view.frustum));
-            draws = batchByMesh(description.draws, inView, gpuCulling ? 0 : firstCaptureEntry, &capture.view.levels);
-        }
-
-        captureBases[static_cast<std::size_t>(capture.capture)] = firstCaptureEntry;
-
-        if (gpuCulling) {
-            firstCaptureEntry += static_cast<std::uint32_t>(gpuListEntries);
-        } else {
-            stats.probeTriangles += capture.capture < cubeFaceCount ? batchTriangles(draws.batches).first : 0;
-            firstCaptureEntry += static_cast<std::uint32_t>(draws.order.size());
-            capturePasses[static_cast<std::size_t>(capture.capture)] = PassDraws{&draws.batches};
-        }
+        captureBases[static_cast<std::size_t>(capture.capture)] = drawList.reserve(listEntries);
     }
 
-    stats.probeTriangles += gpuCulling ? lastCameraCull.probeTriangles : 0;
-
+    stats.probeTriangles += lastCameraCull.probeTriangles;
     cpuClock.lap(CpuStage::Captures, profilerSeconds());
 
     // The transparent draws the camera sees, far to near, their entries last in the draw list.
-    const SortedTransparentDraws transparent = sortTransparentDraws(description.draws, transparentDraws(description.draws, seen), cameraOrigin,
-                                                                    firstCaptureEntry);
+    const SortedTransparentDraws transparent = sortTransparentDraws(description.draws, glassSeen, cameraOrigin, drawList.size());
+    const std::vector<std::uint32_t> transparentEntries(transparent.order.begin(), transparent.order.end());
+    drawList.append(transparentEntries);
 
     // Glass binds the reflection probe's light even while it does not read it: a one-texel probe stands in when there
     // has never been one (reflections off), replaced when reflections make the real one.
@@ -1849,8 +1842,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     cpuClock.lap(CpuStage::Setup, profilerSeconds());
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     cpuClock.lap(CpuStage::Lines, profilerSeconds());
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, gpuListEntries, captureDraws,
-                                                gpuCulling ? captureViews.size() : 0, transparent, settings, probes,
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, drawList, settings, probes,
                                                 hitLights, mirrorPairs, occlusion, occlusionBlurred, occlusionAccumulates, gathersLight, glassShadows, frameFog,
                                                 readsSkyVisibility, contact);
     cpuClock.lap(CpuStage::Pack, profilerSeconds());
@@ -1861,87 +1853,54 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DebugUi);
     }
 
-    // The camera's and the velocity pass's lists culled on the GPU into the draw list just written, before anything draws
-    // from it; the groups' styles kept for the counts read back, and for a comparison the CPU's lists and the records.
-    PassDraws mainPass{&mainDraws.batches};
-    PassDraws motionPass{&motionDraws.batches};
+    // Every view's lists culled on the GPU into the draw list just written, before anything draws from it: the camera
+    // first, then each capture drawn this frame, then each shadow tile drawn, all together. The groups' styles are kept
+    // for the counts read back, and for a comparison the CPU's lists and the records.
+    beginGpuPass(frame, GpuPass::CameraCull);
+    std::vector<GpuCameraCull> cullViews{packCameraCull(cameraFrustum, cameraLevels, temporal, sway != nullptr, settings.wind.swayFadeEnd)};
+    cullViews[0].mainBase = 0;
+    cullViews[0].motionBase = motionBase;
+    std::vector<CullViewKind>& kinds = cullFrameViews[frame.frameIndex];
+    kinds.clear();
 
-    if (gpuCulling) {
-        // The camera first, then each capture drawn this frame, then each shadow tile drawn, all culled together.
-        beginGpuPass(frame, GpuPass::CameraCull);
-        std::vector<GpuCameraCull> cullViews{packCameraCull(cameraFrustum, cameraLevels, temporal, sway != nullptr, settings.wind.swayFadeEnd)};
-        cullViews[0].mainBase = 0;
-        cullViews[0].motionBase = motionBase;
-        std::vector<CullViewKind>& kinds = cullFrameViews[frame.frameIndex];
-        kinds.clear();
+    for (const CaptureCull& capture : captureViews) {
+        GpuCameraCull view = packCaptureCull(capture.view);
+        view.mainBase = captureBases[static_cast<std::size_t>(capture.capture)];
+        view.motionBase = view.mainBase;
+        cullViews.push_back(view);
+        kinds.push_back(CullViewKind{capture.capture, false, false});
+    }
 
-        for (const CaptureCull& capture : captureViews) {
-            GpuCameraCull view = packCaptureCull(capture.view);
-            view.mainBase = captureBases[static_cast<std::size_t>(capture.capture)];
-            view.motionBase = view.mainBase;
-            cullViews.push_back(view);
-            kinds.push_back(CullViewKind{capture.capture, false, false});
-        }
+    const std::uint32_t firstShadowView = static_cast<std::uint32_t>(cullViews.size());
 
-        const std::uint32_t firstShadowView = static_cast<std::uint32_t>(cullViews.size());
+    for (std::size_t tile = 0; tile < shadowDraws.views.size(); ++tile) {
+        cullViews.push_back(shadowDraws.views[tile]);
+        kinds.push_back(CullViewKind{-1, true, shadowDraws.tiles[tile].still});
+    }
 
-        for (std::size_t tile = 0; tile < shadowDraws.views.size(); ++tile) {
-            cullViews.push_back(shadowDraws.views[tile]);
-            kinds.push_back(CullViewKind{-1, true, shadowDraws.tiles[tile].still});
-        }
+    cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, cullFrame, cullViews, frames[frame.frameIndex].scene->drawList.describe().buffer,
+                        comparing);
+    endGpuPass(frame, GpuPass::CameraCull);
+    cullFrameStyles[frame.frameIndex] = cullFrame.styles;
+    cullFrameDraws[frame.frameIndex] = description.draws.size();
+    cullCompares[frame.frameIndex].reset();
 
-        cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, *cullFrame, cullViews, frames[frame.frameIndex].scene->drawList.describe().buffer,
-                            comparing);
-        endGpuPass(frame, GpuPass::CameraCull);
-        cullFrameStyles[frame.frameIndex] = cullFrame->styles;
-        cullFrameDraws[frame.frameIndex] = description.draws.size();
-        cullCompares[frame.frameIndex].reset();
+    if (comparing) {
+        cullCompares[frame.frameIndex] =
+            cpuReferenceLists(description, cullFrame, cullViews, cameraFrustum, cameraLevels, temporal, sway, captureViews, shadowDraws, settings.levelOfDetail);
+    }
 
-        // A comparison's CPU lists: the camera's and velocity pass's, each capture's, and each drawn shadow tile's two
-        // (its casters found and batched as prepareShadowDraws does, without thinned marks: shadow shaders thin nothing).
-        if (comparing) {
-            CullCompare compare{{{0, false, "Camera", mainDraws}, {0, true, "Velocity", motionDraws}}, cullViews,
-                                {cullFrame->stillRecords.begin(), cullFrame->stillRecords.end()}, cullFrame->meshLevels};
-            compare.records.insert(compare.records.end(), cullFrame->movingRecords.begin(), cullFrame->movingRecords.end());
+    const PassDraws mainPass = cameraCulling->mainDraws(frame.frameIndex, cullFrame, 0);
+    const PassDraws motionPass = cameraCulling->motionDraws(frame.frameIndex, cullFrame, 0);
 
-            for (std::size_t view = 0; view < captureViews.size(); ++view) {
-                const int capture = captureViews[view].capture;
-                compare.lists.push_back(CullCompare::List{static_cast<std::uint32_t>(view + 1), false,
-                                                          capture < cubeFaceCount ? "Probe face " + std::to_string(capture) : std::string{"Mirror"},
-                                                          captureDraws[static_cast<std::size_t>(capture)]});
-            }
+    for (std::size_t view = 0; view < captureViews.size(); ++view) {
+        capturePasses[static_cast<std::size_t>(captureViews[view].capture)] = cameraCulling->mainDraws(frame.frameIndex, cullFrame, static_cast<std::uint32_t>(view + 1));
+    }
 
-            for (std::size_t tile = 0; tile < shadowDraws.tiles.size(); ++tile) {
-                const ShadowTile& shadowTile = *shadowDraws.tiles[tile].tile;
-                const std::vector<std::size_t> found = shadowTileCasters(description.draws, castersInReach(description.draws, shadowTile.reach), shadowTile);
-                const ShadowCasterSplit split = shadowTile.separateMovers ? splitMovingCasters(description.draws, found) : ShadowCasterSplit{found, {}};
-                const LevelView tileLevels = tileLevelView(shadowTile, settings.levelOfDetail);
-                const std::uint32_t view = firstShadowView + static_cast<std::uint32_t>(tile);
-                const std::string name = "Shadow tile " + std::to_string(tile);
-                BatchedDraws still = batchByMesh(description.draws, split.still, 0, &tileLevels);
-                BatchedDraws moved = batchByMesh(description.draws, split.moving, 0, &tileLevels);
-                still.thinned.clear();
-                moved.thinned.clear();
-                compare.lists.push_back(CullCompare::List{view, false, name, std::move(still)});
-                compare.lists.push_back(CullCompare::List{view, true, name + " movers", std::move(moved)});
-            }
-
-            cullCompares[frame.frameIndex] = std::move(compare);
-        }
-
-        mainPass = cameraCulling->mainDraws(frame.frameIndex, *cullFrame, 0);
-        motionPass = cameraCulling->motionDraws(frame.frameIndex, *cullFrame, 0);
-
-        for (std::size_t view = 0; view < captureViews.size(); ++view) {
-            capturePasses[static_cast<std::size_t>(captureViews[view].capture)] =
-                cameraCulling->mainDraws(frame.frameIndex, *cullFrame, static_cast<std::uint32_t>(view + 1));
-        }
-
-        for (std::size_t tile = 0; tile < shadowDraws.tiles.size(); ++tile) {
-            const std::uint32_t view = firstShadowView + static_cast<std::uint32_t>(tile);
-            shadowDraws.tiles[tile].casterDraws = cameraCulling->mainDraws(frame.frameIndex, *cullFrame, view);
-            shadowDraws.tiles[tile].moverDraws = cameraCulling->motionDraws(frame.frameIndex, *cullFrame, view);
-        }
+    for (std::size_t tile = 0; tile < shadowDraws.tiles.size(); ++tile) {
+        const std::uint32_t view = firstShadowView + static_cast<std::uint32_t>(tile);
+        shadowDraws.tiles[tile].casterDraws = cameraCulling->mainDraws(frame.frameIndex, cullFrame, view);
+        shadowDraws.tiles[tile].moverDraws = cameraCulling->motionDraws(frame.frameIndex, cullFrame, view);
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
@@ -2014,24 +1973,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::DepthPrepass);
         drawDepthPrepass(frame, mainPass, sceneSet);
         endGpuPass(frame, GpuPass::DepthPrepass);
-    }
-
-    // Occlusion culling's first stage: how many of the camera's draws the prepass's depth would hide, counted on the GPU
-    // and shown a frame or two late; drawing is unchanged. The test's lens is the camera's own, without TAA's jitter
-    // (the rectangles' margin covers it).
-    if (settings.depthPrepass && settings.measureOcclusion && !gpuCulling) {
-        beginGpuPass(frame, GpuPass::Occlusion);
-        const OcclusionView occlusionView = makeOcclusionView(cameraRelativeView(camera), toGpuDepthRange(camera.getProjectionMatrix()),
-                                                              camera.getNearPlane(), sceneSize);
-        const std::vector<GpuOcclusionBatch> occlusionBatches = packOcclusionBatches(mainDraws.batches, [&](MeshHandle mesh) {
-            return static_cast<std::uint32_t>(meshes.at(mesh.index)->getIndexCount() / 3);
-        });
-        occlusionCulling->count(frame.commands, frame.descriptors, frame.frameIndex, depth, bindlessTextures->getSet(), sceneSet, occlusionBatches,
-                                occlusionView, cameraOrigin);
-        endGpuPass(frame, GpuPass::Occlusion);
-        stats.occlusion = lastOcclusionCounts;
-    } else {
-        lastOcclusionCounts.reset();
     }
 
     reflections->forgetColourPyramid();
@@ -2388,9 +2329,8 @@ void VulkanRenderer::bakeSkyVisibility(const FrameDescription& description, cons
 * pass.
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
-                                           const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
-                                           const BatchedDraws& motionDraws, std::size_t gpuListEntries, std::span<const BatchedDraws> captureDraws,
-                                           std::size_t gpuCaptureLists, const SortedTransparentDraws& transparent, const RenderSettings& settings,
+                                           const ShadowPlan& shadows, const DrawListLayout& drawList,
+                                           const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
                                            bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
@@ -2415,37 +2355,6 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     }
 
     checkTextures(description.stillDraws, description.draws.size() - description.stillDraws);
-
-    std::vector<std::uint32_t> drawList;
-    drawList.reserve(mainDraws.order.size() + shadowDraws.drawList.size());
-
-    // The camera's, the velocity pass's and the captures' entries mark the instances drawn thinned (appendDrawList); the
-    // shadow tiles' never do, since their shaders thin nothing.
-    // While the GPU culls the camera, its two lists' regions are left for it to write.
-    const auto appendCameraList = [&](const BatchedDraws& batched) {
-        if (gpuListEntries > 0) {
-            drawList.insert(drawList.end(), gpuListEntries, 0u);
-        } else {
-            appendDrawList(drawList, batched);
-        }
-    };
-
-    appendCameraList(mainDraws);
-    drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
-    appendCameraList(motionDraws);
-
-    // The captures' lists in capture order (faces, then the mirror), as their bases were counted; the GPU's regions empty.
-    if (gpuListEntries > 0) {
-        drawList.insert(drawList.end(), gpuCaptureLists * gpuListEntries, 0u);
-    } else {
-        for (const BatchedDraws& face : captureDraws) {
-            appendDrawList(drawList, face);
-        }
-    }
-
-    for (std::size_t index : transparent.order) {
-        drawList.push_back(static_cast<std::uint32_t>(index));
-    }
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
     GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
@@ -2496,7 +2405,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.pointLights.write(lights.points);
     buffers.spotLights.write(lights.spots);
     buffers.shadowTiles.write(shadows.tileData);
-    buffers.drawList.write(drawList);
+    // The CPU's entries only (glass, its shadows); the GPU's regions are written by the culling.
+    buffers.drawList.writeRuns(drawList);
     buffers.previousModels.write(stillInstances.getPreviousModels(), std::span<const std::array<float, 16>>{records.movingPrevious});
 
     // The terrain's patches (at least one record, so the buffer is never empty).
@@ -2646,114 +2556,15 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
 }
 
 /*
-* Which shadow tiles to redraw, and what goes into each. A tile whose view and casters are what was drawn into it last
-* time keeps its contents (shadow caching). Casters are found in two steps: first the ones the tile's light can reach at
-* all (one sphere test each, shared by a point light's six faces, which come one after another), then those inside the
-* tile's own frustum. Each redrawn tile's casters are batched by mesh, their instance numbers (instance i is draw i)
-* listed one tile after another, from entry firstEntry of the draw list.
+* Which shadow tiles to redraw, and what goes into each (render/gpu/shadow_culling.h), with no walk over every draw: each
+* tile's needs come from the table's changes, the moving draws and its glass (from the table's glass list). A tile whose
+* view and casters are what was drawn into it last keeps its contents (shadow caching). A tile drawn gets a view and
+* room in the draw list for its casters (and, keeping its movers apart, its moved casters) for the GPU to fill.
 */
-VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles,
-                                                               std::uint32_t firstEntry, bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway) {
-    ShadowDraws prepared;
-    prepared.tileGlass.assign(tiles.size(), false);
-    std::vector<std::size_t> inReach;
-    std::vector<std::size_t> glassReached;
-    const BoundingSphere* reachOfList = nullptr;
-
-    const auto sameReach = [](const BoundingSphere& a, const BoundingSphere& b) {
-        return a.radius == b.radius && a.centre.x == b.centre.x && a.centre.y == b.centre.y && a.centre.z == b.centre.z;
-    };
-
-    // Each batch's entries follow the draw list's so far.
-    const auto listed = [&](const std::vector<std::size_t>& draws, const LevelView* levels) {
-        BatchedDraws batched = batchByMesh(description.draws, draws, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()), levels);
-
-        for (std::size_t index : batched.order) {
-            prepared.drawList.push_back(static_cast<std::uint32_t>(index));
-        }
-
-        return batched;
-    };
-
-    for (std::size_t tileIndex = 0; tileIndex < tiles.size(); ++tileIndex) {
-        const ShadowTile& tile = tiles[tileIndex];
-
-        if (tile.size == 0) {
-            ++stats.shadowTilesSkipped;
-            continue;
-        }
-
-        if (reachOfList == nullptr || !sameReach(*reachOfList, tile.reach)) {
-            inReach = castersInReach(description.draws, tile.reach);
-            glassReached = colouredShadows ? glassInReach(description.draws, tile.reach) : std::vector<std::size_t>{};
-            reachOfList = &tile.reach;
-        }
-
-        const Frustum view = Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero);
-        // Each tile draws its casters' levels of detail by its own texels (tileLevelView), not the camera's distance.
-        const LevelView tileLevels = tileLevelView(tile, levelSettings);
-        const std::vector<std::size_t> found = shadowTileCasters(description.draws, inReach, tile);
-        const std::vector<std::size_t> glass = castersAtLeast(description.draws, shadowCasters(description.draws, glassReached, view), tile.smallestCaster);
-        prepared.tileGlass[tileIndex] = !glass.empty();
-
-        // A tile keeping its movers apart is fingerprinted by its still casters alone.
-        const ShadowCasterSplit split = tile.separateMovers ? splitMovingCasters(description.draws, found)
-                                                            : ShadowCasterSplit{found, {}};
-        // A tile that sways redraws every frame something in it sways (its fingerprint the frame's).
-        const bool sways = sway != nullptr && tileSways(tile.sunCascade, *sway);
-        const bool somethingSways = sways && std::any_of(found.begin(), found.end(), [&](std::size_t index) {
-            const DrawItem& draw = description.draws[index];
-            return drawSways(draw.sway, draw.bounds.centre, draw.bounds.radius, cameraOrigin, *sway);
-        });
-        const std::uint64_t signature = swayingShadowSignature(tintedShadowSignature(description.draws, split.still, glass, &tileLevels), somethingSways, shadowFrame);
-        const bool still = !shadowMemory.isCurrent(tile, signature);
-
-        if (tile.separateMovers) {
-            ensureStillShadow(tile.size);
-
-            for (std::size_t index : split.moving) {
-                if (const std::optional<ShadowPatch> patch = shadowPatch(tile, description.draws[index].bounds)) {
-                    prepared.nextMoverPatches.push_back(*patch);
-                }
-            }
-        }
-
-        if (!still && split.moving.empty() && (!tile.separateMovers || moverPatches.empty())) {
-            ++stats.shadowTilesCached;
-            continue;
-        }
-
-        ShadowTileDraw drawing{&tile, still ? listed(split.still, &tileLevels) : BatchedDraws{}, still ? listed(glass, nullptr) : BatchedDraws{}, signature,
-                               still, listed(split.moving, &tileLevels), {}, false, false, PassDraws{}, PassDraws{}};
-        drawing.sways = sways;
-
-        // What to copy back from the still copy: all of it after a redraw, else where movers were and are.
-        if (tile.separateMovers) {
-            if (still) {
-                drawing.restore.push_back(ShadowPatch{tile.x, tile.y, tile.size, tile.size});
-            } else {
-                drawing.restore = moverPatches;
-                drawing.restore.insert(drawing.restore.end(), prepared.nextMoverPatches.begin(), prepared.nextMoverPatches.end());
-            }
-        }
-
-        stats.shadowDrawn += (still ? split.still.size() : 0) + split.moving.size();
-        stats.shadowCulled += description.draws.size() - found.size();
-        prepared.tiles.push_back(std::move(drawing));
-    }
-
-    return prepared;
-}
-
-/*
-* The GPU's way (render/gpu/shadow_culling.h): no walk over every draw. Each tile's needs come from the table's changes,
-* the moving draws and its glass (from the table's glass list); a tile drawn gets a view, its still (or all) casters'
-* region and, keeping its movers apart, its moved casters' region left in the draw list for the GPU to fill. What is
-* cached, skipped and patched follows prepareShadowDraws.
-*/
-VulkanRenderer::ShadowDraws VulkanRenderer::prepareGpuShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles,
-                                                                  std::uint32_t firstEntry, bool colouredShadows, const LevelOfDetailSettings& levelSettings,
-                                                                  const WindSettings* sway, const CameraCullFrame& table, std::size_t listEntries) {
+VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, DrawListLayout& drawList,
+                                                               bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway,
+                                                               const CameraCullFrame& table) {
+    const std::size_t listEntries = description.draws.size();
     ShadowDraws prepared;
     prepared.tileGlass.assign(tiles.size(), false);
 
@@ -2791,14 +2602,12 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareGpuShadowDraws(const FrameDes
             continue;
         }
 
-        ShadowTileDraw drawing{&tile, BatchedDraws{}, BatchedDraws{}, needs.key, needs.redraw, BatchedDraws{}, {}, sways, true, PassDraws{}, PassDraws{}};
+        ShadowTileDraw drawing{&tile, BatchedDraws{}, needs.key, needs.redraw, {}, sways, PassDraws{}, PassDraws{}};
 
         if (needs.redraw && !glass.empty()) {
-            drawing.glass = batchByMesh(description.draws, glass, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()), nullptr);
-
-            for (std::size_t index : drawing.glass.order) {
-                prepared.drawList.push_back(static_cast<std::uint32_t>(index));
-            }
+            drawing.glass = batchByMesh(description.draws, glass, drawList.size(), nullptr);
+            const std::vector<std::uint32_t> entries(drawing.glass.order.begin(), drawing.glass.order.end());
+            drawList.append(entries);
         }
 
         // What to copy back from the still copy: all of it after a redraw, else where movers were and are.
@@ -2813,14 +2622,8 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareGpuShadowDraws(const FrameDes
 
         // The tile's lists' regions, room for every draw each; one only, unless it keeps its moved casters apart.
         GpuCameraCull tileView = needs.view;
-        tileView.mainBase = firstEntry + static_cast<std::uint32_t>(prepared.drawList.size());
-        prepared.drawList.insert(prepared.drawList.end(), listEntries, 0u);
-        tileView.motionBase = tileView.mainBase;
-
-        if (tile.separateMovers) {
-            tileView.motionBase = firstEntry + static_cast<std::uint32_t>(prepared.drawList.size());
-            prepared.drawList.insert(prepared.drawList.end(), listEntries, 0u);
-        }
+        tileView.mainBase = drawList.reserve(listEntries);
+        tileView.motionBase = tile.separateMovers ? drawList.reserve(listEntries) : tileView.mainBase;
 
         prepared.views.push_back(tileView);
         prepared.tiles.push_back(std::move(drawing));
@@ -2868,10 +2671,6 @@ void VulkanRenderer::ensureStillShadow(std::uint32_t size) {
 void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet) {
     moverPatches = shadowDraws.nextMoverPatches;
 
-    // A tile's still (or all) casters and its moved ones: the GPU's commands while it culls, else the CPU's batches.
-    const auto casterDraws = [](const ShadowTileDraw& drawing) { return drawing.gpu ? drawing.casterDraws : PassDraws{&drawing.casters.batches}; };
-    const auto moverDraws = [](const ShadowTileDraw& drawing) { return drawing.gpu ? drawing.moverDraws : PassDraws{&drawing.moving.batches}; };
-
     if (shadowDraws.tiles.empty()) {
         return;
     }
@@ -2893,7 +2692,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
             bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
             const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace, drawing.sways);
             vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-            stats.shadowDrawCalls += drawPassDraws(commands, casterDraws(drawing), {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
+            stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
             vkCmdEndRendering(commands);
             renderingOpen = false;
         }
@@ -2949,12 +2748,12 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
         const BatchPipelines casting{shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE};
 
         if (!tile.separateMovers) {
-            stats.shadowDrawCalls += drawPassDraws(commands, casterDraws(drawing), casting);
+            stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, casting);
         }
 
-        // Only a tile keeping them apart has a list of its moved casters on the GPU.
-        if (!drawing.gpu || tile.separateMovers) {
-            stats.shadowDrawCalls += drawPassDraws(commands, moverDraws(drawing), casting);
+        // Only a tile keeping them apart has a list of its moved casters.
+        if (tile.separateMovers) {
+            stats.shadowDrawCalls += drawPassDraws(commands, drawing.moverDraws, casting);
         }
 
         if (drawing.still) {
@@ -4071,7 +3870,6 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     mirrorDepthRange->setFramesInFlight(count);
     reflections->setFramesInFlight(count);
     eyeAdaptation->setFramesInFlight(count);
-    occlusionCulling->setFramesInFlight(count);
     cameraCulling->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
     cullFrameViews.assign(count, {});

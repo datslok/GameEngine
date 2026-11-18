@@ -4,7 +4,6 @@
 #include "render/gpu/cloth_timing.h"
 #include "render/gpu/eye_adaptation.h"
 #include "render/gpu/gpu_timing.h"
-#include "render/gpu/occlusion_culling.h"
 #include "render/gpu/probe_relocation.h"
 #include "render/gpu/upscaling.h"
 #include "render/gpu/video_memory.h"
@@ -28,9 +27,6 @@ struct RenderStats {
     std::size_t drawnTriangles = 0;
     std::size_t drawnCutOutTriangles = 0;
     std::size_t probeTriangles = 0;
-    // How many of the camera's draws (and their triangles) the prepass's depth would hide (render/gpu/occlusion_culling.h),
-    // read back a frame or two late; none while not measured.
-    std::optional<OcclusionCounts> occlusion;
 
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;

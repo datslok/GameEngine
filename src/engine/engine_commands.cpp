@@ -339,17 +339,13 @@ void addRenderCommands(CommandRegistry& registry, RenderSettings& settings, Typi
 * The comparison needs a frame drawn after it is asked for and its GPU work finished, so each call reports the last one
 * and asks for another.
 */
-void addCullCompareCommand(CommandRegistry& registry, const RenderSettings& settings, std::function<std::string()> compare) {
+void addCullCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
     registry.add("cull-compare", "cull-compare",
-                 "Compares the camera's and the velocity pass's lists the GPU builds with the CPU's on the next frame (GPU culling on); "
+                 "Compares every list the GPU builds (camera, velocity pass, captures, shadow tiles) with the CPU's on the next frame; "
                  "shows the last comparison. Run it, wait a few frames, run it again.",
-                 [&settings, compare](const CommandArguments& arguments) {
+                 [compare](const CommandArguments& arguments) {
                      if (!arguments.empty()) {
                          return commandError("cull-compare takes nothing");
-                     }
-
-                     if (!settings.gpuCulling) {
-                         return commandError("cull-compare needs GPU culling: set engine.render.passes.gpuCulling true");
                      }
 
                      const std::string last = compare();

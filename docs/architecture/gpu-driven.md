@@ -30,16 +30,16 @@ Packed by `packCullRecord`, `packMeshLevels` (throws past three levels), `packLe
 - `cull_records_test`: random scenes and views (perspective and orthographic, levels and impostors on and off): every draw's slot, thinning and camera choice equal the CPU functions'.
 - `cull_records_gpu_test` (`make gputest`): the GLSL against the mirror (also `camera_culling.glsl`), cases near an edge (`nearAChoiceEdge`, `nearACameraEdge`: within 1e-4 of a level threshold, 1 mm of a plane or of the sway's reach) left out, since the GPU's square root may round either way there.
 
-## The camera's lists on the GPU (`gpu-cull-camera`)
+## The lists on the GPU (`gpu-cull-camera`)
 
-`engine.render.passes.gpuCulling`, on by default: the camera's and the velocity pass's lists built by compute in place of `visibleDraws`, `chosenMesh`, `batchByMesh` and the mover walk. Off draws the CPU's lists (the reference) until stage 5 deletes them.
+Every view's lists are built by compute (the only way since `cpu-culling-removed`; no setting). The CPU's `visibleDraws`, `chosenMesh`, `batchByMesh` and `shadowTileCasters` remain as the reference the tests and `cull-compare` check against.
 
 | Piece | What |
 |---|---|
 | Candidate (`GpuCullCandidate`, 8 B) | a draw and one level slot with a mesh; every draw not glass, shadow-only and hidden included (the GPU drops them by flag, so hiding keeps the groups) |
 | Group (`GpuCullGroup`, 16 B; `CullGroupStyle`) | the candidates of one (style, mesh), groups in `batchByMesh`'s order, candidates in draw order (`buildCullGroups`) |
 | `CameraCullTable` | still draws' records, groups, level tables, glass and flat-faced lists kept; built ranges repack records, groups rebuilt only when a draw's mesh, style, glass, flat faces or its mesh's level meshes change; the moving draws' groups made each frame after the still ones |
-| `GpuCameraCull` (208 B, one a view) | frustum, level view, sway fade end, motion and sway flags, counts, the lists' bases, its number and slices (`placeCullView`) |
+| `GpuCameraCull` (240 B, one a view) | frustum, level view, sway fade end, motion and sway flags, counts, the lists' bases, its number and slices (`placeCullView`) |
 
 Four passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers are written, each one dispatch over every view (below):
 
@@ -59,18 +59,18 @@ Four passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers ar
 | Read back | every view's counts and both lists' commands; for `cull-compare` both lists of every view |
 
 - **Same order as the CPU:** the places are prefix sums over a fixed candidate order, so the lists equal `batchByMesh`'s entry for entry (`cullCameraOnCpu`, tested on random scenes). No atomics in the lists.
-- **Draw list:** the camera's region (room for every draw) first, then the shadows', then the velocity region (as big), then a region as big for each capture drawn (faces, then the mirror), then glass; the CPU writes zeros where the GPU writes.
+- **Draw list (`DrawListLayout`):** the camera's region (room for every draw) first, then each drawn shadow tile's (and its glass), then the velocity region, then a region for each capture drawn (faces, then the mirror), then glass. The CPU writes only its own runs (`UploadArray::writeRuns`); the GPU's regions are left for the culling, nothing reading them before.
 - **Drawing (`PassDraws`, a view's commands from `commandFirst`):** prepass, main, velocity and capture passes bind the pools once and draw each style's packed commands with one `vkCmdDrawIndexedIndirectCount` (`drawIndirectCount`); groups of deforming meshes after, one by one from their own commands.
-- **Stays on the CPU:** glass (its cached list tested against the frustum and sorted), the mirror's choice (flat-faced draws only), which shadow tiles to draw (below). HIDDEN (occlusion measurement) is not counted.
+- **Stays on the CPU:** glass (its cached list tested against the frustum and sorted), the mirror's choice (flat-faced draws only), which shadow tiles to draw (below).
 - **F4:** DRAWN, levels, triangles and the probe faces' triangles from the counts and commands read back a frame or two late.
-- **`cull-compare`:** asks for the next frame's CPU lists too, reads the GPU's back and reports each list's (camera, velocity, each probe face drawn, mirror) matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.
-- Tests: `camera_culling_test` (lists, capture views, slices, groups, kept table, comparison, edges, setting, command).
+- **`cull-compare`:** asks for the next frame's CPU lists too (`cpuReferenceLists`), reads the GPU's back and reports each list's (camera, velocity, each probe face drawn, mirror, shadow tiles) matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.
+- Tests: `camera_culling_test` (lists, capture views, slices, groups, kept table, comparison, edges, no setting, command); `gpu_scene_test` (the draw list's layout).
 
 ## Shadow tiles (`gpu-cull-shadows`)
 
 Each shadow tile drawn is a view (`packShadowCull`): its frustum, levels by its own texels (`tileLevelView`), `CAMERA_CULL_SHADOW`, reach, smallest caster and cascade (`GpuCameraCull` 240 B). `shadowTakes` (mirrored, `camera_culling.glsl`) equals the CPU's `castersInReach`, `shadowCasters`, `castersAtLeast`, `castersForCascade` (`shadowTileCasters`); its draws' cascade limit is `GpuCullRecord::shadowCascades`. Its entries carry no thinned bit; a tile keeping its movers apart (the far map) has `CAMERA_CULL_MOTION`: casters that moved go to its second list, drawn over the patches.
 
-**Which tiles are drawn** (`prepareGpuShadowDraws`, `shadowTileNeeds`): the CPU decides from what the scene announces, never walking every draw:
+**Which tiles are drawn** (`prepareShadowDraws`, `shadowTileNeeds`): the CPU decides from what the scene announces, never walking every draw:
 
 | Redrawn when | From |
 |---|---|
@@ -81,7 +81,7 @@ Each shadow tile drawn is a view (`packShadowCull`): its frustum, levels by its 
 | its glass changed | `glassInReach` over the table's glass list, in its key |
 | it sways (`tileSways`: the nearest cascade with sway on) | a new key every frame |
 
-- A drawn tile's lists get room for every draw each in the draw list (one list, two keeping movers apart), after the main pass's entries; cached tiles get no view.
+- A drawn tile's lists get room for every draw each in the draw list (one list, two keeping movers apart); cached tiles get no view.
 - F4's SHADOW DRAWN and CULLED from the counts read back (still casters counted only where redrawn).
 - `cull-compare` compares every drawn tile's lists too (Shadow tile n, Shadow tile n movers).
 - Tests: `shadow_culling_test` (lists equal the CPU's, the new rule redraws every tile today's fingerprint would over random changes, nothing when nothing changed, all after a full rebuild, swaying tiles every frame; edges).

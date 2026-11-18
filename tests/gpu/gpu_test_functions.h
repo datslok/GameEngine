@@ -246,9 +246,6 @@
 #define GPU_TEST_THINNED_SHARE 0
 #define GPU_TEST_THINNED_CARD 1
 
-// occlusion_culling_test.comp
-#define GPU_TEST_OCCLUSION_SPHERE 0
-
 // cull_records_test.comp
 #define GPU_TEST_CULL_DRAW 0
 #define GPU_TEST_CAMERA_CANDIDATE 1

@@ -363,9 +363,30 @@ namespace {
         assert(parallelTable.getEntries().size() == serialTable.getEntries().size() && serialTable.getEntries().size() < 20);
         assert(std::memcmp(parallelTable.getEntries().data(), serialTable.getEntries().data(), serialTable.getEntries().size() * sizeof(GpuMaterial)) == 0);
     }
+    /*
+    * A frame's draw list laid out: the GPU's regions only counted, the CPU's entries in runs at their places, runs side
+    * by side joined into one, so writing them leaves the GPU's regions untouched.
+    */
+    void testDrawListLayoutLeavesTheGpuRegions() {
+        DrawListLayout layout;
+        assert(layout.reserve(100) == 0);
+        const std::vector<std::uint32_t> glass{7, 8};
+        assert(layout.append(glass) == 100);
+        assert(layout.append(std::vector<std::uint32_t>{9}) == 102);
+        assert(layout.reserve(50) == 103);
+        assert(layout.append(std::vector<std::uint32_t>{}) == 153);
+        assert(layout.append(std::vector<std::uint32_t>{1, 2, 3}) == 153);
+        assert(layout.size() == 156);
+
+        const std::vector<DrawListLayout::Run>& runs = layout.getRuns();
+        assert(runs.size() == 2);
+        assert(runs[0].first == 100 && (runs[0].entries == std::vector<std::uint32_t>{7, 8, 9}));
+        assert(runs[1].first == 153 && (runs[1].entries == std::vector<std::uint32_t>{1, 2, 3}));
+    }
 }
 
 void testGpuScene() {
+    testDrawListLayoutLeavesTheGpuRegions();
     testPackingOnManyCoresIsTheSame();
     testFrameDataCarriesTheCascadeTransition();
     testDrawsAreBatchedByMesh();
