@@ -47,7 +47,7 @@ Everything every view draws is settled before any command is recorded, so the sc
 7. Probe cascades, mirrored light pairs, ambient occlusion, contact shadows, fog, wind and sky visibility readied before the scene set is written.
 8. `writeScene`, debug line vertices and shadow tile data straight into upload memory (no copy passes).
 
-Draw list order (one buffer): main pass, shadow tiles, velocity pass, probe faces, mirror view, transparent. With GPU culling the main and velocity regions hold every draw, written by the CULL pass (`gpu-driven.md`).
+Draw list order (one buffer): main pass, shadow tiles, velocity pass, probe faces, mirror view, transparent. With GPU culling the main and velocity regions and each probe face's and the mirror's hold every draw, written by the CULL pass (`gpu-driven.md`).
 
 ## Pass order
 
@@ -57,7 +57,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 |---|---|---|---|
 | 1 | Cloth [CLOTH] | GPU cloths ticked | `cloth-gpu.md` |
 | 2 | Debug UI [UI] | F5 open: the UI into its own overlay image | `settings-and-commands.md` |
-| 3 | Camera culling [CULL] | `passes.gpuCulling`: the camera's and velocity pass's lists and commands | `gpu-driven.md` |
+| 3 | Camera culling [CULL] | `passes.gpuCulling`: the camera's, velocity pass's, probe faces' and mirror's lists and commands | `gpu-driven.md` |
 | 4 | Ray scene [TLAS] | anything traces rays (probes, ray debug, probe capture, reflections, mirrored lights, glass shadows) | `ray-tracing.md` |
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
 | 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
