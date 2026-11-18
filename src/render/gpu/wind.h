@@ -59,11 +59,13 @@ struct WindSettings {
     }};
 
     /*
-    * Each category's flutter. The trees' leaves and the hanging ivy shiver fast and each on its own; the lower layers
-    * (plants, grass and the floor's cover) slower and in step over a frond or tuft (the user, Nov 16 2026: too rippley).
+    * Each category's flutter. The hanging ivy shivers fast and each leaf on its own; the lower layers (plants, grass and
+    * the floor's cover) slower and in step over a frond or tuft (the user, Nov 16 2026: too rippley); the trees' leaves
+    * slowest, in step over a patch of crown: each leaf darting in and out of the sun flecks on its own at 3 Hz sparkled,
+    * which no upscaler could settle (the user, Nov 18 2026, chose 1 Hz over 8 m by eye).
     */
     std::array<WindFlutter, WIND_CATEGORIES> flutters{{
-        {.hertz = 3.0f, .metres = 0.5f},
+        {.hertz = 1.0f, .metres = 8.0f},
         {.hertz = 1.5f, .metres = 8.0f},
         {.hertz = 1.2f, .metres = 8.0f},
         {.hertz = 3.0f, .metres = 0.5f},

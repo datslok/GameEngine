@@ -220,32 +220,33 @@ namespace {
     }
 
     /*
-    * The lower layers (the plants, and the grass with the floor's cover) flutter slower than the trees' leaves and in
-    * step over a frond or tuft: two leaves 30 cm apart shiver nearly alike at their rate, while at the trees' rate they
-    * part. The trees' and hanging things' rates are the old ones (3 Hz, half a metre).
+    * The trees' leaves and the lower layers (the plants, and the grass with the floor's cover) flutter slowly and in
+    * step over a crown's patch, a frond or a tuft: two leaves 30 cm apart shiver nearly alike at their rate, while at
+    * the hanging things' fine rate (the old one: 3 Hz, half a metre) they part. The trees went to 1 Hz over 8 m when
+    * their leaves, darting in and out of the sun flecks each on its own, sparkled (the user, Nov 18 2026).
     */
-    void testTheLowerLayersFlutterInStep() {
+    void testTheLeavesFlutterInStep() {
         const WindSettings settings;
-        const Vec2 trees = windFlutterRate(settings, WIND_CATEGORY_TREES);
-        assert(trees.x == 3.0f && trees.y == 0.5f);
-        assert(windFlutterRate(settings, WIND_CATEGORY_HANGING).x == 3.0f && windFlutterRate(settings, WIND_CATEGORY_HANGING).y == 0.5f);
+        const Vec2 hanging = windFlutterRate(settings, WIND_CATEGORY_HANGING);
+        assert(hanging.x == 3.0f && hanging.y == 0.5f);
+        assert(windFlutterRate(settings, WIND_CATEGORY_TREES).x == 1.0f && windFlutterRate(settings, WIND_CATEGORY_TREES).y == 8.0f);
 
-        for (const int category : {WIND_CATEGORY_PLANTS, WIND_CATEGORY_GRASS}) {
+        for (const int category : {WIND_CATEGORY_TREES, WIND_CATEGORY_PLANTS, WIND_CATEGORY_GRASS}) {
             const Vec2 rate = windFlutterRate(settings, category);
-            assert(rate.x < 0.6f * trees.x && rate.y >= 8.0f * trees.y);
+            assert(rate.x < 0.6f * hanging.x && rate.y >= 8.0f * hanging.y);
             const Vec3 one{4.0f, 0.5f, 9.0f};
             const Vec3 other = one + Vec3{0.3f, 0.0f, 0.0f};
             float apart = 0.0f;
-            float apartAtTreesRate = 0.0f;
+            float apartAtFineRate = 0.0f;
 
             for (int frame = 0; frame < 300; ++frame) {
                 const float seconds = 0.01f * static_cast<float>(frame);
                 apart = std::max(apart, (windFlutterOffset(one, 1.0f, rate, seconds) - windFlutterOffset(other, 1.0f, rate, seconds)).length());
-                apartAtTreesRate =
-                    std::max(apartAtTreesRate, (windFlutterOffset(one, 1.0f, trees, seconds) - windFlutterOffset(other, 1.0f, trees, seconds)).length());
+                apartAtFineRate =
+                    std::max(apartAtFineRate, (windFlutterOffset(one, 1.0f, hanging, seconds) - windFlutterOffset(other, 1.0f, hanging, seconds)).length());
             }
 
-            assert(apart < 0.4f && apartAtTreesRate > 1.0f);
+            assert(apart < 0.4f && apartAtFineRate > 1.0f);
         }
     }
 
@@ -426,7 +427,7 @@ void testWindSway() {
     testTheBranches();
     testTheFlutter();
     testTheFlutterRate();
-    testTheLowerLayersFlutterInStep();
+    testTheLeavesFlutterInStep();
     testWhichDrawsSway();
     testTheShadows();
     testTheRecordsSway();

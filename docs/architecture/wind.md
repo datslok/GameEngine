@@ -55,7 +55,7 @@ Springs, not the wind, are what things sample: they lag a gust, overshoot and se
 - Lean = spring · bend, softly held under `WIND_MOST_LEAN` (`windSoftLean`: lean / (1 + |lean| / 0.5)), times the fade (`windSwayFade` from `swayFadeStart` to `swayFadeEnd` by the foot's distance).
 - Main bend: a vertex at height h moves sideways by lean · h² / height (a cantilever), then back to its distance from the foot, so it bends rather than stretches.
 - Branches bob by `WIND_BRANCH_SHARE` of the lean times their distance from the trunk at `WIND_BRANCH_HERTZ`, phase changing every `WIND_BRANCH_METRES`.
-- Leaves flutter (`windFlutterOffset`) by flutter · lean in three directions at their category's `WindFlutter` (hertz, and metres over which the phase turns once: `windPhase`, `windFlutterRate`). A long wave keeps a frond or tuft in step.
+- Leaves flutter (`windFlutterOffset`) by flutter · lean in three directions at their category's `WindFlutter` (hertz, and metres over which the phase turns once: `windPhase`, `windFlutterRate`). A long wave keeps a frond, tuft or patch of crown in step: the trees 1 Hz over 8 m (faster and finer, leaves darting through the sun flecks sparkled), plants 1.5 Hz and grass 1.2 Hz over 8 m, hanging things 3 Hz over 0.5 m.
 - Bob and flutter grow with the height share, so a foot never moves. Phases come smoothly from the world place, so nothing tears. Normals are not turned (small angles).
 - Impostor cards do not sway, so the fade should end before a tree turns into its card (the forest's: about 1 km).
 
