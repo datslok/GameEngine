@@ -34,7 +34,7 @@ std430, mirrored byte for byte in the shaders, each size checked by a `static_as
 
 - `batchByMesh(draws, chosen, firstInstance, levels)`: groups chosen draws by how they are drawn (one- or double-sided, solid or cut-out), then by mesh (handle order, each mesh's draws in chosen order: deterministic draw lists), into `DrawBatch {mesh, firstInstance, instanceCount, cutOut, doubleSided}`. With a `LevelView`, each draw uses the mesh its level of detail picks in that view; a draw picking nothing is left out. `BatchedDraws::thinned` marks draws using a thinned mesh.
 - `VulkanRenderer::drawBatches(commands, batches, BatchPipelines{plain, cutOut, cull})`: binds the style's pipeline when it changes (cut-outs last, so once), sets the cull mode when it changes (`vkCmdSetCullMode`; scene pipelines have `dynamicCullMode`; none for double-sided), binds the mesh and calls `vkCmdDrawIndexed(indexCount, instanceCount, 0, 0, firstInstance)`, so `gl_InstanceIndex` is the draw list entry.
-- One draw list per frame, in order: main pass, each redrawn shadow tile's casters (no thinned bit: shadow shaders thin nothing), velocity pass, reflection probe faces, mirror view, transparent draws. `appendDrawList` writes a view's entries with their thinned bits.
+- One draw list per frame, in order: main pass, each redrawn shadow tile's casters (no thinned bit: shadow shaders thin nothing), velocity pass, reflection probe faces, mirror view, transparent draws. `appendDrawList` writes a view's entries with their thinned bits. Compute reads it too: occlusion counting walks the main pass's entries (`occlusion-culling.md`).
 
 ## Shaders
 

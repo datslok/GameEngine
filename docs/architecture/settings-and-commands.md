@@ -130,7 +130,7 @@ The engine's text interface: scripts, tools and AIs drive a running game by name
 | `pause`, `resume` | `addSimulationCommands(registry, control, runTick)` | `SimulationControl::paused`; `ticksThisFrame` gives 0 while paused and the time is dropped |
 | `step [ticks]` | same | pauses, runs 1 to `maxStepTicks` (100,000) ticks at once through `runTick`; reaches the very state of ticking (tested with `hashSimulationState`) |
 | `camera [x y z [tx ty tz]]` | `addCameraCommands(registry, game, world)` | shows `cameraText`, or poses through `Game::poseCamera` (three numbers keep the direction); straight up or down, or at its own place, refused (world up is camera up); a game returning false refuses by its title |
-| `debug-view [on\|off]` | `addDebugViewCommand(registry, game)` | `Game::wantsDebugView` / `setDebugView` (the F4 view); a game without one refuses |
+| `debug-view [on\|off]` | `addDebugViewCommand(registry, game)` | `Game::wantsDebugView` / `setDebugView` (the F4 view: the readout, and the boxes and colliders with `debugBoundingBoxes` on); a game without one refuses |
 | `preset [Low\|Medium\|High\|Ultra]` | `addRenderCommands(registry, render, typicalGpu, support)` | the matching preset (Custom when none) or applies one, name in any case |
 | `typical-gpu [on\|off]` | same | through `TypicalGpuView`; reports the upscaler chosen from `support` (`VulkanRenderer::upscalerSupport`) |
 
