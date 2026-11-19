@@ -267,18 +267,34 @@ namespace {
         assert(!drawSways(tree, Vec3{5.0f, 0.0f, 0.0f}, 10.0f, camera, noField));
     }
 
-    // Which shadow tiles sway: the sun's nearest cascades as many as asked, never another light's; and a swaying tile's
-    // fingerprint changes every frame something sways in it.
+    // Which shadow tiles sway: the sun's nearest cascades as many as asked; another light's while its reach comes within
+    // the sway's fade end of the camera (or its reach is unknown), unless the setting keeps lamps still; and a swaying
+    // tile's fingerprint changes every frame something sways in it.
     void testTheShadows() {
         WindSettings settings;
-        assert(tileSways(0, settings) && !tileSways(1, settings) && !tileSways(-1, settings));
+        const Vec3 camera{0.0f, 2.0f, 0.0f};
+        const Vec3 nowhere{0.0f, 0.0f, 0.0f};
+        assert(tileSways(0, nowhere, -1.0f, camera, settings) && !tileSways(1, nowhere, -1.0f, camera, settings));
         settings.swayShadowCascades = 2;
-        assert(tileSways(1, settings) && !tileSways(2, settings));
+        assert(tileSways(1, nowhere, -1.0f, camera, settings) && !tileSways(2, nowhere, -1.0f, camera, settings));
         settings.swayShadowCascades = 0;
-        assert(!tileSways(0, settings));
+        assert(!tileSways(0, nowhere, -1.0f, camera, settings));
         settings.swayShadowCascades = 1;
+
+        // A lamp's tile: the flashlight at the camera, a lamp whose reach just touches the fade's end, one just past it.
+        assert(tileSways(-1, camera, 30.0f, camera, settings));
+        assert(tileSways(-1, Vec3{settings.swayFadeEnd + 25.0f, 2.0f, 0.0f}, 30.0f, camera, settings));
+        assert(!tileSways(-1, Vec3{settings.swayFadeEnd + 35.0f, 2.0f, 0.0f}, 30.0f, camera, settings));
+        assert(tileSways(-1, Vec3{settings.swayFadeEnd * 10.0f, 2.0f, 0.0f}, -1.0f, camera, settings));
+        WindSettings stillLamps = settings;
+        stillLamps.swayLocalShadows = false;
+        assert(!tileSways(-1, camera, 30.0f, camera, stillLamps) && tileSways(0, nowhere, -1.0f, camera, stillLamps));
+
         settings.sway = false;
-        assert(!tileSways(0, settings));
+        assert(!tileSways(0, nowhere, -1.0f, camera, settings) && !tileSways(-1, camera, 30.0f, camera, settings));
+        settings.sway = true;
+        settings.enabled = false;
+        assert(!tileSways(-1, camera, 30.0f, camera, settings));
 
         const Vec4 plane{0.0f, 1.0f, 0.0f, 0.0f};
         assert(packShadowView(Mat4::identity(), plane, plane, true).options[0] == 1.0f && packShadowView(Mat4::identity(), plane, plane).options[0] == 0.0f);

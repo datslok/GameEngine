@@ -63,8 +63,9 @@ Springs, not the wind, are what things sample: they lag a gust, overshoot and se
 
 ## Swaying shadows
 
-- `shadow.vert` and `shadow_cut_out.vert` sway only in tiles that sway: `GpuShadowView::options.x`, set by `tileSways` for the sun's nearest `swayShadowCascades` (1).
-- Such a tile's fingerprint takes the frame's number while something in it sways (`swayingShadowSignature`), so it is redrawn every frame; other cascades and lamps keep still, cached shadows, as Horizon Zero Dawn's do. Shadow cache: [lights-and-shadow-atlas.md](lights-and-shadow-atlas.md).
+- `shadow.vert` and `shadow_cut_out.vert` sway only in tiles that sway: `GpuShadowView::options.x`, set by `tileSways` for the sun's nearest `swayShadowCascades` (1), and for a lamp's tiles (the flashlight's) whose reach comes within `swayFadeEnd` of the camera (`swayLocalShadows`).
+- Such a tile's fingerprint takes the frame's number while something in it sways (`swayingShadowSignature`), so it is redrawn every frame; the other cascades keep still, cached shadows, as Horizon Zero Dawn's do. Shadow cache: [lights-and-shadow-atlas.md](lights-and-shadow-atlas.md).
+- A lamp's tile drawn still while its leaves sway blackens them: each leaf sways in front of its own still shadow. A moving flashlight redraws its tile every frame anyway, so swaying it costs only while it stands still.
 
 ## Hanging things
 
@@ -102,7 +103,7 @@ A mesh without entries of kind `Hanging` sways as its own object on the short ba
 
 ## Settings
 
-`WindSettings` (`RenderSettings::wind`, F5 Wind, `engine.render.wind.*`), live: `enabled`, cell sizes, `springs`, `flutters`, `showField`, `sway`, `swayFadeStart`/`End` (80, 400 m), `swayShadowCascades`. Meanings and defaults: `render/gpu/wind.h`; `validateWind` lists what it rejects.
+`WindSettings` (`RenderSettings::wind`, F5 Wind, `engine.render.wind.*`), live: `enabled`, cell sizes, `springs`, `flutters`, `showField`, `sway`, `swayFadeStart`/`End` (80, 400 m), `swayShadowCascades`, `swayLocalShadows`. Meanings and defaults: `render/gpu/wind.h`; `validateWind` lists what it rejects.
 
 ## Tests
 

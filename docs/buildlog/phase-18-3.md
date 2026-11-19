@@ -57,3 +57,8 @@
   - **At the froxel's middle, unjittered:** without the history's averaging a jittered sample would flicker; the middle is the same every frame, so the beam's edge is only as fine as the froxels.
   - **Cost:** a second RGBA16F grid (160 x 90 x 64, 7.4 MB), one more texel read a froxel in the integration; the fast lights' shading the same as before.
   - **Left for later:** other moving lights (searchlights, sweeping floods) still trail; a 6-neighbour clamp of the history if they do (ROADMAP).
+- `sway-local-shadows` (Nov 19 2026): lamps' shadows sway near the camera (research `docs/research/WIND.md`, lamps' shadows)
+  - **Found by measuring, not guessed:** leaves facing the flashlight went black with a lit rim; the shadow stand-ins and contact shadows made no difference, the lamp's shadow off or the wind off lit them (3.3 to 13.9 of 255). `tileSways` swayed only the sun's nearest cascade, so a lamp's tile drew its casters still under swaying leaves.
+  - **Unreal's default, by tile:** a lamp's tile whose reach comes within the sway's fade end (400 m) sways and redraws every frame; `swayLocalShadows` (F5 Wind) turns it off to compare. Cost grows with shadowed lamps near the camera (at most 8 spots), not the world; a moving flashlight redraws every frame anyway.
+  - **Unity's split left for later (the user's choice):** caching a lamp's still casters helps still lamps among plants, not the flashlight.
+  - **Tested:** the sun's cascades as before; a lamp at the camera, touching and past the fade's end, of unknown reach; the setting and the wind off.

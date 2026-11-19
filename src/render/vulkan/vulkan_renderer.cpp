@@ -2646,8 +2646,9 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
                             : std::vector<std::size_t>{};
         prepared.tileGlass[tileIndex] = !glass.empty();
 
-        // The nearest cascade redraws every frame while things sway: anything in it might.
-        const bool sways = sway != nullptr && tileSways(tile.sunCascade, *sway);
+        // The nearest cascade, and a lamp reaching the swaying ground, redraw every frame while things sway: anything in
+        // them might.
+        const bool sways = sway != nullptr && tileSways(tile.sunCascade, tile.reach.centre, tile.reach.radius, cameraOrigin, *sway);
         const ShadowTileNeeds needs = shadowTileNeeds(tile, levelSettings, table, description.draws, glass, sways, shadowFrame, shadowMemory);
 
         if (tile.separateMovers) {

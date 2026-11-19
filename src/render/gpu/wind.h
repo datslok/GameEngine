@@ -79,11 +79,15 @@ struct WindSettings {
     * field still runs. The sway fades out between fadeStart and fadeEnd metres from the camera (an impostor card does
     * not sway, so a tree turning into one, at about 1 km in the forest, does not jump; 400 m chosen by eye from far off); shadowCascades of the sun's nearest cascades sway with it,
     * redrawn every frame they hold something swaying, and the rest keep still shadows, as Horizon Zero Dawn's do.
+    * swayLocalShadows: a lamp's tiles (the flashlight's) sway likewise while its reach comes within fadeEnd of the camera,
+    * redrawn every frame; off, they keep their casters still, which blackens leaves near the lamp as they sway in front of
+    * their own still shadow (as Unreal's default does: anything moving its vertices invalidates the pages it covers).
     */
     bool sway = true;
     float swayFadeStart = 80.0f;
     float swayFadeEnd = 400.0f;
     int swayShadowCascades = 1;
+    bool swayLocalShadows = true;
 };
 
 void visit(WindSettings& settings, SettingsVisitor& visitor);
@@ -215,8 +219,12 @@ Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, 
 // Whether a draw sways this frame: it has a sway, and part of it is nearer the camera than the fade's end.
 bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadius, const Vec3& camera, const WindSettings& settings);
 
-// Whether a shadow tile sways: one of the sun's nearest swayShadowCascades (sunCascade counted from 0, -1 other lights).
-bool tileSways(int sunCascade, const WindSettings& settings);
+/*
+* Whether a shadow tile sways: one of the sun's nearest swayShadowCascades (sunCascade counted from 0), or another light's
+* (sunCascade -1) while swayLocalShadows is on and its reach (the light's sphere; a negative radius unknown, so taken as
+* near) comes within swayFadeEnd of the camera, where its casters may sway.
+*/
+bool tileSways(int sunCascade, const Vec3& reachCentre, float reachRadius, const Vec3& camera, const WindSettings& settings);
 
 // A swaying tile's fingerprint changes every frame (frame, a count) while something sways in it, so it is redrawn;
 // otherwise it stays the casters' own.
