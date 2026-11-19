@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/job_system.h"
+#include "core/profiler.h"
+#include "core/startup_clock.h"
 #include "math/mat4.h"
 #include "render/gpu/bloom.h"
 #include "render/gpu/clusters.h"
@@ -11,6 +13,7 @@
 #include "render/gpu/terrain_gpu.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/loading_screen.h"
 #include "render/gpu/shadow_atlas.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/shadow_map.h"
@@ -133,11 +136,18 @@ public:
     void finishPipelines();
 
     /*
-    * One frame of the loading screen for this progress (render/gpu/loading_screen.h): the title, the count and a bar,
+    * One frame of the loading screen for this progress (render/gpu/loading_screen.h): the title, the count or a sliding block, and a bar,
     * drawn by clearing rectangles of the window's image, so it needs no pipeline. Returns false, drawing nothing, when no
     * image was available.
     */
-    bool drawLoadingScreen(const PipelineProgress& progress);
+    bool drawLoadingScreen(const LoadingProgress& progress);
+
+    /*
+    * The sky visibility bake render() starts with, done ahead of it for the first frame (seconds of CPU at start). It
+    * touches only the grid's CPU copy and its own threads, so it may run on another thread while this one draws only
+    * the loading screen; render() then finds little left to bake.
+    */
+    void bakeSkyVisibilityAhead(const FrameDescription& description, const RenderSettings& settings);
 
     // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
     // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU. A frame
@@ -216,6 +226,9 @@ public:
 private:
     SDL_Window* window = nullptr;
     JobSystem& jobs;
+
+    // Times the constructor's steps from before Streamline and the device (the log's "Renderer start" line).
+    StartupClock creationClock{profilerSeconds()};
 
     // NVIDIA's Streamline, for DLSS (render/vulkan/vulkan_dlss.h): it must start before the device, which turns on the
     // extensions it asks for, and stop before the device goes (the destructor stops it first).

@@ -212,6 +212,8 @@ void testContactShadows();
 void testVolumetricFog();
 void testSkyVisibility();
 void testPipelineCompiler();
+void testBackgroundWork();
+void testStartupClock();
 void testLoadingScreen();
 void testStaticGeometry();
 void testUpscaling();
@@ -483,6 +485,8 @@ const RoutineTest routineTests[] = {
     {"testVolumetricFog", testVolumetricFog},
     {"testSkyVisibility", testSkyVisibility},
     {"testPipelineCompiler", testPipelineCompiler},
+    {"testBackgroundWork", testBackgroundWork},
+    {"testStartupClock", testStartupClock},
     {"testLoadingScreen", testLoadingScreen},
     {"testStaticGeometry", testStaticGeometry},
     {"testUpscaling", testUpscaling},

@@ -113,18 +113,23 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     swapchain(device, window),
     framesInFlight(validFramesInFlight(requestedFramesInFlight))
 {
+    creationClock.lap("streamline, device and swapchain", profilerSeconds());
     checkFormats();
     createFrames();
     createSamplers();
     createSceneLayout();
+    creationClock.lap("frames and layouts", profilerSeconds());
 
     // Before the main pass's pipelines, which draw into its surfaces.
     reflections = std::make_unique<VulkanReflections>(device, nearestSampler.get(), linearSampler.get(), pyramidSampler.get(), nearestLevelsSampler.get(),
                                                       framesInFlight);
     reflectionProbe = std::make_unique<VulkanReflectionProbe>(device, nearestSampler.get(), pyramidSampler.get());
+    creationClock.lap("reflections", profilerSeconds());
     createPipelines();
+    creationClock.lap("pipelines asked for", profilerSeconds());
     createShadowAtlas(shadowLayout.size());
     createFixedTextures();
+    creationClock.lap("shadow atlas and textures", profilerSeconds());
 
     bloom = std::make_unique<VulkanBloom>(device, layouts, linearSampler.get());
     atmosphere = std::make_unique<VulkanAtmosphere>(device, layouts, linearSampler.get(), sceneColourFormat, depthFormat);
@@ -155,18 +160,25 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
     reactiveMask = std::make_unique<VulkanReactiveMask>(device, nearestSampler.get());
     opaquePicture = std::make_unique<VulkanOpaquePicture>(device, nearestSampler.get(), linearSampler.get(), pyramidSampler.get());
+    creationClock.lap("passes", profilerSeconds());
     fsr = std::make_unique<VulkanFsr>(device);
+    creationClock.lap("FSR", profilerSeconds());
     dlss = std::make_unique<VulkanDlss>(device, streamline);
 
     if (dlss->isAvailable()) {
         swapchain.setPresentFunction(streamline.presentFunction(device.getDevice()));
     }
+    creationClock.lap("DLSS", profilerSeconds());
     createRayTracing();
+    creationClock.lap("ray tracing", profilerSeconds());
 
     if (swapchain.rebuild(false, presentMode, framesInFlight)) {
         swapchainFramesInFlight = framesInFlight;
         createScreenPipelines(swapchain.getFormat());
     }
+
+    creationClock.lap("swapchain rebuilt", profilerSeconds());
+    SDL_Log("%s", creationClock.describe("Renderer start").c_str());
 }
 
 // Nothing may be destroyed while the GPU might still use it, so the destructor waits; the members then go in reverse order.
@@ -1354,7 +1366,7 @@ namespace {
 * The window's image cleared to the background as the rendering begins, then the bar and the text as cleared
 * rectangles: the one way to draw that needs no pipeline, since none may be built yet.
 */
-bool VulkanRenderer::drawLoadingScreen(const PipelineProgress& progress) {
+bool VulkanRenderer::drawLoadingScreen(const LoadingProgress& progress) {
     if (!prepareSwapchain()) {
         SDL_Delay(10);
         return false;
@@ -1379,7 +1391,7 @@ bool VulkanRenderer::drawLoadingScreen(const PipelineProgress& progress) {
         beginRendering(frame.commands, extent, &colour, nullptr);
         renderingOpen = true;
 
-        const LoadingScreenLayout screen = layoutLoadingScreen(static_cast<int>(extent.width), static_cast<int>(extent.height), progress.built, progress.total);
+        const LoadingScreenLayout screen = layoutLoadingScreen(static_cast<int>(extent.width), static_cast<int>(extent.height), progress);
         clearRectangles(frame.commands, extent, std::span<const ScreenRect>{&screen.barBack, 1}, loadingBarTrack);
         clearRectangles(frame.commands, extent, std::span<const ScreenRect>{&screen.barFill, 1}, loadingBarFill);
         clearRectangles(frame.commands, extent, screen.text, loadingText);
@@ -2319,6 +2331,10 @@ bool VulkanRenderer::readsSkyGrid(const FrameDescription& description, const Ren
 }
 
 // The grid follows the camera's place in the world (the main pass measures from it too, cameraOrigin).
+void VulkanRenderer::bakeSkyVisibilityAhead(const FrameDescription& description, const RenderSettings& settings) {
+    bakeSkyVisibility(description, settings, false);
+}
+
 void VulkanRenderer::bakeSkyVisibility(const FrameDescription& description, const RenderSettings& settings, bool everything) {
     validateSkyVisibility(settings.skyVisibility);
 

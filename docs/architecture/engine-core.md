@@ -1,6 +1,6 @@
 # Engine core
 
-Covers: `src/engine/application`, `src/engine/engine_settings`, `src/engine/state_hash`, `src/core/fixed_timestep`, `src/core/job_system`, `src/ecs/`, `src/input/`, `src/platform/window`, `src/platform/sdl_input`, `src/core/`, `src/math/`, `src/scene/interpolation`, `assets/shaders/hash.glsl`
+Covers: `src/engine/application`, `src/engine/engine_settings`, `src/engine/state_hash`, `src/core/fixed_timestep`, `src/core/job_system`, `src/core/background_work`, `src/ecs/`, `src/input/`, `src/platform/window`, `src/platform/sdl_input`, `src/core/`, `src/math/`, `src/scene/interpolation`, `assets/shaders/hash.glsl`
 
 The loop, its timing, threads, entities and input. Rules for working here: `src/engine/CLAUDE.md`, `src/ecs/CLAUDE.md`.
 
@@ -21,7 +21,15 @@ Owns, in declaration order (destroyed in reverse):
 | `input`, `world`, `assets` | |
 | `debugUi` | Destroyed before the renderer it draws with |
 
-**Start:** `game.onInit`, then `waitForPipelines` (the loading screen until every pipeline is built), then the command server, so `--send` waits for a ready game.
+**Start** (each step timed, `core/startup_clock`: one "Start-up" line in the log at the first frame drawn, the renderer's own "Renderer start" line, the first frame's renderer stages):
+
+1. Settings, the window (made hidden, shown with the first loading frame: `Window::reveal`, so the renderer's seconds of start show no black window) and the renderer.
+2. `game.onInit` behind the loading screen ("LOADING THE WORLD") on a thread of its own (`workBehindLoadingScreen`, `runWhileWaiting` in `core/background_work`): safe since games are headless, the job system takes work from any thread and nothing else reads the world meanwhile.
+3. Every mesh up to the GPU, counted ("PREPARING THE SCENE n / m"), a 33 ms slice between loading frames (`stepsWithinBudget`), on the main thread, since uploads share the GPU queue with the screen.
+4. `waitForPipelines` ("BUILDING SHADERS" until every pipeline is built), then the command server, so `--send` waits for a ready game.
+5. The first frame's `describeFrame` and sky bake (`bakeSkyVisibilityAhead`) behind the loading screen on a thread of its own (`describeFirstFrame`), the same work render() would do there.
+
+Closing the window during a stage cannot stop it: drawing stops and the game quits once it ends.
 
 **Each frame:**
 
@@ -85,7 +93,7 @@ Same build + same commands → bit-identical state.
 
 - `Input`: a once-a-frame snapshot, no SDL. Keys by engine `Key` (physical US positions): `isKeyHeld`, `wasKeyPressed`, `wasKeyReleased`; mouse buttons alike, each press also a `MouseButtonPress` with exact position and time; `getMouseDelta`, cursor, window size.
 - `sdl_input` is the only SDL-to-engine translation (`keyFromScancode`, `mouseButtonFromSdl`, `applySdlEvent`; drops key repeat).
-- `Window` (`platform/`) owns SDL video: events into `Input`, quit, focus loss (releases all), click to capture (mouse look) or confine (MOBA), Escape releases, Alt+Enter fullscreen.
+- `Window` (`platform/`) owns SDL video: made hidden and shown by `reveal` once drawn in (not with `--hidden`); events into `Input`, quit, focus loss (releases all), click to capture (mouse look) or confine (MOBA), Escape releases, Alt+Enter fullscreen.
 - With F5 open, ImGui sees every event first, and keys and clicks it wants never reach `Input`.
 - Mouse motion is forwarded only while captured and dropped when capture or control mode changes.
 

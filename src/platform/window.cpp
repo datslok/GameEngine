@@ -34,11 +34,14 @@ Window::Window(const char* title, int width, int height, WindowVisibility visibi
 
         videoInitialized = true;
 
-        window = SDL_CreateWindow(title, width, height, visibility == WindowVisibility::Hidden ? SDL_WINDOW_HIDDEN : 0);
+        // Always hidden at first: a shown one is revealed once something is drawn in it (reveal).
+        window = SDL_CreateWindow(title, width, height, SDL_WINDOW_HIDDEN);
 
         if (window == nullptr) {
             throw platformError("Window creation failed");
         }
+
+        revealPending = visibility == WindowVisibility::Shown;
     }
     catch (...) {
         cleanup();
@@ -64,6 +67,13 @@ void Window::cleanup() noexcept {
 
 SDL_Window* Window::getSdlWindow() const {
     return window;
+}
+
+void Window::reveal() {
+    if (revealPending) {
+        SDL_ShowWindow(window);
+        revealPending = false;
+    }
 }
 
 /*
