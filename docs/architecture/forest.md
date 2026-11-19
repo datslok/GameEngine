@@ -8,7 +8,7 @@ Other forest files: `forest-rock.md` (pillars, islands, what hangs from them, dr
 
 ## Start-up (`onInit`)
 
-In order: `buildGround`, `buildShapes`, `buildPlantingMaps` (the planting maps every plant reads: `forest-plants.md`), `buildTrees`, `buildLianas`, `buildUnderstorey`, `buildPalms`, `buildGrass`, `buildFloorCover`; then the start, the body, the sun, the air entity and `ProbeCascades`.
+In order: `buildGround`, `buildShapes`, `buildPlantingMaps` (the planting maps every plant reads: `forest-plants.md`), `buildTrees` (which plants every layer at once on the drawn ground, `plantThePatch`), `buildLianas`, `buildUnderstorey`, `buildPalms`, `buildGrass`, `buildFloorCover`; then the start, the body, the sun, the air entity and `ProbeCascades`.
 
 - Generated meshes are built on the game's job system (`Game::getJobs`), each into its own slot, so the result does not depend on thread order; most are kept drawn-only (`AssetManager::addDrawnMesh`).
 - Scenery is `ModelRenderer::isStill` (`addShape`): its draws are kept between frames, so any change to its material or sway is announced with `markRenderChanged`.

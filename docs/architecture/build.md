@@ -19,7 +19,7 @@ Covers: `makefile`, `tools/package_demo.py`
 | Exceptions | `src/cloth/`, the signed distance field and the sky visibility bake (with the level's ray code) at `-O2`: too hot to run unoptimised | — |
 
 - `BUILD=debug|release` picks `OPTIMISATION` and `BUILD_DIR`; release targets re-run make with `BUILD=release`, so switching never rebuilds the other.
-- Both keep `-g`. Never `-DNDEBUG` (tests rely on `assert`), never `-ffast-math`.
+- Both keep `-g`. Never `-DNDEBUG` (tests rely on `assert`), never `-ffast-math`. Planting's files (`scene/planting`, `planting_maps`, `terrain_heights`) add `-ffp-contract=off`: they must round as the GPU's `precise` copy does (`planting.md`).
 - Tiny maths (`Vec2`, `Vec3`, `Vec4`, `Mat4 * Vec4`, `transformPoint`, `transformDirection`) is defined in headers so it inlines. `-flto` is not used: a one-file rebuild took 20 s instead of 3 for 3-9% speed.
 
 ## Shaders
