@@ -57,6 +57,7 @@ Per cascade, finest first (`sunCascadeRow`):
 
 - **Why along the light, not the normal:** moving along the rays changes only depth in every cascade, so cascades of different texel sizes agree on where an edge is (`testMovingTowardsTheSunKeepsThePlaceInEveryCascade`).
 - **Blend:** `cascadeBlendWeight(edge, cascadeBlendBand)` (0.1 of a radius; 0 switches hard) mixes in the next cascade near the edge; a point the next box misses stays with this one.
+- **Limited casters thin out:** a caster limited to the nearest cascades (`shadowCascades`) would stop at its last cascade's edge. There `shadowThinKeeps` (`camera_culling`, in `shadowTakes`) keeps a share falling from 1 at `limitedCasterThinStart` (0.5 of a radius from the sides) to 0 at the blend band, by each caster's fixed PCG3D number of its centre. Culled, not drawn; the band is in `ShadowTile::thinStart`/`thinEnd` and the cache key.
 - **Dither:** `CascadeTransition::Dither` keeps one cascade per pixel (`cascadeDitherKeeps(weight, interleaved gradient noise)`): one lookup instead of two, grainy until anti-aliasing averages it.
 - Band and transition reach the shader in `GpuFrameData::cascadeOptions`.
 - `sunCascadeRow` returns its shadow and `ownShare`; `sunShadow` fills the rest from the mirror's row when there is one, else full light (`sunRowOrLit`).

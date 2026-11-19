@@ -7,7 +7,10 @@
 #include "scene/culling.h"
 #include "scene/level_of_detail.h"
 
+#include <algorithm>
+#include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <numbers>
 #include <random>
@@ -45,7 +48,82 @@ namespace {
         tile.smallestCaster = unit(random) < 0.5f ? 0.0f : unit(random) * 20.0f;
         tile.sunCascade = unit(random) < 0.4f ? -1 : static_cast<int>(unit(random) * 4.0f);
         tile.separateMovers = unit(random) < 0.3f;
+
+        if (unit(random) < 0.7f) {
+            tile.thinStart = 0.3f + unit(random) * 0.6f;
+            tile.thinEnd = unit(random) * 0.25f;
+        }
+
         return tile;
+    }
+
+    /*
+    * In a sun cascade's tile, casters limited to no further cascades thin out across its band: all kept deeper in than
+    * thinStart, none nearer a side than thinEnd, the share kept falling evenly between; a caster's choice never changes.
+    * Casters free of the limit or limited to further cascades, a lamp's tile and an empty band keep every one, and
+    * shadowTakes leaves out what the thinning does.
+    */
+    void testLimitedCastersThinOut() {
+        const float half = 20.0f;
+        const Vec3 place{0.0f, 100.0f, 0.0f};
+        ShadowTile tile;
+        tile.matrix = toGpuDepthRange(Mat4::orthographic(-half, half, -half, half, 0.0f, 1500.0f)) *
+                      Mat4::lookAt(place, place + Vec3{0.0f, -1.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f});
+        tile.sunCascade = 1;
+        tile.thinStart = 0.5f;
+        tile.thinEnd = 0.1f;
+        const LevelOfDetailSettings settings;
+        const GpuCameraCull view = packShadowCull(tile, settings);
+
+        ShadowTile lamp = tile;
+        lamp.sunCascade = -1;
+        ShadowTile empty = tile;
+        empty.thinStart = 0.1f;
+        const GpuCameraCull lampView = packShadowCull(lamp, settings);
+        const GpuCameraCull emptyView = packShadowCull(empty, settings);
+
+        std::mt19937 random{29};
+        std::uniform_real_distribution<float> across{-half, half};
+        constexpr int bins = 8;
+        std::array<int, bins> kept{};
+        std::array<int, bins> seen{};
+
+        for (int index = 0; index < 40000; ++index) {
+            GpuCullRecord record{};
+            record.bounds[0] = across(random);
+            record.bounds[1] = 0.0f;
+            record.bounds[2] = across(random);
+            record.bounds[3] = 0.3f;
+            record.flags = CULL_CASTS_SHADOWS;
+            record.shadowCascades = 2;
+            const float edge = 1.0f - std::max(std::abs(record.bounds[0]), std::abs(record.bounds[2])) / half;
+            const bool keeps = shadowThinKeeps(record, view);
+            assert(keeps == shadowThinKeeps(record, view));
+            assert(shadowTakes(record, view) == keeps);
+            assert(shadowThinKeeps(record, lampView) && shadowThinKeeps(record, emptyView));
+
+            if (edge > 0.5001f) {
+                assert(keeps);
+            } else if (edge < 0.0999f) {
+                assert(!keeps);
+            } else if (edge > 0.1f && edge < 0.5f) {
+                const int bin = std::min(bins - 1, static_cast<int>((edge - 0.1f) / 0.4f * static_cast<float>(bins)));
+                kept[static_cast<std::size_t>(bin)] += keeps ? 1 : 0;
+                ++seen[static_cast<std::size_t>(bin)];
+            }
+
+            for (const std::int32_t cascades : {0, 3}) {
+                record.shadowCascades = cascades;
+                assert(shadowThinKeeps(record, view));
+            }
+        }
+
+        for (int bin = 0; bin < bins; ++bin) {
+            const std::size_t at = static_cast<std::size_t>(bin);
+            const float share = static_cast<float>(kept[at]) / static_cast<float>(seen[at]);
+            assert(seen[at] > 500);
+            assert(std::abs(share - (static_cast<float>(bin) + 0.5f) / static_cast<float>(bins)) < 0.06f);
+        }
     }
 
     std::vector<std::uint32_t> orderOf(const BatchedDraws& batched) {
@@ -252,6 +330,7 @@ namespace {
 */
 void testShadowCulling() {
     testShadowListsMatchTheCpu();
+    testLimitedCastersThinOut();
     testShadowCacheCoversTheFingerprint();
     testShadowEdges();
 }

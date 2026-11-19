@@ -26,10 +26,11 @@ namespace {
         float swayFadeEnd = 0.0f;
         std::uint32_t cameraFlags = 0;
 
-        // A shadow tile's (shadowTakes): its reach, smallest caster and cascade.
+        // A shadow tile's (shadowTakes): its reach, smallest caster, cascade and thinning band.
         float reach[4] = {0.0f, 0.0f, 0.0f, -1.0f};
         float smallestCaster = 0.0f;
         std::int32_t cascade = -1;
+        float thinning[2] = {0.0f, 0.0f};
     };
 
     // The case's camera record (GpuCameraCull) for cameraCandidateFlags.
@@ -42,6 +43,8 @@ namespace {
         std::copy(std::begin(c.reach), std::end(c.reach), std::begin(view.reach));
         view.smallestCaster = c.smallestCaster;
         view.cascade = c.cascade;
+        view.thinning[0] = c.thinning[0];
+        view.thinning[1] = c.thinning[1];
         return view;
     }
 
@@ -119,6 +122,12 @@ namespace {
 
             c.smallestCaster = i % 2 == 0 ? random.between(0.0f, 20.0f) : 0.0f;
             c.cascade = i % 3 == 0 ? -1 : static_cast<std::int32_t>(i % 4);
+
+            if (i % 7 != 0) {
+                c.thinning[0] = random.between(0.3f, 0.9f);
+                c.thinning[1] = random.between(0.0f, 0.25f);
+            }
+
             cases.push_back(c);
         }
 
@@ -150,7 +159,7 @@ namespace {
     }
 
     // A candidate's flags, the sway's reach, the shadow tiles' test and its fade field, against the C++ mirror, case by
-    // case (the draw cases plus three inputs).
+    // case (the draw cases plus four inputs).
     void checkCandidates(GpuFunctionRunner& runner, GpuCheckReport& report) {
         const std::vector<Case> cases = randomCases();
         std::vector<GpuVec4> inputs;
@@ -160,9 +169,10 @@ namespace {
             inputs.push_back(gpuVec4(static_cast<float>(c.levels.changesShape), static_cast<float>(c.slot), c.swayFadeEnd, static_cast<float>(c.cameraFlags)));
             inputs.push_back(GpuVec4{c.reach[0], c.reach[1], c.reach[2], c.reach[3]});
             inputs.push_back(gpuVec4(c.smallestCaster, static_cast<float>(c.cascade), static_cast<float>(c.record.shadowCascades)));
+            inputs.push_back(gpuVec4(c.thinning[0], c.thinning[1]));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CAMERA_CANDIDATE, inputs, 16, 1);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CAMERA_CANDIDATE, inputs, 17, 1);
 
         for (std::size_t i = 0; i < cases.size(); ++i) {
             if (nearAThreshold(cases[i])) {
