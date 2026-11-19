@@ -3,9 +3,9 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 /*
-* The placed drawing's commands (render/vulkan/vulkan_placed_drawing.h): one workgroup turns the groups' totals into
-* each group's first entry (an exclusive prefix sum in group order) and writes each group's indirect command, its
-* instances counted from PLACED_INSTANCE_BASE plus that first entry.
+* The placed drawing's commands (render/vulkan/vulkan_placed_drawing.h): a workgroup a view turns its groups' totals
+* into each group's first entry (an exclusive prefix sum in group order, from the view's own entries) and writes each
+* of its groups' indirect commands, the instances counted from PLACED_INSTANCE_BASE plus that first entry.
 */
 #include "placed_cull.glsl"
 
@@ -15,13 +15,16 @@ shared uint sums[PLACED_SCAN_GROUP_SIZE];
 
 void main() {
     uint local = gl_LocalInvocationIndex;
-    uint groups = placedView.groups;
+    uint viewNumber = gl_WorkGroupID.y;
+    PlacedView view = placedViews[viewNumber];
+    uint groups = view.groups;
+    uint bases = view.viewCount * groups;
     uint carried = 0u;
 
     // The loop's bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
     for (uint first = 0u; first < groups; first += PLACED_SCAN_GROUP_SIZE) {
         uint group = first + local;
-        uint value = group < groups ? placedTotals[group] : 0u;
+        uint value = group < groups ? placedTotals[viewNumber * groups + group] : 0u;
         sums[local] = value;
         barrier();
 
@@ -33,10 +36,10 @@ void main() {
         }
 
         if (group < groups) {
-            uint base = carried + sums[local] - value;
+            uint base = view.entryBase + carried + sums[local] - value;
             PlacedGroup mesh = placedGroups[group];
-            placedTotals[PLACED_MOST_GROUPS + group] = base;
-            placedCommands[group] = DrawCommand(mesh.indexCount, value, mesh.firstIndex, mesh.vertexOffset, PLACED_INSTANCE_BASE + base);
+            placedTotals[bases + viewNumber * groups + group] = base;
+            placedCommands[viewNumber * groups + group] = DrawCommand(mesh.indexCount, value, mesh.firstIndex, mesh.vertexOffset, PLACED_INSTANCE_BASE + base);
         }
 
         carried += sums[PLACED_SCAN_GROUP_SIZE - 1];

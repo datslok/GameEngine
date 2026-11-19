@@ -296,6 +296,18 @@ const PlantingSlotLayout& VulkanPlanting::getLayout() const {
     return layout;
 }
 
+float VulkanPlanting::getCellMetres() const {
+    return cellMetres;
+}
+
+const std::shared_ptr<const TerrainHeights>& VulkanPlanting::getHeights() const {
+    return heights;
+}
+
+const std::vector<PlantingCellMade>& VulkanPlanting::getMade() const {
+    return made;
+}
+
 const std::shared_ptr<const PlantingField>& VulkanPlanting::getField() const {
     return field;
 }

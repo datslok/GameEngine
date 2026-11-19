@@ -18,7 +18,8 @@
 * - the still draws were built afresh, or one built in place touches the tile where it was or where it is;
 * - a moving draw it takes changed (the movers' fingerprint in its key; those that moved kept apart where it keeps them so);
 * - its glass changed (the glass's fingerprint, from the CPU's short glass list);
-* - it sways (a new key every frame).
+* - it sways (a new key every frame);
+* - a planting cell it takes was made or dropped, or the placed plants' table changed.
 */
 
 // A tile's casters as the CPU finds them, the GPU's reference: of inReach (castersInReach for its reach), those in its
@@ -28,6 +29,16 @@ std::vector<std::size_t> shadowTileCasters(const std::vector<DrawItem>& draws, c
 // A tile as a view: its frustum, levels by its own texels (tileLevelView), reach, smallest caster and cascade; the moved
 // casters in its second list where it keeps its movers apart.
 GpuCameraCull packShadowCull(const ShadowTile& tile, const LevelOfDetailSettings& settings);
+
+/*
+* What the placed plants (render/gpu/placed_drawing.h) changed this frame: each cell made or dropped as a casting sphere
+* round its boxes (placedChangeRecord), or everything (all: a new table or region, or the placed plants starting or
+* stopping).
+*/
+struct PlantedShadowChanges {
+    std::vector<GpuCullRecord> cells;
+    bool all = false;
+};
 
 // What a tile needs this frame: whether its still casters are drawn again, the key to remember once they are, and the
 // moving draws it takes (standing in still, moved in moving where it keeps them apart; all in still otherwise), and the
@@ -41,7 +52,9 @@ struct ShadowTileNeeds {
 
 /*
 * The tile's needs from the frame's table (CameraCullFrame: its still changes, the moving draws' records after the
-* still ones in draws), its glass (draws tinting it) and whether it sways this frame (frame then makes its key new).
+* still ones in draws), its glass (draws tinting it), whether it sways this frame (frame then makes its key new) and
+* the placed plants' changes (redrawn where a changed cell is a caster it takes, or by all).
 */
 ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSettings& settings, const CameraCullFrame& table, const std::vector<DrawItem>& draws,
-                                const std::vector<std::size_t>& glass, bool sways, std::uint64_t frame, const ShadowTileMemory& memory);
+                                const std::vector<std::size_t>& glass, bool sways, std::uint64_t frame, const ShadowTileMemory& memory,
+                                const PlantedShadowChanges& planted);

@@ -1104,9 +1104,10 @@ namespace {
     }
 
     /*
-    * Placed trees (ROADMAP phase 18, stage 2b2): off, the field draws nothing and every tree entity is shown; on, the
-    * field's looks draw every species' variants over the patch, each variant the parts its entities are drawn with but
-    * the shadow's stand-ins, which stay entities, while those entities are hidden; off again, all as before.
+    * Placed trees (ROADMAP phase 18, stages 2b2 and 2c1): off, the field draws nothing and every tree entity is shown;
+    * on, the field's looks draw every species' variants over the patch, each variant the parts its entities are drawn
+    * with, the shadow's stand-ins among them, swaying as they sway, while those entities are hidden; a change to the
+    * sway gives new looks; off again, all as before.
     */
     void testPlacedTrees(TestForest& forest) {
         World& world = forest.world;
@@ -1137,14 +1138,17 @@ namespace {
         for (const PlantedKindLook& kind : looks->kinds) {
             const bool big = kind.layer == static_cast<int>(ForestLayer::Emergent) || kind.layer == static_cast<int>(ForestLayer::Canopy);
             assert(big || kind.layer == static_cast<int>(ForestLayer::Mid));
-            // Bark, leaves and the card, then any climbers and epiphytes: never the shadow's stand-ins.
-            assert(kind.models.size() >= 3 && kind.models.size() <= 7);
+            // Bark, leaves, the card and the shadow's stand-ins (one shadows-only model of two parts), then any climbers and
+            // epiphytes.
+            assert(kind.models.size() >= 4 && kind.models.size() <= 8);
 
-            for (const ModelRenderer& model : kind.models) {
-                assert(!model.shadowOnly);
+            for (std::size_t model = 0; model < kind.models.size(); ++model) {
+                assert(kind.models[model].shadowOnly == (model == 3));
             }
 
             assert(!kind.models[0].castsShadows && !kind.models[1].castsShadows && !kind.models[2].castsShadows);
+            assert(kind.models[3].castsShadows && kind.models[3].parts.size() == 2);
+            assert(kind.models[2].sway.kind == SwayKind::Still);
 
             assert(kind.models[2].parts.front().material.impostorFrames > 0);
         }
@@ -1158,18 +1162,46 @@ namespace {
         const ModelRenderer& bark = world.get<ModelRenderer>(trees.front());
         assert(look->models[0].parts.front().mesh == bark.parts.front().mesh);
         assert(look->models[0].parts.front().material.roughness == bark.parts.front().material.roughness);
+        assert(look->models[3].parts.front().mesh == world.get<ModelRenderer>(trees[2]).parts.front().mesh);
 
+        // Swaying as its entities sway: bark, leaves and stand-ins.
+        const auto sameSway = [](const WindSway& a, const WindSway& b) {
+            return a.kind == b.kind && a.height == b.height && a.bend == b.bend && a.flutter == b.flutter && a.swing == b.swing;
+        };
+
+        for (std::size_t model = 0; model < 3; ++model) {
+            const std::size_t lookModel = model == 2 ? 3 : model;
+            assert(look->models[lookModel].sway.kind != SwayKind::Still);
+            assert(sameSway(look->models[lookModel].sway, world.get<ModelRenderer>(trees[model]).sway));
+        }
+
+        // Every twin hidden, the stand-ins among them (the placed trees cast their shadows).
         for (const Entity entity : twins) {
             assert(!world.get<ModelRenderer>(entity).isVisible());
         }
 
         for (std::size_t tree = 0; tree < trees.size() / 3; ++tree) {
-            assert(world.get<ModelRenderer>(trees[3 * tree + 2]).isVisible() && world.get<ModelRenderer>(trees[3 * tree + 2]).shadowOnly);
+            assert(!world.get<ModelRenderer>(trees[3 * tree + 2]).isVisible() && world.get<ModelRenderer>(trees[3 * tree + 2]).shadowOnly);
         }
 
-        // The same looks while on (not rebuilt each frame), none once off again.
+        // The same looks while on (not rebuilt each frame).
         frame();
         assert(plantingSourceOf(world).looks == looks);
+
+        // A new sway: new looks swaying by it, as the entities do.
+        const float bend = game.getSwaySettings().trees.bend;
+        game.getSwaySettings().trees.bend = bend * 2.0f;
+        frame();
+        const std::shared_ptr<const PlantingLooks> swayed = plantingSourceOf(world).looks;
+        assert(swayed && swayed != looks);
+        const auto swayedLook = std::find_if(swayed->kinds.begin(), swayed->kinds.end(), [&](const PlantedKindLook& kind) {
+            return kind.layer == static_cast<int>(ForestLayer::Canopy) && kind.kind == first.variant;
+        });
+        assert(sameSway(swayedLook->models[0].sway, world.get<ModelRenderer>(trees.front()).sway) && swayedLook->models[0].sway.bend != look->models[0].sway.bend);
+        game.getSwaySettings().trees.bend = bend;
+        frame();
+
+        // None once off again.
         game.getPlantingSettings().placedTrees = false;
         frame();
         assert(!plantingSourceOf(world).looks);

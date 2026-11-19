@@ -89,6 +89,7 @@ Each shadow tile drawn is a view (`packShadowCull`): its frustum, levels by its 
 | a moving draw it takes changed | the moving draws' records (`shadowTakes`), their fingerprint in its key (standing ones only where it keeps movers apart) |
 | its glass changed | `glassInReach` over the table's glass list, in its key |
 | it sways (`tileSways`: the nearest cascade with sway on) | a new key every frame |
+| a planting cell it takes was made or dropped, or the placed plants' table changed | `PlantedShadowChanges` (`planting.md`, Placed plants drawn) |
 
 - A drawn tile's lists get room for every draw each in the draw list (one list, two keeping movers apart); cached tiles get no view.
 - F4's SHADOW DRAWN and CULLED from the counts read back (still casters counted only where redrawn).

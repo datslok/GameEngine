@@ -16,6 +16,7 @@ Every function here is mirrored in `terrain.glsl` / `terrain_heights.glsl` / `te
 | `terrainHeight` | Bilinear height (`terrainBilinear`) |
 | `terrainNormal(heights, x, z, step)` | Unit normal from the slope over `step` either way |
 | `terrainSurfaceHeight` | The height as the finest patches draw it: each grid square two flat triangles split from its near right corner to its far left (`terrainTriangleHeight`), as `terrainGridMesh` splits it |
+| `terrainHeightRange(heights, west, east, north, south)` | Every height either read gives in a box: the grid points round its squares, finest grid up to the first holding the whole box, a hair wider for rounding (CPU only; the placed plants' cell boxes) |
 | `terrainMorph(distance, start, end)` | 0 before start, 1 from end, linear between |
 | `morphGridCoordinate(grid, morph)` | Odd grid coordinates slide towards their even neighbour below; at 1 the patch is the next coarser grid |
 | `terrainVertex(heights, patch, meshPoint, eye)` | A patch vertex: below |

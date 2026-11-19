@@ -423,6 +423,15 @@ private:
     std::vector<PlantedKindLook> treeLooks; // each species' variants as the placed trees draw them (plantTrees)
     std::vector<Entity> placedTwins;       // the tree entities the placed trees stand in for, hidden while they draw
     bool placedTreesShown = false;         // whether the placed trees draw now (applyPlacedTrees)
+
+    // A look's model swaying as its entities do (applySway gives it the same sway): its look, its model, how it sways.
+    struct LookSwayer {
+        std::size_t look = 0;
+        std::size_t model = 0;
+        ForestSwayer swayer;
+    };
+
+    std::vector<LookSwayer> treeLookSwayers;
     std::vector<GrassCell> grassCells;
     std::vector<Entity> grassEntities;
     std::vector<GroundCell> floorCells;

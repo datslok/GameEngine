@@ -50,7 +50,7 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 - Declaration-only includes: `instances.glsl` (`InstanceData` from `instance_data.glsl`, `Instances` binding 1, `DrawList` binding 10), `frame_data.glsl` (`FrameData`, binding 0), `materials.glsl` (the bindless array and `MaterialData`), `scene_lights.glsl` (light records, bindings 3-5, shared with `cluster_lights.comp`); `frame_clusters.glsl` builds `ClusterGrid` from the block.
 - `triangle.vert`: reads its instance through `drawnObject` (`drawn_objects.glsl`): `instances[drawnInstance(drawList[gl_InstanceIndex])]`, or for a draw from `PLACED_INSTANCE_BASE` a placed part built from its plant (`planting.md`); subtracts `cameraOrigin` from the model's translation (camera-relative: `depth.md`), then terrain, card thinning, ground following and wind sway; passes the material number flat.
 - `scene_surface.glsl` (the main pass's shading): `materials[index]`, textures as `textures[nonuniformEXT(slot)]` (neighbouring pixels may be different objects), each light's shadow from its record.
-- `shadow.vert`: `tileMatrix * (model * position)` in world space, so cached tiles stay keyed on world matrices.
+- `shadow.vert`: `tileMatrix * (model * position)` in world space, so cached tiles stay keyed on world matrices; it, `shadow_cut_out.vert` and `motion.vert` read their instance through `drawnObject` too.
 
 ## Descriptors (`scene_layout`)
 
@@ -78,7 +78,7 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 | 35, 36 | terrain heights and patches | terrain (`scene/terrain`) |
 | 37-41 | wind field, springs (two), hanging vertices, anchors | wind (`render/gpu/wind`) |
 | 42 | card thinning records | card thinning (`scene/card_thinning`) |
-| 43-45 | the planting cells' slots' plants, placed parts' instances, the camera's placed entries | `planting.md` (Placed plants drawn) |
+| 43-45 | the planting cells' slots' plants, placed parts' instances, every view's placed entries | `planting.md` (Placed plants drawn) |
 
 **Sharing:** `SceneLayout` owns set 1's layout and one pipeline layout of both sets plus the push constant, shared by the main, prepass, shadow, tile reset, velocity and coloured-shadow pipelines and the cluster pass (`sharedLayout`). `bindScene` binds both sets once per pass (graphics by default; compute for the cluster pass) and they stay bound across those pipelines. The glass ray pipelines add the ray tracing set; transparent pipelines add a set 2 of their own.
 

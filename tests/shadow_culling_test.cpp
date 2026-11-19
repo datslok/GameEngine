@@ -7,6 +7,7 @@
 #include "scene/culling.h"
 #include "scene/level_of_detail.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <numbers>
@@ -152,7 +153,7 @@ namespace {
             ++frameNumber;
 
             for (const ShadowTile& tile : tiles) {
-                const ShadowTileNeeds needs = shadowTileNeeds(tile, settings, culled, frame.draws, {}, false, frameNumber, memory);
+                const ShadowTileNeeds needs = shadowTileNeeds(tile, settings, culled, frame.draws, {}, false, frameNumber, memory, {});
                 const std::uint64_t print = fingerprint(frame.draws, tile, settings);
                 const bool fingerprintChanged = !reference.isCurrent(tile, print);
                 assert(!fingerprintChanged || needs.redraw);
@@ -216,9 +217,9 @@ namespace {
 
         // A swaying tile's key is new every frame.
         const CameraCullFrame culled = table.update(frameOf(scene.draws, stillDraws, 21, 20), shadowTestPlacement, [](MeshHandle) { return false; });
-        const ShadowTileNeeds first = shadowTileNeeds(tiles[0], settings, culled, scene.draws, {}, true, 100, memory);
+        const ShadowTileNeeds first = shadowTileNeeds(tiles[0], settings, culled, scene.draws, {}, true, 100, memory, {});
         memory.remember(tiles[0], first.key);
-        assert(shadowTileNeeds(tiles[0], settings, culled, scene.draws, {}, true, 101, memory).redraw);
+        assert(shadowTileNeeds(tiles[0], settings, culled, scene.draws, {}, true, 101, memory, {}).redraw);
     }
 
     // A caster's sphere touching the reach or exactly the smallest caster's size is near an edge; well inside, not.
@@ -244,6 +245,70 @@ namespace {
         tile.smallestCaster = 1.0f;
         assert(nearACameraEdge(packCullRecord(draw), levels, packShadowCull(tile, settings)));
     }
+
+    /*
+    * The placed plants' changes (render/gpu/placed_drawing.h): with nothing else changed, a tile is redrawn exactly when
+    * a cell made or dropped is one of its casters by its sphere (shadowTakes); a new table redraws every tile.
+    */
+    void testPlantedChangesRedrawTheirTiles() {
+        std::mt19937 random{79};
+        std::uniform_real_distribution<float> unit{0.0f, 1.0f};
+        CullScene scene = randomCullScene(random, 400);
+
+        for (DrawItem& draw : scene.draws) {
+            draw.previousModel.reset();
+        }
+
+        std::vector<ShadowTile> tiles;
+
+        for (int index = 0; index < 40; ++index) {
+            ShadowTile tile = randomTile(random);
+            tile.x = static_cast<std::uint32_t>(index) * 4096;
+            tiles.push_back(tile);
+        }
+
+        const LevelOfDetailSettings settings;
+        CameraCullTable table;
+        ShadowTileMemory memory;
+        const CameraCullFrame first = table.update(frameOf(scene.draws, scene.draws.size(), 1, 0), shadowTestPlacement, [](MeshHandle) { return false; });
+
+        for (const ShadowTile& tile : tiles) {
+            memory.remember(tile, shadowTileNeeds(tile, settings, first, scene.draws, {}, false, 1, memory, {}).key);
+        }
+
+        const CameraCullFrame culled = table.update(frameOf(scene.draws, scene.draws.size(), 2, 1), shadowTestPlacement, [](MeshHandle) { return false; });
+        PlantedShadowChanges planted;
+
+        for (int cell = 0; cell < 6; ++cell) {
+            GpuCullRecord record{};
+            record.bounds[0] = (unit(random) - 0.5f) * 3000.0f;
+            record.bounds[1] = unit(random) * 60.0f;
+            record.bounds[2] = (unit(random) - 0.5f) * 3000.0f;
+            record.bounds[3] = 40.0f + unit(random) * 60.0f;
+            record.flags = CULL_CASTS_SHADOWS;
+            planted.cells.push_back(record);
+        }
+
+        std::size_t touched = 0;
+
+        for (const ShadowTile& tile : tiles) {
+            const ShadowTileNeeds needs = shadowTileNeeds(tile, settings, culled, scene.draws, {}, false, 2, memory, planted);
+            const bool takes = std::any_of(planted.cells.begin(), planted.cells.end(), [&](const GpuCullRecord& record) {
+                return shadowTakes(record, needs.view);
+            });
+            assert(needs.redraw == takes);
+            touched += takes ? 1 : 0;
+            assert(!shadowTileNeeds(tile, settings, culled, scene.draws, {}, false, 2, memory, {}).redraw);
+        }
+
+        assert(touched > 0 && touched < tiles.size());
+
+        planted.all = true;
+
+        for (const ShadowTile& tile : tiles) {
+            assert(shadowTileNeeds(tile, settings, culled, scene.draws, {}, false, 2, memory, planted).redraw);
+        }
+    }
 }
 
 /*
@@ -254,4 +319,5 @@ void testShadowCulling() {
     testShadowListsMatchTheCpu();
     testShadowCacheCoversTheFingerprint();
     testShadowEdges();
+    testPlantedChangesRedrawTheirTiles();
 }

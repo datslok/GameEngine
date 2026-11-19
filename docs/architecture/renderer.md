@@ -62,7 +62,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
 | 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
 | 7 | Wind [WIND] | the wind field runs | wind (`render/gpu/wind`) |
-| 8 | Planting [PLANTING], placed [PLACED] | planting cells made, or read back (`placement-compare`); the camera's placed plants' lists while a field's looks draw some | `planting.md` |
+| 8 | Planting [PLANTING], placed [PLACED] | planting cells made, or read back (`placement-compare`); every view's placed plants' lists while a field's looks draw some (camera, velocity, probe faces, shadow tiles) | `planting.md` |
 | 9 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
 | 10 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
 | 11 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |

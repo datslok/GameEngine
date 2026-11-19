@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -37,7 +38,8 @@ namespace {
         std::uint32_t entries[2] = {0, 0};
     };
 
-    PartDraws placedPartEntries(const GpuPlacedPart& part, const GpuPlacedPlant& plant, std::uint32_t number, const GpuCameraCull& view) {
+    PartDraws placedPartEntries(const GpuPlacedPart& part, const GpuPlacedPlant& plant, std::uint32_t number, const GpuCameraCull& view,
+                                std::uint32_t wanted) {
         const GpuCullRecord record = placedCullRecord(part.record, plant);
         PartDraws draws;
         std::uint32_t found = 0;
@@ -49,7 +51,7 @@ namespace {
 
             const std::uint32_t flags = cameraCandidateFlags(record, part.levels, view, slot);
 
-            if ((flags & CAMERA_CULL_DRAWN) == 0u || found >= 2) {
+            if ((flags & wanted) == 0u || found >= 2) {
                 continue;
             }
 
@@ -73,6 +75,34 @@ namespace {
         const PlantedRegion region{view.region[0], view.region[1], view.region[2]};
         return insidePlantedRegion(maps, region, Vec3{plant.foot[0], plant.foot[1], plant.foot[2]});
     }
+
+    // A part's bounds into its layer's reach: across, up and down from the foot, what sees it and what it casts into.
+    void reachFor(PlacedLayerReach& reach, const DrawItem& draw) {
+        const GpuCullRecord record = packCullRecord(draw);
+        reach.seen = reach.seen || (record.flags & (CULL_SHADOW_ONLY | CULL_HIDDEN)) == 0u;
+        reach.casts = reach.casts || ((record.flags & CULL_CASTS_SHADOWS) != 0u && (record.flags & CULL_HIDDEN) == 0u);
+
+        if (record.bounds[3] < 0.0f) {
+            reach.unknown = true;
+            return;
+        }
+
+        reach.across = std::max(reach.across, std::hypot(record.bounds[0], record.bounds[2]) + record.bounds[3]);
+        reach.up = std::max(reach.up, record.bounds[1] + record.bounds[3]);
+        reach.down = std::max(reach.down, record.bounds[3] - record.bounds[1]);
+    }
+
+    // FNV-1a over a span's bytes, carried on from hash.
+    template<typename Element>
+    std::uint64_t mixSpan(std::uint64_t hash, std::span<const Element> elements) {
+        const auto* bytes = reinterpret_cast<const unsigned char*>(elements.data());
+
+        for (std::size_t at = 0; at < elements.size_bytes(); ++at) {
+            hash = (hash ^ bytes[at]) * 1099511628211ull;
+        }
+
+        return hash;
+    }
 }
 
 /*
@@ -85,6 +115,7 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
     PlacedTable table;
     table.kinds.resize(layerCount * static_cast<std::size_t>(plantingMostKinds));
     table.drawnLayers.assign(layerCount, false);
+    table.layerReach.assign(layerCount, PlacedLayerReach{});
     std::vector<std::size_t> order;
 
     for (const PlantedKindParts& kind : kinds) {
@@ -108,8 +139,11 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
             }
 
             order.push_back(part);
+            reachFor(table.layerReach[static_cast<std::size_t>(kind.layer)], draw);
         }
 
+        PlacedLayerReach& reach = table.layerReach[static_cast<std::size_t>(kind.layer)];
+        reach.mostParts = std::max(reach.mostParts, static_cast<std::uint32_t>(kind.count));
         table.drawnLayers[static_cast<std::size_t>(kind.layer)] = table.drawnLayers[static_cast<std::size_t>(kind.layer)] || kind.count > 0;
         table.mostParts = std::max(table.mostParts, static_cast<std::uint32_t>(kind.count));
     }
@@ -203,20 +237,146 @@ std::vector<GpuPlacedBlock> placedBlocks(const std::map<PlantingCell, int>& held
     return blocks;
 }
 
-std::uint32_t placedEntryRoom(std::size_t blocks, const PlacedTable& table) {
-    return static_cast<std::uint32_t>(blocks * placedGroupSize * 2 * table.mostParts);
+// placedBlocks' walk, counting each held cell's drawn layer's blocks instead of making them.
+std::vector<PlacedBlockRun> placedBlockRuns(const std::map<PlantingCell, int>& held, const PlantingSlotLayout& layout, const PlacedTable& table) {
+    std::vector<PlacedBlockRun> runs;
+    const auto layers = static_cast<std::uint32_t>(layout.layerFirst.size());
+    std::uint32_t next = 0;
+
+    for (const auto& [cell, slot] : held) {
+        for (std::uint32_t layer = 0; layer < layers && layer < table.drawnLayers.size(); ++layer) {
+            if (!table.drawnLayers[layer]) {
+                continue;
+            }
+
+            const std::uint32_t blocks = (layout.layerCapacity[layer] + placedGroupSize - 1) / placedGroupSize;
+
+            if (blocks > 0) {
+                runs.push_back(PlacedBlockRun{cell, layer, next, blocks});
+                next += blocks;
+            }
+        }
+    }
+
+    return runs;
 }
 
-GpuPlacedView packPlacedView(const GpuCameraCull& camera, const PlantedRegion& region, std::size_t blocks, const PlacedTable& table) {
-    GpuPlacedView view;
-    view.camera = camera;
-    view.region[0] = region.northmost;
-    view.region[1] = region.southmost;
-    view.region[2] = region.spread;
-    view.blocks = static_cast<std::uint32_t>(blocks);
-    view.groups = static_cast<std::uint32_t>(table.groups.size());
-    view.entryRoom = placedEntryRoom(blocks, table);
-    return view;
+/*
+* Feet anywhere in the cell, at most the layer's largest scale (plantingScale's top), on the ground less the sink; the
+* turn moves a part round the foot, so its centre's distance across and its radius bound it every way across.
+*/
+GpuCullChunk placedCellChunk(const PlantingBox& cell, const TerrainHeightRange& ground, const PlantingLayerRecord& layer, const PlacedLayerReach& reach) {
+    GpuCullChunk chunk{};
+    chunk.flags = (reach.seen ? CULL_CHUNK_SEEN : 0u) | (reach.casts ? CULL_CHUNK_CASTS : 0u) | (reach.unknown ? CULL_CHUNK_ALWAYS : 0u);
+    const float scale = layer.leastScale + layer.scaleRange;
+    const float across = reach.across * scale;
+    const float low[3] = {std::min(cell.west, cell.east) - across, ground.lowest - layer.footSink - reach.down * scale, std::min(cell.north, cell.south) - across};
+    const float high[3] = {std::max(cell.west, cell.east) + across, ground.highest - layer.footSink + reach.up * scale, std::max(cell.north, cell.south) + across};
+    setCullChunkBox(chunk, low, high);
+    return chunk;
+}
+
+/*
+* A view's items in run order, so its blocks keep placedBlocks' order (the entries' order within a group); its room by
+* its own items' layers. A shadow tile's parts never fade, so one entry a part there.
+*/
+PlacedViews placedViews(std::span<const PlacedViewAsked> asked, std::span<const PlacedBlockRun> runs, std::span<const GpuCullChunk> chunks,
+                        const PlantedRegion& region, const PlacedTable& table) {
+    PlacedViews made;
+
+    for (std::size_t index = 0; index < asked.size(); ++index) {
+        const PlacedViewAsked& wanted = asked[index];
+        const std::uint32_t entriesAPart = (wanted.camera.flags & CAMERA_CULL_SHADOW) != 0u ? 1u : 2u;
+        GpuPlacedView view;
+        view.camera = wanted.camera;
+        view.region[0] = region.northmost;
+        view.region[1] = region.southmost;
+        view.region[2] = region.spread;
+        view.firstItem = static_cast<std::uint32_t>(made.items.size());
+        view.groups = static_cast<std::uint32_t>(table.groups.size());
+        view.wanted = wanted.wanted;
+        view.entryBase = made.entries;
+
+        for (std::size_t run = 0; run < runs.size(); ++run) {
+            if (!chunkInView(chunks[run], wanted.camera)) {
+                continue;
+            }
+
+            for (std::uint32_t block = runs[run].firstBlock; block < runs[run].firstBlock + runs[run].blocks; ++block) {
+                made.items.push_back(GpuPlacedItem{block, static_cast<std::uint32_t>(index)});
+            }
+
+            view.entryRoom += runs[run].blocks * placedGroupSize * table.layerReach.at(runs[run].layer).mostParts * entriesAPart;
+        }
+
+        view.items = static_cast<std::uint32_t>(made.items.size()) - view.firstItem;
+        made.entries += view.entryRoom;
+        made.views.push_back(view);
+    }
+
+    for (GpuPlacedView& view : made.views) {
+        view.viewCount = static_cast<std::uint32_t>(made.views.size());
+        view.itemCount = static_cast<std::uint32_t>(made.items.size());
+    }
+
+    return made;
+}
+
+// The casting boxes' corners' box, its centre and half its diagonal.
+GpuCullRecord placedChangeRecord(std::span<const GpuCullChunk> chunks) {
+    GpuCullRecord record{};
+    record.mesh = 0;
+    record.bounds[3] = 0.0f;
+    float low[3] = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    float high[3] = {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
+    bool casts = false;
+
+    for (const GpuCullChunk& chunk : chunks) {
+        if ((chunk.flags & CULL_CHUNK_CASTS) == 0u) {
+            continue;
+        }
+
+        casts = true;
+
+        if ((chunk.flags & CULL_CHUNK_ALWAYS) != 0u) {
+            record.bounds[3] = -1.0f;
+        }
+
+        for (int axis = 0; axis < 3; ++axis) {
+            low[axis] = std::min(low[axis], chunk.minimum[axis]);
+            high[axis] = std::max(high[axis], chunk.maximum[axis]);
+        }
+    }
+
+    if (!casts) {
+        return record;
+    }
+
+    record.flags = CULL_CASTS_SHADOWS;
+    float squared = 0.0f;
+
+    for (int axis = 0; axis < 3; ++axis) {
+        record.bounds[axis] = 0.5f * (low[axis] + high[axis]);
+        const float half = 0.5f * (high[axis] - low[axis]);
+        squared += half * half;
+    }
+
+    // Grown a hair past rounding, so the corners lie inside.
+    if (record.bounds[3] >= 0.0f) {
+        record.bounds[3] = std::sqrt(squared) * (1.0f + 1e-5f) + static_cast<float>(CULL_CHUNK_MARGIN);
+    }
+
+    std::copy(record.bounds, record.bounds + 4, record.levelSphere);
+    return record;
+}
+
+std::uint64_t placedTableSignature(const PlacedTable& table, const PlantedRegion& region) {
+    std::uint64_t hash = 14695981039346656037ull;
+    hash = mixSpan(hash, std::span<const GpuPlacedPart>{table.parts});
+    hash = mixSpan(hash, std::span<const GpuPlacedKind>{table.kinds});
+    hash = mixSpan(hash, std::span<const GpuPlacedGroup>{table.groups});
+    const std::array<float, 3> regionNumbers{region.northmost, region.southmost, region.spread};
+    return mixSpan(hash, std::span<const float>{regionNumbers});
 }
 
 // Transform::getMatrix's steps with the quaternion's zero parts left out where they change nothing.
@@ -281,14 +441,17 @@ GpuInstance placedInstance(const GpuInstance& part, const GpuPlacedPlant& plant)
 }
 
 /*
-* Each group's entries gathered in block order, then plant order, then joined group by group: what the passes' prefix
-* sums place (the count and scan passes' block offsets, the commands pass's group bases).
+* Each group's entries gathered in item order, then plant order, then joined group by group: what the passes' prefix
+* sums place (the count and scan passes' item offsets, the commands pass's group bases from the view's entries).
 */
-PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPlacedBlock> blocks, std::span<const GpuPlacedPlant> plants,
-                                 std::span<const std::uint32_t> counts, const PlantingMaps& maps, const GpuPlacedView& view) {
+PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPlacedBlock> blocks, std::span<const GpuPlacedItem> items,
+                                 std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts, const PlantingMaps& maps,
+                                 const GpuPlacedView& view) {
     std::vector<std::vector<GpuPlacedEntry>> byGroup(table.groups.size());
 
-    for (const GpuPlacedBlock& block : blocks) {
+    for (const GpuPlacedItem& item : items.subspan(view.firstItem, view.items)) {
+        const GpuPlacedBlock& block = blocks[item.block];
+
         for (std::uint32_t thread = 0; thread < placedGroupSize; ++thread) {
             if (!blockPlant(block, thread, plants, counts, maps, view)) {
                 continue;
@@ -299,7 +462,7 @@ PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPl
             const GpuPlacedKind& kind = table.kinds.at(block.firstKind + plant.kind);
 
             for (std::uint32_t each = 0; each < kind.parts; ++each) {
-                const PartDraws draws = placedPartEntries(table.parts[kind.part[each]], plant, number, view.camera);
+                const PartDraws draws = placedPartEntries(table.parts[kind.part[each]], plant, number, view.camera, view.wanted);
 
                 for (int drawn = 0; drawn < 2; ++drawn) {
                     if (draws.groups[drawn] < placedMostGroups) {
@@ -315,7 +478,7 @@ PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPl
     for (std::size_t group = 0; group < table.groups.size(); ++group) {
         const GpuPlacedGroup& mesh = table.groups[group];
         result.commands.push_back(GpuDrawCommand{mesh.indexCount, static_cast<std::uint32_t>(byGroup[group].size()), mesh.firstIndex, mesh.vertexOffset,
-                                                 placedInstanceBase + static_cast<std::uint32_t>(result.entries.size())});
+                                                 placedInstanceBase + view.entryBase + static_cast<std::uint32_t>(result.entries.size())});
         result.entries.insert(result.entries.end(), byGroup[group].begin(), byGroup[group].end());
     }
 
@@ -342,8 +505,9 @@ PlacedComparison comparePlacedDraws(const PlacedTable& table, std::span<const Gp
         const GpuPlacedPart& part = table.parts[entry.part];
         return nearACameraEdge(placedCullRecord(part.record, plants[number]), part.levels, view.camera);
     };
-    const auto range = [](std::span<const GpuPlacedEntry> entries, const GpuDrawCommand& command) {
-        const std::size_t first = std::min<std::size_t>(command.firstInstance - std::min(command.firstInstance, placedInstanceBase), entries.size());
+    // A command's entries: the GPU's count from every view's first, the CPU's from the view's own.
+    const auto range = [](std::span<const GpuPlacedEntry> entries, const GpuDrawCommand& command, std::uint32_t base) {
+        const std::size_t first = std::min<std::size_t>(command.firstInstance - std::min(command.firstInstance, base), entries.size());
         return entries.subspan(first, std::min<std::size_t>(command.instanceCount, entries.size() - first));
     };
 
@@ -356,8 +520,8 @@ PlacedComparison comparePlacedDraws(const PlacedTable& table, std::span<const Gp
             ++comparison.commandsDiffering;
         }
 
-        const std::span<const GpuPlacedEntry> cpuEntries = range(cpu.entries, mine);
-        const std::span<const GpuPlacedEntry> gpuGroup = range(gpuEntries, theirs);
+        const std::span<const GpuPlacedEntry> cpuEntries = range(cpu.entries, mine, placedInstanceBase + view.entryBase);
+        const std::span<const GpuPlacedEntry> gpuGroup = range(gpuEntries, theirs, placedInstanceBase);
         comparison.entries += cpuEntries.size();
         std::vector<GpuPlacedEntry> a(cpuEntries.begin(), cpuEntries.end());
         std::vector<GpuPlacedEntry> b(gpuGroup.begin(), gpuGroup.end());

@@ -1669,10 +1669,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     DrawListLayout drawList;
     drawList.reserve(listEntries);
 
+    // The planting cells round the camera (render/vulkan/vulkan_planting.h), on by themselves while the field's looks draw
+    // plants, and the placed plants' table, blocks and boxes (render/vulkan/vulkan_placed_drawing.h): the cells made and
+    // dropped are shadow tiles' changes, and the scene set points at their buffers.
+    PlantingCellSettings plantingCells = settings.planting;
+    plantingCells.enabled = plantingCells.enabled || !description.plantedParts.empty();
+    const bool plantsCells = planting->prepare(description.planting, description.plantingVersion, description.terrainHeights, plantingCells, cameraOrigin,
+                                               frame.frameIndex);
+    const bool drawsPlaced = placedDrawing->prepare(description, *planting, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
+                                                    frame.frameIndex);
+    framePlaced = drawsPlaced ? std::optional{frame.frameIndex} : std::nullopt;
+
     // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway and the velocity pass.
     validateWind(settings.wind);
     const WindSettings* sway = description.wind && settings.wind.enabled && settings.wind.sway ? &settings.wind : nullptr;
-    ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame);
+    ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
+                                                 placedDrawing->getShadowChanges());
     stats.shadowDrawn += lastCameraCull.shadowDrawn;
     stats.shadowCulled += lastCameraCull.shadowCulled;
 
@@ -1860,16 +1872,25 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // is written with its record.
     frameWind = wind->prepare(description.wind ? &*description.wind : nullptr, settings.wind, cameraOrigin, description.frameSeconds);
 
-    // The planting cells round the camera (render/vulkan/vulkan_planting.h), on by themselves while the field's looks draw
-    // plants, and the placed plants' table and blocks (render/vulkan/vulkan_placed_drawing.h), before the scene set points
-    // at their buffers.
-    PlantingCellSettings plantingCells = settings.planting;
-    plantingCells.enabled = plantingCells.enabled || !description.plantedParts.empty();
-    const bool plantsCells = planting->prepare(description.planting, description.plantingVersion, description.terrainHeights, plantingCells, cameraOrigin,
-                                               frame.frameIndex);
-    const bool drawsPlaced = placedDrawing->prepare(description, *planting, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
-                                                    frame.frameIndex);
-    framePlaced = drawsPlaced ? std::optional{placedDrawing->draws(frame.frameIndex)} : std::nullopt;
+    // The camera's culling view, and the placed plants' views (render/vulkan/vulkan_placed_drawing.h) before the scene set
+    // points at their entries: the camera, its velocity list while there is one, the probe faces captured this frame and
+    // the shadow tiles drawing their casters. The mirror draws only flat-faced draws, which plants are not.
+    const GpuCameraCull cameraCull = packCameraCull(cameraFrustum, cameraLevels, temporal, sway != nullptr, settings.wind.swayFadeEnd);
+    placedViewNumbers = PlacedViewNumbers{};
+
+    if (drawsPlaced) {
+        std::vector<GpuCameraCull> faces;
+        std::vector<int> faceNumbers;
+
+        for (const CaptureCull& capture : captureViews) {
+            if (capture.capture < cubeFaceCount) {
+                faces.push_back(packCaptureCull(capture.view));
+                faceNumbers.push_back(capture.capture);
+            }
+        }
+
+        setPlacedViews(cameraCull, temporal, faces, faceNumbers, shadowDraws, frame.frameIndex);
+    }
 
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
     // points copied up before the fog and the main pass read them.
@@ -1898,7 +1919,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // first, then each capture drawn this frame, then each shadow tile drawn, all together. The groups' styles are kept
     // for the counts read back, and for a comparison the CPU's lists and the records.
     beginGpuPass(frame, GpuPass::CameraCull);
-    std::vector<GpuCameraCull> cullViews{packCameraCull(cameraFrustum, cameraLevels, temporal, sway != nullptr, settings.wind.swayFadeEnd)};
+    std::vector<GpuCameraCull> cullViews{cameraCull};
     cullViews[0].mainBase = 0;
     cullViews[0].motionBase = motionBase;
     std::vector<CullViewKind>& kinds = cullFrameViews[frame.frameIndex];
@@ -1997,7 +2018,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (drawsPlaced) {
         beginGpuPass(frame, GpuPass::Placed);
-        placedDrawing->record(frame.commands, frame.descriptors, cullViews.front(), *planting, plantingGround, frame.frameIndex);
+        placedDrawing->record(frame.commands, frame.descriptors, *planting, plantingGround, frame.frameIndex);
         endGpuPass(frame, GpuPass::Placed);
     }
 
@@ -2683,7 +2704,7 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
 */
 VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, DrawListLayout& drawList,
                                                                bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway,
-                                                               const CameraCullFrame& table) {
+                                                               const CameraCullFrame& table, const PlantedShadowChanges& planted) {
     const std::size_t listEntries = description.draws.size();
     ShadowDraws prepared;
     prepared.tileGlass.assign(tiles.size(), false);
@@ -2706,7 +2727,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         // The nearest cascade, and a lamp reaching the swaying ground, redraw every frame while things sway: anything in
         // them might.
         const bool sways = sway != nullptr && tileSways(tile.sunCascade, tile.reach.centre, tile.reach.radius, cameraOrigin, *sway);
-        const ShadowTileNeeds needs = shadowTileNeeds(tile, levelSettings, table, description.draws, glass, sways, shadowFrame, shadowMemory);
+        const ShadowTileNeeds needs = shadowTileNeeds(tile, levelSettings, table, description.draws, glass, sways, shadowFrame, shadowMemory, planted);
 
         if (tile.separateMovers) {
             ensureStillShadow(tile.size);
@@ -2723,7 +2744,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
             continue;
         }
 
-        ShadowTileDraw drawing{&tile, BatchedDraws{}, needs.key, needs.redraw, {}, sways, PassDraws{}, PassDraws{}};
+        ShadowTileDraw drawing{&tile, BatchedDraws{}, needs.key, needs.redraw, {}, sways, PassDraws{}, PassDraws{}, std::nullopt};
 
         if (needs.redraw && !glass.empty()) {
             drawing.glass = batchByMesh(description.draws, glass, drawList.size(), nullptr);
@@ -2813,7 +2834,9 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
             bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
             const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace, drawing.sways);
             vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-            stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
+            const BatchPipelines casting{shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE};
+            stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, casting);
+            stats.shadowDrawCalls += drawPlacedDraws(commands, casting, drawing.placedView);
             vkCmdEndRendering(commands);
             renderingOpen = false;
         }
@@ -2870,6 +2893,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
 
         if (!tile.separateMovers) {
             stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, casting);
+            stats.shadowDrawCalls += drawPlacedDraws(commands, casting, drawing.placedView);
         }
 
         // Only a tile keeping them apart has a list of its moved casters.
@@ -2965,7 +2989,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const PassDraws& main
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     pushUnusedView(commands, sceneLayout->getPipelineLayout());
     stats.drawCalls += drawPassDraws(commands, mainDraws, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
-    stats.drawCalls += drawPlacedDraws(commands, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
+    stats.drawCalls += drawPlacedDraws(commands, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT}, 0u);
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
@@ -3019,7 +3043,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const PassDraws& mainDraw
     }
     pushUnusedView(commands, pipeline.getLayout());
     stats.drawCalls += drawPassDraws(commands, mainDraws, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
-    stats.drawCalls += drawPlacedDraws(commands, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
+    stats.drawCalls += drawPlacedDraws(commands, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT}, 0u);
 
     /*
     * With the reflection surfaces, the sky's and the stars' pipelines (which draw into the scene image alone) need a
@@ -3117,12 +3141,16 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const PassDraws& motionDraw
     beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTest);
     renderingOpen = true;
 
-    const bool anything = motionDraws.groups != nullptr ? !motionDraws.groups->groups.empty() : !motionDraws.batches->empty();
+    // The placed plants' velocity list (their swaying parts), drawn the same way.
+    const bool placed = framePlaced && placedViewNumbers.velocity;
+    const bool anything = placed || (motionDraws.groups != nullptr ? !motionDraws.groups->groups.empty() : !motionDraws.batches->empty());
 
     if (anything) {
+        const BatchPipelines moving{motionPipeline->get(), motionCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT, true};
         bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-        stats.drawCalls += drawPassDraws(commands, motionDraws, {motionPipeline->get(), motionCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT, true});
+        stats.drawCalls += drawPassDraws(commands, motionDraws, moving);
+        stats.drawCalls += drawPlacedDraws(commands, moving, placedViewNumbers.velocity);
     }
 
     vkCmdEndRendering(commands);
@@ -3224,6 +3252,7 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, const ProbeCaptureSte
         const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane) * fromCamera, noClipPlane(), Vec3{}, probeThinning);
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
         stats.drawCalls += drawPassDraws(commands, captureDraws[static_cast<std::size_t>(face)], capturing);
+        stats.drawCalls += drawPlacedDraws(commands, capturing, placedViewNumbers.faces.at(static_cast<std::size_t>(face)));
 
         if (sky) {
             atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(),
@@ -3421,15 +3450,17 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
 }
 
 /*
-* The placed plants (render/gpu/placed_drawing.h): every group's command drawn, empty or not (a few hundred, cheap on
-* the GPU, and their count is known without the GPU's), each style's run by one multi-draw from the shared mesh buffer.
+* A placed plants' view (render/gpu/placed_drawing.h): every group's command drawn, empty or not (a few hundred, cheap
+* on the GPU, and their count is known without the GPU's), each style's run by one multi-draw from the shared mesh
+* buffer.
 */
-std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const BatchPipelines& pipelines) const {
-    if (!framePlaced) {
+std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const BatchPipelines& pipelines, std::optional<std::uint32_t> view) const {
+    if (!framePlaced || !view) {
         return 0;
     }
 
-    const CullDrawOrder& order = *framePlaced->order;
+    const VulkanPlacedDrawing::Draws placed = placedDrawing->draws(*framePlaced, *view);
+    const CullDrawOrder& order = *placed.order;
     BatchState state{pipelines};
     std::size_t calls = 0;
     bindPools(commands, pipelines.previousShapes);
@@ -3440,12 +3471,42 @@ std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const Batc
         }
 
         state.use(commands, (run & 2) != 0, (run & 1) != 0);
-        vkCmdDrawIndexedIndirect(commands, framePlaced->commands, VkDeviceSize{order.runFirst[run]} * sizeof(GpuDrawCommand), order.runCount[run],
+        vkCmdDrawIndexedIndirect(commands, placed.commands, placed.offset + VkDeviceSize{order.runFirst[run]} * sizeof(GpuDrawCommand), order.runCount[run],
                                  sizeof(GpuDrawCommand));
         ++calls;
     }
 
     return calls;
+}
+
+void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, bool velocity, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
+                                    ShadowDraws& shadowDraws, std::uint32_t frameIndex) {
+    std::vector<PlacedViewAsked> asked{PlacedViewAsked{camera, CAMERA_CULL_DRAWN}};
+    std::vector<std::string> names{"Camera"};
+    const auto add = [&](const GpuCameraCull& view, std::uint32_t wanted, std::string name) {
+        asked.push_back(PlacedViewAsked{view, wanted});
+        names.push_back(std::move(name));
+        return static_cast<std::uint32_t>(asked.size() - 1);
+    };
+
+    if (velocity) {
+        placedViewNumbers.velocity = add(camera, CAMERA_CULL_MOVING, "Velocity");
+    }
+
+    for (std::size_t face = 0; face < faces.size(); ++face) {
+        placedViewNumbers.faces.at(static_cast<std::size_t>(faceNumbers[face])) = add(faces[face], CAMERA_CULL_DRAWN, "Probe face " + std::to_string(faceNumbers[face]));
+    }
+
+    // A tile keeping its movers apart draws its casters only when its still copy is redrawn; placed plants never move.
+    for (std::size_t tile = 0; tile < shadowDraws.tiles.size(); ++tile) {
+        ShadowTileDraw& drawing = shadowDraws.tiles[tile];
+
+        if (!drawing.tile->separateMovers || drawing.still) {
+            drawing.placedView = add(shadowDraws.views[tile], CAMERA_CULL_DRAWN, "Shadow tile " + std::to_string(tile));
+        }
+    }
+
+    placedDrawing->setViews(asked, std::move(names), frameIndex);
 }
 
 /*

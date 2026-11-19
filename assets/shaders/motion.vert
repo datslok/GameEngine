@@ -9,10 +9,11 @@
 * each vertex placed as the main pass places it (with the jitter, so it lands on the same pixels) and also projected
 * without the jitter as it is now and as it was last frame, measured from this frame's camera. The fragment shader
 * turns the two into the pixel's motion. Where it was last frame is last frame's matrix applied to last frame's shape:
-* a deforming mesh's previous vertices (vertex binding 1), the same vertices for every other mesh.
+* a deforming mesh's previous vertices (vertex binding 1), the same vertices for every other mesh. A placed plant's part
+* (drawn_objects.glsl) never moves: its matrix last frame is its matrix now, only its sway differs.
 */
 #include "frame_data.glsl"
-#include "instances.glsl"
+#include "drawn_objects.glsl"
 #include "terrain_data.glsl"
 #include "wind_data.glsl"
 #include "card_thinning_data.glsl"
@@ -44,34 +45,37 @@ layout(location = 4) flat out uint levelFade;
 invariant gl_Position;
 
 void main() {
-    uint entry = drawList[gl_InstanceIndex];
-    uint instance = drawnInstance(entry);
+    // A frame's draw, or a placed plant's part (drawn_objects.glsl).
+    bool placed = uint(gl_BaseInstanceARB) >= PLACED_INSTANCE_BASE;
+    DrawnObject drawn = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB));
+    uint entry = drawn.entry;
+    InstanceData object = drawn.instance;
     levelFade = drawListFade(entry);
 
     // Thinned cards (card_thinning_data.glsl) shaped exactly as triangle.vert shapes them, now and last frame alike.
-    vec3 shaped = thinnedVertex(instances[instance], entry, gl_VertexIndex - gl_BaseVertexARB, position, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
-    vec3 previousShaped = thinnedVertex(instances[instance], entry, gl_VertexIndex - gl_BaseVertexARB, previousPosition, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
+    vec3 shaped = thinnedVertex(object, entry, gl_VertexIndex - gl_BaseVertexARB, position, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
+    vec3 previousShaped = thinnedVertex(object, entry, gl_VertexIndex - gl_BaseVertexARB, previousPosition, vec3(0.0), cameraOrigin.xyz, levelOptions.x);
 
     // As triangle.vert does: the camera subtracted from the translation first (camera-relative rendering).
-    mat4 model = instances[instance].model;
+    mat4 model = object.model;
     model[3].xyz -= cameraOrigin.xyz;
-    uint kind = instances[instance].material.w;
+    uint kind = object.material.w;
     vec3 relativePosition = (model * vec4(shaped, 1.0)).xyz;
     relativePosition.y += groundLift(kind, relativePosition + cameraOrigin.xyz);
-    float scale = instances[instance].handedness.y;
-    vec4 sway = instances[instance].sway;
-    relativePosition += windSwayOfVertex(instances[instance].model, sway, scale, instances[instance].hanging, gl_VertexIndex - gl_BaseVertexARB, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    float scale = object.handedness.y;
+    vec4 sway = object.sway;
+    relativePosition += windSwayOfVertex(object.model, sway, scale, object.hanging, gl_VertexIndex - gl_BaseVertexARB, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
 
     // Last frame's sway from last frame's springs and time (the same fade: it changes too slowly to show).
-    mat4 before = previousModels[instance];
+    mat4 before = placed ? object.model : previousModels[drawnInstance(entry)];
     mat4 beforeInWorld = before;
     before[3].xyz -= cameraOrigin.xyz;
     currentClip = view.current * vec4(relativePosition, 1.0);
     vec3 previousRelative = (before * vec4(previousShaped, 1.0)).xyz;
     previousRelative.y += groundLift(kind, previousRelative + cameraOrigin.xyz);
-    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, instances[instance].hanging, gl_VertexIndex - gl_BaseVertexARB, previousShaped, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
+    previousRelative += windSwayOfVertex(beforeInWorld, sway, scale, object.hanging, gl_VertexIndex - gl_BaseVertexARB, previousShaped, previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
     previousClip = view.previous * vec4(previousRelative, 1.0);
     textureUv = uv;
-    materialIndex = instances[instance].material.x;
+    materialIndex = object.material.x;
 }

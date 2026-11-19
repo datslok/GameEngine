@@ -5,7 +5,7 @@
 #extension GL_ARB_shader_draw_parameters : require
 
 #include "frame_data.glsl"
-#include "instances.glsl"
+#include "drawn_objects.glsl"
 #include "planar_reflection.glsl"
 #include "terrain_data.glsl"
 #include "wind_data.glsl"
@@ -26,7 +26,8 @@ layout(push_constant) uniform ShadowView {
 out float gl_ClipDistance[1];
 
 void main() {
-    InstanceData instance = instances[drawnInstance(drawList[gl_InstanceIndex])];
+    // A frame's draw, or a placed plant's part (drawn_objects.glsl).
+    InstanceData instance = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB)).instance;
 
     // A terrain patch is lifted onto the land as the camera's views lift it (morphed from the camera), so the shadow
     // falls from the surface that is seen.

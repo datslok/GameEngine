@@ -3,6 +3,7 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/level_fade.h"
 #include "render/gpu/placed_drawing.h"
+#include "render/gpu/shadow_culling.h"
 #include "render/gpu/transparency.h"
 #include "scene/culling.h"
 #include "scene/frame_description.h"
@@ -11,6 +12,7 @@
 #include "planting_helpers.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -72,9 +74,24 @@ namespace {
         return part;
     }
 
+    // Leaves swaying as the forest's trees do (render/gpu/wind.h): the velocity list redraws them near the camera.
+    DrawItem swayingLeaves() {
+        DrawItem leaves = treePart(MeshHandle{20}, &leafLevels(), true, true, 0.0f, 5);
+        leaves.sway = WindSway{.kind = SwayKind::Tree, .height = 18.0f, .bend = 0.1f, .flutter = 0.3f};
+        return leaves;
+    }
+
+    // The shadow's stand-in, as the forest's: casting, never seen by the camera, a cut-out without levels.
+    DrawItem standInPart(MeshHandle mesh) {
+        DrawItem part = treePart(mesh, nullptr, true, false, 0.0f, 0);
+        part.castsShadows = true;
+        part.shadowOnly = true;
+        return part;
+    }
+
     /*
-    * Two kinds of layer 0 (a tree of bark, leaves and card; one of bark and card) and one of layer 1 (leaves only);
-    * layer 2 not drawn. Styles mixed so the parts are sorted.
+    * Two kinds of layer 0 (a tree of bark, swaying leaves, card and the shadow's stand-in; one of bark and card) and one
+    * of layer 1 (swaying leaves only); layer 2 not drawn. Styles mixed so the parts are sorted.
     */
     struct TestKinds {
         std::vector<DrawItem> parts;
@@ -87,10 +104,10 @@ namespace {
             test.kinds.push_back(PlantedKindParts{.layer = layer, .kind = which, .first = test.parts.size(), .count = parts.size()});
             test.parts.insert(test.parts.end(), parts.begin(), parts.end());
         };
-        kind(0, 0, {treePart(MeshHandle{10}, &barkLevels(), false, false, 0.0f, 0), treePart(MeshHandle{20}, &leafLevels(), true, true, 0.0f, 5),
-                    treePart(MeshHandle{30}, nullptr, true, false, 0.4f, 0)});
+        kind(0, 0, {treePart(MeshHandle{10}, &barkLevels(), false, false, 0.0f, 0), swayingLeaves(), treePart(MeshHandle{30}, nullptr, true, false, 0.4f, 0),
+                    standInPart(MeshHandle{40})});
         kind(0, 1, {treePart(MeshHandle{10}, &barkLevels(), false, false, 0.0f, 0), treePart(MeshHandle{31}, nullptr, true, false, 0.4f, 0)});
-        kind(1, 0, {treePart(MeshHandle{20}, &leafLevels(), true, true, 0.0f, 5)});
+        kind(1, 0, {swayingLeaves()});
         return test;
     }
 
@@ -192,7 +209,76 @@ namespace {
         return packCameraCull(frustum, cameraLevelView(eye, 1080.0f, 1.4f, settings), false, false, 0.0f);
     }
 
+    // Looking straight down from 60 m on the middle of cell (0, -2) through a narrow lens: its neighbours' boxes are out.
+    GpuCameraCull narrowCamera() {
+        LevelOfDetailSettings settings;
+        settings.enabled = false;
+        const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.5f, 1.0f, 0.1f, 2000.0f));
+        const Vec3 eye{32.0f, 60.0f, -96.0f};
+        const Frustum frustum = Frustum::fromClipMatrix(projection * Mat4::lookAt(eye, Vec3{32.0f, 0.0f, -96.0f}, Vec3{0.0f, 0.0f, -1.0f}), ClipDepth::OneToZero);
+        return packCameraCull(frustum, cameraLevelView(eye, 1080.0f, 0.5f, settings), false, false, 0.0f);
+    }
+
     const PlantedRegion testRegion{.northmost = -170.0f, .southmost = -70.0f, .spread = 50.0f};
+
+    // What the test plants keep to (randomPlant): scales 0.8 to 1.2, feet unsunk on ground from -10 to 10 m.
+    PlantingLayerRecord testLayer() {
+        PlantingLayerRecord layer;
+        layer.leastScale = 0.8f;
+        layer.scaleRange = 0.4f;
+        layer.footSink = 0.0f;
+        return layer;
+    }
+
+    const TerrainHeightRange testGround{-10.0f, 10.0f};
+
+    // Each run's cell box, as the renderer makes them from the ground and the layers.
+    std::vector<GpuCullChunk> runChunks(const std::vector<PlacedBlockRun>& runs, const PlacedTable& table) {
+        std::vector<GpuCullChunk> chunks;
+
+        for (const PlacedBlockRun& run : runs) {
+            chunks.push_back(placedCellChunk(plantingCellBox(run.cell, 64.0f), testGround, testLayer(), table.layerReach.at(run.layer)));
+        }
+
+        return chunks;
+    }
+
+    // The views over every block (boxes no view skips): each view's passes over every plant held.
+    PlacedViews everyBlock(std::span<const PlacedViewAsked> asked, const std::vector<PlacedBlockRun>& runs, const PlacedTable& table) {
+        std::vector<GpuCullChunk> chunks(runs.size());
+
+        for (GpuCullChunk& chunk : chunks) {
+            chunk.flags = CULL_CHUNK_SEEN | CULL_CHUNK_CASTS | CULL_CHUNK_ALWAYS;
+        }
+
+        return placedViews(asked, runs, chunks, testRegion, table);
+    }
+
+    // The camera alone over every block.
+    PlacedViews cameraOverEveryBlock(const GpuCameraCull& camera, const std::vector<PlacedBlockRun>& runs, const PlacedTable& table) {
+        const std::array<PlacedViewAsked, 1> asked{PlacedViewAsked{camera, CAMERA_CULL_DRAWN}};
+        return everyBlock(asked, runs, table);
+    }
+
+    /*
+    * A sun's tile over the slots (round x 0, z -100): its box 40 to 240 m across looking down at a slant, a reach
+    * sometimes, a cascade or none, sometimes a smallest caster.
+    */
+    GpuCameraCull randomSunTile(std::mt19937& random) {
+        std::uniform_real_distribution<float> unit{0.0f, 1.0f};
+        const Vec3 aim{(unit(random) - 0.5f) * 160.0f, 0.0f, -100.0f + (unit(random) - 0.5f) * 160.0f};
+        const float yaw = unit(random) * 2.0f * std::numbers::pi_v<float>;
+        const Vec3 toward{std::cos(yaw) * 0.6f, -1.0f, std::sin(yaw) * 0.6f};
+        const Vec3 place = aim - toward * 300.0f;
+        const float half = 20.0f + unit(random) * 100.0f;
+        ShadowTile tile;
+        tile.matrix = toGpuDepthRange(Mat4::orthographic(-half, half, -half, half, 0.0f, 700.0f)) * Mat4::lookAt(place, aim, Vec3{0.0f, 1.0f, 0.0f});
+        tile.lightPlace = Vec4{-toward.x, -toward.y, -toward.z, 0.0f};
+        tile.reach = unit(random) < 0.5f ? BoundingSphere{} : BoundingSphere{aim, 60.0f + unit(random) * 200.0f};
+        tile.smallestCaster = unit(random) < 0.7f ? 0.0f : unit(random) * 8.0f;
+        tile.sunCascade = unit(random) < 0.3f ? -1 : static_cast<int>(unit(random) * 3.0f);
+        return packShadowCull(tile, LevelOfDetailSettings{});
+    }
 
     // An entry's place: its group's mesh and style, its plant and part, its draw list bits.
     using Key = std::tuple<std::uint32_t, int, std::uint32_t, std::uint32_t, std::uint32_t>;
@@ -288,7 +374,38 @@ namespace {
         assert(table.parts.size() == kinds.parts.size() && table.draws.size() == kinds.parts.size());
         assert(table.kinds.size() == 3 * static_cast<std::size_t>(plantingMostKinds));
         assert(table.drawnLayers == (std::vector<bool>{true, true, false}));
-        assert(table.mostParts == 3);
+        assert(table.mostParts == 4);
+
+        // Each layer's reach from the foot a unit of scale: the farthest any part's bounds go across, up and down (one
+        // of them reaching it), what its parts are seen by and cast into, and its most-parted kind.
+        assert(table.layerReach.size() == 3);
+
+        for (std::size_t layer = 0; layer < 3; ++layer) {
+            const PlacedLayerReach& reach = table.layerReach[layer];
+            float across = 0.0f;
+            float up = 0.0f;
+            float down = 0.0f;
+
+            for (const PlantedKindParts& kind : kinds.kinds) {
+                if (static_cast<std::size_t>(kind.layer) != layer) {
+                    continue;
+                }
+
+                for (std::size_t part = kind.first; part < kind.first + kind.count; ++part) {
+                    const BoundingSphere& bounds = kinds.parts[part].bounds;
+                    across = std::max(across, std::hypot(bounds.centre.x, bounds.centre.z) + bounds.radius);
+                    up = std::max(up, bounds.centre.y + bounds.radius);
+                    down = std::max(down, bounds.radius - bounds.centre.y);
+                }
+            }
+
+            assert(nearlyRelative(reach.across, across, 1e-6f) && nearlyRelative(reach.up, up, 1e-6f) && nearlyRelative(reach.down, down, 1e-6f));
+            assert(reach.across >= across && reach.up >= up && reach.down >= down && !reach.unknown);
+        }
+
+        assert(table.layerReach[0].seen && table.layerReach[0].casts && table.layerReach[0].mostParts == 4);
+        assert(table.layerReach[1].seen && !table.layerReach[1].casts && table.layerReach[1].mostParts == 1);
+        assert(!table.layerReach[2].seen && !table.layerReach[2].casts && table.layerReach[2].mostParts == 0);
 
         // Parts by style, each pointing at its draw; each kind's parts its draws, in order within a style.
         for (std::size_t part = 0; part < table.parts.size(); ++part) {
@@ -387,10 +504,257 @@ namespace {
         }
 
         assert(blocks.size() == expected);
-        assert(placedEntryRoom(blocks.size(), table) == blocks.size() * placedGroupSize * 2 * table.mostParts);
-        const GpuPlacedView view = packPlacedView(GpuCameraCull{}, testRegion, blocks.size(), table);
-        assert(view.blocks == blocks.size() && view.groups == table.groups.size() && view.entryRoom == placedEntryRoom(blocks.size(), table));
-        assert(view.region[0] == testRegion.northmost && view.region[1] == testRegion.southmost && view.region[2] == testRegion.spread);
+
+        // The runs: each held cell's drawn layer's blocks, one after another as the blocks are.
+        const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
+        std::uint32_t next = 0;
+
+        for (const PlacedBlockRun& run : runs) {
+            assert(run.firstBlock == next && run.blocks > 0 && table.drawnLayers[run.layer]);
+            const auto slot = static_cast<std::uint32_t>(slots.held.at(run.cell));
+
+            for (std::uint32_t at = run.firstBlock; at < run.firstBlock + run.blocks; ++at) {
+                assert(blocks[at].countPlace == slot * slots.layers + run.layer);
+            }
+
+            next += run.blocks;
+        }
+
+        assert(next == blocks.size());
+    }
+
+    /*
+    * A cell's box for a layer holds every part's bounds of every plant the cells may stand in it: feet anywhere in the
+    * cell on the ground's range, any scale the layer gives, any turn; flags as its parts are seen and cast; a part of
+    * unknown size makes the box always taken.
+    */
+    void testTheCellBoxes() {
+        std::mt19937 random{19};
+        std::uniform_real_distribution<float> unit{0.0f, 1.0f};
+        const TestKinds kinds = testKinds();
+        const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
+        const PlantingCell cell{-1, -2};
+        const PlantingBox box = plantingCellBox(cell, 64.0f);
+        const std::array<GpuCullChunk, 2> chunks{placedCellChunk(box, testGround, testLayer(), table.layerReach[0]),
+                                                 placedCellChunk(box, testGround, testLayer(), table.layerReach[1])};
+        assert(chunks[0].flags == (CULL_CHUNK_SEEN | CULL_CHUNK_CASTS) && chunks[1].flags == CULL_CHUNK_SEEN);
+
+        for (int test = 0; test < 3000; ++test) {
+            GpuPlacedPlant plant = randomPlant(random, box);
+
+            // Every tenth at a corner, the largest and turned most out.
+            if (test % 10 == 0) {
+                plant.foot[0] = unit(random) < 0.5f ? box.west : box.east;
+                plant.foot[2] = unit(random) < 0.5f ? box.north : box.south;
+                plant.foot[1] = unit(random) < 0.5f ? testGround.lowest : testGround.highest;
+                plant.scale = 1.2f;
+            }
+
+            for (std::uint32_t layer = 0; layer < 2; ++layer) {
+                const GpuPlacedKind& kind = table.kinds[layer * plantingMostKinds + plant.kind % (layer == 0 ? 2u : 1u)];
+
+                for (const std::uint32_t part : std::span<const std::uint32_t>{kind.part, kind.parts}) {
+                    const GpuCullRecord placed = placedCullRecord(table.parts[part].record, plant);
+
+                    for (int axis = 0; axis < 3; ++axis) {
+                        assert(placed.bounds[axis] - placed.bounds[3] >= chunks[layer].minimum[axis]);
+                        assert(placed.bounds[axis] + placed.bounds[3] <= chunks[layer].maximum[axis]);
+                    }
+                }
+            }
+        }
+
+        // Not too loose: across no more than the cell plus twice the reach at the largest scale and a margin.
+        assert(chunks[0].maximum[0] - chunks[0].minimum[0] < 64.0f + 2.0f * table.layerReach[0].across * 1.2f + 1.0f);
+
+        // A part of unknown size: the box is always taken.
+        TestKinds unknown = testKinds();
+        unknown.parts[0].bounds.radius = -1.0f;
+        const PlacedTable unknownTable = buildPlacedTable(unknown.parts, unknown.kinds, 3, testPlacement);
+        assert(unknownTable.layerReach[0].unknown);
+        assert((placedCellChunk(box, testGround, testLayer(), unknownTable.layerReach[0]).flags & CULL_CHUNK_ALWAYS) != 0u);
+    }
+
+    /*
+    * Each view's items are the blocks of the runs whose box it may see (chunkInView), in block order; the views follow
+    * one another in the items and the entries: each its room, two entries a part of its layer's most-parted kind a plant
+    * (one in a shadow tile, where nothing fades); every view's count of views and items, its groups, the list it wants.
+    */
+    void testTheViewsLayout() {
+        std::mt19937 random{23};
+        const TestSlots slots = testSlots(random);
+        const TestKinds kinds = testKinds();
+        const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
+        const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
+        const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
+        const std::vector<GpuCullChunk> chunks = runChunks(runs, table);
+        const TestCamera camera = randomCamera(random, 0);
+        const std::array<PlacedViewAsked, 4> asked{PlacedViewAsked{narrowCamera(), CAMERA_CULL_DRAWN}, PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN},
+                                                   PlacedViewAsked{camera.packed, CAMERA_CULL_MOVING}, PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN}};
+        const PlacedViews views = placedViews(asked, runs, chunks, testRegion, table);
+        assert(views.views.size() == asked.size());
+        std::vector<std::uint32_t> layerOfBlock(blocks.size());
+
+        for (const PlacedBlockRun& run : runs) {
+            std::fill(layerOfBlock.begin() + run.firstBlock, layerOfBlock.begin() + run.firstBlock + run.blocks, run.layer);
+        }
+
+        std::uint32_t nextItem = 0;
+        std::uint32_t nextEntry = 0;
+
+        for (std::size_t index = 0; index < views.views.size(); ++index) {
+            const GpuPlacedView& view = views.views[index];
+            const bool shadow = (asked[index].camera.flags & CAMERA_CULL_SHADOW) != 0u;
+            assert(view.firstItem == nextItem && view.entryBase == nextEntry && view.wanted == asked[index].wanted);
+            assert(view.viewCount == views.views.size() && view.itemCount == views.items.size() && view.groups == table.groups.size());
+            assert(view.camera.flags == asked[index].camera.flags && view.region[2] == testRegion.spread && view.region[0] == testRegion.northmost);
+            std::uint32_t room = 0;
+            std::vector<std::uint32_t> expected;
+
+            for (std::size_t run = 0; run < runs.size(); ++run) {
+                if (chunkInView(chunks[run], asked[index].camera)) {
+                    for (std::uint32_t block = runs[run].firstBlock; block < runs[run].firstBlock + runs[run].blocks; ++block) {
+                        expected.push_back(block);
+                    }
+                }
+            }
+
+            assert(view.items == expected.size());
+
+            for (std::uint32_t item = 0; item < view.items; ++item) {
+                const GpuPlacedItem& made = views.items[view.firstItem + item];
+                assert(made.block == expected[item] && made.view == index);
+                room += placedGroupSize * table.layerReach[layerOfBlock[made.block]].mostParts * (shadow ? 1u : 2u);
+            }
+
+            assert(view.entryRoom == room);
+            nextItem += view.items;
+            nextEntry += view.entryRoom;
+
+            // Its commands count from its own entries.
+            const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
+            assert(result.entries.size() <= view.entryRoom && result.commands.size() == table.groups.size());
+            assert(result.commands.front().firstInstance == placedInstanceBase + view.entryBase);
+        }
+
+        assert(nextItem == views.items.size() && views.entries == nextEntry);
+
+        // The narrow camera sees one cell's boxes of the four: the others' blocks are dropped.
+        const std::size_t oneCell = std::count_if(runs.begin(), runs.end(), [](const PlacedBlockRun& run) {
+            return run.cell == PlantingCell{0, -2};
+        });
+        assert(oneCell > 0 && views.views[0].items > 0 && views.views[0].items < blocks.size());
+
+        for (std::uint32_t item = 0; item < views.views[0].items; ++item) {
+            const std::uint32_t block = views.items[item].block;
+            const auto run = std::find_if(runs.begin(), runs.end(), [&](const PlacedBlockRun& each) {
+                return block >= each.firstBlock && block < each.firstBlock + each.blocks;
+            });
+            assert(run->cell == (PlantingCell{0, -2}));
+        }
+    }
+
+    /*
+    * Culling by the cells' boxes first drops nothing: every view's lists over its own items equal its lists over every
+    * block (the camera, its velocity list and sun tiles), entry for entry; tiles take only casters, the velocity list
+    * only swaying parts the camera draws.
+    */
+    void testTheBoxesHideNothing() {
+        std::mt19937 random{29};
+        const PlantingMaps maps = straightMaps();
+        std::size_t skipped = 0;
+        std::size_t shadowEntries = 0;
+        std::size_t movingEntries = 0;
+
+        for (int test = 0; test < 30; ++test) {
+            const TestSlots slots = testSlots(random);
+            const TestKinds kinds = testKinds();
+            const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
+            const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
+            const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
+            GpuCameraCull camera = test % 3 == 0 ? overheadCamera() : randomCamera(random, test).packed;
+            camera.flags |= CAMERA_CULL_MOTION | CAMERA_CULL_SWAY;
+            camera.swayFadeEnd = 150.0f;
+            const std::array<PlacedViewAsked, 4> asked{PlacedViewAsked{camera, CAMERA_CULL_DRAWN}, PlacedViewAsked{camera, CAMERA_CULL_MOVING},
+                                                       PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN},
+                                                       PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN}};
+            const PlacedViews culled = placedViews(asked, runs, runChunks(runs, table), testRegion, table);
+            const PlacedViews every = everyBlock(asked, runs, table);
+            std::vector<PlacedCullResult> results;
+
+            for (std::size_t index = 0; index < asked.size(); ++index) {
+                const PlacedCullResult mine = cullPlacedOnCpu(table, blocks, culled.items, slots.plants, slots.counts, maps, culled.views[index]);
+                const PlacedCullResult all = cullPlacedOnCpu(table, blocks, every.items, slots.plants, slots.counts, maps, every.views[index]);
+                assert(mine.entries == all.entries);
+
+                for (std::size_t group = 0; group < table.groups.size(); ++group) {
+                    assert(mine.commands[group].instanceCount == all.commands[group].instanceCount);
+                    assert(mine.commands[group].firstInstance - culled.views[index].entryBase == all.commands[group].firstInstance - every.views[index].entryBase);
+                }
+
+                skipped += blocks.size() - culled.views[index].items;
+                results.push_back(mine);
+            }
+
+            // The tiles' entries are casters (the stand-in alone); the velocity list's are the camera's swaying leaves.
+            for (std::size_t tile = 2; tile < 4; ++tile) {
+                for (const GpuPlacedEntry& entry : results[tile].entries) {
+                    assert((table.parts[entry.part].record.flags & CULL_CASTS_SHADOWS) != 0u);
+                }
+
+                shadowEntries += results[tile].entries.size();
+            }
+
+            for (const GpuPlacedEntry& entry : results[1].entries) {
+                assert((table.parts[entry.part].record.flags & CULL_SWAYS) != 0u);
+                assert(std::find(results[0].entries.begin(), results[0].entries.end(), entry) != results[0].entries.end());
+            }
+
+            movingEntries += results[1].entries.size();
+        }
+
+        assert(skipped > 1000 && shadowEntries > 100 && movingEntries > 100);
+    }
+
+    /*
+    * A cell made or dropped stands for its boxes in the shadow tiles' tests: one casting sphere holding every casting
+    * layer's box (none casting: it touches no tile). The table's signature changes with its parts, kinds or region.
+    */
+    void testTheChanges() {
+        const TestKinds kinds = testKinds();
+        const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
+        const PlantingBox box = plantingCellBox(PlantingCell{2, -3}, 64.0f);
+        const std::array<GpuCullChunk, 2> chunks{placedCellChunk(box, testGround, testLayer(), table.layerReach[0]),
+                                                 placedCellChunk(box, testGround, testLayer(), table.layerReach[1])};
+        const GpuCullRecord record = placedChangeRecord(chunks);
+        assert((record.flags & CULL_CASTS_SHADOWS) != 0u && (record.flags & (CULL_HIDDEN | CULL_TRANSPARENT)) == 0u && record.shadowCascades == 0);
+        assert(record.bounds[3] > 0.0f && record.mesh != cullNoMesh);
+
+        for (int corner = 0; corner < 8; ++corner) {
+            const GpuCullChunk& chunk = chunks[0];
+            const float x = (corner & 1) != 0 ? chunk.maximum[0] : chunk.minimum[0];
+            const float y = (corner & 2) != 0 ? chunk.maximum[1] : chunk.minimum[1];
+            const float z = (corner & 4) != 0 ? chunk.maximum[2] : chunk.minimum[2];
+            const float dx = x - record.bounds[0];
+            const float dy = y - record.bounds[1];
+            const float dz = z - record.bounds[2];
+            assert(std::sqrt(dx * dx + dy * dy + dz * dz) <= record.bounds[3]);
+        }
+
+        const std::array<GpuCullChunk, 1> seenOnly{chunks[1]};
+        assert((placedChangeRecord(seenOnly).flags & CULL_CASTS_SHADOWS) == 0u);
+
+        const std::uint64_t signature = placedTableSignature(table, testRegion);
+        assert(placedTableSignature(buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement), testRegion) == signature);
+        PlantedRegion wider = testRegion;
+        wider.spread += 1.0f;
+        assert(placedTableSignature(table, wider) != signature);
+        TestKinds fewer = testKinds();
+        fewer.kinds.pop_back();
+        assert(placedTableSignature(buildPlacedTable(fewer.parts, fewer.kinds, 3, testPlacement), testRegion) != signature);
+        TestKinds casting = testKinds();
+        casting.parts[0].castsShadows = true;
+        assert(placedTableSignature(buildPlacedTable(casting.parts, casting.kinds, 3, testPlacement), testRegion) != signature);
     }
 
     /*
@@ -412,8 +776,9 @@ namespace {
             const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
             const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
             const TestCamera camera = randomCamera(random, test);
-            const GpuPlacedView view = packPlacedView(camera.packed, testRegion, blocks.size(), table);
-            const PlacedCullResult result = cullPlacedOnCpu(table, blocks, slots.plants, slots.counts, maps, view);
+            const PlacedViews views = cameraOverEveryBlock(camera.packed, placedBlockRuns(slots.held, slots.layout, table), table);
+            const GpuPlacedView& view = views.views.front();
+            const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, maps, view);
 
             // The entities: every drawn part of every plant that counts, with its plant and part beside it.
             std::vector<DrawItem> entities;
@@ -522,8 +887,9 @@ namespace {
             }
         }
 
-        const GpuPlacedView view = packPlacedView(overheadCamera(), testRegion, blocks.size(), table);
-        const PlacedCullResult result = cullPlacedOnCpu(table, blocks, slots.plants, slots.counts, straightMaps(), view);
+        const PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(slots.held, slots.layout, table), table);
+        const GpuPlacedView& view = views.views.front();
+        const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
         std::size_t drawn = 0;
 
         for (const GpuDrawCommand& command : result.commands) {
@@ -546,8 +912,9 @@ namespace {
         const TestKinds kinds = testKinds();
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
         const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
-        const GpuPlacedView view = packPlacedView(overheadCamera(), testRegion, blocks.size(), table);
-        const PlacedCullResult cpu = cullPlacedOnCpu(table, blocks, slots.plants, slots.counts, straightMaps(), view);
+        const PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(slots.held, slots.layout, table), table);
+        const GpuPlacedView& view = views.views.front();
+        const PlacedCullResult cpu = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
         assert(cpu.entries.size() > 10);
 
         const PlacedComparison same = comparePlacedDraws(table, slots.plants, view, cpu, cpu.commands, cpu.entries);
@@ -618,6 +985,10 @@ void testPlacedDrawing() {
     testTheRegion();
     testTheTable();
     testTheBlocks();
+    testTheCellBoxes();
+    testTheViewsLayout();
+    testTheBoxesHideNothing();
+    testTheChanges();
     testTheListsAreTheEntitys();
     testTheOrder();
     testTheComparison();

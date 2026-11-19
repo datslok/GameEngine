@@ -44,14 +44,24 @@ struct PlacedGroup {
     uint unused;
 };
 
-// The frame's culling. Must match GpuPlacedView.
+// A block one view culls. Must match GpuPlacedItem.
+struct PlacedItem {
+    uint block;
+    uint view;
+};
+
+// A view's culling. Must match GpuPlacedView.
 struct PlacedView {
     CameraCull camera;
-    vec4 region; // north, south, spread
-    uint blocks;
+    vec4 region;    // north, south, spread
+    uint firstItem; // its items, from here
+    uint items;
     uint groups;
+    uint wanted;    // the flag a part's slot needs to draw: CAMERA_CULL_DRAWN, or CAMERA_CULL_MOVING (the velocity list)
+    uint entryBase; // its entries, from here
     uint entryRoom;
-    uint unused;
+    uint viewCount; // every view's
+    uint itemCount;
 };
 
 // The turn's two numbers the matrix is made of, as Quat::fromAxisAngle about up and toMatrix make them: the diagonal's
@@ -105,14 +115,15 @@ InstanceData placedInstance(InstanceData part, PlacedPlant plant) {
     return instance;
 }
 
-// What a part of a plant draws: up to two level slots (two only while fading), each its group and entry (the plant's
-// number and the draw list's bits: cameraCandidateEntry), or a group of PLACED_MOST_GROUPS for none (placedPartEntries).
+// What a part of a plant draws in a view: up to two level slots (two only while fading) whose flags hold the wanted bit,
+// each its group and entry (the plant's number and the draw list's bits: cameraCandidateEntry), or a group of
+// PLACED_MOST_GROUPS for none (placedPartEntries).
 struct PlacedPartDraws {
     uvec2 groups;
     uvec2 entries;
 };
 
-PlacedPartDraws placedPartEntries(PlacedPart part, PlacedPlant plant, uint plantNumber, CameraCull view) {
+PlacedPartDraws placedPartEntries(PlacedPart part, PlacedPlant plant, uint plantNumber, CameraCull view, uint wanted) {
     CullRecord record = placedCullRecord(part.record, plant);
     PlacedPartDraws draws;
     draws.groups = uvec2(PLACED_MOST_GROUPS);
@@ -126,7 +137,7 @@ PlacedPartDraws placedPartEntries(PlacedPart part, PlacedPlant plant, uint plant
 
         uint flags = cameraCandidateFlags(record, part.levels, view, slot);
 
-        if ((flags & CAMERA_CULL_DRAWN) == 0u || found >= 2u) {
+        if ((flags & wanted) == 0u || found >= 2u) {
             continue;
         }
 

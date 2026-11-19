@@ -361,6 +361,7 @@ void addCullCompareCommand(CommandRegistry& registry, std::function<std::string(
 void addPlacementCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
     addCompareCommand(registry, "placement-compare",
                       "Reads the planting cells round the camera back from the GPU on the next frame they run (with engine.render.planting.enabled on) and "
-                      "plants the same cells on the CPU, plant for plant.",
+                      "plants the same cells on the CPU, plant for plant; while placed plants draw, each view's placed lists (camera, "
+                      "velocity, probe faces, shadow tiles) against the CPU's too.",
                       std::move(compare));
 }

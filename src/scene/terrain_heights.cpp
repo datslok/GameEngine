@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 TerrainHeightGrid makeTerrainHeightGrid(const Vec2& centre, float halfSize, float spacing, const std::function<float(float, float)>& height,
@@ -90,6 +91,44 @@ float terrainTriangleHeight(float nearLeft, float nearRight, float farLeft, floa
 
 float terrainSurfaceHeight(const TerrainHeights& heights, float x, float z) {
     return sampleHeights(heights, x, z, terrainTriangleHeight);
+}
+
+TerrainHeightRange terrainHeightRange(const TerrainHeights& heights, float west, float east, float north, float south) {
+    TerrainHeightRange range{std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
+
+    for (const TerrainHeightGrid& grid : heights.grids) {
+        const float last = static_cast<float>(grid.size - 1);
+        const auto point = [&](float place, float corner, bool upper) {
+            const float coordinate = std::clamp((place - corner) / grid.spacing, 0.0f, last);
+            return static_cast<std::uint32_t>(upper ? std::ceil(coordinate) : std::floor(coordinate));
+        };
+        const std::uint32_t firstColumn = point(west, grid.corner.x, false);
+        const std::uint32_t lastColumn = point(east, grid.corner.x, true);
+        const std::uint32_t firstRow = point(north, grid.corner.y, false);
+        const std::uint32_t lastRow = point(south, grid.corner.y, true);
+
+        // One point wider each way: a place's squares are found by its rounded coordinate, which may slip a square.
+        for (std::uint32_t row = firstRow > 0 ? firstRow - 1 : 0; row <= std::min(lastRow + 1, grid.size - 1); ++row) {
+            for (std::uint32_t column = firstColumn > 0 ? firstColumn - 1 : 0; column <= std::min(lastColumn + 1, grid.size - 1); ++column) {
+                const float height = grid.heights[static_cast<std::size_t>(row) * grid.size + column];
+                range.lowest = std::min(range.lowest, height);
+                range.highest = std::max(range.highest, height);
+            }
+        }
+
+        // A grid holding the whole box is the finest holding each place in it: no coarser one is read there.
+        if (holds(grid, west, north) && holds(grid, east, south)) {
+            break;
+        }
+    }
+
+    if (range.lowest > range.highest) {
+        return TerrainHeightRange{};
+    }
+
+    // Interpolation rounds: at a corner it can land a last bit past the corner's own height.
+    const float slack = 1e-5f * std::max({1.0f, std::abs(range.lowest), std::abs(range.highest)});
+    return TerrainHeightRange{range.lowest - slack, range.highest + slack};
 }
 
 Vec3 terrainNormal(const TerrainHeights& heights, float x, float z, float step) {

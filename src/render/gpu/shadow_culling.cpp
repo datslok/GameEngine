@@ -42,7 +42,8 @@ GpuCameraCull packShadowCull(const ShadowTile& tile, const LevelOfDetailSettings
 * where they were and where they are; the key is the movers' and glass's fingerprint with the tile's levels mixed in.
 */
 ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSettings& settings, const CameraCullFrame& table, const std::vector<DrawItem>& draws,
-                                const std::vector<std::size_t>& glass, bool sways, std::uint64_t frame, const ShadowTileMemory& memory) {
+                                const std::vector<std::size_t>& glass, bool sways, std::uint64_t frame, const ShadowTileMemory& memory,
+                                const PlantedShadowChanges& planted) {
     ShadowTileNeeds needs;
     needs.view = packShadowCull(tile, settings);
     const GpuCameraCull& view = needs.view;
@@ -61,9 +62,11 @@ ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSetti
     const std::uint64_t fingerprint = tintedShadowSignature(draws, needs.movers.still, glass, &levels);
     needs.key = swayingShadowSignature(mixBytes(fingerprint, view.levels), sways, frame);
 
-    const bool touched = std::any_of(table.stillChanges.begin(), table.stillChanges.end(), [&view](const GpuCullRecord& record) {
+    const auto takes = [&view](const GpuCullRecord& record) {
         return shadowTakes(record, view);
-    });
-    needs.redraw = table.stillRebuilt || touched || !memory.isCurrent(tile, needs.key);
+    };
+    const bool touched = std::any_of(table.stillChanges.begin(), table.stillChanges.end(), takes) ||
+                         std::any_of(planted.cells.begin(), planted.cells.end(), takes);
+    needs.redraw = table.stillRebuilt || planted.all || touched || !memory.isCurrent(tile, needs.key);
     return needs;
 }

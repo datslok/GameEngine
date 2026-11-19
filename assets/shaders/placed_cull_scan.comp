@@ -3,9 +3,9 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 /*
-* The placed drawing's scan (render/vulkan/vulkan_placed_drawing.h): a workgroup a group turns its count in every block
-* into the block's first place within the group (an exclusive prefix sum over the blocks, a workgroup's worth at a time
-* carried on), and writes the group's total.
+* The placed drawing's scan (render/vulkan/vulkan_placed_drawing.h): a workgroup a (group, view) turns the group's count
+* in each of the view's items into the item's first place within the view's group (an exclusive prefix sum over its
+* items, a workgroup's worth at a time carried on), and writes the view's group's total.
 */
 #include "placed_cull.glsl"
 
@@ -16,14 +16,16 @@ shared uint sums[PLACED_SCAN_GROUP_SIZE];
 void main() {
     uint local = gl_LocalInvocationIndex;
     uint group = gl_WorkGroupID.x;
-    uint groups = placedView.groups;
-    uint blocks = placedView.blocks;
+    uint viewNumber = gl_WorkGroupID.y;
+    PlacedView view = placedViews[viewNumber];
+    uint groups = view.groups;
     uint carried = 0u;
 
     // The loop's bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
-    for (uint first = 0u; first < blocks; first += PLACED_SCAN_GROUP_SIZE) {
-        uint block = first + local;
-        uint value = block < blocks ? placedBlockCounts[block * groups + group] : 0u;
+    for (uint first = 0u; first < view.items; first += PLACED_SCAN_GROUP_SIZE) {
+        uint item = view.firstItem + first + local;
+        bool held = first + local < view.items;
+        uint value = held ? placedBlockCounts[item * groups + group] : 0u;
         sums[local] = value;
         barrier();
 
@@ -34,8 +36,8 @@ void main() {
             barrier();
         }
 
-        if (block < blocks) {
-            placedBlockCounts[block * groups + group] = carried + sums[local] - value;
+        if (held) {
+            placedBlockCounts[item * groups + group] = carried + sums[local] - value;
         }
 
         carried += sums[PLACED_SCAN_GROUP_SIZE - 1];
@@ -43,6 +45,6 @@ void main() {
     }
 
     if (local == 0u) {
-        placedTotals[group] = carried;
+        placedTotals[viewNumber * groups + group] = carried;
     }
 }

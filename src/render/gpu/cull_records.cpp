@@ -68,10 +68,14 @@ GpuCullChunk packCullChunk(std::span<const GpuCullRecord> members) {
         anyBox = true;
     }
 
-    if (!anyBox) {
-        return chunk;
+    if (anyBox) {
+        setCullChunkBox(chunk, low, high);
     }
 
+    return chunk;
+}
+
+void setCullChunkBox(GpuCullChunk& chunk, const float low[3], const float high[3]) {
     float farthest = 0.0f;
 
     for (int axis = 0; axis < 3; ++axis) {
@@ -84,8 +88,6 @@ GpuCullChunk packCullChunk(std::span<const GpuCullRecord> members) {
         chunk.minimum[axis] = low[axis] - margin;
         chunk.maximum[axis] = high[axis] + margin;
     }
-
-    return chunk;
 }
 
 // Slot 0 is the mesh itself, always sharing its own vertices; the rest follow the levels, coarsest last.
