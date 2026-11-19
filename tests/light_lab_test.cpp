@@ -1099,7 +1099,7 @@ namespace {
         Input idle;
         idle.beginFrame();
         lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
-        const FlashlightPose held = flashlightInHand(lab.game.getCamera());
+        const FlashlightPose held = flashlightInHand(lab.game.getCamera(), lab.game.getFlashlightSettings());
         const Vec3 position = lab.world.get<Transform>(flashlight).position;
         assert(near(position.x, held.position.x, 1e-5f) && near(position.y, held.position.y, 1e-5f) && near(position.z, held.position.z, 1e-5f));
         assert(lab.world.get<SpotLight>(flashlight).direction.normalized().dot(held.direction.normalized()) > 0.99999f);

@@ -3,6 +3,7 @@
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
 #include "gameplay/first_person_body.h"
+#include "gameplay/flashlight.h"
 #include "gameplay/grenade.h"
 #include "math/transform.h"
 #include "physics/character_controller.h"
@@ -705,17 +706,17 @@ void testDemoGame() {
     freeCamera.onInit(otherWorld, otherAssets);
     assert(freeCamera.wantsMouseLook());
 
-    // Away from MOBA mode, the flashlight is held in the right hand, a little to the right of and below the eye, and aimed
-    // at the middle of the view. Being off to the side, its shadows show beside things instead of hiding behind them.
+    // Away from MOBA mode, the flashlight is held in the right hand, a little to the right of and below the eye (the
+    // default FlashlightSettings: the demo has no settings of its own for it), and aimed at the middle of the view.
     Input idle;
     idle.beginFrame();
     freeCamera.onUpdate(otherWorld, idle, 1.0f / 60.0f, 1.0f);
     const Entity cameraFlashlight = freeCamera.getFlashlight();
     const Vec3 heldAt = otherWorld.get<Transform>(cameraFlashlight).position;
     const Camera& view = freeCamera.getCamera();
+    assert((heldAt - flashlightInHand(view, FlashlightSettings{}).position).length() < 1e-4f);
     const Vec3 fromEye = heldAt - view.getPosition();
-    assert(fromEye.dot(view.getRight()) > 0.2f && fromEye.dot(view.getRight()) < 0.6f);
-    assert(fromEye.dot(view.getUp()) < -0.1f && fromEye.dot(view.getUp()) > -0.5f);
+    assert(fromEye.dot(view.getRight()) > 0.0f && fromEye.dot(view.getUp()) < 0.0f);
 
     // The beam passes through the point straight ahead of the eye, where the crosshair would be.
     const Vec3 beamDirection = otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized();

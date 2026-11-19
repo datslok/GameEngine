@@ -1284,7 +1284,7 @@ void ForestGame::onUpdate(World& world, const Input& input, float frameSeconds, 
     }
 
     updateDaylight(world);
-    flashlight.place(world, flashlightInHand(controls.getCamera()));
+    flashlight.place(world, flashlightInHand(controls.getCamera(), flashlightSettings));
 
     if (flashlight.isOn(world) != flashlightSettings.on) {
         flashlight.toggle(world);

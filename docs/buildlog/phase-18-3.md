@@ -62,3 +62,7 @@
   - **Unreal's default, by tile:** a lamp's tile whose reach comes within the sway's fade end (400 m) sways and redraws every frame; `swayLocalShadows` (F5 Wind) turns it off to compare. Cost grows with shadowed lamps near the camera (at most 8 spots), not the world; a moving flashlight redraws every frame anyway.
   - **Unity's split left for later (the user's choice):** caching a lamp's still casters helps still lamps among plants, not the flashlight.
   - **Tested:** the sun's cascades as before; a lamp at the camera, touching and past the fade's end, of unknown reach; the setting and the wind off.
+- `flashlight-hand` (Nov 19 2026): the flashlight held close to the eye
+  - **Why:** with the swaying fixed, near shadows still looked misplaced. Held 0.4 m right and 0.3 m below the eye, the lamp threw a leaf's shadow about 28 degrees aside at a metre; correct for a hand-held torch, but it reads as wrong on screen.
+  - **0.15 m right, 0.1 m down** (about 10 degrees at a metre), keeping a little shadow depth; now `FlashlightSettings::handRight`/`handDown` (F5, `forest.flashlight.*`, the light lab's too), so the user can tune it live; the demo uses the defaults.
+  - **Tested:** the pose follows the settings, at the eye the beam is the view's line; forest, light lab and demo place it from them.

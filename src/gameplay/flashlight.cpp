@@ -4,16 +4,19 @@
 #include "math/transform.h"
 #include "scene/lighting.h"
 
+// The switch and the hand, live (F5, settings.cfg and the set command reach them).
+void visit(FlashlightSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("On", settings.on);
+    visitor.field("Hand right", settings.handRight, {.min = -1.0f, .max = 1.0f, .unit = "m"});
+    visitor.field("Hand down", settings.handDown, {.min = -1.0f, .max = 1.0f, .unit = "m"});
+}
+
 /*
 * The beam starts beside the eye and passes through the point straight ahead of it, so the middle of the lit patch is
 * where you look whatever the distance to it.
 */
-void visit(FlashlightSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("On", settings.on);
-}
-
-FlashlightPose flashlightInHand(const Camera& camera) {
-    const Vec3 position = camera.getPosition() + camera.getRight() * flashlightHandRight - camera.getUp() * flashlightHandDown;
+FlashlightPose flashlightInHand(const Camera& camera, const FlashlightSettings& settings) {
+    const Vec3 position = camera.getPosition() + camera.getRight() * settings.handRight - camera.getUp() * settings.handDown;
     const Vec3 aimPoint = camera.getPosition() + camera.getForward() * flashlightAimDistance;
     return FlashlightPose{position, aimPoint - position};
 }

@@ -722,7 +722,7 @@ void DemoGame::signalLampField(World& world) const {
 * duck's drawn (interpolated) pose, keeping the beam in step with the model.
 */
 void DemoGame::updateFlashlight(World& world, float alpha) {
-    FlashlightPose pose = flashlightInHand(controls.getCamera());
+    FlashlightPose pose = flashlightInHand(controls.getCamera(), FlashlightSettings{});
 
     if (controls.getMode() == ControlMode::Moba && world.isAlive(player)) {
         // Held above the ground, out in front, and tilted down so the beam lands a few steps ahead.

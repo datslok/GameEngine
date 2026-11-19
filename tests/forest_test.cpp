@@ -1034,7 +1034,7 @@ namespace {
         forest.game.onInput(forest.world, pressF);
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(forest.game.getFlashlightSettings().on && forest.world.has<SpotLight>(flashlight));
-        const FlashlightPose held = flashlightInHand(forest.game.getCamera());
+        const FlashlightPose held = flashlightInHand(forest.game.getCamera(), forest.game.getFlashlightSettings());
         assert((forest.world.get<Transform>(flashlight).position - held.position).length() < 1e-4f);
         forest.game.getFlashlightSettings().on = false;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
