@@ -103,6 +103,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `probe_relocation.glsl` | `render/gpu/probe_relocation` | `probe_relocation_gpu_test.cpp` |
 | `terrain.glsl` | `scene/terrain_heights` | `terrain_gpu_test.cpp` |
 | `planting.glsl`, `hash64.glsl` | `scene/planting`, `core/hash` | `planting_gpu_test.cpp` |
+| `placed_drawing.glsl` | `render/gpu/placed_drawing` | `placed_drawing_gpu_test.cpp` |
 | `impostor.glsl` | `scene/impostor` | `impostor_gpu_test.cpp` |
 | `card_thinning.glsl` | `scene/card_thinning` | `card_thinning_gpu_test.cpp` |
 | `facet_variation.glsl` | `render/gpu/facet_variation` | `facet_variation_gpu_test.cpp` |

@@ -25,6 +25,7 @@
 #include "physics/static_level.h"
 #include "scene/atmosphere.h"
 #include "scene/fog.h"
+#include "scene/planting_cells.h"
 #include "scene/wind.h"
 #include "games/forest/forest_sway.h"
 
@@ -234,6 +235,9 @@ public:
     // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, the emergents, the mid layer.
     const std::vector<Entity>& getTrees() const;
     const std::vector<Entity>& getTreeImpostors() const;
+
+    // The tree entities placedTrees hides while the GPU's cells draw the trees (all but the shadows' stand-ins).
+    const std::vector<Entity>& getPlacedTwins() const;
     // The understorey's settings and places, and each plant's leaves and then its shadow's stand-in, plant by plant.
     ForestUnderstoreySettings& getUnderstoreySettings();
     const std::vector<UnderstoreyPlacement>& getUnderstoreyPlacements() const;
@@ -276,6 +280,9 @@ private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
     void updateDaylight(World& world);
 
+    // The placed trees shown or hidden as placedTrees says: the field's looks set or cleared, the twins hidden or shown.
+    void applyPlacedTrees(World& world);
+
     // Give every swaying thing its sway when the sway's settings changed, announcing the still draws changed.
     void applySway(World& world);
 
@@ -313,8 +320,8 @@ private:
     // One species' variants grown and its placed trees added, bark then leaves, with its leaf material; with climbers,
     // each variant's grown too (none for the mid layer), and likewise with epiphytes.
     // Returns each variant's height (its box's top, in its mesh's units), which its sway bends against.
-    std::vector<float> plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                                  std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
+    std::vector<float> plantTrees(World& world, AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
+                                  const std::vector<TreePlacement>& placements, std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
 
     // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified,
     // placed many times.
@@ -413,6 +420,9 @@ private:
     std::vector<TreePlacement> climbedTrees;
     std::vector<Vec3> climbedFacing; // each one's first climber's way out of the trunk, in the world (forest-climber looks from it)
     std::vector<Entity> epiphyteEntities;
+    std::vector<PlantedKindLook> treeLooks; // each species' variants as the placed trees draw them (plantTrees)
+    std::vector<Entity> placedTwins;       // the tree entities the placed trees stand in for, hidden while they draw
+    bool placedTreesShown = false;         // whether the placed trees draw now (applyPlacedTrees)
     std::vector<GrassCell> grassCells;
     std::vector<Entity> grassEntities;
     std::vector<GroundCell> floorCells;

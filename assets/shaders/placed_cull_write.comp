@@ -1,0 +1,70 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+/*
+* The placed drawing's last pass (render/vulkan/vulkan_placed_drawing.h): a workgroup a block, a thread a plant, culling
+* again as the counting pass did; part by part each drawn entry goes to its group's first entry, plus the block's first
+* place in the group, plus the plants before it in the block drawing in the same group. No atomics, so every group's
+* entries are in block order, then plant order: the CPU's cullPlacedOnCpu, entry for entry.
+*/
+#include "placed_cull.glsl"
+
+layout(local_size_x = PLACED_GROUP_SIZE) in;
+
+// Each thread's groups for the part being placed (PLACED_MOST_GROUPS: none).
+shared uvec2 threadGroups[PLACED_GROUP_SIZE];
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    uint blockNumber = gl_WorkGroupID.x;
+    uint groups = placedView.groups;
+    PlacedBlock block = placedBlocks[blockNumber];
+    uint number;
+    PlacedPlant plant;
+    bool counted = placedBlockPlant(block, local, number, plant);
+    uint parts = 0u;
+
+    if (counted) {
+        parts = placedKinds[block.firstKind + plant.kind].parts;
+    }
+
+    // The same number of rounds for every thread (the most parts any kind may have), so the barriers are reached by all.
+    for (uint partRound = 0u; partRound < PLACED_MOST_PARTS; ++partRound) {
+        PlacedPartDraws draws;
+        draws.groups = uvec2(PLACED_MOST_GROUPS);
+        draws.entries = uvec2(0u);
+        uint part = 0u;
+
+        if (partRound < parts) {
+            part = placedKinds[block.firstKind + plant.kind].part[partRound];
+            draws = placedPartEntries(placedParts[part], plant, number, placedView.camera);
+        }
+
+        threadGroups[local] = draws.groups;
+        barrier();
+
+        for (uint drawn = 0u; drawn < 2u; ++drawn) {
+            uint group = draws.groups[drawn];
+
+            if (group >= PLACED_MOST_GROUPS) {
+                continue;
+            }
+
+            uint before = 0u;
+
+            for (uint other = 0u; other < local; ++other) {
+                uvec2 its = threadGroups[other];
+                before += (its.x == group || its.y == group) ? 1u : 0u;
+            }
+
+            uint place = placedTotals[PLACED_MOST_GROUPS + group] + placedBlockCounts[blockNumber * groups + group] + before;
+
+            if (place < placedView.entryRoom) {
+                placedEntries[place] = uvec2(draws.entries[drawn], part);
+            }
+        }
+
+        barrier();
+    }
+}

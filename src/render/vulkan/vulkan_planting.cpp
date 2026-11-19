@@ -10,7 +10,7 @@
 
 namespace {
     constexpr std::uint32_t pushBytes = 16;
-    constexpr std::uint32_t bindingCount = 8;
+    constexpr std::uint32_t bindingCount = PLANTING_BINDINGS;
 
     std::unique_ptr<ComputePipeline> plantingPipeline(const VulkanDevice& device, const char* shader) {
         ComputePipelineDescription description;
@@ -35,9 +35,12 @@ namespace {
 
     // Compute shaders reading and writing a buffer, or copying it out for a comparison.
     constexpr BufferUse computeUse{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
-    constexpr BufferUse computeOrCopy{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT};
     constexpr BufferUse copyRead{VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT};
+
+    // Every earlier use of the slots: the planting's and the placed drawing's passes, a comparison's copy, the vertex
+    // shaders drawing placed plants (render/vulkan/vulkan_placed_drawing.h).
+    constexpr BufferUse slotsUsed{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT};
 }
 
 VulkanPlanting::VulkanPlanting(const VulkanDevice& device, ImmediateCommands& uploads, std::uint32_t framesInFlight):
@@ -142,17 +145,13 @@ bool VulkanPlanting::prepare(const std::shared_ptr<const PlantingField>& frameFi
 * writing pass, a workgroup a cell. Asked for a comparison, the slots, counts and problems are copied out after.
 */
 void VulkanPlanting::record(VkCommandBuffer commands, FrameDescriptors& descriptors, VkBuffer heightsBuffer, std::uint32_t frameIndex) {
-    const std::array<ComputeBinding, bindingCount> bindings{
-        storageBufferBinding(maps.get()),        storageBufferBinding(layers.get()), storageBufferBinding(heightsBuffer),
-        storageBufferBinding(jobs.at(frameIndex).get()), storageBufferBinding(candidates.get()), storageBufferBinding(plants.get()),
-        storageBufferBinding(counts.get()),      storageBufferBinding(problems.get()),
-    };
+    const std::array<ComputeBinding, bindingCount> bindings = getBindings(heightsBuffer, frameIndex);
     const auto cells = static_cast<std::uint32_t>(made.size());
 
     // Last frame's passes and copies are done with the candidates and the slots before this frame's write them.
     bufferBarrier(commands, candidates.get(), computeUse, computeUse);
-    bufferBarrier(commands, plants.get(), computeOrCopy, computeUse);
-    bufferBarrier(commands, counts.get(), computeOrCopy, computeUse);
+    bufferBarrier(commands, plants.get(), slotsUsed, computeUse);
+    bufferBarrier(commands, counts.get(), slotsUsed, computeUse);
 
     const auto dispatch = [&](const ComputePipeline& pipeline, std::uint32_t layer, std::uint32_t x, std::uint32_t y) {
         const std::array<std::uint32_t, 4> pushed{layer, layerCount, cells, 0};
@@ -267,6 +266,38 @@ std::size_t VulkanPlanting::getHeldCells() const {
 
 std::size_t VulkanPlanting::getMadeCells() const {
     return made.size();
+}
+
+std::array<ComputeBinding, PLANTING_BINDINGS> VulkanPlanting::getBindings(VkBuffer heightsBuffer, std::uint32_t frameIndex) const {
+    return {
+        storageBufferBinding(maps.get()),        storageBufferBinding(layers.get()), storageBufferBinding(heightsBuffer),
+        storageBufferBinding(jobs.at(frameIndex).get()), storageBufferBinding(candidates.get()), storageBufferBinding(plants.get()),
+        storageBufferBinding(counts.get()),      storageBufferBinding(problems.get()),
+    };
+}
+
+VkBuffer VulkanPlanting::getPlants() const {
+    return plants.get();
+}
+
+VkDeviceSize VulkanPlanting::getPlantsBytes() const {
+    return plants.getSize();
+}
+
+VkDeviceSize VulkanPlanting::getCountsBytes() const {
+    return counts.getSize();
+}
+
+const std::map<PlantingCell, int>& VulkanPlanting::getHeld() const {
+    return ring.getHeld();
+}
+
+const PlantingSlotLayout& VulkanPlanting::getLayout() const {
+    return layout;
+}
+
+const std::shared_ptr<const PlantingField>& VulkanPlanting::getField() const {
+    return field;
 }
 
 void VulkanPlanting::setFramesInFlight(std::uint32_t count) {

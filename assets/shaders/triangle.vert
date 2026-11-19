@@ -6,7 +6,7 @@
 
 #include "frame_data.glsl"
 #include "ground_layers.glsl"
-#include "instances.glsl"
+#include "drawn_objects.glsl"
 #include "planar_reflection.glsl"
 #include "render/gpu/reflection_probe_shared.h"
 #include "terrain_data.glsl"
@@ -60,8 +60,10 @@ layout(location = 11) flat out uint levelFade;
 invariant gl_Position;
 
 void main() {
-    uint entry = drawList[gl_InstanceIndex];
-    InstanceData instance = instances[drawnInstance(entry)];
+    // A frame's draw, or a placed plant's part (drawn_objects.glsl).
+    DrawnObject drawn = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB));
+    uint entry = drawn.entry;
+    InstanceData instance = drawn.instance;
     levelFade = drawListFade(entry);
     mat4 normalMatrix = instance.normalMatrix;
     vec4 handedness = instance.handedness;

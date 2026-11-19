@@ -30,6 +30,7 @@
 #define PLANTING_PLANTS_BINDING 5
 #define PLANTING_COUNTS_BINDING 6
 #define PLANTING_PROBLEMS_BINDING 7
+#define PLANTING_BINDINGS 8
 
 // What the CPU would have thrown for, counted instead: a layer read past what an earlier one planted, a plant wider
 // than every canopy cap, a cell's plants past its slot's room.

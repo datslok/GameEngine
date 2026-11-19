@@ -288,4 +288,9 @@
 #define GPU_TEST_PLANTING_GIVES_WAY 8
 #define GPU_TEST_PLANTING_NEAR_SEGMENT 9
 
+// placed_drawing_test.comp
+#define GPU_TEST_PLACED_PLANT_MODEL 0
+#define GPU_TEST_PLACED_SPHERE 1
+#define GPU_TEST_PLACED_INSTANCE 2
+
 #endif

@@ -62,6 +62,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the hanging vertices' anchors and arms
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the anchors they hang from
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the thinned meshes' cards
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the planting cells' slots' plants (render/gpu/placed_drawing.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each placed part's instance in its plant's frame
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the camera's placed entries
     }};
 }
 
@@ -186,7 +189,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     skyVisibilityCascades(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     terrainPatches(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     wind(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    windAnchors(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    windAnchors(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    placedParts(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -238,6 +242,9 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.hangingVertices,
         buffers.windAnchors.describe(),
         views.thinningCards,
+        views.placedPlants,
+        buffers.placedParts.describe(),
+        views.placedEntries,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

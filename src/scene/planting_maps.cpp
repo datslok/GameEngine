@@ -262,6 +262,11 @@ float plantingAxisAt(const PlantingMaps& maps, float z) {
     return plantingBetween(maps.axis[north], maps.axis[south], row - static_cast<float>(north));
 }
 
+// The axis from the maps rather than the game's own curve, so the GPU (which has only the maps) agrees at the edges.
+bool insidePlantedRegion(const PlantingMaps& maps, const PlantedRegion& region, const Vec3& foot) {
+    return foot.z >= region.northmost && foot.z <= region.southmost && std::fabs(foot.x - plantingAxisAt(maps, foot.z)) <= region.spread;
+}
+
 Vec2 plantingGridPlace(const PlantingMaps& maps, float x, float z) {
     return Vec2{plantingCoordinate(x - plantingAxisAt(maps, z), -maps.halfWidth, maps.inverseTexel), plantingCoordinate(z, maps.northmost, maps.inverseTexel)};
 }

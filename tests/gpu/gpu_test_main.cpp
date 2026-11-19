@@ -39,6 +39,7 @@ int main() {
             gpuTestDither(runner, report);
             gpuTestTerrain(runner, report);
             gpuTestPlanting(runner, report);
+            gpuTestPlacedDrawing(runner, report);
             gpuTestImpostor(runner, report);
             gpuTestWind(runner, report);
             gpuTestCardThinning(runner, report);

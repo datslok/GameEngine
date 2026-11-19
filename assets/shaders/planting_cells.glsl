@@ -6,6 +6,7 @@
 #ifndef PLANTING_CELLS_GLSL
 #define PLANTING_CELLS_GLSL
 
+#include "placed_plant.glsl"
 #include "planting.glsl"
 #include "render/gpu/planting_records_shared.h"
 
@@ -104,21 +105,19 @@ layout(std430, set = 0, binding = PLANTING_CANDIDATES_BINDING) buffer PlantingCa
     PlantingCandidate plantingCandidates[];
 };
 
-// Must match GpuPlacedPlant.
-struct PlacedPlant {
-    vec3 foot;
-    float scale;
-    float turnRadians;
-    float pick;
-    uint kind;
-    float threshold;
-};
+// The slots' plants and counts: written by the planting's passes, read by the placed drawing's (which define
+// PLANTING_SLOTS_READ before including this).
+#ifdef PLANTING_SLOTS_READ
+#define PLANTING_SLOTS_ACCESS readonly
+#else
+#define PLANTING_SLOTS_ACCESS writeonly
+#endif
 
-layout(std430, set = 0, binding = PLANTING_PLANTS_BINDING) writeonly buffer PlacedPlants {
+layout(std430, set = 0, binding = PLANTING_PLANTS_BINDING) PLANTING_SLOTS_ACCESS buffer PlacedPlants {
     PlacedPlant placedPlants[];
 };
 
-layout(std430, set = 0, binding = PLANTING_COUNTS_BINDING) writeonly buffer PlantingCounts {
+layout(std430, set = 0, binding = PLANTING_COUNTS_BINDING) PLANTING_SLOTS_ACCESS buffer PlantingCounts {
     uint plantingCounts[];
 };
 
@@ -180,6 +179,12 @@ float plantingAxisAt(float z) {
     uint south = min(north + 1u, axisCount - 1u);
     precise float share = row - float(north);
     return plantingBetween(mapFloat(axisFirst + north), mapFloat(axisFirst + south), share);
+}
+
+// Whether a foot is in a region (north, south, spread): insidePlantedRegion.
+bool plantingInsideRegion(vec3 region, vec3 foot) {
+    precise float across = abs(foot.x - plantingAxisAt(foot.z));
+    return foot.z >= region.x && foot.z <= region.y && across <= region.z;
 }
 
 vec2 plantingGridPlace(float x, float z) {

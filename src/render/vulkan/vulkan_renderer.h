@@ -60,6 +60,7 @@
 #include "render/vulkan/vulkan_motion_blur.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
+#include "render/vulkan/vulkan_placed_drawing.h"
 #include "render/vulkan/vulkan_planting.h"
 #include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_camera_culling.h"
@@ -360,6 +361,12 @@ private:
     std::unique_ptr<VulkanWind> wind;
     std::unique_ptr<VulkanPlanting> planting;
     GpuWindField frameWind{};
+
+    // The placed plants drawn by the camera's prepass and main pass (render/gpu/placed_drawing.h): this frame's commands
+    // while it draws any, and a stand-in for the scene set's placed buffers while it draws none.
+    std::unique_ptr<VulkanPlacedDrawing> placedDrawing;
+    std::optional<VulkanPlacedDrawing::Draws> framePlaced;
+    VulkanBuffer noPlacedRecords;
 
     // The sky visibility grid (render/gpu/sky_visibility.h): baked on the CPU round the camera, its points copied up
     // when they change, read by the main pass and the fog without light probes.
@@ -806,6 +813,9 @@ private:
 
     // A camera pass's draws (PassDraws): its batches, or its groups' GPU-written commands. Returns the draw calls.
     std::size_t drawPassDraws(VkCommandBuffer commands, const PassDraws& draws, const BatchPipelines& pipelines) const;
+
+    // The placed plants' commands (framePlaced), each style's run by one multi-draw; none without. Returns the draw calls.
+    std::size_t drawPlacedDraws(VkCommandBuffer commands, const BatchPipelines& pipelines) const;
 
     // The triangles batches draw (each mesh's times its instances), and those of cut-outs among them: the F4 readout's.
     std::pair<std::size_t, std::size_t> batchTriangles(const std::vector<DrawBatch>& batches) const;

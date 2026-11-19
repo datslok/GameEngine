@@ -398,7 +398,7 @@ bool blocksSight(const Vec3& centre, float radius, const std::vector<SightLine>&
 inline constexpr float treeNorthmost = -210.0f;
 inline constexpr float treeSouthmost = -40.0f;
 inline constexpr float treeSpread = 130.0f;
-inline constexpr PlantingRegion forestPatch{.northmost = treeNorthmost, .southmost = treeSouthmost, .spread = treeSpread};
+inline constexpr PlantedRegion forestPatch{.northmost = treeNorthmost, .southmost = treeSouthmost, .spread = treeSpread};
 
 // The trees' sizes against their variant's: smallestTreeScale to smallestTreeScale + treeScaleRange.
 inline constexpr float smallestTreeScale = 0.85f;

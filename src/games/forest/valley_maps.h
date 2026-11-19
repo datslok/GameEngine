@@ -49,8 +49,8 @@ inline constexpr int ecotopeCount = 4;
 using EcotopeWeights = std::array<float, ecotopeCount>;
 
 /*
-* The maps (F5 Forest, Planting; read at start-up). Their extent: within halfWidth of the valley's axis, from northmost to
-* southmost, the floor, walls and rim (not the mountains beyond); texelMetres a texel.
+* The maps (F5 Forest, Planting; read at start-up but placedTrees). Their extent: within halfWidth of the valley's axis,
+* from northmost to southmost, the floor, walls and rim (not the mountains beyond); texelMetres a texel.
 */
 struct ForestPlantingSettings {
     float texelMetres = 2.0f;
@@ -75,6 +75,10 @@ struct ForestPlantingSettings {
 
     // How far under a sight line every crown stays.
     float corridorClearance = 2.0f;
+
+    // The patch's trees drawn from the GPU's cells (render/gpu/placed_drawing.h) in place of their entities, all but
+    // the shadows' stand-ins, which stay entities (ROADMAP phase 18, stage 2b2; live).
+    bool placedTrees = false;
 };
 
 void visit(ForestPlantingSettings& settings, SettingsVisitor& visitor);
@@ -152,13 +156,6 @@ float valleyGap(const ForestPlantingSettings& settings, float x, float z);
 // A layer's density for the planting (scene/planting_maps.h).
 PlantingDensity plantingDensity(const PlantingLayer& layer);
 
-// The region a layer is planted in now: within spread of the valley's axis, from northmost to southmost.
-struct PlantingRegion {
-    float northmost = 0.0f;
-    float southmost = 0.0f;
-    float spread = 0.0f;
-};
-
-// The box round a region on the ground (the axis winds, so wider than 2 spread), and whether a place is in the region.
-PlantingBox regionBox(const PlantingRegion& region);
-bool insideRegion(const PlantingRegion& region, const Vec3& foot);
+// The box round a region on the ground (the axis winds, so wider than 2 spread; insidePlantedRegion says which places
+// in it are in the region).
+PlantingBox regionBox(const PlantedRegion& region);

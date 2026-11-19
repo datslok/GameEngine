@@ -71,6 +71,16 @@ struct PlantingMaps {
 // The axis's x at a place's z, blended between the rows' middles (held past the first and last).
 float plantingAxisAt(const PlantingMaps& maps, float z);
 
+// A stretch of the planted land: from northmost to southmost, within spread of the maps' axis either way.
+struct PlantedRegion {
+    float northmost = 0.0f;
+    float southmost = 0.0f;
+    float spread = 0.0f;
+};
+
+// Whether a place's foot is in the region, the axis read from the maps (plantingInsideRegion in planting_cells.glsl).
+bool insidePlantedRegion(const PlantingMaps& maps, const PlantedRegion& region, const Vec3& foot);
+
 // The place on the grid across the axis: its column and row coordinates, in texels from the grid's corner.
 Vec2 plantingGridPlace(const PlantingMaps& maps, float x, float z);
 

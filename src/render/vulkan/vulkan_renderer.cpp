@@ -157,6 +157,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     cullCompares.resize(framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
+    placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -819,6 +820,7 @@ void VulkanRenderer::createFixedTextures() {
     noTerrainHeights = VulkanBuffer{device.getAllocator(), sizeof(GpuTerrainHeightsHeader), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noHangingVertices = VulkanBuffer{device.getAllocator(), sizeof(std::array<std::uint32_t, 3>), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noThinningCards = VulkanBuffer{device.getAllocator(), sizeof(GpuThinningRecord), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    noPlacedRecords = VulkanBuffer{device.getAllocator(), sizeof(GpuInstance), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
 
 /*
@@ -1008,6 +1010,7 @@ FrameContext VulkanRenderer::beginFrame() {
     }
 
     planting->collect(frameIndex, jobs);
+    placedDrawing->collect(frameIndex);
     collectClothReadbacks();
 
     frame.descriptors->reset();
@@ -1182,7 +1185,9 @@ std::string VulkanRenderer::compareCulling() {
 }
 
 std::string VulkanRenderer::comparePlacement() {
-    return planting->compare();
+    const std::string placed = placedDrawing->compare();
+    const std::string cells = planting->compare();
+    return placed.empty() ? cells : cells + '\n' + placed;
 }
 
 /*
@@ -1855,6 +1860,17 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // is written with its record.
     frameWind = wind->prepare(description.wind ? &*description.wind : nullptr, settings.wind, cameraOrigin, description.frameSeconds);
 
+    // The planting cells round the camera (render/vulkan/vulkan_planting.h), on by themselves while the field's looks draw
+    // plants, and the placed plants' table and blocks (render/vulkan/vulkan_placed_drawing.h), before the scene set points
+    // at their buffers.
+    PlantingCellSettings plantingCells = settings.planting;
+    plantingCells.enabled = plantingCells.enabled || !description.plantedParts.empty();
+    const bool plantsCells = planting->prepare(description.planting, description.plantingVersion, description.terrainHeights, plantingCells, cameraOrigin,
+                                               frame.frameIndex);
+    const bool drawsPlaced = placedDrawing->prepare(description, *planting, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
+                                                    frame.frameIndex);
+    framePlaced = drawsPlaced ? std::optional{placedDrawing->draws(frame.frameIndex)} : std::nullopt;
+
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
     // points copied up before the fog and the main pass read them.
     const bool readsSkyVisibility = readsSkyGrid(description, settings);
@@ -1970,12 +1986,19 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // The planting cells round the camera made this frame (render/vulkan/vulkan_planting.h), on the ground the scene's
-    // heights hold (uploaded with the scene set above). Nothing draws them yet.
-    if (planting->prepare(description.planting, description.plantingVersion, description.terrainHeights, settings.planting, cameraOrigin,
-                          frame.frameIndex)) {
+    // heights hold (uploaded with the scene set above); then the camera's placed plants culled from the cells held.
+    const VkBuffer plantingGround = uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get();
+
+    if (plantsCells) {
         beginGpuPass(frame, GpuPass::Planting);
-        planting->record(frame.commands, frame.descriptors, uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get(), frame.frameIndex);
+        planting->record(frame.commands, frame.descriptors, plantingGround, frame.frameIndex);
         endGpuPass(frame, GpuPass::Planting);
+    }
+
+    if (drawsPlaced) {
+        beginGpuPass(frame, GpuPass::Placed);
+        placedDrawing->record(frame.commands, frame.descriptors, cullViews.front(), *planting, plantingGround, frame.frameIndex);
+        endGpuPass(frame, GpuPass::Placed);
     }
 
     // The lists feed both clustered shading and its heatmap.
@@ -2405,6 +2428,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 
     checkTextures(description.stillDraws, description.draws.size() - description.stillDraws);
 
+    for (const DrawItem& part : description.plantedParts) {
+        checkTexturesUploaded(part.material);
+    }
+
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
     GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
                                            settings.clusterHeatmap, settings.shadows);
@@ -2473,6 +2500,18 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     }
 
     buffers.windAnchors.write(anchors);
+
+    // The placed parts' instances in the placed table's order (render/gpu/placed_drawing.h; one unused without).
+    std::vector<GpuInstance> placedParts;
+
+    if (framePlaced) {
+        for (const std::size_t draw : placedDrawing->getTable(frame.frameIndex).draws) {
+            placedParts.push_back(records.planted[draw]);
+        }
+    }
+
+    placedParts.resize(std::max<std::size_t>(placedParts.size(), 1));
+    buffers.placedParts.write(placedParts);
     updateVertexRecords(hangingRecords.data(), hangingRecords.size() * sizeof(hangingRecords.front()), hangingChanged, hangingVertices);
     updateVertexRecords(thinningRecords.data(), thinningRecords.size() * sizeof(GpuThinningRecord), thinningChanged, thinningCards);
 
@@ -2509,6 +2548,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.terrainHeights = VkDescriptorBufferInfo{uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get(), 0, VK_WHOLE_SIZE};
     views.hangingVertices = VkDescriptorBufferInfo{hangingRecords.empty() ? noHangingVertices.get() : hangingVertices.get(), 0, VK_WHOLE_SIZE};
     views.thinningCards = VkDescriptorBufferInfo{thinningRecords.empty() ? noThinningCards.get() : thinningCards.get(), 0, VK_WHOLE_SIZE};
+    views.placedPlants = VkDescriptorBufferInfo{framePlaced ? planting->getPlants() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    views.placedEntries = framePlaced ? placedDrawing->describeEntries(frame.frameIndex) : VkDescriptorBufferInfo{noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
 
@@ -2924,6 +2965,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const PassDraws& main
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     pushUnusedView(commands, sceneLayout->getPipelineLayout());
     stats.drawCalls += drawPassDraws(commands, mainDraws, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
+    stats.drawCalls += drawPlacedDraws(commands, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
@@ -2977,6 +3019,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const PassDraws& mainDraw
     }
     pushUnusedView(commands, pipeline.getLayout());
     stats.drawCalls += drawPassDraws(commands, mainDraws, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
+    stats.drawCalls += drawPlacedDraws(commands, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
 
     /*
     * With the reflection surfaces, the sky's and the stars' pipelines (which draw into the scene image alone) need a
@@ -3371,6 +3414,34 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
         state.use(commands, style.cutOut, style.doubleSided);
         bindMesh(commands, style.mesh, pipelines.previousShapes);
         vkCmdDrawIndexedIndirect(commands, draws.commands, (VkDeviceSize{draws.commandFirst} + group) * sizeof(GpuDrawCommand), 1, sizeof(GpuDrawCommand));
+        ++calls;
+    }
+
+    return calls;
+}
+
+/*
+* The placed plants (render/gpu/placed_drawing.h): every group's command drawn, empty or not (a few hundred, cheap on
+* the GPU, and their count is known without the GPU's), each style's run by one multi-draw from the shared mesh buffer.
+*/
+std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const BatchPipelines& pipelines) const {
+    if (!framePlaced) {
+        return 0;
+    }
+
+    const CullDrawOrder& order = *framePlaced->order;
+    BatchState state{pipelines};
+    std::size_t calls = 0;
+    bindPools(commands, pipelines.previousShapes);
+
+    for (std::size_t run = 0; run < cullStyles; ++run) {
+        if (order.runCount[run] == 0) {
+            continue;
+        }
+
+        state.use(commands, (run & 2) != 0, (run & 1) != 0);
+        vkCmdDrawIndexedIndirect(commands, framePlaced->commands, VkDeviceSize{order.runFirst[run]} * sizeof(GpuDrawCommand), order.runCount[run],
+                                 sizeof(GpuDrawCommand));
         ++calls;
     }
 
@@ -3965,6 +4036,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     eyeAdaptation->setFramesInFlight(count);
     cameraCulling->setFramesInFlight(count);
     planting->setFramesInFlight(count);
+    placedDrawing->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
     cullFrameViews.assign(count, {});
     cullFrameDraws.assign(count, 0);

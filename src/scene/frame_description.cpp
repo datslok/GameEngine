@@ -56,6 +56,45 @@ void MotionHistory::reserveSlots(std::size_t count) {
     }
 }
 
+// The renderer's choices carried into a part's draw; bounds, levels and the rest are attached later by the engine.
+DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const Mat4& model) {
+    const RenderPart& piece = renderer.parts[part];
+    DrawItem draw;
+    draw.mesh = piece.mesh;
+    draw.model = model;
+    draw.material = piece.material;
+    draw.castsShadows = renderer.castsShadows;
+    draw.isStatic = renderer.isStatic;
+    draw.shadowOnly = renderer.shadowOnly;
+    draw.shadowCascades = renderer.shadowCascades;
+    draw.hidden = renderer.hidden;
+    draw.followsGround = renderer.followsGround;
+    draw.sway = renderer.sway;
+    return draw;
+}
+
+/*
+* Each kind's models' parts, in the plant's frame (their local transforms only), one run a kind in the looks' order.
+* A handful of draws a kind, made every frame: cheaper than keeping them, since the engine attaches spans of the assets'
+* levels to them, which a change of levels would leave dangling.
+*/
+void appendPlantedParts(FrameDescription& frame, const PlantingLooks& looks) {
+    frame.plantedRegion = looks.region;
+
+    for (const PlantedKindLook& kind : looks.kinds) {
+        PlantedKindParts run{.layer = kind.layer, .kind = kind.kind, .first = frame.plantedParts.size()};
+
+        for (const ModelRenderer& model : kind.models) {
+            for (std::size_t part = 0; part < model.parts.size(); ++part) {
+                frame.plantedParts.push_back(rendererPartDraw(model, part, model.parts[part].localTransform));
+            }
+        }
+
+        run.count = frame.plantedParts.size() - run.first;
+        frame.plantedKinds.push_back(run);
+    }
+}
+
 /*
 * Walks every entity that has something to draw and a place to draw it, in the order world.each walks them (the packed
 * order of ModelRenderer). Each part of a model becomes its own draw, placed by the entity's interpolated transform times
@@ -71,13 +110,8 @@ void buildEntityDraws(const World& world, Entity entity, const ModelRenderer& re
         const RenderPart& piece = renderer.parts[part];
         const Mat4 model = entityMatrix * piece.localTransform;
         DrawItem& draw = draws[part];
-        draw = DrawItem{piece.mesh, model, piece.material, renderer.castsShadows, renderer.isStatic, BoundingSphere{},
-                        history != nullptr ? history->previous(entity, part) : std::nullopt};
-        draw.shadowOnly = renderer.shadowOnly;
-        draw.shadowCascades = renderer.shadowCascades;
-        draw.hidden = renderer.hidden;
-        draw.followsGround = renderer.followsGround;
-        draw.sway = renderer.sway;
+        draw = rendererPartDraw(renderer, part, model);
+        draw.previousModel = history != nullptr ? history->previous(entity, part) : std::nullopt;
 
         if (history != nullptr) {
             history->remember(entity, part, model);
@@ -127,6 +161,10 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
         if (!frame.planting) {
             frame.planting = source.field;
             frame.plantingVersion = source.version;
+
+            if (source.looks) {
+                appendPlantedParts(frame, *source.looks);
+            }
         }
     });
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();

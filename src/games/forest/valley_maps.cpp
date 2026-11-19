@@ -282,6 +282,7 @@ void visit(ForestPlantingSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Gap from", settings.gapFrom, {.min = -1.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Gap to", settings.gapTo, {.min = -1.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Corridor clearance", settings.corridorClearance, {.min = 0.0f, .max = 50.0f, .sliderMax = 10.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Placed trees", settings.placedTrees);
 }
 
 void visit(PlantingLayer& layer, SettingsVisitor& visitor) {
@@ -403,7 +404,7 @@ PlantingDensity plantingDensity(const PlantingLayer& layer) {
                            .farShare = layer.farShare};
 }
 
-PlantingBox regionBox(const PlantingRegion& region) {
+PlantingBox regionBox(const PlantedRegion& region) {
     float west = valleyAxis(region.northmost);
     float east = west;
 
@@ -413,10 +414,7 @@ PlantingBox regionBox(const PlantingRegion& region) {
         east = std::max(east, axis);
     }
 
-    // A metre more each way: the axis moves far less than that between the metres it was read at.
+    // A metre more each way: the axis moves far less than that between the metres it was read at, and the maps' axis
+    // (read between its rows) far less than that from this curve.
     return PlantingBox{west - region.spread - 1.0f, east + region.spread + 1.0f, region.northmost, region.southmost + 1.0f};
-}
-
-bool insideRegion(const PlantingRegion& region, const Vec3& foot) {
-    return foot.z >= region.northmost && foot.z <= region.southmost && std::fabs(foot.x - valleyAxis(foot.z)) <= region.spread;
 }

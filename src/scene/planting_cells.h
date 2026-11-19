@@ -2,6 +2,7 @@
 
 #include "core/settings_visitor.h"
 #include "math/vec2.h"
+#include "scene/model_renderer.h"
 #include "scene/planting_maps.h"
 
 #include <cstddef>
@@ -25,19 +26,35 @@ struct PlantingField {
     std::vector<PlantingLayerRecord> layers;
 };
 
+// How one kind of a layer's plants is drawn on the GPU: its models in the plant's own frame (the plant's foot, turn and
+// scale place them, as an entity's Transform would).
+struct PlantedKindLook {
+    int layer = 0;
+    int kind = 0;
+    std::vector<ModelRenderer> models;
+};
+
+// The kinds drawn from the cells, and the region their plants are drawn in (the rest are planted but not drawn).
+struct PlantingLooks {
+    PlantedRegion region;
+    std::vector<PlantedKindLook> kinds;
+};
+
 /*
 * A world's planting field: the first one placed is the frame's (FrameDescription::planting). version changes when the
-* field is rebuilt, so the renderer uploads it again.
+* field is rebuilt, so the renderer uploads it again. looks, when there, draws its plants (read every frame: a game
+* shows or hides them by setting it).
 */
 struct PlantingSource {
     std::shared_ptr<const PlantingField> field;
     std::uint64_t version = 0;
+    std::shared_ptr<const PlantingLooks> looks;
 };
 
 /*
-* The cells (F5 Planting): off by default while nothing draws them (stage 2b1 only places and compares). Each a square
-* of cellMetres from the world's origin; those within radius of the camera held, at most cellsAFrame made a frame,
-* nearest first; a held one dropped once it is a cell farther than radius.
+* The cells (F5 Planting): off by default, for comparing (placement-compare) while nothing draws them; on by themselves
+* while a field's looks draw some. Each a square of cellMetres from the world's origin; those within radius of the
+* camera held, at most cellsAFrame made a frame, nearest first; a held one dropped once it is a cell farther than radius.
 */
 struct PlantingCellSettings {
     bool enabled = false;

@@ -1,8 +1,8 @@
 # Planting from maps
 
-Covers: `src/scene/planting`, `src/scene/planting_maps`, `src/scene/planting_shared.h`, `assets/shaders/planting.glsl`, `assets/shaders/hash64.glsl`, `src/core/hash_shared.h`, `src/scene/planting_cells`, `src/render/gpu/planting_records`, `src/render/gpu/planting_records_shared.h`, `src/render/vulkan/vulkan_planting`, `assets/shaders/planting_cells.glsl`, `assets/shaders/planting_candidates.comp`, `assets/shaders/planting_spacing.comp`, `assets/shaders/planting_write.comp`
+Covers: `src/scene/planting`, `src/scene/planting_maps`, `src/scene/planting_shared.h`, `assets/shaders/planting.glsl`, `assets/shaders/hash64.glsl`, `src/core/hash_shared.h`, `src/scene/planting_cells`, `src/render/gpu/planting_records`, `src/render/gpu/planting_records_shared.h`, `src/render/vulkan/vulkan_planting`, `assets/shaders/planting_cells.glsl`, `assets/shaders/planting_candidates.comp`, `assets/shaders/planting_spacing.comp`, `assets/shaders/planting_write.comp`, `src/render/gpu/placed_drawing`, `src/render/gpu/placed_drawing_shared.h`, `src/render/vulkan/vulkan_placed_drawing`, `assets/shaders/placed_drawing.glsl`, `assets/shaders/placed_plant.glsl`, `assets/shaders/placed_cull.glsl`, `assets/shaders/placed_cull_count.comp`, `assets/shaders/placed_cull_scan.comp`, `assets/shaders/placed_cull_commands.comp`, `assets/shaders/placed_cull_write.comp`, `assets/shaders/drawn_objects.glsl`
 
-Plants placed from maps by an ordered dither, a box at a time, the same on the CPU and the GPU (Horizon Zero Dawn's placement; research and the user's choices: `docs/research/VALLEY.md`). A game builds the maps and turns its settings into layer records; the forest's: `forest-plants.md`. Stage 2b1: the GPU plants cells round the camera and `placement-compare` checks them; nothing draws them yet (2b2).
+Plants placed from maps by an ordered dither, a box at a time, the same on the CPU and the GPU (Horizon Zero Dawn's placement; research and the user's choices: `docs/research/VALLEY.md`). A game builds the maps and turns its settings into layer records; the forest's: `forest-plants.md`. Stage 2b1: the GPU plants cells round the camera and `placement-compare` checks them; 2b2: the camera's prepass and main pass draw the kinds a game gives looks.
 
 ## Exact on both sides
 
@@ -92,3 +92,29 @@ Three passes a layer over the frame's cells (a workgroup row a cell), in layer o
 - **`placement-compare`:** reads back every slot, count and problem; the CPU plants the box round the held cells once and splits it by cell (`plantingByCell`); each cell's plants compared by their bits (`comparePlantingCell`: matching, missing, extra, reordered).
 - **Cost grows with:** the cells made a frame (their layers' lattices with borders); memory with the slots: the forest's 3,098 plants a slot (2,209 of them the understorey's 1.5 m lattice), 16.8 MB for 169 slots; candidates for 4 cells.
 - Tests: `planting_cells_test` (ring, slots, layout, cells planting the whole), `planting_records_test` (maps round trip, layers, jobs, comparison, command).
+
+## Placed plants drawn (`gpu-placement` 2b2)
+
+A field's `PlantingLooks` (on its `PlantingSource`, read every frame) names how each (layer, kind) is drawn: `ModelRenderer`s in the plant's own frame, and the `PlantedRegion` drawn. The cells run while looks are there, the setting off or not.
+
+| Piece | What |
+|---|---|
+| Frame (`appendPlantedParts`) | each kind's parts as draws (`rendererPartDraw`, shared with entities), `plantedKinds` runs, the region; attached by the engine as the frame's draws (bounds, levels, entries) |
+| Table (`buildPlacedTable`) | parts by style (`GpuPlacedPart` 112 B: cull record and levels in the plant's frame, first group), a group a part's level slot, a kind's parts by index (`GpuPlacedKind` 48 B, `PLACED_MOST_PARTS` 8), each style's groups one run; refuses glass, unpooled meshes, past the passes' limits |
+| Blocks (`placedBlocks`) | 64 places of a held slot's drawn layer each (`GpuPlacedBlock`); about 2,000 at 300 m |
+| Region (`insidePlantedRegion`, `plantingInsideRegion`) | z between north and south, within spread of the maps' axis (the GPU has only the maps) |
+| Instances | each part's `GpuInstance` packed with the moving draws' (`SceneRecords::planted`, the frame's materials), in the table's order, scene binding 44; the slots' plants 43, the entries 45 |
+
+Four passes [PLACED], after the planting's (`VulkanPlacedDrawing`, `placed_cull_*.comp`):
+
+1. `count`: a workgroup a block, a thread a plant in its count and the region; each of its kind's parts placed (`placedCullRecord`) and flagged at every level slot with a mesh by the camera's own `cameraCandidateFlags`, the block's drawn per group counted.
+2. `scan`: a workgroup a group, the blocks' counts to each block's first place in the group.
+3. `commands`: one workgroup, the groups' totals to their first entries and each group's command (`firstInstance` from `PLACED_INSTANCE_BASE`).
+4. `write`: as `count`, each drawn part's entry (the plant with the draw list's bits, the part) at group base + block place + the block's earlier plants in that group: no atomics, so `cullPlacedOnCpu`'s order.
+
+- **Drawing:** the prepass and main pass draw every group's command, empty or not, a multi-draw a style (`drawPlacedDraws`); `triangle.vert`'s `drawnObject` (`drawn_objects.glsl`) reads a placed entry for a draw from `PLACED_INSTANCE_BASE` and builds the instance (`placedInstance`: the plant's matrix after the part's, its turn on the normals, the level sphere placed), the branch the same for a whole draw.
+- **The entity's matrix:** `placedPlantModel` is `Transform::getMatrix` of the plant's pose step for step (equal on the CPU); the GPU's sine and cosine differ in the last bits.
+- **Not yet (2c):** shadows, velocity, sway and captures; placed parts stand still, so the forest keeps its entity trees' shadow stand-ins while they draw.
+- **`placement-compare`:** also reads back a frame's entries, commands and slots and reports each group's entries against `cullPlacedOnCpu` over those slots (`comparePlacedDraws`: matching, missing, extra, near an edge, reordered, commands).
+- **Cost grows with:** the plants held in drawn layers (a thread each, twice), the groups (a scan each); memory the entries' room (two a part of the most-parted kind a plant held).
+- Tests: `placed_drawing_test` (the matrix equal to the entity's, parts' records and instances, region, table, blocks, the lists equal to the entities' through `batchByMesh`, order, comparison, the frame's looks); `forest_trees_test` (the forest's looks and twins); `placed_drawing_gpu_test` (`make gputest`).

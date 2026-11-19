@@ -18,6 +18,8 @@ const char* gpuPassName(GpuPass pass) {
         return "WIND";
     case GpuPass::Planting:
         return "PLANTING";
+    case GpuPass::Placed:
+        return "PLACED";
     case GpuPass::Probes:
         return "PROBES";
     case GpuPass::Clusters:

@@ -10,6 +10,7 @@
 #include "scene/terrain_heights.h"
 #include "volk/volk.h"
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -53,6 +54,17 @@ public:
     // The cells held and made this frame, for F4.
     std::size_t getHeldCells() const;
     std::size_t getMadeCells() const;
+
+    // What the placed drawing reads (render/vulkan/vulkan_placed_drawing.h): the passes' eight bindings this frame (the
+    // slots' plants and counts among them), the slots' plants alone, the cells held, the slots' layout, the field (none
+    // while nothing is planted).
+    std::array<ComputeBinding, PLANTING_BINDINGS> getBindings(VkBuffer heights, std::uint32_t frameIndex) const;
+    VkBuffer getPlants() const;
+    VkDeviceSize getPlantsBytes() const;
+    VkDeviceSize getCountsBytes() const;
+    const std::map<PlantingCell, int>& getHeld() const;
+    const PlantingSlotLayout& getLayout() const;
+    const std::shared_ptr<const PlantingField>& getField() const;
 
 private:
     // A frame read back for a comparison: the cells held then, and what the CPU needs to plant them.

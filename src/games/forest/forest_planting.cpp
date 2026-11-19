@@ -21,9 +21,9 @@ namespace {
 
     // Each kept place's plants only.
     template <typename Placement>
-    std::vector<Placement> inside(const std::vector<Placement>& placed, const PlantingRegion& region) {
+    std::vector<Placement> inside(const std::vector<Placement>& placed, const PlantingMaps& maps, const PlantedRegion& region) {
         std::vector<Placement> kept;
-        std::copy_if(placed.begin(), placed.end(), std::back_inserter(kept), [&](const Placement& each) { return insideRegion(region, each.foot); });
+        std::copy_if(placed.begin(), placed.end(), std::back_inserter(kept), [&](const Placement& each) { return insidePlantedRegion(maps, region, each.foot); });
         return kept;
     }
 }
@@ -85,6 +85,7 @@ ForestPlanting plantTheForest(const ForestSpecies& species, const ValleyMaps& ma
 
 ForestPlanting plantThePatch(const ForestSpecies& species, const ValleyMaps& maps, const TerrainHeights& heights, JobSystem& jobs) {
     const ForestPlanting all = plantTheForest(species, maps, heights, regionBox(forestPatch), jobs);
-    return ForestPlanting{inside(all.emergents, forestPatch), inside(all.canopy, forestPatch), inside(all.mid, forestPatch),
-                          inside(all.understorey, forestPatch), inside(all.palms, forestPatch)};
+    const PlantingMaps& planting = maps.planting;
+    return ForestPlanting{inside(all.emergents, planting, forestPatch), inside(all.canopy, planting, forestPatch), inside(all.mid, planting, forestPatch),
+                          inside(all.understorey, planting, forestPatch), inside(all.palms, planting, forestPatch)};
 }

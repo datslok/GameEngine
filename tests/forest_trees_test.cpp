@@ -1,6 +1,7 @@
 #include "games/forest/forest_trees.h"
 #include "games/forest/forest_game.h"
 #include "games/forest/forest_ground.h"
+#include "games/forest/forest_planting.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/island_hangings.h"
 #include "games/forest/leaf_clusters.h"
@@ -8,8 +9,10 @@
 #include "assets/asset_manager.h"
 #include "ecs/world.h"
 #include "math/angles.h"
+#include "input/input.h"
 #include "math/closest_points.h"
 #include "scene/model_renderer.h"
+#include "scene/planting_cells.h"
 
 #include "forest_helpers.h"
 #include "test_levels.h"
@@ -1001,6 +1004,8 @@ namespace {
     * The game plants them: each tree its bark and its leaves, placed, turned and scaled as its placement says, drawn
     * only, the variants' meshes shared; the leaves a double-sided cut-out, the bark not.
     */
+    void testPlacedTrees(TestForest& forest);
+
     void testTheGamePlantsThem() {
         TestForest forest;
         World& world = forest.world;
@@ -1084,6 +1089,93 @@ namespace {
             for (const TreePlacement& big : emergents) {
                 assert((Vec2{mid[tree].foot.x, mid[tree].foot.z} - Vec2{big.foot.x, big.foot.z}).length() >= midTrunkClearance);
             }
+        }
+
+        testPlacedTrees(forest);
+    }
+
+    const PlantingSource& plantingSourceOf(World& world) {
+        const PlantingSource* found = nullptr;
+        world.each<PlantingSource>([&](Entity, PlantingSource& source) {
+            found = &source;
+        });
+        assert(found != nullptr);
+        return *found;
+    }
+
+    /*
+    * Placed trees (ROADMAP phase 18, stage 2b2): off, the field draws nothing and every tree entity is shown; on, the
+    * field's looks draw every species' variants over the patch, each variant the parts its entities are drawn with but
+    * the shadow's stand-ins, which stay entities, while those entities are hidden; off again, all as before.
+    */
+    void testPlacedTrees(TestForest& forest) {
+        World& world = forest.world;
+        ForestGame& game = forest.game;
+        const auto frame = [&] {
+            game.onUpdate(world, Input{}, 1.0f / 60.0f, 1.0f);
+        };
+        const std::vector<Entity>& trees = game.getTrees();
+        const std::vector<Entity>& twins = game.getPlacedTwins();
+        assert(!game.getPlantingSettings().placedTrees);
+        frame();
+        assert(!plantingSourceOf(world).looks);
+        assert(twins.size() >= trees.size());
+
+        for (const Entity entity : twins) {
+            assert(world.get<ModelRenderer>(entity).isVisible());
+        }
+
+        game.getPlantingSettings().placedTrees = true;
+        frame();
+        const std::shared_ptr<const PlantingLooks> looks = plantingSourceOf(world).looks;
+        assert(looks);
+        assert(looks->region.northmost == forestPatch.northmost && looks->region.southmost == forestPatch.southmost &&
+               looks->region.spread == forestPatch.spread);
+        const int variants = game.getTreeSettings().variants + game.getEmergentSettings().variants + game.getMidSettings().variants;
+        assert(looks->kinds.size() == static_cast<std::size_t>(variants));
+
+        for (const PlantedKindLook& kind : looks->kinds) {
+            const bool big = kind.layer == static_cast<int>(ForestLayer::Emergent) || kind.layer == static_cast<int>(ForestLayer::Canopy);
+            assert(big || kind.layer == static_cast<int>(ForestLayer::Mid));
+            // Bark, leaves and the card, then any climbers and epiphytes: never the shadow's stand-ins.
+            assert(kind.models.size() >= 3 && kind.models.size() <= 7);
+
+            for (const ModelRenderer& model : kind.models) {
+                assert(!model.shadowOnly);
+            }
+
+            assert(!kind.models[0].castsShadows && !kind.models[1].castsShadows && !kind.models[2].castsShadows);
+
+            assert(kind.models[2].parts.front().material.impostorFrames > 0);
+        }
+
+        // The first canopy tree's bark: its variant's look holds its very mesh and material.
+        const TreePlacement& first = game.getTreePlacements().front();
+        const auto look = std::find_if(looks->kinds.begin(), looks->kinds.end(), [&](const PlantedKindLook& kind) {
+            return kind.layer == static_cast<int>(ForestLayer::Canopy) && kind.kind == first.variant;
+        });
+        assert(look != looks->kinds.end());
+        const ModelRenderer& bark = world.get<ModelRenderer>(trees.front());
+        assert(look->models[0].parts.front().mesh == bark.parts.front().mesh);
+        assert(look->models[0].parts.front().material.roughness == bark.parts.front().material.roughness);
+
+        for (const Entity entity : twins) {
+            assert(!world.get<ModelRenderer>(entity).isVisible());
+        }
+
+        for (std::size_t tree = 0; tree < trees.size() / 3; ++tree) {
+            assert(world.get<ModelRenderer>(trees[3 * tree + 2]).isVisible() && world.get<ModelRenderer>(trees[3 * tree + 2]).shadowOnly);
+        }
+
+        // The same looks while on (not rebuilt each frame), none once off again.
+        frame();
+        assert(plantingSourceOf(world).looks == looks);
+        game.getPlantingSettings().placedTrees = false;
+        frame();
+        assert(!plantingSourceOf(world).looks);
+
+        for (const Entity entity : twins) {
+            assert(world.get<ModelRenderer>(entity).isVisible());
         }
     }
 }

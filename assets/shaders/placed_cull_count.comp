@@ -1,0 +1,50 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+/*
+* The placed drawing's first pass (render/vulkan/vulkan_placed_drawing.h): a workgroup a block of the held slots'
+* plants, a thread a plant; each plant in its count and the region culls its kind's parts as the camera's draws are
+* culled (placedPartEntries), and the block counts what each group draws. Counts only, so the order the threads add in
+* changes nothing; the writing pass places the entries in the plants' order.
+*/
+#include "placed_cull.glsl"
+
+layout(local_size_x = PLACED_GROUP_SIZE) in;
+
+shared uint groupCounts[PLACED_MOST_GROUPS];
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    uint blockNumber = gl_WorkGroupID.x;
+    uint groups = placedView.groups;
+
+    for (uint group = local; group < groups; group += PLACED_GROUP_SIZE) {
+        groupCounts[group] = 0u;
+    }
+
+    barrier();
+    PlacedBlock block = placedBlocks[blockNumber];
+    uint number;
+    PlacedPlant plant;
+
+    if (placedBlockPlant(block, local, number, plant)) {
+        PlacedKind kind = placedKinds[block.firstKind + plant.kind];
+
+        for (uint each = 0u; each < kind.parts; ++each) {
+            PlacedPartDraws draws = placedPartEntries(placedParts[kind.part[each]], plant, number, placedView.camera);
+
+            for (uint drawn = 0u; drawn < 2u; ++drawn) {
+                if (draws.groups[drawn] < PLACED_MOST_GROUPS) {
+                    atomicAdd(groupCounts[draws.groups[drawn]], 1u);
+                }
+            }
+        }
+    }
+
+    barrier();
+
+    for (uint group = local; group < groups; group += PLACED_GROUP_SIZE) {
+        placedBlockCounts[blockNumber * groups + group] = groupCounts[group];
+    }
+}

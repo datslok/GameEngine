@@ -88,7 +88,7 @@ inline std::vector<PlantedPlant> plantAlone(const PlantingLayerRecord& layer, co
     std::vector<PlantedPlant> kept;
 
     for (const PlantedPlant& plant : plantLayers({layer}, maps.planting, patchTerrainHeights(), regionBox(forestPatch), testJobs()).front()) {
-        if (insideRegion(forestPatch, plant.foot)) {
+        if (insidePlantedRegion(maps.planting, forestPatch, plant.foot)) {
             kept.push_back(plant);
         }
     }
