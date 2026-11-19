@@ -30,6 +30,7 @@
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/scene_layout.h"
 #include "render/vulkan/vulkan_atmosphere.h"
+#include "render/vulkan/vulkan_beacons.h"
 #include "render/vulkan/vulkan_eye_adaptation.h"
 #include "render/vulkan/vulkan_stars.h"
 #include "render/vulkan/vulkan_dlss.h"
@@ -552,6 +553,9 @@ private:
 
     // The stars behind the sky, when the frame has an atmosphere and a starry sky.
     std::unique_ptr<VulkanStars> starPass;
+
+    // The beacons' splats (render/gpu/beacon_splat.h), when the frame has lit beacons.
+    std::unique_ptr<VulkanBeacons> beaconPass;
     std::unique_ptr<VulkanDebugLines> debugLines;
     std::unique_ptr<VulkanOverlay> overlay;
     bool debugUiStarted = false;
@@ -766,6 +770,8 @@ private:
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     void drawMotion(FrameContext& frame, const PassDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
+    // The frame's lit beacons added over the fogged picture (render/gpu/beacon_splat.h), its depth tested, not written.
+    void drawBeacons(FrameContext& frame, std::span<const PlacedBeacon> beacons, VkDescriptorSet sceneSet);
     // The transparent draws, far to near, blended over the scene image (its depth tested, not written), sampling the
     // light probes or not, reading the reflection probe when this frame captured it, refracting glass reading the picture
     // before the glass as refraction says (opaquePicture, kept first).

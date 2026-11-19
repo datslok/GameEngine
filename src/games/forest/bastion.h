@@ -19,7 +19,10 @@ class SettingsVisitor;
 * Its shape (the start-up part: height, the shaft's width, the glacis, the fins, the head's overhang, all in metres) and
 * its concrete (live: albedo, roughness, how deep the formwork's seams read, the formwork tile's size). At night (stage 4,
 * "Lights at night"): the share of the slit windows lit (a scale on each row's, start-up), the windows' brightness and
-* their cells' pitch, the light strips' brightness, and the floodlights' intensity and range (live).
+* their cells' pitch, the light strips' brightness, and the floodlights' intensity and range (live). The obstruction
+* lights (stage 5): their intensity (engine units; a lens's luminance about 280 times a lit window's, as 28,000 to 100
+* cd/m2), flashes a minute and on-time (FAA L-864: 30, about 0.5 s), the Bastion's spill on its corners and its reach
+* (live), and the most their levels stand apart (start-up).
 */
 struct ForestBastionSettings {
     float height = 610.0f;
@@ -40,6 +43,12 @@ struct ForestBastionSettings {
     float stripBrightness = 12.0f;
     float floodIntensity = 1500.0f;
     float floodRange = 300.0f;
+    float beaconIntensity = 120.0f;
+    float beaconFlashesPerMinute = 30.0f;
+    float beaconOnSeconds = 0.5f;
+    float beaconSpacing = 105.0f;
+    float beaconSpill = 30.0f;
+    float beaconSpillRange = 20.0f;
 
     bool operator==(const ForestBastionSettings&) const = default;
 };
@@ -49,6 +58,8 @@ inline const Vec3 bastionWarmLight{1.0f, 0.52f, 0.18f};
 inline const Vec3 bastionCoolLight{0.25f, 0.85f, 1.0f};
 // The floodlights' colour (linear): warm white, about 3000 K.
 inline const Vec3 bastionFloodLight{1.0f, 0.72f, 0.45f};
+// The obstruction lights' colour (linear): aviation red.
+inline const Vec3 bastionBeaconLight{1.0f, 0.06f, 0.02f};
 
 void visit(ForestBastionSettings& settings, SettingsVisitor& visitor);
 
@@ -174,3 +185,11 @@ struct FloodPlace {
 * front and back of the wall above, one before each side, a few metres out, aimed up it and leaning a little towards it.
 */
 std::vector<FloodPlace> bastionFloods(const BastionShape& shape);
+
+/*
+* The obstruction lights (docs/research/STRUCTURES.md, "Planned: obstruction lights"), from the tower's foot: levels
+* evenly from the head's roof down, as few as keep them at most spacing apart (FAA: about 105 m), the top one on the roof;
+* at each, one light at every chamfered corner of the section there, just outside it, so some show from every side. Four
+* a level, level by level from the lowest; none for a spacing of 0.
+*/
+std::vector<Vec3> bastionBeacons(const BastionShape& shape, float spacing);

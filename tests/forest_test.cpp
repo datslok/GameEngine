@@ -1023,6 +1023,39 @@ namespace {
         assert(near(forest.world.get<ModelRenderer>(forest.game.getMonolith().front()).parts.front().material.windowWarm.x, 2.0f * bastionWarmLight.x, 1e-6f));
 
         /*
+        * The obstruction lights: the Bastion's four a level on six levels, red, flashing together at 30 a minute with a
+        * spill of light on their corners; each far tower's its own, at 20 to 40 a minute, out of step, with none; their
+        * intensity live; flashing by the simulation's clock between ticks.
+        */
+        const std::vector<Entity>& beacons = forest.game.getBeacons();
+        const std::size_t onBastion = forest.game.getBastionBeaconCount();
+        assert(onBastion == 24 && beacons.size() > onBastion);
+        const Beacon& first = forest.world.get<Beacon>(beacons.front());
+        assert(first.colour.x > 10.0f * first.colour.y && near(first.flash.periodSeconds, 2.0f, 1e-5f) && first.spill > 0.0f);
+        bool outOfStep = false;
+
+        for (std::size_t index = onBastion; index < beacons.size(); ++index) {
+            const Beacon& far = forest.world.get<Beacon>(beacons[index]);
+            assert(far.spill == 0.0f && far.flash.periodSeconds >= 1.5f - 1e-4f && far.flash.periodSeconds <= 3.0f + 1e-4f);
+            outOfStep = outOfStep || std::fabs(far.flash.periodSeconds - forest.world.get<Beacon>(beacons[onBastion]).flash.periodSeconds) > 0.01f;
+        }
+
+        assert(outOfStep);
+
+        // On, a quarter of a second into the Bastion's period (the last tick ending then, alpha 1); dark a second in.
+        forest.game.onFixedUpdate(forest.world, 1.0f / 60.0f, 0.25);
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(near(forest.world.get<Beacon>(beacons.front()).level, 1.0f, 1e-5f) && forest.world.get<PointLight>(beacons.front()).intensity > 0.0f);
+        assert(!forest.world.has<PointLight>(beacons.back()));
+        forest.game.onFixedUpdate(forest.world, 1.0f / 60.0f, 1.0);
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(forest.world.get<Beacon>(beacons.front()).level == 0.0f && forest.world.get<PointLight>(beacons.front()).intensity == 0.0f);
+
+        forest.game.getBastionSettings().beaconIntensity = 500.0f;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(forest.world.get<Beacon>(beacons.front()).intensity == 500.0f && forest.world.get<Beacon>(beacons.back()).intensity == 500.0f);
+
+        /*
         * The flashlight (gameplay/flashlight): off at the start, F switches it on in the right hand and off again, and so
         * does its setting (the set command).
         */

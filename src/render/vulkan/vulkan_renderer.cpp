@@ -134,6 +134,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     bloom = std::make_unique<VulkanBloom>(device, layouts, linearSampler.get());
     atmosphere = std::make_unique<VulkanAtmosphere>(device, layouts, linearSampler.get(), sceneColourFormat, depthFormat);
     starPass = std::make_unique<VulkanStars>(device, layouts, sceneColourFormat, depthFormat);
+    beaconPass = std::make_unique<VulkanBeacons>(device, layouts, bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), sceneColourFormat, depthFormat);
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
@@ -2153,6 +2154,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::FogApply);
     }
 
+    // The beacons over the fogged picture, each fogged at its own point, before the glass (which then refracts them).
+    if (!description.lighting.beacons.empty()) {
+        beginGpuPass(frame, GpuPass::Beacons);
+        drawBeacons(frame, description.lighting.beacons, sceneSet);
+        endGpuPass(frame, GpuPass::Beacons);
+    }
+
     // Glass and blended surfaces over the picture with its reflections, before it is smoothed. The picture before them
     // is kept first (with its blurred levels and distances), which refracting glass reads; with anti-aliasing it is
     // compared with the one after (the reactive mask, all timed with the glass), so the anti-aliasing trusts its history
@@ -3075,6 +3083,26 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const PassDraws& motionDraw
 * written. Set 2 holds the reflection probe's light and the picture before the glass (VulkanOpaquePicture, kept just
 * before: refracting glass reads it).
 */
+/*
+* The beacons added to the picture in a block of their own, its depth tested and kept; the picture left readable after,
+* as the main pass leaves it.
+*/
+void VulkanRenderer::drawBeacons(FrameContext& frame, std::span<const PlacedBeacon> beacons, VkDescriptorSet sceneSet) {
+    const VkCommandBuffer commands = frame.commands;
+    sceneColour.transition(commands, ImageState::ColourTarget);
+    depth.transition(commands, ImageState::DepthTarget);
+
+    const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, {}};
+    const DepthAttachment depthTest{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTest);
+    renderingOpen = true;
+    beaconPass->draw(commands, frame.descriptors, frame.frameIndex, beacons, cameraOrigin, bindlessTextures->getSet(), sceneSet);
+    ++stats.drawCalls;
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+    sceneColour.transition(commands, ImageState::SurfaceRead);
+}
+
 void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes,
                                      bool readsProbe, const TransparentRefraction& refraction) {
     const VkCommandBuffer commands = frame.commands;

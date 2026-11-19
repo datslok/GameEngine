@@ -3,6 +3,7 @@
 #include "ecs/world.h"
 #include "math/vec3.h"
 #include "scene/atmosphere.h"
+#include "scene/beacon.h"
 #include "scene/fog.h"
 #include "scene/light.h"
 #include "scene/probe_volume.h"
@@ -69,6 +70,7 @@ struct FrameLighting {
     std::optional<Atmosphere> atmosphere;  // the sky and the air the light crosses (the first, if several)
     std::optional<StarrySky> stars;        // the stars behind the sky, drawn with an atmosphere (the first, if several)
     std::vector<Fog> fogLayers;            // fog in the air, lit by the lights: every layer, adding (the renderer reads the first FOG_MAX_LAYERS)
+    std::vector<PlacedBeacon> beacons;     // the lit beacons, drawn as splats keeping their light at any distance (scene/beacon.h)
 };
 
 // Gather the World's lights for drawing at alpha (0..1) between the last two ticks.

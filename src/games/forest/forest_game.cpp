@@ -13,6 +13,7 @@
 #include "gameplay/first_person_body.h"
 #include "math/angles.h"
 #include "math/transform.h"
+#include "scene/beacon.h"
 #include "scene/light.h"
 #include "scene/model_renderer.h"
 #include "scene/probe_volume.h"
@@ -219,6 +220,25 @@ namespace {
         light.intensity = std::max(settings.floodIntensity, 0.0f);
         light.range = std::max(settings.floodRange, 1.0f);
     }
+
+    /*
+    * An obstruction light's live settings: intensity and on-time on every one; the flash rate and the spill on the
+    * Bastion's only (the far towers keep their own rates, and throw no light on their walls).
+    */
+    void applyBeaconSettings(Beacon& beacon, const ForestBastionSettings& settings, bool onBastion) {
+        beacon.intensity = std::max(settings.beaconIntensity, 0.0f);
+        beacon.flash.onSeconds = std::max(settings.beaconOnSeconds, 0.0f);
+
+        if (onBastion) {
+            beacon.flash.periodSeconds = settings.beaconFlashesPerMinute > 0.0f ? 60.0f / settings.beaconFlashesPerMinute : 0.0f;
+            beacon.spill = std::max(settings.beaconSpill, 0.0f);
+            beacon.spillRange = std::max(settings.beaconSpillRange, 0.01f);
+        }
+    }
+
+    // The far towers' obstruction lights: each tower flashing between this many and this many more times a minute (FAA: 20-40).
+    constexpr float farBeaconLeastFlashes = 20.0f;
+    constexpr float farBeaconFlashRange = 20.0f;
 
     // The floodlights' cone (half-angles, degrees) and source size (metres): a wide wash, soft up close.
     constexpr float floodInnerDegrees = 18.0f;
@@ -598,6 +618,31 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         world.add(flood, Transform{.position = bastion.foot + place.position});
         world.add(flood, light);
         floodlights.push_back(flood);
+    }
+
+    /*
+    * The obstruction lights (scene/beacon.h): the Bastion's flashing together and throwing a little red on its corners;
+    * each far tower's at its own rate and phase, so the skyline blinks out of step, as towers on separate systems do.
+    */
+    const auto addBeacons = [&](const BastionShape& tower, const BeaconFlash& flash, bool onBastion) {
+        for (const Vec3& place : bastionBeacons(tower, bastionSettings.beaconSpacing)) {
+            Beacon beacon{.colour = bastionBeaconLight, .flash = flash};
+            applyBeaconSettings(beacon, bastionSettings, onBastion);
+            const Entity entity = world.create();
+            world.add(entity, Transform{.position = tower.foot + place});
+            world.add(entity, beacon);
+            beacons.push_back(entity);
+        }
+    };
+
+    addBeacons(bastion, BeaconFlash{}, true);
+    bastionBeaconCount = beacons.size();
+    const std::vector<BastionShape> far = farTowers();
+    const std::uint32_t flashSeed = forestShapeSeed(0, 47);
+
+    for (std::size_t index = 0; index < far.size(); ++index) {
+        const float period = 60.0f / (farBeaconLeastFlashes + farBeaconFlashRange * forestUnitRandom(flashSeed, index));
+        addBeacons(far[index], BeaconFlash{.periodSeconds = period, .phaseSeconds = period * forestUnitRandom(flashSeed, index + far.size())}, false);
     }
 }
 
@@ -1271,11 +1316,15 @@ void ForestGame::onFixedUpdate(World& world, float tickSeconds, double simulatio
     updateDriftingRocks(world, simulationSeconds, driftSettings.moving);
     sunSettings.solarHours = advanceSolarHours(sunSettings.solarHours, sunSettings.hoursPerSecond, tickSeconds);
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
+    beaconClock = simulationSeconds;
+    beaconTick = tickSeconds;
 }
 
 /*
 * The daylight, haze and blend follow the settings every frame, so a slider or a set command changes them at once; the
 * flashlight (gameplay/flashlight) follows the camera that just moved, and its setting, so F or a set command switches it.
+* The obstruction lights flash by the simulation's clock between the last two ticks (the last tick's end is alpha 1),
+* so the same moment always shows the same flash; only how they look changes, nothing a tick reads.
 */
 void ForestGame::onUpdate(World& world, const Input& input, float frameSeconds, float alpha) {
     // Motion from the previous mode must not rotate the new camera pose.
@@ -1289,6 +1338,8 @@ void ForestGame::onUpdate(World& world, const Input& input, float frameSeconds, 
     if (flashlight.isOn(world) != flashlightSettings.on) {
         flashlight.toggle(world);
     }
+
+    flashBeacons(world, beaconClock - static_cast<double>(beaconTick) * (1.0 - static_cast<double>(alpha)));
 }
 
 void ForestGame::updateDaylight(World& world) {
@@ -1378,6 +1429,10 @@ void ForestGame::updateDaylight(World& world) {
 
         for (const Entity flood : floodlights) {
             applyFloodSettings(world.get<SpotLight>(flood), bastionSettings);
+        }
+
+        for (std::size_t index = 0; index < beacons.size(); ++index) {
+            applyBeaconSettings(world.get<Beacon>(beacons[index]), bastionSettings, index < bastionBeaconCount);
         }
 
         appliedBastionSettings = bastionSettings;
@@ -1719,6 +1774,14 @@ const std::vector<Entity>& ForestGame::getLightStrips() const {
 
 const std::vector<Entity>& ForestGame::getFloodlights() const {
     return floodlights;
+}
+
+const std::vector<Entity>& ForestGame::getBeacons() const {
+    return beacons;
+}
+
+std::size_t ForestGame::getBastionBeaconCount() const {
+    return bastionBeaconCount;
 }
 
 FlashlightSettings& ForestGame::getFlashlightSettings() {

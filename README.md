@@ -50,7 +50,7 @@ A game engine written from scratch in C++23, as a learning project: its own Vulk
 - `lightlab` (default): a sunlit test ground with a sun clock, a street of lamps, a two-room building, mirrors, glass and mist.
 - `demo`: a night scene with flying lamps, floodlights, glTF test models and an obstacle course.
 - `clothlab`: cloth stations, a mannequin and a sewn dress.
-- `forest`: a jungle valley kilometres across, with grown trees, palms, lianas and floating islands (being built).
+- `forest`: a jungle valley kilometres across, with grown trees, palms, lianas, floating islands and brutalist megatowers lit at night (windows, floodlights, flashing red aircraft-warning lights) (being built).
 
 ## Requirements
 

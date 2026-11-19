@@ -1,0 +1,24 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs beacon_splat.glsl's functions on the cases beacon_splat_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "beacon_splat.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_BEACON_LENS_PIXELS) {
+        testOutput(0, vec4(beaconLensPixels(a.x, a.y, a.z)));
+    } else if (function == GPU_TEST_BEACON_SPLAT_RADIANCE) {
+        testOutput(0, vec4(beaconSplatRadiance(a.x, a.y, a.z)));
+    } else if (function == GPU_TEST_BEACON_SPLAT_WEIGHT) {
+        testOutput(0, vec4(beaconSplatWeight(a.xy, a.z)));
+    } else if (function == GPU_TEST_BEACON_EXTENT_PIXELS) {
+        testOutput(0, vec4(beaconExtentPixels(a.x)));
+    }
+}

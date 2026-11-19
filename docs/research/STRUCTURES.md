@@ -141,6 +141,15 @@ The user's choices (Nov 19 2026): concept A2, the terraced Bastion (sheets above
 - **Bridge:** a chamfered box 14 x 8 m with parapets from inside the pillar into the second tier's side, 331 m up, walked on.
 - **Cost grows with:** nothing per frame beyond drawing a few tens of thousands of triangles, still and GPU-culled.
 
+## Planned: obstruction lights
+
+The user's choices (Nov 19 2026): sprites plus small real red lights on the concrete, far towers blinking too, an LED flash.
+
+- **The rules** [V]: medium-intensity flashing red (FAA L-864, ICAO type B), 2000 cd, 20-40 flashes a minute (the FAA now asks 30 ([L-864](https://flightlight.com/what-is-an-faa-l-864-obstruction-light/))); LED units about 0.5 s on (one: 0.5 s on, 2.5 s off ([AVlite](https://manualedistruzioni.it/avlite/lighting-equipment/av-ol-imb/supplement/1cryt))), older up to 1.5 s; every light on a structure in unison ([Clampco](https://clampco.it/obstruction-light-medium-intensity-type-b-miolb-m1_xxs/)); levels at most about 105 m apart, seen from every side.
+- **Drawn as the stars are** (`sky.md`, Stars): illuminance at the eye E = I T / d^2 (T the fog's transmittance) shared by a tent over a pixel either side, so it keeps its light at any distance and never flickers; past a pixel or two the lens's disc at its own luminance (2000 cd over a 15 cm lens about 28,000 cd/m2), bloom giving the glow. Fixed-size sprites (Flight Simulator's) are the failure ([forum](https://forums.flightsimulator.com/t/airport-and-general-light-sprites-are-not-fixed-yet-general-night-lighting-thread-as-well/752834)); X-Plane shrinks the bulb; the old OpenGL point-size attenuation the same idea ([SIGGRAPH 1998 notes](https://web.tecgraf.puc-rio.br/~ismael/Cursos/Cidade_CG/labs/OpenGL/OpenGL_siggraph1998/node157.html)).
+- **Plan:** a `Beacon` component (colour, candela, lens radius, flash period, on-time, phase); the flash from the simulation clock in a mirrored library; drawn after the fog is applied, fogged at its own point, in the reactive mask; the Bastion's levels at its tiers' corners, its own phase, the far towers each their own rate and phase; a small unshadowed red point light at each Bastion beacon, pulsing with it.
+- **Cost grows with:** beacons on screen (six vertices each); the real lights with the pixels they reach. Later: a glow scattered in the far haze, with the searchlights (stage 14).
+
 ## The military megatower (direction v5)
 
 Concept sheets (four concepts: Bastion, Spear, Bulwark, Twin Pylons): https://claude.ai/artifact/KfyixvEX1qjCe2cwvLAW2z (private). [V] read in a primary source, [S] secondary or snippet, [K] background knowledge, not checked.
