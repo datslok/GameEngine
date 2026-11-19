@@ -23,6 +23,13 @@
 // A hex tap's weight under this is dropped (and the rest scaled back up to one), so most places read one or two.
 #define GROUND_HEX_SMALLEST 0.02
 
+// Projected layers read once in each flat facet's own plane instead of along the object's three axes (set with
+// GROUND_PROJECTED; render/gpu/ground_layers.h, facetPlace).
+#define GROUND_FACETS 8u
+
+// A facet whose normal's upward part is under this (in size) is steep: its place's second coordinate is the height.
+#define GROUND_FACET_STEEP 0.5
+
 // A projection's share under this is dropped (and the rest scaled back up to one), so most pixels read one or two.
 #define GROUND_PROJECTION_SMALLEST 0.1
 

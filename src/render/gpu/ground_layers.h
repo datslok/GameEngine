@@ -87,6 +87,40 @@ Vec2 projectedPlace(const Vec3& framePosition, int axis);
 Vec3 projectedNormal(const Vec3& frameNormal, const std::array<Vec3, 3>& tilts, const Vec3& weights);
 
 /*
+* Facet-planar projection, for shapes of flat facets turned every which way (games/forest/structures: hexagon sections),
+* where the three axes' projections would cross-fade a straight seam on a facet turned 30 degrees and show it twice. Each
+* facet reads its textures once, in its own plane, in metres of the object's frame: across along A = normalize(up x n),
+* level, and up along B = n x A, the plane's steepest way up (up - n (n.up), normalised). On a steep facet (|n.y| under
+* groundFacetSteep) the second coordinate is the height itself, so a seam at one height meets itself at every edge round
+* the shape, the way floors run round a building (stretched by at most 1 / cos 30 degrees, 15 %); on a flatter facet it is
+* p.B, unstretched. A facet facing straight up or down, where up x n vanishes, takes the object's x across. Both
+* coordinates are linear in the position, so a step across the pixel maps through the same function.
+*/
+inline constexpr std::uint32_t groundFacetsFlag = GROUND_FACETS;
+inline constexpr float groundFacetSteep = static_cast<float>(GROUND_FACET_STEEP);
+
+struct FacetAxes {
+    Vec3 across; // A: level along the facet
+    Vec3 up;     // B: the facet's steepest way up (the object's -z on a facet facing straight up)
+};
+
+// The facet's two directions from its unit normal in the object's frame; A x B = n.
+FacetAxes facetAxes(const Vec3& frameNormal);
+
+// Where a point of the object's frame reads on its facet (metres): (p.A, the height on steep facets, else p.B).
+Vec2 facetPlace(const Vec3& framePosition, const Vec3& frameNormal);
+
+// The bumped normal in the object's frame from the normal map's direction in the facet's plane (decodeNormalTexel's: x
+// along A, y along B, z out of it): the facet's frame applied, normalised. Zero for no usable direction.
+Vec3 facetNormal(const Vec3& frameNormal, const Vec3& tilt);
+
+// How much of a facet is side (the streaks' sideShare): its normal's level part, 1 upright, 0 facing up or down.
+float facetSideShare(const Vec3& frameNormal);
+
+// Where along the streaks a point of a facet is: across as facetPlace's first coordinate, down as the height.
+Vec2 facetStreakPlace(const Vec3& framePosition, const Vec3& frameNormal, float inverseWidth, float inverseLength);
+
+/*
 * Strata: the layers painted by height, a strip of weights from bottom to top (one cake of rock bands for a whole
 * valley, so the same band stands at the same height on every pillar, as real eroded sandstone's does). Where along the
 * strip (0 bottom, 1 top) a world height is, given the bottom and one over the strip's span.

@@ -1,6 +1,6 @@
 # Forest
 
-Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/games/forest/forest_ground`, `src/games/forest/forest_sway`, `src/games/forest/structures`
+Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/games/forest/forest_ground`, `src/games/forest/forest_sway`, `src/games/forest/structures`, `src/games/forest/structure_seams`
 
 `ForestGame` (`--game forest`, title "Forest"): a jungle valley at a scale meant to be felt. Rules for working here: `src/games/forest/CLAUDE.md`; research: `docs/research/JUNGLE.md`. North is -z.
 
@@ -65,7 +65,8 @@ Stealth-alien shapes (design: `docs/research/STRUCTURES.md`), every one lofted f
 | The Ring | `ringSegmentsMesh` | `ringSegments` (20) straight prisms round a polygon, middles `forestRingRadius` out, chamfered square section of half `forestRingTubeRadius`, ends cut on radial planes 1.5 m short; within 30 degrees of the top drifted 3-10 m out and turned up to 1 degree. One mesh, at the ground with no scale |
 | Far spires | `farSpires` | ten needles 300-800 m at the old towers' places, sunk 20 m |
 
-- One material for all (`applyStructureSettings`, `ForestStructureSettings`): matte coating, linear albedo 0.04 times a cool tint, roughness 0.65, facet tone 0.12, facet roughness 0.07; rewritten when the settings change (`appliedStructureSettings`).
+- One material for all (`structureCoating`, `applyStructureSettings`, `ForestStructureSettings`): a layered material of one layer, the matte coating (linear albedo 0.04 times a cool tint, roughness 0.65) with the seam map, read in each facet's plane (`GroundProjection::Facets`, `parallax-and-grounds.md`), painted by a one-texel strata strip; facet tone 0.12, facet roughness 0.07; seam depth (the normal scale) 1, seam tile 16 m; rewritten when the settings change (`appliedStructureSettings`).
+- **Seam map** (`structure_seams`): `seamLayout` fills a 16 m tile with rows 2-4 m and panels 2-6 m (each row's splits from a random start), 30 % of row edges and 25 % of splits sawtooth at 45 degrees (teeth about 0.3 m, their period dividing the tile), an inset hatch in 15 % of panels; `seamDistance` to the nearest line, `seamHeight` a groove 3 cm wide bevelled over 2 cm; `seamImages` at 2048 texels (a row a job): albedo with each panel's tone ±4 % and grooves at 0.55, height, normals 2 cm deep (`normalMapFromHeight`).
 - `getStructures()` lists every structure entity; `getMonolith()` its slabs and the strut (static, with collision).
 
 ## Sky, air and wind

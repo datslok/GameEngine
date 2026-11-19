@@ -270,6 +270,52 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Facets turned every which way, steep (the height as the second coordinate), sloping and level, straight up and down
+    * among them (A falls back to x), at places hundreds of metres out, with tilts as a normal map gives.
+    */
+    void checkFacetPlane(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{79};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 400; ++i) {
+            Vec3 normal{random.between(-1.0f, 1.0f), random.between(-1.0f, 1.0f), random.between(-1.0f, 1.0f)};
+            normal = i % 50 == 0 ? Vec3{0.0f, i % 100 == 0 ? 1.0f : -1.0f, 0.0f} : normal.normalized();
+            inputs.push_back(GpuVec4{random.between(-300.0f, 300.0f), random.between(-20.0f, 700.0f), random.between(-300.0f, 300.0f), 0.0f});
+            inputs.push_back(GpuVec4{normal.x, normal.y, normal.z, 0.0f});
+            inputs.push_back(GpuVec4{random.between(-0.6f, 0.6f), random.between(-0.6f, 0.6f), random.between(0.3f, 1.0f), 0.0f});
+            inputs.push_back(GpuVec4{1.0f / random.between(2.0f, 20.0f), 1.0f / random.between(50.0f, 400.0f), 0.0f, 0.0f});
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FACET_PLANE, inputs, 4, 5);
+
+        for (std::size_t i = 0; i < inputs.size() / 4; ++i) {
+            const GpuVec4* in = &inputs[i * 4];
+            const GpuVec4* out = &outputs[i * 5];
+            const Vec3 position = vec3Of(in[0]);
+            const Vec3 normal = vec3Of(in[1]);
+            const Vec2 place = facetPlace(position, normal);
+            const Vec3 bumped = facetNormal(normal, vec3Of(in[2]));
+            const Vec2 streak = facetStreakPlace(position, normal, in[3][0], in[3][1]);
+            const FacetAxes axes = facetAxes(normal);
+            report.check("facetPlace", arithmeticTolerance, place.x, out[0][0]);
+            report.check("facetPlace", arithmeticTolerance, place.y, out[0][1]);
+            report.check("facetSideShare", arithmeticTolerance, facetSideShare(normal), out[0][2]);
+            report.check("facetNormal", arithmeticTolerance, bumped.x, out[1][0]);
+            report.check("facetNormal", arithmeticTolerance, bumped.y, out[1][1]);
+            report.check("facetNormal", arithmeticTolerance, bumped.z, out[1][2]);
+            report.check("facetStreakPlace", arithmeticTolerance, streak.x, out[2][0]);
+            report.check("facetStreakPlace", arithmeticTolerance, streak.y, out[2][1]);
+            report.check("facetAxes", arithmeticTolerance, axes.across.x, out[3][0]);
+            report.check("facetAxes", arithmeticTolerance, axes.across.z, out[3][2]);
+            report.check("facetAxes", arithmeticTolerance, axes.up.x, out[4][0]);
+            report.check("facetAxes", arithmeticTolerance, axes.up.y, out[4][1]);
+            report.check("facetAxes", arithmeticTolerance, axes.up.z, out[4][2]);
+        }
+    }
+}
+
 void gpuTestGroundLayers(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("ground_layers.glsl");
     checkBlendWeights(runner, report);
@@ -280,4 +326,5 @@ void gpuTestGroundLayers(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkProjectionFrame(runner, report);
     checkWarpAndStreaks(runner, report);
     checkHexTiling(runner, report);
+    checkFacetPlane(runner, report);
 }

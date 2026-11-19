@@ -92,9 +92,11 @@ GpuMaterial packMaterial(const Material& material) {
             data.groundRepeats[layer] = material.groundRepeats[layer];
         }
 
+        // Facets are projected too, read once in each facet's plane instead of along three axes.
+        const bool projected = material.groundProjection != GroundProjection::TextureCoordinates;
+        const std::uint32_t projection = (projected ? groundProjectedFlag : 0u) | (material.groundProjection == GroundProjection::Facets ? groundFacetsFlag : 0u);
         data.groundWeights[0] = bindlessTextureSlot(material.groundWeights);
-        data.groundWeights[1] = (material.groundProjected ? groundProjectedFlag : 0u) | (material.groundPaint == GroundPaint::Strata ? groundStrataFlag : 0u) |
-                                (material.groundHexTiling ? groundHexFlag : 0u);
+        data.groundWeights[1] = projection | (material.groundPaint == GroundPaint::Strata ? groundStrataFlag : 0u) | (material.groundHexTiling ? groundHexFlag : 0u);
         data.groundBlend[0] = std::max(material.groundBlendDepth, 0.0f);
 
         // Strata: where the strip starts and how many of it a metre is; the layer that takes over facing up.
@@ -115,7 +117,7 @@ GpuMaterial packMaterial(const Material& material) {
         }
 
         // Streaks down the sides of projected layers, only with their texture.
-        if (material.groundProjected && material.groundStreaks.isValid() && material.streakWidth > 0.0f && material.streakLength > 0.0f) {
+        if (projected && material.groundStreaks.isValid() && material.streakWidth > 0.0f && material.streakLength > 0.0f) {
             data.groundSlots[1] = bindlessTextureSlot(material.groundStreaks);
             data.groundStreaks[0] = std::clamp(material.streakStrength, 0.0f, 1.0f);
             data.groundStreaks[1] = 1.0f / material.streakWidth;
@@ -123,7 +125,7 @@ GpuMaterial packMaterial(const Material& material) {
         }
 
         // Tone variation over projected layers, only with its texture.
-        if (material.groundProjected && material.groundVariation.isValid() && material.variationTile > 0.0f) {
+        if (projected && material.groundVariation.isValid() && material.variationTile > 0.0f) {
             data.groundSlots[2] = bindlessTextureSlot(material.groundVariation);
             data.groundStreaks[3] = std::clamp(material.variationStrength, 0.0f, 1.0f);
             data.groundFacing[3] = 1.0f / material.variationTile;

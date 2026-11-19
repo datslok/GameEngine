@@ -46,7 +46,7 @@ Cross-fading by the weights alone smears borders; instead the texel standing hig
 - A layer without a height map (or `heightScale` 0) stands halfway; one without a normal map lies flat (otherwise the slot's white stand-in would always win and tilt normals).
 - **Weights read as a cubic B-spline** (`groundPaintTaps`, Sigg and Hadwiger 2005): sixteen texels in four bilinear reads, each with the surface's own footprint. Plain bilinear's slope jumps at every texel, and the height blend sharpens those kinks into staircases along the texture grid.
 
-### Projected layers (`Material::groundProjected`, triplanar)
+### Projected layers (`Material::groundProjection = Axes`, triplanar)
 
 For generated shapes stretched to size (the forest's pillars and islands), whose UVs stretch with them.
 
@@ -55,6 +55,16 @@ For generated shapes stretched to size (the forest's pillars and islands), whose
 - **Shares** (`projectionWeights`): each axis's |n|⁴, normalised, less `GROUND_PROJECTION_SMALLEST` (0.1), rescaled to sum 1, so a share fades out smoothly and most pixels read one or two projections. A zero share is not read; mips come from each place's own steps taken before any branch.
 - **Places** (`projectedPlace`): along x (z, y), along y (x, z), along z (x, y), so up the picture is up the object on every side.
 - **Normals** (`projectedNormal`): each projection's texel in its own plane, combined with the surface normal by the whiteout blend (Barré-Brisebois and Hill 2012, as Golus 2017 applies it), blended by shares, turned back by R. A flat map gives the surface normal back; on an axis-aligned face it equals `perturbNormal`. Toksvig reads the blended texels.
+
+### Facet projection (`groundProjection = Facets`)
+
+For flat facets turned every which way (the forest's structures), where triplanar would cross-fade a straight seam on a facet turned 30 degrees and draw it twice. Same frame and metres as triplanar; one read a layer.
+
+- **Axes** (`facetAxes`): across `A = normalize(up x n)` (level), up `B = n x A` (the steepest way up); `A x B = n`. Facing straight up or down, A is the object's x.
+- **Place** (`facetPlace`): `(p.A, p.y)` on steep facets (`|n.y|` under `GROUND_FACET_STEEP`, 0.5), so a seam at one height meets itself round every edge (stretch at most 15 %); `(p.A, p.B)` on flatter ones. Linear in p, so the pixel steps map through it for mips.
+- **Normal** (`facetNormal`): the decoded tilt turned by (A, B, n), normalised.
+- **Streaks and tone:** one read each, streaks across `p.A` and down the height (`facetStreakPlace`), side share the normal's level part (`facetSideShare`).
+- The facets' own numbers (`facetTone`, `facetRoughness`) keep the mesh's texture coordinates, so a faceted ground paints by strata, not by a weights texture over them.
 
 ### Hex tiling (`Material::groundHexTiling`, `hexTiling`)
 
@@ -72,19 +82,19 @@ Layers painted by world height, so every object with the material shows the same
 - `groundTopLayer` takes over where the normal faces up (`strataPaint`): none below `groundTopStart` of its upward part, all from `groundTopFull`, smoothstep between.
 - **Wavy beds** (`strataWarp`, `warpedStrataHeight`): a noise texture's red (0.5 none) over world x, z moves the read height by up to `strataWarpMetres`, repeating every `strataWarpTile` m.
 
-### Streaks and tone (projected layers only)
+### Streaks and tone (projected layers and facets only)
 
 - **Water streaks** (`groundStreaks`): red = clean rock (1) to darkest stain (0), read on the two side projections stretched down the height (`streakPlace`: `streakWidth` across, `streakLength` down), darkening the albedo by up to `streakStrength`, on sides only (`streakShade`).
 - **Tone variation** (`groundVariation`, `variationShade`): slow noise (0.5 none) along each projection every `variationTile` m, lightening or darkening by up to `variationStrength`.
 
 ### Packing and the main pass
 
-- `MaterialTable::add` adds each layer first as a material of its own (shared with identical ones); the ground's `GpuMaterial` names them by index + 1 in `groundLayers`, with repeats, weights slot, switches (`GROUND_PROJECTED`, `GROUND_STRATA`, `GROUND_HEX`), strata, warp, streak and variation numbers in `groundBlend`, `groundFacing`, `groundSlots`, `groundStreaks`; which lane holds what: `render/gpu/material_uniforms.h`.
+- `MaterialTable::add` adds each layer first as a material of its own (shared with identical ones); the ground's `GpuMaterial` names them by index + 1 in `groundLayers`, with repeats, weights slot, switches (`GROUND_PROJECTED`, `GROUND_FACETS` with it, `GROUND_STRATA`, `GROUND_HEX`), strata, warp, streak and variation numbers in `groundBlend`, `groundFacing`, `groundSlots`, `groundStreaks`; which lane holds what: `render/gpu/material_uniforms.h`.
 - Throws `std::invalid_argument` for more than four layers or none, no weights texture, a layered layer, or a top layer not among them.
-- In `scene_surface.glsl`: the weights (B-spline at the mesh's UVs, or the strip with the top layer), then each needed layer's colour, metallic-roughness, occlusion, height and normal (at the ground's `normalScale`) at its repeated UVs or per projection, blended into the surface the rest of the shader lights. Parallax does not run on the layers.
+- In `scene_surface.glsl`: the weights (B-spline at the mesh's UVs, or the strip with the top layer), then each needed layer's colour, metallic-roughness, occlusion, height and normal (at the ground's `normalScale`) at its repeated UVs, per projection or in the facet's plane, blended into the surface the rest of the shader lights. Parallax does not run on the layers.
 
 ## Tests
 
 - `parallax_test`: frame, steps, shifts, the crossing, flat maps, a tilted plane's exact crossing, a brick hiding mortar one way only, self-shadowing, the fade, the settings. `height_map_test`.
-- `ground_layers_test`: the blend, uneven and empty weights, refused materials, the frame, shares, places, normals, strata and top layer, warp, streaks, hex tiling, tone variation.
+- `ground_layers_test`: the blend, uneven and empty weights, refused materials, the frame, shares, places, normals, facet axes, places, normals and streaks, strata and top layer, warp, streaks, hex tiling, tone variation.
 - GPU: `parallax_gpu_test`, `ground_layers_gpu_test`. Also `material_uniforms_test`, `engine_commands_test`, `light_lab_test`.

@@ -53,5 +53,17 @@ void main() {
         testOutput(0, vec4(taps.places[0], taps.places[1]));
         testOutput(1, vec4(taps.places[2], variationShade(in0.z, in0.w), 0.0));
         testOutput(2, vec4(taps.weights, 0.0));
+    } else if (function == GPU_TEST_FACET_PLANE) {
+        // Inputs: (position, 0), (unit normal, 0), (tilt, 0), (one over the streaks' width and length, 0, 0). Outputs:
+        // (facetPlace, facetSideShare, 0), (facetNormal, 0), (facetStreakPlace, 0, 0), (across, 0), (up, 0).
+        vec3 position = testInput(0).xyz;
+        vec3 normal = testInput(1).xyz;
+        vec4 streak = testInput(3);
+        FacetAxes axes = facetAxes(normal);
+        testOutput(0, vec4(facetPlace(position, normal), facetSideShare(normal), 0.0));
+        testOutput(1, vec4(facetNormal(normal, testInput(2).xyz), 0.0));
+        testOutput(2, vec4(facetStreakPlace(position, normal, streak.x, streak.y), 0.0, 0.0));
+        testOutput(3, vec4(axes.across, 0.0));
+        testOutput(4, vec4(axes.up, 0.0));
     }
 }

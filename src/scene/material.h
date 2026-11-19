@@ -26,6 +26,14 @@ enum class GroundPaint {
     Strata
 };
 
+// Where a layered material's layers read their textures (Material::groundProjection): the mesh's texture coordinates,
+// along the object's own three axes in metres (triplanar), or once in each flat facet's own plane in metres.
+enum class GroundProjection {
+    TextureCoordinates,
+    Axes,
+    Facets
+};
+
 /*
 * How the renderer colours a part: a base colour multiplied by a texture, how metallic and rough it is, and any light it emits.
 * No texture handle means plain colour (the renderer uses a white texture).
@@ -146,10 +154,11 @@ struct Material {
     std::array<float, 4> groundRepeats{1.0f, 1.0f, 1.0f, 1.0f};
     TextureHandle groundWeights;
     float groundBlendDepth = 0.2f;
-    // Projected layers (render/gpu/ground_layers.h, projectionWeights): each layer's textures read along the object's own
-    // three axes in metres instead of the mesh's texture coordinates (triplanar mapping), for shapes made by code and
-    // stretched to size; groundRepeats then count repeats a metre.
-    bool groundProjected = false;
+    // Projected layers (render/gpu/ground_layers.h): each layer's textures read in metres instead of the mesh's texture
+    // coordinates, for shapes made by code and stretched to size; groundRepeats then count repeats a metre. Axes: along
+    // the object's own three axes (triplanar mapping, projectionWeights), for rock. Facets: once in each flat facet's own
+    // plane (facetPlace), horizontal seams meeting round the shape, for faceted structures.
+    GroundProjection groundProjection = GroundProjection::TextureCoordinates;
     // What paints the layers: groundWeights over the mesh's texture coordinates, or strata: groundWeights as a strip of
     // weights by world height, its first column at strataBottom and its last at strataTop (render/gpu/ground_layers.h,
     // strataPlace), so every object with this material shows the same bands at the same heights.

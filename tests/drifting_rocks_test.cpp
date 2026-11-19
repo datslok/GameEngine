@@ -226,7 +226,7 @@ namespace {
             assert(renderer.castsShadows && forest.assets.isDrawnOnly(renderer.parts.front().mesh));
             assert(forest.assets.getMeshLevels().at(renderer.parts.front().mesh.index).size() == 2);
             const Material& material = renderer.parts.front().material;
-            assert(material.groundPaint == GroundPaint::Strata && material.groundProjected && material.groundWeights.isValid());
+            assert(material.groundPaint == GroundPaint::Strata && material.groundProjection == GroundProjection::Axes && material.groundWeights.isValid());
         }
 
         const Entity first = rocks.front();
