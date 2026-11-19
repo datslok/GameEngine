@@ -341,8 +341,9 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
     - [x] 1. Density maps a layer over floor, walls and rim, from the terrain, with ecotopes, noise gaps and sight corridors capping the canopy; the patch rebuilt from them (`valley-maps`)
     - [ ] 2. Plants made on the GPU round the camera from the maps, by cells, every layer (Horizon's placement; the user's choice of the GPU deciding, Nov 19 2026; design in `docs/research/VALLEY.md`) (`gpu-placement`)
       - [x] a. The placement maths as a `.glsl` library mirrored in C++, exact on both (`precise`, reciprocals and the axis from the CPU, the 64-bit hash); every layer planted a box at a time, a box alone the same as the whole (`gpu-placement`)
-      - [ ] b. Trees by cells on the GPU: the maps on the GPU, a record a plant, a part table a variant, cells made and dropped round the camera, culled a plant a view (mirrored), the vertex shaders' placed kind; the patch's tree entities retired; `placement-compare` (the GPU's cells against the CPU's)
-      - [ ] c. Shadows, velocity and sway for placed plants; shadow tiles redrawn by the cells that changed
+      - [ ] b1. The maps and layer records on the GPU, the placement passes a cell (candidates, spacing, standing grid a layer), cells made and dropped round the camera into fixed slots; `placement-compare` (the GPU's cells read back against `plantLayers`); nothing drawn yet
+      - [ ] b2. The placed trees drawn in the camera's passes over the patch only (the user's choice, Nov 19 2026): a record a plant, a part table a variant, culled a plant a view (mirrored), the vertex shaders' placed kind in their own pipelines; behind `placedTrees` (off), the entity trees kept to compare
+      - [ ] c. Shadows, velocity, sway and the captures for placed plants; shadow tiles redrawn by the cells that changed; then `placedTrees` on and the patch's tree entities retired (lianas stay, from the CPU's planting)
       - [ ] d. Palms and understorey on the GPU; the near trees' CPU mirror; lianas per near cell from it
       - [ ] e. The whole valley: radii and cells a frame, measured (F4)
     - [ ] 3. The far tier: one impostor a tree past about 1 km, casting into the far shadow map (`impostor-fields`)
