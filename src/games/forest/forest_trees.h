@@ -2,6 +2,7 @@
 
 #include "core/settings_visitor.h"
 #include "games/forest/island_hangings.h"
+#include "games/forest/valley_maps.h"
 #include "games/forest/valley_shapes.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
@@ -146,9 +147,12 @@ std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius)
 * emergents 45-60 m above it.
 */
 struct ForestTreeSettings {
-    // How many trees stand between the Ring and the clearing, and how many different shapes they are grown in. Four
-    // times the first patch's crown cover (the user, Nov 14 2026: "the tall coverage isnt there").
-    int count = 80;
+    // How the species is planted from the valley's maps (valley_maps), in 12 m cells shared with the emergents, none in
+    // the gaps: 30 a hectare asked on the floor, of which about 18 stand once crowding, the path and the sight lines take
+    // theirs, the 80 trees of the patch (four times the first patch's crown cover: the user, Nov 14 2026, "the tall
+    // coverage isnt there"). How many different shapes they are grown in.
+    PlantingLayer planting{.floorPerHectare = 30.0f, .wallPerHectare = 13.0f, .rimPerHectare = 23.0f, .footprintMetres = 12.0f,
+                           .jitterShare = 0.8f, .gapShare = 0.0f, .pathClearance = 6.0f};
     int variants = 4;
 
     // How close two trunks of the species may stand, as a share of the larger crown's radius: below 1 their crowns
@@ -366,16 +370,10 @@ struct TreePlacement {
     int variant = 0;
 };
 
-// A line of sight from somewhere walked to a landmark.
-struct SightLine {
-    Vec3 from;
-    Vec3 to;
-};
-
 /*
 * The lines of sight the forest must leave open (the user's requirement): from eye height on the path every
 * sightLineSpacing metres, round the meadow and round the clearing, to a point high on the Monolith's face and to the
-* Ring's top. A tree whose crown meets one is not planted, so some of both stays in view all along the walk.
+* Ring's top. They cap the canopy under them (valley_maps), so some of both stays in view all along the walk.
 */
 inline constexpr float sightLineSpacing = 10.0f;
 inline constexpr float sightEyeHeight = 1.7f;
@@ -402,22 +400,33 @@ struct StandingCrown {
 };
 
 /*
-* Where a species' trees stand: by dart throwing (as the pillars), from its own seed, on the valley's floor between the
-* Ring and the clearing, within treeSpread of the valley's axis (so they show through the Ring from the path), their
-* trunks treePathGap from the path's centre and outside the crowns of each other and of the trees already standing,
-* their crowns clear of every pillar, sized 85-115% and turned at random; never where the crown would block a sight
-* line. Fewer than asked if the tries run out. The same every run.
+* The patch planted so far (until stage 2 plants round the camera): the valley's floor between the Ring and the
+* clearing, within treeSpread of its axis, so the trees show through the Ring from the path.
 */
 inline constexpr float treeNorthmost = -210.0f;
 inline constexpr float treeSouthmost = -40.0f;
 inline constexpr float treeSpread = 130.0f;
-inline constexpr float treePathGap = 6.0f;
+inline constexpr PlantingRegion forestPatch{.northmost = treeNorthmost, .southmost = treeSouthmost, .spread = treeSpread};
+
+// The trees' sizes against their variant's: smallestTreeScale to smallestTreeScale + treeScaleRange.
+inline constexpr float smallestTreeScale = 0.85f;
+inline constexpr float treeScaleRange = 0.3f;
+
+// The farthest a species' crowns reach from their trunks (the largest tree's crown sphere): the canopy cap it reads.
+float treeReach(const ForestTreeSettings& settings);
+
+/*
+* Where a species' trees stand, planted from the maps (ditheredCells over forestPatch, from its own seed; under is a
+* species sharing its lattice planted first): each sized and turned at random, standing on the lowest ground round its
+* trunk, its crown fitting the maps (clear of every obstacle, under every sight line), its trunk outside the crowns of
+* the trees already standing, then outside the middle of the crowns of its own species (spacingShare of the larger's
+* radius) where the cell with the lower threshold keeps its tree. The same every run.
+*/
 inline constexpr std::uint64_t emergentPlaceSeed = 0x454d4552ull;
 inline constexpr std::uint64_t canopyPlaceSeed = 0x54524545ull;
 inline constexpr std::uint64_t midPlaceSeed = 0x4d494444ull;
-std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const std::vector<PillarPlacement>& pillars,
-                                      const std::vector<SightLine>& sightLines, const std::vector<StandingCrown>& standing,
-                                      std::uint64_t seed);
+std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& standing,
+                                      std::uint64_t seed, const PlantingLayer* under = nullptr);
 
 // The placed trees as crowns for the next species to keep clear of.
 std::vector<StandingCrown> standingCrowns(const std::vector<TreePlacement>& trees, const ForestTreeSettings& settings);

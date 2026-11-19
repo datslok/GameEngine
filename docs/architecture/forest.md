@@ -8,7 +8,7 @@ Other forest files: `forest-rock.md` (pillars, islands, what hangs from them, dr
 
 ## Start-up (`onInit`)
 
-In order: `buildGround`, `buildShapes`, `buildTrees`, `buildLianas`, `buildUnderstorey`, `buildPalms`, `buildGrass`, `buildFloorCover`; then the start, the body, the sun, the air entity and `ProbeCascades`.
+In order: `buildGround`, `buildShapes`, `buildPlantingMaps` (the planting maps every plant reads: `forest-plants.md`), `buildTrees`, `buildLianas`, `buildUnderstorey`, `buildPalms`, `buildGrass`, `buildFloorCover`; then the start, the body, the sun, the air entity and `ProbeCascades`.
 
 - Generated meshes are built on the game's job system (`Game::getJobs`), each into its own slot, so the result does not depend on thread order; most are kept drawn-only (`AssetManager::addDrawnMesh`).
 - Scenery is `ModelRenderer::isStill` (`addShape`): its draws are kept between frames, so any change to its material or sway is announced with `markRenderChanged`.
@@ -94,7 +94,7 @@ Everything on the air entity, rewritten each frame by `updateDaylight`:
 
 ## Settings
 
-F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, Hangings, Moss, Drifting rocks, Canopy trees, Emergent trees, Mid trees, Leaf light, Understorey, Palms, Lianas, Climbers, Epiphytes, Grass, Forest floor, Valley.
+F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, Hangings, Moss, Drifting rocks, Canopy trees, Emergent trees, Mid trees, Leaf light, Understorey, Palms, Lianas, Climbers, Epiphytes, Grass, Forest floor, Valley, Planting (the maps; each species' layer is a Planting group in its own).
 
 - Live: Sun, Atmosphere, Wind, Sway, Mist, Ground (`ForestGroundSettings`: blend depth 0.2, hex tiling on), Rock (but its bed waves), Structures, drifting rocks' `moving`.
 - Start-up: the rest, including `ForestValleySettings` (`groundCoarseness` 0, `pillarCount` 220, `islandCount` 30, `start`).

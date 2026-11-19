@@ -14,8 +14,6 @@
 #include <utility>
 
 namespace {
-    constexpr int triesPerTree = 60;
-
     // Clumps: 75-125% of the setting's radius, 55-100% of the way out, and how many tries each gets.
     constexpr float smallestClump = 0.75f;
     constexpr float clumpSizeRange = 0.5f;
@@ -35,10 +33,6 @@ namespace {
 
     // The least a foliage normal leans to its card's front (the cosine between them, before making it unit again).
     constexpr float leastFrontShare = 0.1f;
-
-    // The smallest and largest tree against its variant.
-    constexpr float smallestTree = 0.85f;
-    constexpr float treeSizeRange = 0.3f;
 
     // How far round the trunk the foot looks for the lowest ground (the buttresses' reach, at the variant's size).
     constexpr float footReachMetres = 2.5f;
@@ -639,7 +633,9 @@ int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, co
 }
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Trees", settings.count, {.min = 0, .max = 5000, .sliderMax = 2000, .applies = FieldApplies::AtStartup});
+    visitor.group("Planting", [&] {
+        visit(settings.planting, visitor);
+    });
     visitor.field("Spacing share", settings.spacingShare, {.min = 0.1f, .max = 2.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Variants", settings.variants, {.min = 1, .max = 32, .sliderMax = 8, .applies = FieldApplies::AtStartup});
     visitor.field("Height", settings.height, {.min = 2.0f, .max = 120.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
@@ -673,7 +669,9 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
 
 ForestTreeSettings emergentTreeSettings() {
     ForestTreeSettings settings;
-    settings.count = 10;
+    settings.planting.floorPerHectare = 2.8f; // about ten in the patch
+    settings.planting.wallPerHectare = 0.6f;
+    settings.planting.rimPerHectare = 1.8f;
     settings.spacingShare = 1.0f;
     settings.variants = 3;
     settings.height = 55.0f;
@@ -690,7 +688,8 @@ ForestTreeSettings emergentTreeSettings() {
 
 ForestTreeSettings midTreeSettings() {
     ForestTreeSettings settings;
-    settings.count = 1200;
+    settings.planting = PlantingLayer{.floorPerHectare = 480.0f, .wallPerHectare = 200.0f, .rimPerHectare = 340.0f, .footprintMetres = 4.0f,
+                                      .jitterShare = 0.8f, .gapShare = 0.4f, .pathClearance = 6.0f}; // about 1200 in the patch
     settings.spacingShare = 0.6f;
     settings.variants = 4;
     settings.height = 15.0f;
@@ -966,53 +965,97 @@ float placedCrownRadius(const TreePlacement& tree, const ForestTreeSettings& set
     return std::max(crown.radius, crown.halfHeight) * tree.scale;
 }
 
-std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const std::vector<PillarPlacement>& pillars,
-                                      const std::vector<SightLine>& sightLines, const std::vector<StandingCrown>& standing,
-                                      std::uint64_t seed) {
-    std::vector<TreePlacement> trees;
+float treeReach(const ForestTreeSettings& settings) {
+    const CrownEnvelope crown = treeCrown(settings);
+    return std::max(crown.radius, crown.halfHeight) * (smallestTreeScale + treeScaleRange);
+}
+
+std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& standing,
+                                      std::uint64_t seed, const PlantingLayer* under) {
     const int variants = std::max(settings.variants, 1);
-    const int tries = std::max(settings.count, 0) * triesPerTree;
+    std::vector<TreePlacement> candidates;
+    std::vector<DitheredCell> cells;
 
-    for (int attempt = 0; attempt < tries && static_cast<int>(trees.size()) < settings.count; ++attempt) {
-        const std::uint64_t base = static_cast<std::uint64_t>(attempt) * 8u;
-        const float z = treeNorthmost + (treeSouthmost - treeNorthmost) * forestUnitRandom(seed, base);
-        const float x = valleyAxis(z) + treeSpread * (2.0f * forestUnitRandom(seed, base + 1) - 1.0f);
+    // Each cell's tree, kept where its crown fits the maps and its trunk is outside the crowns already standing.
+    for (const DitheredCell& cell : ditheredCells(settings.planting, maps, forestPatch, seed, under)) {
+        TreePlacement tree{
+            .foot = Vec3{cell.place.x, 0.0f, cell.place.y},
+            .scale = smallestTreeScale + treeScaleRange * forestUnitRandom(seed, cell.firstDraw),
+            .turnRadians = fullTurnRadians * forestUnitRandom(seed, cell.firstDraw + 1),
+            .variant = std::min(static_cast<int>(forestUnitRandom(seed, cell.firstDraw + 2) * static_cast<float>(variants)), variants - 1)
+        };
+        const bool underStanding = std::any_of(standing.begin(), standing.end(), [&](const StandingCrown& crown) {
+            return (cell.place - crown.foot).length() < crown.radius;
+        });
 
-        if (forestPathDistance(x, z) < treePathGap) {
+        if (underStanding) {
             continue;
         }
 
-        TreePlacement tree{
-            .foot = Vec3{x, 0.0f, z},
-            .scale = smallestTree + treeSizeRange * forestUnitRandom(seed, base + 2),
-            .turnRadians = fullTurnRadians * forestUnitRandom(seed, base + 3),
-            .variant = std::min(static_cast<int>(forestUnitRandom(seed, base + 4) * static_cast<float>(variants)), variants - 1)
-        };
+        tree.foot.y = lowestGroundRound(cell.place.x, cell.place.y, footReachMetres * tree.scale);
         const float radius = placedCrownRadius(tree, settings);
 
-        // Each trunk outside the other's crown's middle, and every crown clear of the pillars (which bulge and lean).
-        const bool crowded = std::any_of(trees.begin(), trees.end(), [&](const TreePlacement& other) {
-            return (Vec2{x, z} - Vec2{other.foot.x, other.foot.z}).length() < settings.spacingShare * std::max(radius, placedCrownRadius(other, settings));
-        });
-        const bool byPillar = std::any_of(pillars.begin(), pillars.end(), [&](const PillarPlacement& pillar) {
-            return (Vec2{x, z} - Vec2{pillar.foot.x, pillar.foot.z}).length() < 1.3f * pillar.radius + radius;
-        });
+        if (fitsTheMaps(maps, cell.place, radius, placedCrownCentre(tree, settings).y + radius)) {
+            candidates.push_back(tree);
+            cells.push_back(cell);
+        }
+    }
 
-        const bool underStanding = std::any_of(standing.begin(), standing.end(), [&](const StandingCrown& crown) {
-            return (Vec2{x, z} - crown.foot).length() < crown.radius;
-        });
+    if (candidates.empty()) {
+        return {};
+    }
 
-        if (crowded || byPillar || underStanding) {
-            continue;
+    // The cells by place on the lattice, to find each tree's neighbours.
+    int firstColumn = cells.front().column;
+    int lastColumn = firstColumn;
+    int firstRow = cells.front().row;
+    int lastRow = firstRow;
+
+    for (const DitheredCell& cell : cells) {
+        firstColumn = std::min(firstColumn, cell.column);
+        lastColumn = std::max(lastColumn, cell.column);
+        firstRow = std::min(firstRow, cell.row);
+        lastRow = std::max(lastRow, cell.row);
+    }
+
+    const int columns = lastColumn - firstColumn + 1;
+    std::vector<int> byCell(static_cast<std::size_t>(columns) * static_cast<std::size_t>(lastRow - firstRow + 1), -1);
+    const auto cellIndex = [&](int column, int row) {
+        return static_cast<std::size_t>(row - firstRow) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(column - firstColumn);
+    };
+
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        byCell[cellIndex(cells[i].column, cells[i].row)] = static_cast<int>(i);
+    }
+
+    // Each tree gives way to a closer neighbour of its own species with a lower threshold (then the earlier cell).
+    const float footprint = std::max(settings.planting.footprintMetres, 0.1f);
+    const int rings = static_cast<int>(std::ceil(settings.spacingShare * treeReach(settings) / footprint)) + 1;
+    std::vector<TreePlacement> trees;
+
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const DitheredCell& cell = cells[i];
+        const float radius = placedCrownRadius(candidates[i], settings);
+        bool givesWay = false;
+
+        for (int row = std::max(cell.row - rings, firstRow); row <= std::min(cell.row + rings, lastRow) && !givesWay; ++row) {
+            for (int column = std::max(cell.column - rings, firstColumn); column <= std::min(cell.column + rings, lastColumn) && !givesWay; ++column) {
+                const int other = byCell[cellIndex(column, row)];
+
+                if (other < 0 || static_cast<std::size_t>(other) == i) {
+                    continue;
+                }
+
+                const DitheredCell& neighbour = cells[static_cast<std::size_t>(other)];
+                const bool first = neighbour.threshold < cell.threshold || (neighbour.threshold == cell.threshold && static_cast<std::size_t>(other) < i);
+                const float apart = (cell.place - neighbour.place).length();
+                givesWay = first && apart < settings.spacingShare * std::max(radius, placedCrownRadius(candidates[static_cast<std::size_t>(other)], settings));
+            }
         }
 
-        tree.foot.y = lowestGroundRound(x, z, footReachMetres * tree.scale);
-
-        if (blocksSight(placedCrownCentre(tree, settings), radius, sightLines)) {
-            continue;
+        if (!givesWay) {
+            trees.push_back(candidates[i]);
         }
-
-        trees.push_back(tree);
     }
 
     return trees;

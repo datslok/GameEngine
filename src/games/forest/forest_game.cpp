@@ -369,6 +369,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     flashlight.create(world, flashlightSettings.on);
     buildGround(world, assets);
     buildShapes(world, assets);
+    buildPlantingMaps();
     buildTrees(world, assets);
     buildLianas(world, assets);
     buildUnderstorey(world, assets);
@@ -647,19 +648,33 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
 }
 
 /*
+* The planting maps (valley_maps) over the floor, walls and rim, before anything is planted: the obstacles from the
+* pillars and the towers, a canopy cap for each species' reach under the sight lines.
+*/
+void ForestGame::buildPlantingMaps() {
+    std::vector<BastionShape> towers = farTowers();
+    towers.push_back(monolithBastion(clearingLevel(), bastionSettings));
+    const std::vector<float> reaches{treeReach(emergentSettings), treeReach(treeSettings), treeReach(midSettings), palmReach(palmSettings),
+                                     understoreyReach(understoreySettings)};
+    valleyMaps = buildValleyMaps(plantingSettings, forestObstacles(pillars, towers), forestSightLines(), reaches, getJobs());
+}
+
+/*
 * The variants are grown on every core, each into its own slot, and drawn only. Every tree of a variant shares its two
 * meshes, so the GPU draws all of them in one instanced draw each; each is turned and scaled by its Transform. The
 * leaves seen cast no shadow: their shadow leaves, fewer and bigger cards drawn into shadows only, cast it. Not
 * static yet: the trunks and leaves join the sky visibility grid's rays with the forest floor.
 */
 void ForestGame::buildTrees(World& world, AssetManager& assets) {
-    const std::vector<SightLine> sightLines = forestSightLines();
-    emergentPlacements = placeTrees(emergentSettings, pillars, sightLines, {}, emergentPlaceSeed);
-    treePlacements = placeTrees(treeSettings, pillars, sightLines, standingCrowns(emergentPlacements, emergentSettings), canopyPlaceSeed);
+    // The canopy trees share the emergents' lattice (each takes the thresholds above theirs) while their cells match.
+    const bool shareLattice = treeSettings.planting.footprintMetres == emergentSettings.planting.footprintMetres;
+    emergentPlacements = placeTrees(emergentSettings, valleyMaps, {}, emergentPlaceSeed);
+    treePlacements = placeTrees(treeSettings, valleyMaps, standingCrowns(emergentPlacements, emergentSettings), canopyPlaceSeed,
+                                shareLattice ? &emergentSettings.planting : nullptr);
     std::vector<StandingCrown> bigTrunks = standingTrunks(treePlacements, midTrunkClearance);
     const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, midTrunkClearance);
     bigTrunks.insert(bigTrunks.end(), emergentTrunks.begin(), emergentTrunks.end());
-    midPlacements = placeTrees(midSettings, pillars, sightLines, bigTrunks, midPlaceSeed);
+    midPlacements = placeTrees(midSettings, valleyMaps, bigTrunks, midPlaceSeed);
 
     if (treePlacements.empty() && emergentPlacements.empty() && midPlacements.empty()) {
         return;
@@ -807,7 +822,7 @@ std::vector<StandingCrown> ForestGame::floorTrunks() const {
 }
 
 void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
-    understoreyPlacements = placeUnderstorey(understoreySettings, floorTrunks(), forestSightLines());
+    understoreyPlacements = placeUnderstorey(understoreySettings, valleyMaps, floorTrunks());
 
     if (understoreyPlacements.empty()) {
         return;
@@ -877,7 +892,7 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
 * meshes added) and placed; every palm of a variant shares its meshes, so each is one instanced draw.
 */
 void ForestGame::buildPalms(World& world, AssetManager& assets) {
-    palmPlacements = placePalms(palmSettings, floorTrunks(), forestSightLines());
+    palmPlacements = placePalms(palmSettings, valleyMaps, floorTrunks());
 
     if (palmPlacements.empty()) {
         return;
@@ -1586,6 +1601,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
+    visitor.group("Planting", [&] {
+        visit(plantingSettings, visitor);
+    });
     controls.visitSettings(visitor);
 }
 
@@ -1730,6 +1748,14 @@ const std::vector<Entity>& ForestGame::getMonolith() const {
 
 ForestValleySettings& ForestGame::getValleySettings() {
     return valleySettings;
+}
+
+ForestPlantingSettings& ForestGame::getPlantingSettings() {
+    return plantingSettings;
+}
+
+const ValleyMaps& ForestGame::getValleyMaps() const {
+    return valleyMaps;
 }
 
 Entity ForestGame::getSun() const {

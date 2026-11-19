@@ -3,6 +3,11 @@
 #include "assets/asset_manager.h"
 #include "ecs/world.h"
 #include "games/forest/forest_game.h"
+#include "games/forest/forest_terrain.h"
+#include "games/forest/forest_trees.h"
+#include "games/forest/palms.h"
+#include "games/forest/understorey.h"
+#include "games/forest/valley_maps.h"
 #include "core/settings_visitor.h"
 #include "gameplay/control_mode.h"
 #include "scene/indexed_mesh.h"
@@ -20,6 +25,34 @@
 * the game's, since the crowns' sizes are the same, but grown in a fraction of the time (forest_trees_test grows full
 * ones), and their leaf clusters' texture small.
 */
+// Planting maps round the trees' patch only (the game's cover the whole valley), so building them is quick.
+inline ForestPlantingSettings testPlantingSettings() {
+    ForestPlantingSettings settings;
+    settings.northmost = -450.0f;
+    settings.southmost = 100.0f;
+    return settings;
+}
+
+// Every species' reach with its default settings: the canopy caps the planting maps are built for.
+inline std::vector<float> defaultPlantReaches() {
+    return {treeReach(emergentTreeSettings()), treeReach(ForestTreeSettings{}), treeReach(midTreeSettings()),
+            palmReach(ForestPalmSettings{}), understoreyReach(ForestUnderstoreySettings{})};
+}
+
+/*
+* The planting maps over the patch (testPlantingSettings) with the default valley's pillars, the towers and the sight
+* lines, caps for every species' default reach: built once for the run.
+*/
+inline const ValleyMaps& patchValleyMaps() {
+    static const ValleyMaps maps = [] {
+        std::vector<BastionShape> towers = farTowers();
+        towers.push_back(monolithBastion(forestHeight(forestClearingCentre.x, forestClearingCentre.y), ForestBastionSettings{}));
+        return buildValleyMaps(testPlantingSettings(), forestObstacles(placePillars(ValleyLayout{}), towers), forestSightLines(),
+                               defaultPlantReaches(), testJobs());
+    }();
+    return maps;
+}
+
 struct TestForest {
     World world;
     AssetManager assets;
@@ -44,6 +77,7 @@ struct TestForest {
         game.getFloorSettings().variants = 1;
         game.getFloorSettings().densitySteps = 2;
         game.getFloorSettings().reachMetres = 40.0f;
+        game.getPlantingSettings() = testPlantingSettings();
         game.useJobs(testJobs());
         game.onInit(world, assets);
     }

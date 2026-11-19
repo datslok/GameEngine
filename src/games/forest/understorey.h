@@ -29,17 +29,14 @@ const char* understoreyScanName(UnderstoreyKind kind);
 
 // The understorey (F5 Forest, Understorey; read at start-up).
 struct ForestUnderstoreySettings {
-    // The grid the plants are thrown on (one at most a cell, jittered within it), metres.
-    float spacing = 1.5f;
+    // How the plants are planted from the valley's maps (valley_maps): every 1.5 m cell on the floor within 20 m of the
+    // path's centre, 35% of them past 60 m (thick along the walk, thinning into the trees), more in the gaps' light;
+    // 1.5 m clear of the path's centre.
+    PlantingLayer planting{.floorPerHectare = 4500.0f, .wallPerHectare = 2500.0f, .rimPerHectare = 3000.0f, .footprintMetres = 1.5f,
+                           .jitterShare = 1.0f, .gapShare = 1.5f, .pathClearance = 1.5f, .nearPathMetres = 20.0f, .farPathMetres = 60.0f,
+                           .farShare = 0.35f};
 
-    // Every cell is planted within nearPathMetres of the path's centre, farShare of them past farPathMetres, a straight
-    // blend between: thick along the walk, thinning into the trees.
-    float nearPathMetres = 20.0f;
-    float farPathMetres = 60.0f;
-    float farShare = 0.35f;
-
-    // How far plants keep from the path's centre and from every trunk's reach (metres).
-    float pathClearance = 1.5f;
+    // How far plants keep from every trunk's reach (metres).
     float trunkClearance = 1.0f;
 
     // Each kind's share of the plants (the anthuriums the rest), and its tallest plant's height (metres; each plant
@@ -95,52 +92,20 @@ struct UnderstoreyPlacement {
     float variantPick = 0.0f;
 };
 
-/*
-* Where a kind of plant may stand on the floor (the understorey's, the palms'): a grid spacing apart, every cell kept
-* within nearPathMetres of the path's centre, farShare of them past farPathMetres, a straight blend between; none within
-* pathClearance of the path's centre or trunkClearance of a trunk's reach.
-*/
-struct PlantingGrid {
-    float spacing = 1.5f;
-    float nearPathMetres = 20.0f;
-    float farPathMetres = 60.0f;
-    float farShare = 0.35f;
-    float pathClearance = 1.5f;
-    float trunkClearance = 1.0f;
-};
-
-// A cell planted: where on the floor (x, z), and the first of its own random numbers left for its plant (each cell has
-// drawsPerCell of them, the first three spent placing it).
-struct PlantedCell {
-    Vec2 place;
-    std::uint64_t firstDraw = 0;
-};
-
-inline constexpr std::uint64_t plantingDrawsUsed = 3;
-
-// The understorey's random numbers: its seed, and each cell's numbers (three placing it, four for its plant).
+// The understorey's random numbers' seed.
 inline constexpr std::uint64_t understoreySeed = 0x554e4445ull;
-inline constexpr std::uint64_t understoreyDrawsPerCell = 7;
 
 /*
-* The cells planted: a jittered grid over the trees' stretch of the floor (treeNorthmost to treeSouthmost, within
-* treeSpread of the valley's axis), one place a cell, kept by its distance from the path and clear of the path and the
-* trunks (given as StandingCrowns, their radius the reach), in rows from the north. Random numbers forestUnitRandom(seed,
-* cell * drawsPerCell + k); the keeping of a cell does not depend on the shares, so more or fewer plants keep the same
-* places. The same every run.
+* The plants' places, planted from the maps (ditheredCells over forestPatch): one of each planted cell, its kind by the
+* kinds' shares, sized and turned at random, none within trunkClearance of a trunk's reach (the trunks given as
+* StandingCrowns, their radius the reach), each fitting the maps (its nominal sphere clear of every obstacle and under
+* every sight line). The same every run.
 */
-std::vector<PlantedCell> plantedCells(const PlantingGrid& grid, const std::vector<StandingCrown>& trunks, std::uint64_t seed,
-                                      std::uint64_t drawsPerCell);
+std::vector<UnderstoreyPlacement> placeUnderstorey(const ForestUnderstoreySettings& settings, const ValleyMaps& maps,
+                                                   const std::vector<StandingCrown>& trunks);
 
-/*
-* The plants' places: a jittered grid spacing apart over the trees' stretch of the floor (treeNorthmost to
-* treeSouthmost, within treeSpread of the valley's axis), each cell planted with a share by its distance from the path
-* (nearPathMetres, farPathMetres, farShare), none within pathClearance of the path's centre or trunkClearance of a
-* trunk's reach (the trunks given as StandingCrowns, their radius the reach), none whose nominal size meets a sight line.
-* The same every run; the keeping of a cell does not depend on the shares, so more or fewer plants keep the same places.
-*/
-std::vector<UnderstoreyPlacement> placeUnderstorey(const ForestUnderstoreySettings& settings, const std::vector<StandingCrown>& trunks,
-                                                   const std::vector<SightLine>& sightLines);
+// The farthest any plant's nominal sphere reaches (the tallest kind at its largest): the canopy cap it reads.
+float understoreyReach(const ForestUnderstoreySettings& settings);
 
 // A plant's nominal sphere in the world, its kind's height across (for the sight lines).
 Vec3 understoreyCentre(const ForestUnderstoreySettings& settings, const UnderstoreyPlacement& plant);
