@@ -131,6 +131,17 @@ Research for ROADMAP phase 18's "The structures, half reclaimed": the Monolith (
 - **Real sizes** (2 asin(R/a)): Jupiter from Io 19.5, Europa 12.2 degrees; Saturn from Dione 18.4, Tethys 23.6, Enceladus 29.3 degrees. Regular moons orbit in the ring plane, so from them rings are edge-on; an open ring needs an inclined orbit (a deliberate fiction). Tidally locked: the planet stays put, its phase cycles once an orbit.
 - **Planetshine:** `E = p E_sun (R/d)² Φ(α)`, `Φ = (sin α + (π-α) cos α)/π`: a 20 degree full disc gives ~70 lux at 5.2 AU, ~1,900 lux at 1 AU (full moon 0.25 lux): a real second directional light with a wide source. Eclipses: circle-circle overlap of the discs on the CPU, multiplying the sun.
 
+## Planned: weathering
+
+The user's choices (Nov 19 2026): lightly reclaimed (the slabs stay mostly clean charcoal; every amount a setting), seams generated in code, three branches looked at in turn.
+
+- **Facet-planar projection (2a):** the slabs' facets face every way (hexagon sections), so triplanar would cross-fade seams on a facet turned 30 degrees. Each flat facet reads once in its own plane: across `A = normalize(up x n)`, up `B = n x A` (`= up - n (n.up)`, normalised); place `(p.A, p.y)` on steep facets (`|n.y|` under a limit), so horizontal seams meet at every edge round a slab, and `(p.A, p.B)` on flatter ones. A degenerate `A` (facing straight up or down) takes the object's x. The normal map's tilt is turned by `(A, B, n)`. Cost: one read a layer instead of up to three.
+- **Seam map (2a):** generated, seamless, 16 m tile at 2048 px (0.8 cm a texel): rows 2-4 m, panels 2-6 m, some edges sawtooth at 45 degrees, now and then a small inset hatch; grooves 3 cm wide, darker in the albedo, as a height map turned into a normal map. Per-triangle offsets are not possible: a facet's two triangles carry different numbers.
+- **Layers (2b):** coating with seams, wet stain, moss, soil, painted by a strip a structure (generated from its foot, shoulder and band heights): moss on what faces up and in a band rising from the foot, soil in the first metres, stain below each ledge fading down 20-40 m, its height map the streak pattern stretched 1:20 so the height blend breaks the band into streaks.
+- **Overgrowth (2c):** strands from anchors along each shoulder's outer lip, draped down the face 0.3 m off it (the face widens downwards); ferns, shrubs and small trees on the shoulders; a soil berm 2-5 m against each foot, rubble of coating chunks, denser understorey at the base, nothing placed inside a footprint.
+- **Cost grows with:** structure pixels (2a, 2b), strands and plants near the camera (2c).
+- **Left out:** edge wear (a matte coating has no clear coat to chip).
+
 ## The engine today (survey)
 
 - **Have:** flat-shaded `Mesh` by default, `buildIndexedMesh` keeps hard edges, `addDrawnMeshWithLevels`, still objects (`addShape`, `markRenderChanged`); up-facing moss blend (`GroundPaint::Strata` top layer, as the rock) with `groundProjected`, `groundStreaks`, `groundVariation`; spot lights with atlas shadows (8 shadowed, 256 total), animated per tick; the height fog's closed form (`fogOpticalDepth`, `henyeyGreensteinPhase`, `spotCone` mirrored in C++); drifting rocks posed in closed form from the simulation clock; `hangingStrand`/`hangFrom`/`catenaryStrand` from any world point; `sky_object` meshes placed as sky bodies.

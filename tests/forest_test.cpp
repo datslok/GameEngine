@@ -890,7 +890,7 @@ namespace {
         Forest forest;
         assert(forest.game.getRockShapes().size() == forest.game.getPillars().size() + forest.game.getIslands().size());
         const Material& rock = forest.world.get<ModelRenderer>(forest.game.getRockShapes().front()).parts.front().material;
-        assert(rock.groundLayers.size() == 4 && rock.groundProjected && rock.groundPaint == GroundPaint::Strata && rock.groundWeights.isValid());
+        assert(rock.groundLayers.size() == 4 && rock.groundProjection == GroundProjection::Axes && rock.groundPaint == GroundPaint::Strata && rock.groundWeights.isValid());
         assert(rock.strataBottom == valleyStrataBottom && rock.strataTop == valleyStrataTop && rock.groundTopLayer == forestMossLayer);
 
         assert(rock.strataWarp.isValid() && rock.strataWarpMetres == forest.game.getRockSettings().warpMetres);
@@ -979,6 +979,27 @@ namespace {
             assert(rock.groundBlendDepth == 0.6f && rock.groundTopStart == 0.4f && rock.groundTopFull == 0.9f);
             assert(rock.streakStrength == 0.2f && !rock.groundHexTiling && rock.variationStrength == 0.4f);
             assert(forest.world.has<RenderChanged>(shape));
+        }
+
+        /*
+        * The structures: one coating layer with the seam map, read in each facet's plane, painted everywhere by strata (the
+        * mesh's texture coordinates are the facets' numbers); the seams' depth and tile and the coating apply live.
+        */
+        for (const Entity structure : forest.game.getStructures()) {
+            const Material& coating = forest.world.get<ModelRenderer>(structure).parts.front().material;
+            assert(coating.groundLayers.size() == 1 && coating.groundProjection == GroundProjection::Facets && coating.groundPaint == GroundPaint::Strata);
+            assert(coating.groundLayers.front().texture.isValid() && coating.groundLayers.front().normalTexture.isValid() && coating.facetTone > 0.0f);
+        }
+
+        forest.game.getStructureSettings().seamDepth = 2.0f;
+        forest.game.getStructureSettings().seamTile = 32.0f;
+        forest.game.getStructureSettings().coatingRoughness = 0.8f;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+
+        for (const Entity structure : forest.game.getStructures()) {
+            const Material& coating = forest.world.get<ModelRenderer>(structure).parts.front().material;
+            assert(coating.normalScale == 2.0f && near(coating.groundRepeats[0], 1.0f / 32.0f, 1e-7f) && coating.groundLayers.front().roughness == 0.8f);
+            assert(forest.world.has<RenderChanged>(structure));
         }
 
         // The ground and the rocks are still: a change marks them to be built again, an unchanged frame marks nothing.

@@ -36,7 +36,7 @@ struct GpuMaterial {
     std::uint32_t coatAndHeightTextures[4]; // slots in the texture array: x coat amount, y coat roughness, z coat normal map, w height map
     // A blended ground (render/gpu/ground_layers.h; MaterialTable::add fills the layers): each layer's place in the frame's
     // material table plus one (0 none), each layer's repeats over the texture coordinates (a metre when projected); the
-    // weights texture's slot (0 for a material without layers), the switches (GROUND_PROJECTED, GROUND_STRATA,
+    // weights texture's slot (0 for a material without layers), the switches (GROUND_PROJECTED, GROUND_FACETS, GROUND_STRATA,
     // render/gpu/ground_layers_shared.h) and the top layer's number plus one (0 none); the blend depth, the strata's
     // bottom, one over their span and the warp's metres; the height of the normal's upward part where the top layer
     // starts and is full, one over the warp's tile and one over the tone variation's; the warp's, the streaks' and the

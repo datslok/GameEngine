@@ -99,13 +99,17 @@ void visit(ForestRockSettings& settings, SettingsVisitor& visitor);
 /*
 * The structures' matte coating (games/forest/structures, docs/research/STRUCTURES.md): its albedo (linear; charcoal
 * paint is about 0.02-0.05, never 0, or the facets go black in shadow), its roughness, and how much each facet's own
-* tone (a share) and roughness vary, so neighbouring facets at nearly the same angle stay apart.
+* tone (a share) and roughness vary, so neighbouring facets at nearly the same angle stay apart. Its panel lines
+* (games/forest/structure_seams): how deep the seams' normal map reads (its scale; 0 flat), and the seam tile's size in
+* metres (the pattern scales with it).
 */
 struct ForestStructureSettings {
     float coatingAlbedo = 0.04f;
     float coatingRoughness = 0.65f;
     float facetTone = 0.12f;
     float facetRoughness = 0.07f;
+    float seamDepth = 1.0f;
+    float seamTile = 16.0f;
 
     bool operator==(const ForestStructureSettings&) const = default;
 };

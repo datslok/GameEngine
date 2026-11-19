@@ -137,6 +137,38 @@ Vec3 projectedNormal(const Vec3& frameNormal, const std::array<Vec3, 3>& tilts, 
     return length > 0.0f ? combined * (1.0f / length) : Vec3{0.0f, 0.0f, 0.0f};
 }
 
+/*
+* up x n written out, (n.z, 0, -n.x): level, so A is too. Its length is n's level part; under a hair of it the facet faces
+* straight up or down and A falls back to the object's x.
+*/
+FacetAxes facetAxes(const Vec3& frameNormal) {
+    const Vec3 level{frameNormal.z, 0.0f, -frameNormal.x};
+    const float levelLength = level.length();
+    const Vec3 across = levelLength > 1e-4f ? level * (1.0f / levelLength) : Vec3{1.0f, 0.0f, 0.0f};
+    return FacetAxes{.across = across, .up = frameNormal.cross(across)};
+}
+
+Vec2 facetPlace(const Vec3& framePosition, const Vec3& frameNormal) {
+    const FacetAxes axes = facetAxes(frameNormal);
+    const float up = std::fabs(frameNormal.y) < groundFacetSteep ? framePosition.y : framePosition.dot(axes.up);
+    return Vec2{framePosition.dot(axes.across), up};
+}
+
+Vec3 facetNormal(const Vec3& frameNormal, const Vec3& tilt) {
+    const FacetAxes axes = facetAxes(frameNormal);
+    const Vec3 combined = axes.across * tilt.x + axes.up * tilt.y + frameNormal * tilt.z;
+    const float length = combined.length();
+    return length > 0.0f ? combined * (1.0f / length) : Vec3{0.0f, 0.0f, 0.0f};
+}
+
+float facetSideShare(const Vec3& frameNormal) {
+    return std::sqrt(std::max(1.0f - frameNormal.y * frameNormal.y, 0.0f));
+}
+
+Vec2 facetStreakPlace(const Vec3& framePosition, const Vec3& frameNormal, float inverseWidth, float inverseLength) {
+    return Vec2{facetPlace(framePosition, frameNormal).x * inverseWidth, framePosition.y * inverseLength};
+}
+
 float strataPlace(float height, float bottom, float inverseSpan) {
     return (height - bottom) * inverseSpan;
 }

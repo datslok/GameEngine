@@ -5,6 +5,7 @@
 #include "core/srgb.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/leaf_clusters.h"
+#include "games/forest/structure_seams.h"
 #include "games/forest/structures.h"
 #include "games/forest/valley_strata.h"
 #include "scene/indexed_mesh.h"
@@ -136,7 +137,7 @@ namespace {
             material.groundRepeats[layer] = 1.0f / forestRockLayers[layer].tileMetres;
         }
 
-        material.groundProjected = true;
+        material.groundProjection = GroundProjection::Axes;
         material.groundPaint = GroundPaint::Strata;
         material.groundWeights = assets.addTexture(strataImage(valleyStrata(), strataTexels));
         material.strataBottom = valleyStrataBottom;
@@ -164,14 +165,44 @@ namespace {
         return entity;
     }
 
-    // The structures' tunable parts (ForestStructureSettings), applied when they change.
+    // The seam map's tile: texels across (16 m at 2048 is 0.8 cm a texel, a groove about four) and its pattern's seed.
+    constexpr int seamTexels = 2048;
+    constexpr std::uint32_t seamSeed = 0x5345'414du;
+
+    // The structures' tunable parts (ForestStructureSettings), applied when they change: the coating is the layered
+    // material's one layer, its seams read in each facet's plane at the ground's normal scale.
     void applyStructureSettings(Material& material, const ForestStructureSettings& settings) {
+        Material& coat = material.groundLayers.front();
         const Vec3 albedo = coatingTint * std::max(settings.coatingAlbedo, 0.0f);
-        material.colour = Pixel{linearToSrgbByte(albedo.x), linearToSrgbByte(albedo.y), linearToSrgbByte(albedo.z)};
-        material.roughness = settings.coatingRoughness;
-        material.metallic = 0.0f;
+        coat.colour = Pixel{linearToSrgbByte(albedo.x), linearToSrgbByte(albedo.y), linearToSrgbByte(albedo.z)};
+        coat.roughness = settings.coatingRoughness;
+        coat.metallic = 0.0f;
+        material.groundRepeats[0] = 1.0f / std::max(settings.seamTile, 0.1f);
+        material.normalScale = std::max(settings.seamDepth, 0.0f);
         material.facetTone = settings.facetTone;
         material.facetRoughness = settings.facetRoughness;
+    }
+
+    /*
+    * The structures' coating (games/forest/structures, structure_seams): one layer with the seam map, read once in each
+    * facet's own plane, painted everywhere by a strip of one texel (strata, so the mesh's texture coordinates stay the
+    * facets' numbers), then the facets' own tone and roughness on top.
+    */
+    Material structureCoating(AssetManager& assets, JobSystem& jobs, const ForestStructureSettings& settings) {
+        SeamImages seams = seamImages(seamLayout(ForestStructureSettings{}.seamTile, seamSeed), seamTexels, jobs);
+        Material coat;
+        coat.texture = assets.addTexture(std::move(seams.albedo));
+        coat.normalTexture = assets.addTexture(std::move(seams.normal));
+
+        ImageData everywhere{1, 1, {255, 0, 0, 0}, TextureEncoding::Linear};
+        everywhere.storage = TextureStorage::Exact;
+        Material material;
+        material.groundLayers.push_back(coat);
+        material.groundProjection = GroundProjection::Facets;
+        material.groundPaint = GroundPaint::Strata;
+        material.groundWeights = assets.addTexture(std::move(everywhere));
+        applyStructureSettings(material, settings);
+        return material;
     }
 
     /*
@@ -239,6 +270,8 @@ void visit(ForestStructureSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Coating roughness", settings.coatingRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Facet tone", settings.facetTone, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.4f});
     visitor.field("Facet roughness", settings.facetRoughness, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.3f});
+    visitor.field("Seam depth", settings.seamDepth, {.min = 0.0f, .max = 10.0f, .sliderMax = 3.0f});
+    visitor.field("Seam tile", settings.seamTile, {.min = 1.0f, .max = 200.0f, .sliderMax = 64.0f, .unit = "m"});
 }
 
 void visit(ForestValleySettings& settings, SettingsVisitor& visitor) {
@@ -446,8 +479,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     }
 
     // The structures (games/forest/structures): faceted, in one matte coating whose facets each keep their own tone.
-    Material coating;
-    applyStructureSettings(coating, structureSettings);
+    const Material coating = structureCoating(assets, getJobs(), structureSettings);
     appliedStructureSettings = structureSettings;
 
     // The Ring stands across the path, its centre at the ground there, so its lower half is buried.

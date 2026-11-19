@@ -1,7 +1,9 @@
 #include "games/forest/forest_terrain.h"
+#include "games/forest/structure_seams.h"
 #include "games/forest/structures.h"
 #include "games/forest/valley_shapes.h"
 #include "scene/indexed_mesh.h"
+#include "test_jobs.h"
 #include "test_levels.h"
 
 #include <algorithm>
@@ -258,7 +260,136 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The seam layout: rows and panels within their sizes (a little outside after scaling to fill the tile), filling it;
+    * some sawtooth edges of each kind and some hatches over a few tiles' seeds; the same for the same seed.
+    */
+    void testSeamLayout() {
+        int sawtoothRows = 0;
+        int sawtoothSplits = 0;
+        std::size_t hatches = 0;
+
+        for (std::uint32_t seed = 0; seed < 8; ++seed) {
+            const SeamLayout layout = seamLayout(16.0f, seed);
+            assert(layout.tile == 16.0f && layout.rows.size() >= 4 && layout.rows.size() <= 8);
+            assert(layout.rows.front().bottom.at == 0.0f && !layout.rows.front().bottom.sawtooth);
+
+            for (std::size_t row = 0; row < layout.rows.size(); ++row) {
+                const float top = row + 1 < layout.rows.size() ? layout.rows[row + 1].bottom.at : 16.0f;
+                const float height = top - layout.rows[row].bottom.at;
+                assert(height > 1.5f && height < 5.5f);
+                sawtoothRows += layout.rows[row].bottom.sawtooth ? 1 : 0;
+                const std::vector<SeamLine>& splits = layout.rows[row].splits;
+                assert(splits.size() >= 2);
+
+                for (std::size_t split = 0; split < splits.size(); ++split) {
+                    const float next = split + 1 < splits.size() ? splits[split + 1].at : splits.front().at + 16.0f;
+                    assert(splits[split].at >= 0.0f && splits[split].at < 16.0f && next - splits[split].at > 1.5f && next - splits[split].at < 8.5f);
+                    sawtoothSplits += splits[split].sawtooth ? 1 : 0;
+                }
+            }
+
+            hatches += layout.hatches.size();
+        }
+
+        assert(sawtoothRows > 0 && sawtoothSplits > 0 && hatches > 0);
+        const SeamLayout again = seamLayout(16.0f, 3);
+        const SeamLayout first = seamLayout(16.0f, 3);
+        assert(again.rows.size() == first.rows.size() && again.rows[1].splits[0].at == first.rows[1].splits[0].at);
+        assert(seamLayout(16.0f, 4).rows[1].splits[0].at != first.rows[1].splits[0].at);
+    }
+
+    /*
+    * The distance to the nearest seam: zero on a straight row boundary and on a straight split, the tile wrapping (the
+    * same a tile over), a sawtooth's teeth meeting across the tile's edge, never more than half a row. A groove's height
+    * is 0 inside its half width and 1 past the bevel, rising in between.
+    */
+    void testSeamDistance() {
+        SeamLayout layout;
+        layout.tile = 16.0f;
+        layout.rows = {SeamRow{.bottom = {0.0f, false}, .splits = {{2.0f, false}, {9.0f, true}}},
+                       SeamRow{.bottom = {6.0f, true}, .splits = {{5.0f, false}, {12.0f, false}}},
+                       SeamRow{.bottom = {11.0f, false}, .splits = {{1.0f, false}, {8.0f, false}}}};
+
+        assert(near(seamDistance(layout, Vec2{4.0f, 11.0f}), 0.0f, 1e-5f));
+        assert(near(seamDistance(layout, Vec2{2.0f, 3.0f}), 0.0f, 1e-5f));
+        assert(near(seamDistance(layout, Vec2{18.0f, 3.0f}), 0.0f, 1e-5f) && near(seamDistance(layout, Vec2{2.0f, -13.0f}), 0.0f, 1e-5f));
+        assert(near(seamDistance(layout, Vec2{4.0f, 13.5f}), seamDistance(layout, Vec2{20.0f, 29.5f}), 1e-4f));
+        assert(near(seamDistance(layout, Vec2{4.0f, 13.5f}), 2.5f, 1e-4f));
+
+        // The sawtooth boundary at 6 m: its teeth rise to half a period between the tile's edges, the same either side.
+        float highest = 0.0f;
+
+        for (int step = 0; step <= 400; ++step) {
+            const float x = 3.0f + 0.002f * static_cast<float>(step);
+            float lowest = 1e9f;
+            float lineAt = 0.0f;
+
+            for (int up = 0; up <= 500; ++up) {
+                const float y = 5.9f + 0.001f * static_cast<float>(up);
+                const float distance = seamDistance(layout, Vec2{x, y});
+
+                if (distance < lowest) {
+                    lowest = distance;
+                    lineAt = y;
+                }
+            }
+
+            assert(lowest < 0.002f && lineAt >= 6.0f - 0.002f && lineAt <= 6.0f + sawtoothTooth + 0.01f);
+            highest = std::max(highest, lineAt - 6.0f);
+        }
+
+        assert(highest > 0.25f);
+        assert(near(seamDistance(layout, Vec2{0.0f, 6.0f}), seamDistance(layout, Vec2{16.0f, 6.0f}), 1e-4f));
+
+        assert(seamHeight(0.0f) == 0.0f && seamHeight(seamHalfWidth) == 0.0f && seamHeight(seamHalfWidth + seamBevel) == 1.0f && seamHeight(1.0f) == 1.0f);
+        assert(seamHeight(seamHalfWidth + 0.5f * seamBevel) > 0.4f && seamHeight(seamHalfWidth + 0.5f * seamBevel) < 0.6f);
+    }
+
+    /*
+    * The textures: square, sRGB albedo, linear height and normals; panels lighter and higher than grooves; the normal
+    * flat in a panel's middle and leaning towards a groove on its bevel (just under a boundary, up the picture);
+    * seamless, the first column as close to the last as any two neighbours.
+    */
+    void testSeamImages() {
+        SeamLayout layout;
+        layout.tile = 16.0f;
+        layout.rows = {SeamRow{.bottom = {0.0f, false}, .splits = {{2.0f, false}, {9.0f, false}}},
+                       SeamRow{.bottom = {8.0f, false}, .splits = {{5.0f, false}, {12.0f, false}}}};
+        const int size = 512;
+        const SeamImages images = seamImages(layout, size, testJobs());
+        assert(images.albedo.width == 512 && images.albedo.height == 512 && images.albedo.encoding == TextureEncoding::Srgb);
+        assert(images.normal.width == 512 && images.normal.encoding == TextureEncoding::Linear);
+
+        const auto texel = [&](const ImageData& image, int column, int row) {
+            return &image.pixels[(static_cast<std::size_t>(row) * size + static_cast<std::size_t>(column)) * 4];
+        };
+        const int boundary = size / 2;
+        assert(texel(images.albedo, 160, boundary)[0] < texel(images.albedo, 160, boundary - 40)[0]);
+        assert(images.height.encoding == TextureEncoding::Linear && texel(images.height, 160, boundary)[0] < 8 && texel(images.height, 160, boundary - 40)[0] == 255);
+        const std::uint8_t* flat = texel(images.normal, 160, boundary - 40);
+        assert(flat[0] == 128 && flat[1] == 128 && flat[2] == 255);
+
+        // A texel on the bevel just under the boundary (16 m over 512 texels: 3.1 cm a texel), leaning up towards it.
+        assert(texel(images.normal, 160, boundary - 2)[1] > 140);
+
+        int worstEdge = 0;
+        int worstInside = 0;
+
+        for (int row = 0; row < size; ++row) {
+            worstEdge = std::max(worstEdge, std::abs(texel(images.albedo, 0, row)[0] - texel(images.albedo, size - 1, row)[0]));
+            worstInside = std::max(worstInside, std::abs(texel(images.albedo, 300, row)[0] - texel(images.albedo, 301, row)[0]));
+        }
+
+        assert(worstEdge <= std::max(worstInside, 12));
+    }
+}
+
 void testForestStructures() {
+    testSeamLayout();
+    testSeamDistance();
+    testSeamImages();
     testSlab();
     testMonolith();
     testSpires();

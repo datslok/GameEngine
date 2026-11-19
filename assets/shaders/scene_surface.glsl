@@ -974,8 +974,20 @@ void main() {
         * Not projected: the mesh's texture coordinates, one read, as the first "projection".
         */
         vec3 frameNormal = transpose(frameAxes) * (smoothNormal * side);
-        vec3 projectionShares = projected ? projectionWeights(frameNormal) : vec3(1.0, 0.0, 0.0);
+        // Facets (facetPlace): one read in the facet's own plane, as the first "projection"; its place and steps are
+        // linear in the position, so the steps map through the same function.
+        bool faceted = (material.groundWeights.y & GROUND_FACETS) != 0u;
+        vec3 projectionShares = projected && !faceted ? projectionWeights(frameNormal) : vec3(1.0, 0.0, 0.0);
         float stepScale = exp2(mipBias);
+        vec2 facetUv = vec2(0.0);
+        vec2 facetStepAcross = vec2(0.0);
+        vec2 facetStepDown = vec2(0.0);
+
+        if (faceted) {
+            facetUv = facetPlace(framePosition, frameNormal);
+            facetStepAcross = facetPlace(frameStepAcross, frameNormal) * stepScale;
+            facetStepDown = facetPlace(frameStepDown, frameNormal) * stepScale;
+        }
 
         vec4 heights = vec4(0.0);
         vec4 layerColour[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
@@ -1018,7 +1030,11 @@ void main() {
                 vec2 stepAcross;
                 vec2 stepDown;
 
-                if (projected) {
+                if (faceted) {
+                    layerUv = facetUv * repeats;
+                    stepAcross = facetStepAcross * repeats;
+                    stepDown = facetStepDown * repeats;
+                } else if (projected) {
                     layerUv = projectedPlace(framePosition, axis) * repeats;
                     stepAcross = projectedPlace(frameStepAcross, axis) * (repeats * stepScale);
                     stepDown = projectedPlace(frameStepDown, axis) * (repeats * stepScale);
@@ -1088,9 +1104,16 @@ void main() {
         * Water streaks down the sides (streakPlace, streakShade): the streak texture read on each side projection with a
         * share, stretched along the height, their stains blended by the shares and darkening the albedo on the sides only.
         */
-        float sideShare = projectionShares.x + projectionShares.z;
+        float sideShare = faceted ? facetSideShare(frameNormal) : projectionShares.x + projectionShares.z;
 
-        if (projected && material.groundSlots.y != 0u && sideShare > 0.0) {
+        if (faceted && material.groundSlots.y != 0u && sideShare > 0.0) {
+            // Facets: one read across the facet, down the height (facetStreakPlace).
+            vec2 streakUv = facetStreakPlace(framePosition, frameNormal, material.groundStreaks.y, material.groundStreaks.z);
+            vec2 streakAcross = facetStreakPlace(frameStepAcross, frameNormal, material.groundStreaks.y, material.groundStreaks.z) * stepScale;
+            vec2 streakDown = facetStreakPlace(frameStepDown, frameNormal, material.groundStreaks.y, material.groundStreaks.z) * stepScale;
+            float stain = textureGrad(textures[nonuniformEXT(material.groundSlots.y)], streakUv, streakAcross, streakDown).r;
+            albedo.rgb *= streakShade(stain, material.groundStreaks.x, sideShare);
+        } else if (projected && material.groundSlots.y != 0u && sideShare > 0.0) {
             float stain = 0.0;
 
             for (int axis = 0; axis < 3; axis += 2) {
@@ -1106,7 +1129,11 @@ void main() {
         }
 
         // Slow tone variation over projected layers (variationShade): its texture along each projection with a share.
-        if (projected && material.groundSlots.z != 0u) {
+        if (faceted && material.groundSlots.z != 0u) {
+            float tile = material.groundFacing.w;
+            float variation = textureGrad(textures[nonuniformEXT(material.groundSlots.z)], facetUv * tile, facetStepAcross * tile, facetStepDown * tile).r;
+            albedo.rgb *= variationShade(variation, material.groundStreaks.w);
+        } else if (projected && material.groundSlots.z != 0u) {
             float variation = 0.0;
 
             for (int axis = 0; axis < 3; ++axis) {
@@ -1123,7 +1150,11 @@ void main() {
 
         // Projected: each projection's blended texel decoded in its own plane and the three combined (projectedNormal),
         // then turned from the object's frame into the world.
-        if (projected && dot(frameNormal, frameNormal) > 0.0) {
+        if (faceted && dot(frameNormal, frameNormal) > 0.0) {
+            // Facets: the one read's direction turned by the facet's own frame (facetNormal).
+            projectedWorldNormal = frameAxes * facetNormal(frameNormal, decodeNormalTexel(axisTexels[0], material.surfaceParameters.z));
+            projectedBump = dot(projectedWorldNormal, projectedWorldNormal) > 0.0;
+        } else if (projected && dot(frameNormal, frameNormal) > 0.0) {
             float scale = material.surfaceParameters.z;
             vec3 bumped = projectedNormal(frameNormal, decodeNormalTexel(axisTexels[0], scale), decodeNormalTexel(axisTexels[1], scale),
                                           decodeNormalTexel(axisTexels[2], scale), projectionShares);

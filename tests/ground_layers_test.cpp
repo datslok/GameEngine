@@ -315,7 +315,7 @@ namespace {
         Material rock;
         rock.groundLayers.resize(4);
         rock.groundWeights = TextureHandle{7};
-        rock.groundProjected = true;
+        rock.groundProjection = GroundProjection::Axes;
         rock.groundPaint = GroundPaint::Strata;
         rock.strataBottom = -200.0f;
         rock.strataTop = 1300.0f;
@@ -379,7 +379,7 @@ namespace {
         Material rock;
         rock.groundLayers.resize(2);
         rock.groundWeights = TextureHandle{7};
-        rock.groundProjected = true;
+        rock.groundProjection = GroundProjection::Axes;
         rock.groundPaint = GroundPaint::Strata;
         rock.strataWarp = TextureHandle{8};
         rock.strataWarpMetres = 6.0f;
@@ -454,7 +454,7 @@ namespace {
         Material rock;
         rock.groundLayers.resize(2);
         rock.groundWeights = TextureHandle{7};
-        rock.groundProjected = true;
+        rock.groundProjection = GroundProjection::Axes;
         rock.groundHexTiling = true;
         rock.groundVariation = TextureHandle{11};
         rock.variationStrength = 0.25f;
@@ -470,7 +470,122 @@ namespace {
     }
 }
 
+namespace {
+    bool nearPoint(const Vec3& a, const Vec3& b, float tolerance) {
+        return near(a.x, b.x, tolerance) && near(a.y, b.y, tolerance) && near(a.z, b.z, tolerance);
+    }
+
+    // Unit normals all round the sphere, steep, sloping and nearly flat, plus straight up and down.
+    std::vector<Vec3> facetNormals() {
+        std::vector<Vec3> normals{{0.0f, 1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {-1.0f, 0.0f, 0.0f}};
+
+        for (int turn = 0; turn < 12; ++turn) {
+            for (int tilt = -5; tilt <= 5; ++tilt) {
+                const float yaw = 0.5236f * static_cast<float>(turn) + 0.1f;
+                const float pitch = 0.3f * static_cast<float>(tilt);
+                normals.push_back(Vec3{std::cos(pitch) * std::sin(yaw), std::sin(pitch), std::cos(pitch) * std::cos(yaw)});
+            }
+        }
+
+        return normals;
+    }
+
+    /*
+    * A facet's frame: A level, B its steepest way up, both in its plane, unit and square to each other, A x B its normal
+    * (so a normal map's tilts turn the right way). Upright facets: B is straight up; one facing +z reads x across, one
+    * facing -x reads z. Facing straight up, A falls back to x.
+    */
+    void testFacetAxesFollowTheFacet() {
+        for (const Vec3& normal : facetNormals()) {
+            const FacetAxes axes = facetAxes(normal);
+            assert(near(axes.across.length(), 1.0f, 1e-5f) && near(axes.up.length(), 1.0f, 1e-5f));
+            assert(near(axes.across.y, 0.0f, 1e-6f) && near(axes.across.dot(normal), 0.0f, 1e-5f) && near(axes.up.dot(normal), 0.0f, 1e-5f));
+            assert(near(axes.across.dot(axes.up), 0.0f, 1e-5f) && nearPoint(axes.across.cross(axes.up), normal, 1e-5f));
+            assert(axes.up.y >= -1e-6f);
+        }
+
+        const FacetAxes front = facetAxes(Vec3{0.0f, 0.0f, 1.0f});
+        assert(nearPoint(front.across, Vec3{1.0f, 0.0f, 0.0f}, 1e-6f) && nearPoint(front.up, Vec3{0.0f, 1.0f, 0.0f}, 1e-6f));
+        const FacetAxes left = facetAxes(Vec3{-1.0f, 0.0f, 0.0f});
+        assert(nearPoint(left.across, Vec3{0.0f, 0.0f, 1.0f}, 1e-6f) && nearPoint(left.up, Vec3{0.0f, 1.0f, 0.0f}, 1e-6f));
+        const FacetAxes top = facetAxes(Vec3{0.0f, 1.0f, 0.0f});
+        assert(nearPoint(top.across, Vec3{1.0f, 0.0f, 0.0f}, 1e-6f) && nearPoint(top.up, Vec3{0.0f, 0.0f, -1.0f}, 1e-6f));
+    }
+
+    /*
+    * Where a facet reads: on steep facets the second coordinate is the height, so two facets meeting at an edge read the
+    * same heights along it (a horizontal seam runs on round the corner); on flatter ones a metre along the facet is a
+    * metre of texture both ways (no stretch). Linear in the position, so a step across the pixel maps the same way.
+    */
+    void testFacetPlacesKeepSeamsLevel() {
+        const Vec3 corner{12.0f, 87.5f, -4.0f};
+        const Vec3 east = Vec3{0.96f, 0.05f, 0.27f}.normalized();
+        const Vec3 north = Vec3{-0.2f, -0.1f, 0.97f}.normalized();
+        assert(facetPlace(corner, east).y == corner.y && facetPlace(corner, north).y == corner.y);
+
+        const Vec3 shoulder = Vec3{0.3f, 0.9f, -0.2f}.normalized();
+        const FacetAxes axes = facetAxes(shoulder);
+        const Vec3 start{3.0f, 40.0f, 9.0f};
+        const Vec2 there = facetPlace(start, shoulder);
+        const Vec2 along = facetPlace(start + axes.across * 2.0f, shoulder) - there;
+        const Vec2 upward = facetPlace(start + axes.up * 3.0f, shoulder) - there;
+        assert(near(along.x, 2.0f, 1e-4f) && near(along.y, 0.0f, 1e-4f) && near(upward.x, 0.0f, 1e-4f) && near(upward.y, 3.0f, 1e-4f));
+
+        for (const Vec3& normal : facetNormals()) {
+            const Vec3 a{1.5f, -3.0f, 7.25f};
+            const Vec3 b{-0.5f, 2.0f, 0.75f};
+            const Vec2 sum = facetPlace(a + b, normal);
+            const Vec2 parts = facetPlace(a, normal) + facetPlace(b, normal);
+            assert(near(sum.x, parts.x, 1e-4f) && near(sum.y, parts.y, 1e-4f));
+        }
+    }
+
+    /*
+    * The bumped normal: a flat map gives the facet's own normal; a tilt along the map's first coordinate leans towards A,
+    * along its second towards B; always unit length. The streaks' side share is 1 on upright facets and 0 on level ones,
+    * and they run down the height across facetPlace's first coordinate.
+    */
+    void testFacetNormalsAndStreaks() {
+        for (const Vec3& normal : facetNormals()) {
+            const FacetAxes axes = facetAxes(normal);
+            assert(nearPoint(facetNormal(normal, Vec3{0.0f, 0.0f, 1.0f}), normal, 1e-5f));
+            const Vec3 leaning = facetNormal(normal, Vec3{0.3f, -0.2f, 0.93f});
+            assert(near(leaning.length(), 1.0f, 1e-5f) && leaning.dot(axes.across) > 0.25f && leaning.dot(axes.up) < -0.15f);
+        }
+
+        assert(facetNormal(Vec3{0.0f, 0.0f, 1.0f}, Vec3{0.0f, 0.0f, 0.0f}).lengthSquared() == 0.0f);
+        assert(near(facetSideShare(Vec3{0.0f, 0.0f, 1.0f}), 1.0f, 1e-6f) && facetSideShare(Vec3{0.0f, 1.0f, 0.0f}) == 0.0f);
+        assert(near(facetSideShare(Vec3{0.6f, 0.8f, 0.0f}), 0.6f, 1e-6f));
+
+        const Vec3 point{4.0f, 120.0f, -2.0f};
+        const Vec3 normal{0.0f, 0.0f, 1.0f};
+        const Vec2 streak = facetStreakPlace(point, normal, 0.125f, 0.005f);
+        assert(near(streak.x, 4.0f * 0.125f, 1e-6f) && near(streak.y, 120.0f * 0.005f, 1e-6f));
+    }
+
+    // Facets in the table: both switches, projected and facets; triplanar sets only projected; streaks kept on facets.
+    void testTheTableCarriesFacets() {
+        Material coating;
+        coating.groundLayers.resize(1);
+        coating.groundWeights = TextureHandle{3};
+        coating.groundProjection = GroundProjection::Facets;
+        coating.groundStreaks = TextureHandle{5};
+        coating.streakStrength = 0.4f;
+        const GpuMaterial faceted = packMaterial(coating);
+        assert(faceted.groundWeights[1] == (groundProjectedFlag | groundFacetsFlag) && faceted.groundSlots[1] == 6 && faceted.groundStreaks[0] == 0.4f);
+
+        coating.groundProjection = GroundProjection::Axes;
+        assert(packMaterial(coating).groundWeights[1] == groundProjectedFlag);
+        coating.groundProjection = GroundProjection::TextureCoordinates;
+        assert(packMaterial(coating).groundWeights[1] == 0u && packMaterial(coating).groundSlots[1] == 0u);
+    }
+}
+
 void testGroundLayers() {
+    testFacetAxesFollowTheFacet();
+    testFacetPlacesKeepSeamsLevel();
+    testFacetNormalsAndStreaks();
+    testTheTableCarriesFacets();
     testHexTilingHidesTheRepeat();
     testToneVariation();
     testTheTableCarriesHexTilingAndVariation();

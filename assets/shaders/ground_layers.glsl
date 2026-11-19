@@ -118,6 +118,47 @@ vec3 projectedNormal(vec3 frameNormal, vec3 tiltX, vec3 tiltY, vec3 tiltZ, vec3 
     return combinedLength > 0.0 ? combined / combinedLength : vec3(0.0);
 }
 
+// A facet's level direction A and its steepest way up B from its unit normal in the object's frame (facetAxes): up x n
+// written out and normalised, the object's x when the facet faces straight up or down; B = n x A.
+struct FacetAxes {
+    vec3 across;
+    vec3 up;
+};
+
+FacetAxes facetAxes(vec3 frameNormal) {
+    vec3 level = vec3(frameNormal.z, 0.0, -frameNormal.x);
+    float levelLength = length(level);
+    FacetAxes axes;
+    axes.across = levelLength > 1e-4 ? level / levelLength : vec3(1.0, 0.0, 0.0);
+    axes.up = cross(frameNormal, axes.across);
+    return axes;
+}
+
+// Where a point reads on its facet, in metres (facetPlace): across along A; up as the height on steep facets, else along B.
+vec2 facetPlace(vec3 framePosition, vec3 frameNormal) {
+    FacetAxes axes = facetAxes(frameNormal);
+    float up = abs(frameNormal.y) < float(GROUND_FACET_STEEP) ? framePosition.y : dot(framePosition, axes.up);
+    return vec2(dot(framePosition, axes.across), up);
+}
+
+// The bumped normal in the object's frame from the normal map's direction in the facet's plane (facetNormal).
+vec3 facetNormal(vec3 frameNormal, vec3 tilt) {
+    FacetAxes axes = facetAxes(frameNormal);
+    vec3 combined = axes.across * tilt.x + axes.up * tilt.y + frameNormal * tilt.z;
+    float combinedLength = length(combined);
+    return combinedLength > 0.0 ? combined / combinedLength : vec3(0.0);
+}
+
+// How much of a facet is side, for the streaks (facetSideShare): its normal's level part.
+float facetSideShare(vec3 frameNormal) {
+    return sqrt(max(1.0 - frameNormal.y * frameNormal.y, 0.0));
+}
+
+// Where along the streaks a point of a facet is (facetStreakPlace): across as facetPlace's first coordinate, down the height.
+vec2 facetStreakPlace(vec3 framePosition, vec3 frameNormal, float inverseWidth, float inverseLength) {
+    return vec2(facetPlace(framePosition, frameNormal).x * inverseWidth, framePosition.y * inverseLength);
+}
+
 // Where along the strata's strip a world height is (strataPlace).
 float strataPlace(float height, float bottom, float inverseSpan) {
     return (height - bottom) * inverseSpan;
