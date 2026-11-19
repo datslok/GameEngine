@@ -16,7 +16,7 @@ S: light arriving at s from each light, times the phase function and its shadow 
 
 - **`Fog` components**, one layer each (`scene/fog.h`; every one goes into `FrameLighting::fogLayers` in the world's order, the first `FOG_MAX_LAYERS` (4) count): `density` (extinction per metre at `baseHeight`; 3 / density ≈ visibility), `shape`, `scaleHeight`, `albedo` per colour, `anisotropy` (Henyey-Greenstein g, `henyeyGreensteinPhase` shared with the sky), `maxDistance` (none of the layer beyond it along a ray, so the sky shows).
 - **Shapes** (`fogDensity`): `Exponential` falls by e per scale height above the base, grows below (exponent capped at `FOG_MAX_EXPONENT`); `Pooled` is even up to `baseHeight` (its top) and falls by e per scale height above (its soft edge): mist pooled under the canopy.
-- **`FogSettings`** (`RenderSettings::fog`, F5 Fog, `validateFog`; meanings in `render/gpu/volumetric_fog.h`): `enabled` (off on Low), `range` (100 m, never past the far plane), `gridWidth`/`gridHeight`/`slices` (160 × 90 × 64; presets lower; changing them remakes the grid after a GPU wait), `historyWeight` (0.9), `probeLight`, `farShadowSteps` (16), `sunThroughFog` (on), `forwardShare` (1).
+- **`FogSettings`** (`RenderSettings::fog`, F5 Fog, `validateFog`; meanings in `render/gpu/volumetric_fog.h`): `enabled` (off on Low), `range` (100 m, never past the far plane), `gridWidth`/`gridHeight`/`slices` (160 × 90 × 64; presets lower; changing them remakes the grid after a GPU wait), `historyWeight` (0.9), `probeLight`, `farShadowSteps` (16), `sunThroughFog` (on), `forwardShare` (1), `freshFastLights` (on).
 
 ## Layers
 
@@ -38,7 +38,7 @@ Froxels shaped like the view through the unjittered camera (`motionViewProjectio
 - Slices even in log(depth + `FOG_SLICE_START`) (`fogSliceDepth`, `fogDepthSlice`): about 7 cm deep at the camera, 7 m at 100 m for 64 slices, as a froxel's width grows with distance.
 - Froxel (x, y, k)'s middle is ((x, y, k) + 0.5) / size.
 
-**`GpuFog`** (400 bytes, std430, `SceneBuffers::fog`, set 1 binding 27, `packFog`): the grid's camera, its inverse, last frame's taking this frame's points (`previousRelativeViewProjection`), grid size and range, options (x on; y history weight, 0 with no usable history; z read probes; w dim the sun), the jitter, and **`GpuFogMedia`** (160 bytes, `packFogMedia`; GLSL `FogMedia`): per layer (density, base height, scale height, anisotropy) and (albedo, `maxDistance`), the shapes (0 or `FOG_SHAPE_POOLED`), extent (x layer count, y the farthest `maxDistance`). All zeros without fog. Binding 28: the integrated grid (`VulkanFog::sampledVolume`; a 1 × 1 × 1 clear stand-in without fog).
+**`GpuFog`** (400 bytes, std430, `SceneBuffers::fog`, set 1 binding 27, `packFog`): the grid's camera, its inverse, last frame's taking this frame's points (`previousRelativeViewProjection`), grid size and range, options (x on; y history weight, 0 with no usable history; z read probes; w dim the sun), the jitter, and **`GpuFogMedia`** (160 bytes, `packFogMedia`; GLSL `FogMedia`): per layer (density, base height, scale height, anisotropy) and (albedo, `maxDistance`), the shapes (0 or `FOG_SHAPE_POOLED`), extent (x layer count, y the farthest `maxDistance`). Then `fastLights` (`CLUSTER_WORDS` words, `markFastFogLights`, read by `fogLightIsFast`): the fast point lights by slot, the spots after `CLUSTER_POINT_WORDS` words, as the cluster lists number them; none with `freshFastLights` off. 560 bytes. All zeros without fog. Binding 28: the integrated grid (`VulkanFog::sampledVolume`; a 1 × 1 × 1 clear stand-in without fog).
 
 ## The passes
 
@@ -63,11 +63,13 @@ The shadow atlas goes to `DepthComputeRead` for the lighting pass and back.
 - From all around: with probes in the frame (`packFog`'s `probesRead`, `options.z`), `probeAmbientInAir` (`scene_probes.glsl`: cascades densest first, 8 corners weighted by `probeAirWeight`, read up and down); else the flat ambient times the sky visibility grid's air share (`skyVisibilityInAirAt`), so closed rooms are not lit as outdoors.
 - Each light through `fogMediaInScattering`, the light from all around through `fogMediaAmbient`, with the layers' shares at the point; alpha holds `fogMediaDensity`.
 
+**Fast lights** (`SpotLight::fast`, `PointLight::fast`: the flashlight; research `docs/research/FOGHISTORY.md`): lit at the froxel's middle, unjittered so the same every frame, into the fast grid (`VulkanFog::fastLighting`, written every frame, never a history), which the integration adds to the averaged light. So the fog does not trail behind them; their cone's edge is as fine as the froxels. Shipped engines accept the trail or take such lights out of the fog.
+
 **History:** last frame's grid read where the froxel's middle was (`fogHistoryCoordinate`, filtered; with a still camera exactly its own texel, so no neighbour mixing that would make sunbeam edges shimmer), keeping `fogHistoryWeight`'s share (0 outside last frame's grid). Kept only when last frame drew fog with the same grid and range (`VulkanFog::prepare`). Two lighting grids take turns.
 
 ### Integration
 
-Each column front to back, slice length = depth step × the column's stretch (1 / its cosine to the view axis); `fogIntegrateSlice`: light += scattered × T × (1 − e^−τ) (`oneMinusExp`, shared with the sky), T ×= e^−τ. Exact for constant fog in a slice (energy-conserving). Texel k holds the fog to the far side of slice k. Mirror: `integrateFogColumn`.
+Each column front to back, a froxel's light the averaged grid's plus the fast grid's, slice length = depth step × the column's stretch (1 / its cosine to the view axis); `fogIntegrateSlice`: light += scattered × T × (1 − e^−τ) (`oneMinusExp`, shared with the sky), T ×= e^−τ. Exact for constant fog in a slice (energy-conserving). Texel k holds the fog to the far side of slice k. Mirror: `integrateFogColumn`.
 
 ### The picture
 

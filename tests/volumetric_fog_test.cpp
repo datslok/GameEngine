@@ -931,6 +931,52 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Fast lights kept out of the history (the flashlight; docs/research/FOGHISTORY.md): the record marks each point and
+    * spot light flagged fast by its slot, points in the first CLUSTER_POINT_WORDS words and spots after, as the cluster
+    * lists number them; none with the setting off or without fog, and none past the words' reach.
+    */
+    void testFastLightsMarked() {
+        const Mat4 viewProjection = cameraRelativeViewProjection(testCamera());
+        const FogSettings settings;
+        Fog fog;
+        fog.density = 0.03f;
+        const std::span<const Fog> one{&fog, 1};
+
+        std::vector<bool> points(70, false);
+        std::vector<bool> spots(40, false);
+        points[3] = true;
+        points[69] = true;
+        spots[0] = true;
+        spots[33] = true;
+
+        GpuFog packed = packFog(one, settings, viewProjection, viewProjection, true, true, 3, 500.0f);
+        markFastFogLights(packed, points, spots, settings);
+        assert(fogLightIsFast(packed, 3, false) && fogLightIsFast(packed, 69, false) && !fogLightIsFast(packed, 4, false));
+        assert(fogLightIsFast(packed, 0, true) && fogLightIsFast(packed, 33, true) && !fogLightIsFast(packed, 1, true));
+        assert(!fogLightIsFast(packed, 0, false) && !fogLightIsFast(packed, 3, true));
+        assert(packed.fastLights[0] == (1u << 3) && packed.fastLights[2] == (1u << 5));
+        assert(packed.fastLights[CLUSTER_POINT_WORDS] == 1u && packed.fastLights[CLUSTER_POINT_WORDS + 1] == (1u << 1));
+
+        FogSettings intoHistory;
+        intoHistory.freshFastLights = false;
+        GpuFog kept = packFog(one, intoHistory, viewProjection, viewProjection, true, true, 3, 500.0f);
+        markFastFogLights(kept, points, spots, intoHistory);
+        assert(!fogLightIsFast(kept, 3, false) && !fogLightIsFast(kept, 0, true));
+
+        GpuFog none = packFog(std::span<const Fog>{}, settings, viewProjection, viewProjection, true, true, 3, 500.0f);
+        markFastFogLights(none, points, spots, settings);
+        assert(!fogLightIsFast(none, 3, false));
+
+        std::vector<bool> tooMany(CLUSTER_POINT_WORDS * 32 + 5, true);
+        GpuFog crowded = packFog(one, settings, viewProjection, viewProjection, true, true, 3, 500.0f);
+        markFastFogLights(crowded, tooMany, {}, settings);
+        assert(fogLightIsFast(crowded, CLUSTER_POINT_WORDS * 32 - 1, false) && !fogLightIsFast(crowded, 0, true));
+        assert(!fogLightIsFast(crowded, CLUSTER_POINT_WORDS * 32 + 2, false));
+    }
+}
+
 void testVolumetricFog() {
     testSettings();
     testDensity();
@@ -958,5 +1004,6 @@ void testVolumetricFog() {
     testFarShadowShare();
     testProbeAirWeight();
     testPacking();
+    testFastLightsMarked();
     testCollected();
 }

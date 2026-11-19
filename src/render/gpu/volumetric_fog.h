@@ -4,6 +4,7 @@
 #include "math/mat4.h"
 #include "math/vec3.h"
 #include "math/vec4.h"
+#include "render/gpu/clusters_shared.h"
 #include "render/gpu/upscaling.h"
 #include "render/gpu/volumetric_fog_shared.h"
 #include "scene/fog.h"
@@ -73,6 +74,13 @@ struct FogSettings {
     // the sun's direction (the similarity relation): 1 by default (the user's choice, Nov 18 2026), 0 every scattered
     // photon lost. Droplets deflect light only a little, and a deflected photon lights the ground nearly as well.
     float forwardShare = 1.0f;
+
+    /*
+    * Lights flagged fast (PointLight::fast, SpotLight::fast: the flashlight) lit fresh each frame at each froxel's middle
+    * into a grid of their own, never into the history, so the fog does not trail behind them (docs/research/
+    * FOGHISTORY.md: shipped engines accept the trail or turn such lights out of the fog). Off: they go into the history.
+    */
+    bool freshFastLights = true;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
@@ -318,7 +326,8 @@ GpuFogMedia packFogMedia(std::span<const Fog> layers);
 * The frame's fog for every pass that reads it (std430, scene set 1 binding 27): the grid's camera (camera-relative,
 * without the jitter), its inverse and last frame's (taking this frame's camera-relative points), the grid (froxels
 * across, down, slices, range), the options (x 1 when on, y the history weight (0 without a usable history), z 1 reading
-* the probes, w 1 dimming the directional lights through the fog), the frame's jitter and the layers.
+* the probes, w 1 dimming the directional lights through the fog), the frame's jitter and the layers; then which point
+* and spot lights are fast (markFastFogLights), a bit a slot, the points' words first, as the cluster lists number them.
 */
 struct GpuFog {
     float viewProjection[16];
@@ -328,15 +337,25 @@ struct GpuFog {
     float options[4];
     float jitter[4];
     GpuFogMedia media;
+    std::uint32_t fastLights[CLUSTER_WORDS];
 };
 
-static_assert(sizeof(GpuFog) == 400, "GpuFog must match scene_fog.glsl's Fog");
+static_assert(sizeof(GpuFog) == 560, "GpuFog must match scene_fog_data.glsl's FogData");
 
 // The frame's record: off without layers or with the setting off; the range no further than the camera's far plane; the
 // air lit by the light probes only when probesRead (the frame has them), since without them their reading falls back to
 // the open sky's light, which lit the air in closed rooms as outdoors (the sky visibility grid lights it instead).
 GpuFog packFog(std::span<const Fog> layers, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
                bool probesRead, std::uint64_t frame, float cameraFar);
+
+/*
+* Mark the fast lights in the record (by slot: GpuLights::fastPoints, fastSpots), so the lighting pass lights them fresh
+* outside the history: none with freshFastLights off or without fog; slots past the words' reach are left in the history.
+*/
+void markFastFogLights(GpuFog& fog, const std::vector<bool>& fastPoints, const std::vector<bool>& fastSpots, const FogSettings& settings);
+
+// Whether the record marks a point light's slot (spot false) or a spot light's as fast; fog_light.comp reads the same bits.
+bool fogLightIsFast(const GpuFog& fog, std::size_t slot, bool spot);
 
 // The picture pass's push constants (fog_apply.comp): the camera-relative view-projection's inverse as the frame was
 // drawn (jitter included), and the render size, the far shadow's steps and the frame (turning each pixel's samples).

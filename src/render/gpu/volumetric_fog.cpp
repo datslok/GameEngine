@@ -75,6 +75,7 @@ void visit(FogSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Fog far shadow steps", settings.farShadowSteps, {.min = 0, .max = FOG_MAX_FAR_SHADOW_STEPS, .sliderMax = 32});
     visitor.field("Fog dims the sun (air and surfaces)", settings.sunThroughFog);
     visitor.field("Fog forward share", settings.forwardShare, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Fog fast lights fresh", settings.freshFastLights);
 }
 
 // Written so not a number fails too.
@@ -516,6 +517,50 @@ GpuFog packFog(std::span<const Fog> layers, const FogSettings& settings, const M
     packed.jitter[1] = jitter.y;
     packed.jitter[2] = jitter.z;
     return packed;
+}
+
+namespace {
+    // A slot's word and bit in the record's fast-light mask: points in the first CLUSTER_POINT_WORDS words, spots after.
+    struct FastBit {
+        std::size_t word;
+        std::uint32_t bit;
+    };
+
+    std::optional<FastBit> fastBit(std::size_t slot, bool spot) {
+        const std::size_t words = spot ? CLUSTER_SPOT_WORDS : CLUSTER_POINT_WORDS;
+
+        if (slot >= words * 32) {
+            return std::nullopt;
+        }
+
+        return FastBit{(spot ? CLUSTER_POINT_WORDS : 0) + slot / 32, 1u << (slot % 32)};
+    }
+}
+
+void markFastFogLights(GpuFog& fog, const std::vector<bool>& fastPoints, const std::vector<bool>& fastSpots, const FogSettings& settings) {
+    std::fill(std::begin(fog.fastLights), std::end(fog.fastLights), 0u);
+
+    if (!settings.freshFastLights || fog.options[0] == 0.0f) {
+        return;
+    }
+
+    const auto mark = [&](const std::vector<bool>& fast, bool spot) {
+        for (std::size_t slot = 0; slot < fast.size(); ++slot) {
+            const std::optional<FastBit> place = fastBit(slot, spot);
+
+            if (fast[slot] && place) {
+                fog.fastLights[place->word] |= place->bit;
+            }
+        }
+    };
+
+    mark(fastPoints, false);
+    mark(fastSpots, true);
+}
+
+bool fogLightIsFast(const GpuFog& fog, std::size_t slot, bool spot) {
+    const std::optional<FastBit> place = fastBit(slot, spot);
+    return place && (fog.fastLights[place->word] & place->bit) != 0u;
 }
 
 GpuFogPicturePass packFogPicturePass(const Mat4& inverseViewProjection, RenderSize size, int farShadowSteps, int frame) {
