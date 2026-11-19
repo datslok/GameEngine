@@ -67,6 +67,7 @@ void visit(WindSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Sway fade start", settings.swayFadeStart, {.min = 0.0f, .max = 10000.0f, .sliderMax = 300.0f, .unit = "m"});
     visitor.field("Sway fade end", settings.swayFadeEnd, {.min = 0.0f, .max = 10000.0f, .sliderMax = 400.0f, .unit = "m"});
     visitor.field("Swaying shadow cascades", settings.swayShadowCascades, {.min = 0, .max = 8});
+    visitor.field("Swaying lamp shadows", settings.swayLocalShadows);
 }
 
 void validateWind(const WindSettings& settings) {
@@ -287,8 +288,16 @@ bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadiu
     return sway.kind != SwayKind::Still && settings.enabled && settings.sway && (boundsCentre - camera).length() - std::max(boundsRadius, 0.0f) < settings.swayFadeEnd;
 }
 
-bool tileSways(int sunCascade, const WindSettings& settings) {
-    return settings.enabled && settings.sway && sunCascade >= 0 && sunCascade < settings.swayShadowCascades;
+bool tileSways(int sunCascade, const Vec3& reachCentre, float reachRadius, const Vec3& camera, const WindSettings& settings) {
+    if (!settings.enabled || !settings.sway) {
+        return false;
+    }
+
+    if (sunCascade >= 0) {
+        return sunCascade < settings.swayShadowCascades;
+    }
+
+    return settings.swayLocalShadows && (reachRadius < 0.0f || (reachCentre - camera).length() - reachRadius < settings.swayFadeEnd);
 }
 
 std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSways, std::uint64_t frame) {

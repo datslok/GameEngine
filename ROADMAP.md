@@ -372,6 +372,8 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [ ] Later: local fog volumes in the froxels, then drifting noise near the camera
 - [ ] Wind (research in `docs/research/WIND.md`); left: its shadow cache cost measured
   - [x] The wind field (`wind-field`), swaying plants (`wind-sway`), hanging things (`wind-hanging`), follow-ups (`wind-flutter`, `wind-chain-swing`)
+  - [x] Lamps' shadows sway near the camera, redrawn every frame, so leaves near the flashlight are not blackened by their own still shadow (`sway-local-shadows`)
+  - [ ] Later: a still lamp's tile caches its still casters and redraws only the swaying ones over them, as Unity HDRP's "always draw dynamic" (research `docs/research/WIND.md`, lamps' shadows)
 - [ ] Level of detail (research in `docs/research/LOD.md`): by error in pixels (`tree-lod`), shadows from the same levels (`shadow-lod`), the terrain's CDLOD (`terrain-lod`)
 - [x] Impostors (`tree-impostors`, `impostor-switch`, `plant-impostors`)
 - [ ] Pop-in: done for the trees' and palms' cards (`lod-pop-in`, `palm-thinning`); left: the trees' bark if it shows

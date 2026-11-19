@@ -98,6 +98,18 @@ Each branch's and leaf's pivot, parent and direction baked into textures; the sh
 
 **Shadows only near:** the nearest cascades redraw swaying casters each frame; the far ones keep still shadows, too coarse to show the sway.
 
+### Lamps' shadows over swaying plants (Nov 2026)
+
+Found when the forest's flashlight blackened leaves near it: its tile drew them still while they swayed, so each leaf sat in front of its own shadow (proved: wind off, or the lamp's shadow off, lit them; 3.3 to 13.9 of 255).
+
+| Engine | Cached shadows of things whose vertices move |
+|---|---|
+| Unreal 5 (virtual shadow maps) | By default (`Auto`) anything moving its vertices (World Position Offset) invalidates the cached pages it covers every frame, local lights too; `Rigid` stops that and the shadow stops matching; advice: no sway in shadows for small foliage, a distance past which it stops ([API](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/EShadowCacheInvalidationBehavior), [guide](https://www.strayspark.studio/blog/virtual-shadow-map-optimization-open-worlds-ue5-7)) |
+| Unity HDRP | "Always draw dynamic" on a spot or point light: still casters cached in their own map, copied in each frame, moving casters drawn over it every frame ([docs](https://docs.unity3d.com/Packages/com.unity.render-pipelines.high-definition@17.1/manual/Shadows-in-HDRP)) |
+| Flax, CryEngine | The same split: still geometry cached, moving casters drawn every frame ([Flax](https://forum.flaxengine.com/t/new-shadow-map-atlas/1675), [CryEngine](https://www.cryengine.com/docs/static/engines/cryengine-3/categories/1114113/pages/21267738)) |
+
+The user's choice: A now (`sway-local-shadows`: a lamp's tile reaching the sway range sways and redraws every frame, as Unreal's default), B later (Unity's split: the lamp's still casters cached, only the swaying ones redrawn; it helps still lamps among plants, not the flashlight, which redraws whenever it moves).
+
 ## Plan
 
 Following Horizon Zero Dawn.
