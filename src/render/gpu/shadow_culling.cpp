@@ -20,9 +20,16 @@ namespace {
     }
 }
 
+/*
+* The thinning last (shadowThinKeeps), from each draw's record against the tile's view, so both sides use one function;
+* only the view's frustum, cascade and band matter to it.
+*/
 std::vector<std::size_t> shadowTileCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& inReach, const ShadowTile& tile) {
     const Frustum view = Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero);
-    return castersForCascade(draws, castersAtLeast(draws, shadowCasters(draws, inReach, view), tile.smallestCaster), tile.sunCascade);
+    std::vector<std::size_t> casters = castersForCascade(draws, castersAtLeast(draws, shadowCasters(draws, inReach, view), tile.smallestCaster), tile.sunCascade);
+    const GpuCameraCull thinning = packShadowCull(tile, LevelOfDetailSettings{});
+    std::erase_if(casters, [&](std::size_t index) { return !shadowThinKeeps(packCullRecord(draws[index]), thinning); });
+    return casters;
 }
 
 GpuCameraCull packShadowCull(const ShadowTile& tile, const LevelOfDetailSettings& settings) {
@@ -34,6 +41,8 @@ GpuCameraCull packShadowCull(const ShadowTile& tile, const LevelOfDetailSettings
     view.reach[3] = tile.reach.radius;
     view.smallestCaster = tile.smallestCaster;
     view.cascade = tile.sunCascade;
+    view.thinning[0] = tile.thinStart;
+    view.thinning[1] = tile.thinEnd;
     return view;
 }
 
@@ -59,7 +68,7 @@ ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSetti
 
     const LevelView levels = tileLevelView(tile, settings);
     const std::uint64_t fingerprint = tintedShadowSignature(draws, needs.movers.still, glass, &levels);
-    needs.key = swayingShadowSignature(mixBytes(fingerprint, view.levels), sways, frame);
+    needs.key = swayingShadowSignature(mixBytes(mixBytes(fingerprint, view.levels), view.thinning), sways, frame);
 
     const bool touched = std::any_of(table.stillChanges.begin(), table.stillChanges.end(), [&view](const GpuCullRecord& record) {
         return shadowTakes(record, view);

@@ -6,6 +6,7 @@
 
 #include "render/gpu/camera_culling_shared.h"
 #include "culling.glsl"
+#include "hash.glsl"
 #include "level_of_detail.glsl"
 #include "level_fade.glsl"
 
@@ -82,7 +83,8 @@ struct CameraCull {
     int cascade;          // a shadow tile's sun cascade (-1 none)
     uint segments;        // the segments every view's passes walk
     uint segmentBlocks;   // workgroups of segments
-    uvec4 segmentSlices;  // CAMERA_CULL_SEGMENT_SLICE_* (x offsets and visible list, y block sums)
+    uvec2 segmentSlices;  // CAMERA_CULL_SEGMENT_SLICE_* (x offsets and visible list, y block sums)
+    vec2 thinning;        // a sun cascade's thinning band: x where it starts, y where none is left (shadowThinKeeps)
 };
 
 // Whether a box may be inside all six planes: its corner farthest along each plane's normal tested (boxInFrustum).
@@ -125,6 +127,46 @@ bool chunkInView(CullChunk chunk, CameraCull view) {
     return boxInFrustum(view.frustum, chunk.minimum, chunk.maximum);
 }
 
+/*
+* The share of casters like this one a sun cascade keeps (shadowThinShare): 1 unless the cascade is the last the caster
+* is limited to and has a thinning band; then 1 from thinning.x in from the box's sides, falling evenly to 0 at
+* thinning.y. The box is a parallel projection, so a pair of opposite planes' distances add up to its width.
+*/
+float shadowThinShare(CullRecord record, CameraCull view) {
+    float start = view.thinning.x;
+    float end = view.thinning.y;
+
+    if (view.cascade < 0 || record.shadowCascades <= 0 || view.cascade != record.shadowCascades - 1 || record.bounds.w < 0.0 || start <= end) {
+        return 1.0;
+    }
+
+    float edge = 1.0;
+
+    for (int axis = 0; axis < 2; ++axis) {
+        vec4 low = view.frustum.planes[2 * axis];
+        vec4 high = view.frustum.planes[2 * axis + 1];
+        float fromLow = low.x * record.bounds.x + low.y * record.bounds.y + low.z * record.bounds.z + low.w;
+        float fromHigh = high.x * record.bounds.x + high.y * record.bounds.y + high.z * record.bounds.z + high.w;
+        float width = fromLow + fromHigh;
+
+        if (width > 0.0) {
+            edge = min(edge, 2.0 * min(fromLow, fromHigh) / width);
+        }
+    }
+
+    return clamp((edge - end) / (start - end), 0.0, 1.0);
+}
+
+// The caster's own fixed number in [0, 1): PCG3D of its sphere's centre's bits (shadowThinNumber).
+float shadowThinNumber(CullRecord record) {
+    return float(pcg3d(floatBitsToUint(record.bounds.xyz)).x >> 8u) * (1.0 / 16777216.0);
+}
+
+// Whether the cascade keeps the caster: its number below the share (shadowThinKeeps).
+bool shadowThinKeeps(CullRecord record, CameraCull view) {
+    return shadowThinNumber(record) < shadowThinShare(record, view);
+}
+
 // Whether part of a sphere is nearer the eye than the sway's fade end (drawSways; unknown bounds count from the centre).
 bool swayReaches(vec4 bounds, vec3 eye, float fadeEnd) {
     return length(bounds.xyz - eye) - max(bounds.w, 0.0) < fadeEnd;
@@ -132,7 +174,7 @@ bool swayReaches(vec4 bounds, vec3 eye, float fadeEnd) {
 
 /*
 * Whether a shadow tile takes a draw: a solid caster, not hidden, touching the light's reach, maybe in view, at least the
-* smallest caster's size (unknown sizes kept) and within its cascades.
+* smallest caster's size (unknown sizes kept), within its cascades and not thinned out (shadowThinKeeps).
 */
 bool shadowTakes(CullRecord record, CameraCull view) {
     if ((record.flags & (CULL_TRANSPARENT | CULL_HIDDEN)) != 0u || (record.flags & CULL_CASTS_SHADOWS) == 0u) {
@@ -156,7 +198,11 @@ bool shadowTakes(CullRecord record, CameraCull view) {
         return false;
     }
 
-    return view.cascade < 0 || record.shadowCascades <= 0 || view.cascade < record.shadowCascades;
+    if (view.cascade >= 0 && record.shadowCascades > 0 && view.cascade >= record.shadowCascades) {
+        return false;
+    }
+
+    return shadowThinKeeps(record, view);
 }
 
 /*

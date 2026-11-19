@@ -356,6 +356,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] Still entities announced, not searched for (`still-announced`)
 - [x] Cheaper forest shadows (`understorey-shadow-cascades`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
+- [x] Small plants' shadows thinned out across their last cascade, not cut at its edge about 20 m away (`shadow-thin-out`)
 - [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`): ground-following patches (`ground-cover-patches`), meadow grass (`meadow-grass`), the forest floor (`forest-floor-cover`)
 - [ ] The structures: a military brutalist megatower over the jungle, the terraced Bastion (the user's pick, Nov 19 2026), the Ring kept as the alien relic (research, concept sheets and plan in `docs/research/STRUCTURES.md`)
   - [x] 1. Faceted slabs in the stealth-alien look, kept for the Ring (`structure-slabs`)

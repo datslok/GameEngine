@@ -112,7 +112,8 @@ struct GpuCameraCull {
     std::int32_t cascade = -1;                // a shadow tile's sun cascade (ShadowTile::sunCascade; -1 none)
     std::uint32_t segments = 0;               // the segments every view's passes walk
     std::uint32_t segmentBlocks = 0;          // workgroups of segments
-    std::uint32_t segmentSlices[4] = {};      // CAMERA_CULL_SEGMENT_SLICE_*: its parts of the segment passes' buffers
+    std::uint32_t segmentSlices[2] = {};      // CAMERA_CULL_SEGMENT_SLICE_*: its parts of the segment passes' buffers
+    float thinning[2] = {0.0f, 0.0f};         // a sun cascade's thinning band (ShadowTile::thinStart, thinEnd)
 };
 
 static_assert(sizeof(GpuCameraCull) == 256, "GpuCameraCull must match camera_culling.glsl's CameraCull");
@@ -203,9 +204,22 @@ bool swayReaches(const float bounds[4], const Vec3& eye, float fadeEnd);
 /*
 * Whether a shadow tile takes a draw: a solid caster, not hidden (shadow-only kept), touching the light's reach, maybe
 * in the tile's view, at least the smallest caster's size (unknown sizes kept) and within its cascades (castersInReach,
-* shadowCasters, castersAtLeast, castersForCascade).
+* shadowCasters, castersAtLeast, castersForCascade), and not thinned out (shadowThinKeeps).
 */
 bool shadowTakes(const GpuCullRecord& record, const GpuCameraCull& view);
+
+/*
+* The share of casters like this one a sun cascade keeps: 1 unless the cascade is the last the caster is limited to
+* (GpuCullRecord::shadowCascades) and has a thinning band (thinning x above y); then 1 from x in from the box's sides
+* (measured in radii, as cascadeEdgeDistance's sides), falling evenly to 0 at y.
+*/
+float shadowThinShare(const GpuCullRecord& record, const GpuCameraCull& view);
+
+// The caster's own fixed number in [0, 1): PCG3D of its sphere's centre's bits, so it never changes while it stands.
+float shadowThinNumber(const GpuCullRecord& record);
+
+// Whether the cascade keeps the caster: its number below the share (a share of 1 keeps every caster, 0 none).
+bool shadowThinKeeps(const GpuCullRecord& record, const GpuCameraCull& view);
 
 // Whether a box (a chunk's) may be inside all six planes: its corner farthest along each plane's normal tested.
 bool boxInFrustum(const GpuFrustum& frustum, const float minimum[3], const float maximum[3]);
@@ -272,7 +286,8 @@ void packCullCommands(std::span<const GpuDrawCommand> commands, std::span<const 
 
 /*
 * Whether the draw's choice is within rounding of changing (a level's error within 1e-4 of the budget, its sphere
-* within a millimetre of a plane or of the sway's reach), where the GPU and the CPU may each be right.
+* within a millimetre of a plane or of the sway's reach, its thinning number within 1e-4 of its share), where the GPU and
+* the CPU may each be right.
 */
 bool nearACameraEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view);
 
