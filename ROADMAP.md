@@ -369,7 +369,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [ ] 14. Searchlight beams kilometres long through the height fog, shadowed (`searchlight-beams`)
 - [ ] Layers of fog (research in `docs/research/FOGLAYERS.md`)
   - [x] Up to four fog layers, exponential or pooled; the jungle's floor mist under the canopy; the sun dimmed through them (`fog-layers`)
-  - [ ] Fast lights (the flashlight) outside the fog's history, fresh each frame, so the fog does not trail behind them (research `docs/research/FOGHISTORY.md`; `fog-fast-lights`)
+  - [x] Fast lights (the flashlight) outside the fog's history, fresh each frame, so the fog does not trail behind them (research `docs/research/FOGHISTORY.md`; `fog-fast-lights`)
   - [ ] Later, if other moving lights trail: the history clamped to its 6 neighbours (variance clipping)
   - [ ] Later: local fog volumes in the froxels, then drifting noise near the camera
 - [ ] Wind (research in `docs/research/WIND.md`); left: its shadow cache cost measured
