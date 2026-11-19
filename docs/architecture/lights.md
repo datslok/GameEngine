@@ -1,6 +1,6 @@
 # Lights
 
-Covers: `src/scene/light.h`, `src/scene/lighting`, `src/render/gpu/light_falloff`, `assets/shaders/lighting.glsl`
+Covers: `src/scene/light.h`, `src/scene/lighting`, `src/scene/beacon`, `src/render/gpu/light_falloff`, `src/render/gpu/beacon_splat`, `src/render/gpu/beacon_splat_shared.h`, `src/render/vulkan/vulkan_beacons`, `assets/shaders/lighting.glsl`, `assets/shaders/beacon_splat.glsl`, `assets/shaders/beacon_splat.vert`, `assets/shaders/beacon_splat.frag`
 
 The light components games place, how a frame gathers them and how the shaders receive them. Light units and the camera-relative rule: `src/render/CLAUDE.md`. How surfaces answer the light: `shading.md`. Who gets a seat and a shadow: light priority (`render/gpu/light_priority`).
 
@@ -26,7 +26,7 @@ The light components games place, how a frame gathers them and how the shaders r
 
 ## Each frame
 
-1. `buildFrame` → `collectLighting(world, alpha)` (`scene/lighting`) fills `FrameLighting`: ambient and background summed, point and spot positions interpolated like meshes (`PlacedPointLight`, `PlacedSpotLight`, which also carry the entity and the seat and shadow fades); the first `ProbeCascades`, `Atmosphere` and `StarrySky`; every `Fog` (its layers, in the world's order); the frame's probe events.
+1. `buildFrame` → `collectLighting(world, alpha)` (`scene/lighting`) fills `FrameLighting`: ambient and background summed, point and spot positions interpolated like meshes (`PlacedPointLight`, `PlacedSpotLight`, which also carry the entity and the seat and shadow fades); the lit beacons (`PlacedBeacon`, below); the first `ProbeCascades`, `Atmosphere` and `StarrySky`; every `Fog` (its layers, in the world's order); the frame's probe events.
 2. `VulkanRenderer::drawScene`: `prioritizeLights`, then `packLighting(lighting, cameraPosition)` → `GpuLights`.
 3. `packLighting` drops what `canBeDrawn` refuses (a zero direction, a range that is not positive) and what is past the limits (`selectDrawableLights`; a light's place in its list is its slot, which shadow planning relies on), precomputes the cone cosines (inner clamped to outer), and measures positions from the camera, so the viewer is the shaders' origin.
 4. Shadows join later (`attachShadows`, `render/gpu/shadow_map`).
@@ -46,6 +46,17 @@ The light components games place, how a frame gathers them and how the shaders r
 | Spot | 256 (`maxSpotLights`) | all (`defaultSpotSeats`) | 8 (`maxShadowedSpotLights`) |
 
 All lights fit because clustered shading makes each pixel walk only its cluster's lights; the priority mostly hands out shadows.
+
+## Beacons (`scene/beacon`, `render/gpu/beacon_splat`)
+
+Small, very bright lights seen from far off (obstruction lights; research `docs/research/STRUCTURES.md`, "Planned: obstruction lights").
+
+- **Component** `Beacon` (entity `Transform`): `colour`, `intensity`, `lensRadius` (0.15 m), `flash` (`BeaconFlash`: period, on-time, ramp, phase; FAA L-864 by default, 2 s, 0.5 s, 0.05 s), `spill` and `spillRange`, `level`.
+- **Flash on the CPU:** a game calls `flashBeacons(world, seconds)` every frame with its simulation clock between ticks; `beaconLevel` is a trapezium (rise and fall over the ramp), steady with no period. Each beacon's spill becomes an unshadowed, `fast` `PointLight` on its entity at spill × level (removed at 0), so the light on the walls pulses with the splat. Frame-only: nothing a tick reads.
+- **Gathered:** lit ones only (level and intensity above 0), light = colour × intensity × level.
+- **Drawn** (`VulkanBeacons`, BEACONS, after FOGMIX, before GLASS): one instance of six vertices each, records (`GpuBeacon`, 32 bytes, from the camera) rewritten every frame, scene sets 0-1 and the records in set 2, no push constants (the frame's uniform block gives the jittered view, its axes and size). Additive, depth tested `GREATER_OR_EQUAL` at the beacon's own depth, not written; past the far plane at the far depth.
+- **Splat** (as the stars': `sky.md`): radiance = I / (d² Ω_pixel) shared by `beaconSplatWeight`: the star's tent while the lens is under a pixel, its disc (antialiased edge, over π R²) from two pixels, mixed between; sums to 1 (tent exactly, disc within 2.5 %), so the light reaching the eye is I / d² at any distance and a near lens shows I / (π r²). Fogged in the fragment shader by `fogAlongView` to its own point (the picture behind was fogged to its own depth). Not in the reactive mask yet.
+- Tests: `beacon_test`, `beacon_splat_test`; GPU `beacon_splat_gpu_test`.
 
 ## The background
 

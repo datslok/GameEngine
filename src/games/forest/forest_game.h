@@ -199,6 +199,9 @@ public:
     // The towers' light strips (the Bastion's first, then the far towers'), and the Bastion's floodlights.
     const std::vector<Entity>& getLightStrips() const;
     const std::vector<Entity>& getFloodlights() const;
+    // The obstruction lights (scene/beacon.h): the Bastion's first (getBastionBeaconCount of them), then the far towers'.
+    const std::vector<Entity>& getBeacons() const;
+    std::size_t getBastionBeaconCount() const;
     // The player's flashlight (F, off at the start) and its entity.
     FlashlightSettings& getFlashlightSettings();
     Entity getFlashlight() const;
@@ -411,6 +414,11 @@ private:
     std::vector<Entity> structures;
     std::vector<Entity> lightStrips;
     std::vector<Entity> floodlights;
+    std::vector<Entity> beacons;
+    std::size_t bastionBeaconCount = 0;
+    // The last tick's end on the simulation clock and a tick's length, so each frame's flashes are timed between ticks.
+    double beaconClock = 0.0;
+    float beaconTick = 0.0f;
     Flashlight flashlight;
     FlashlightSettings flashlightSettings;
     Entity sun;

@@ -337,7 +337,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [ ] The forest: grown trees on the floor, the pillars' tops and the islands, the understorey, logs and rocks (research in `docs/research/TREES.md`, `docs/research/JUNGLE.md`)
   - [x] Grown trees (`tree-growth`)
   - [x] The jungle patch along the path: canopy and emergents (`jungle-canopy`), midstorey (`jungle-midstorey`), scanned understorey (`understorey-scans`), palms (`jungle-palms`), lianas, climbers, epiphytes (`jungle-vines`, `jungle-climbers`, `jungle-epiphytes`), light through leaves (`leaf-transmission`), wind (below)
-  - [ ] The rest of the valley, keeping the sight lines to the Monolith and the Ring
+  - [ ] The rest of the valley, keeping the sight lines to the Monolith and the Ring (the user's order, Nov 19 2026: after the structures' stage 5, before their stages 6-14; research first: filling square kilometres, with the GPU-bound frame's levers)
 - [x] Smooth moving shadows in the far map (`far-shadow-movers`)
 - [x] Staggered far cascades (`cascade-stagger`)
 - [x] The frame built on every core (`frame-build-speed`)
@@ -357,7 +357,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] 2. Panel lines and sawtooth seams: a generated seam map read in each facet's own plane (`structure-seams`)
   - [x] 3. The Bastion's mass: armoured glacis, three setbacks of fins and slots, the command head on corbels, concrete with formwork; far towers from the same kit; the strut rebuilt as an armoured bridge (`bastion-mass`)
   - [x] 4. Slit windows, light strips up the fins and floodlit walls: a procedural mask in the facet plane, far slits kept at their average (`slit-windows`)
-  - [ ] 5. Obstruction lights: red levels every 105 m flashing together, sprites keeping their energy with distance (`obstruction-lights`)
+  - [x] 5. Obstruction lights: red levels every 105 m flashing together, sprites keeping their energy with distance (`obstruction-lights`)
   - [ ] 6. Garden terraces cantilevered from the sides and gardens on the setbacks, planted by the jungle's generators, strung with lights (`bastion-terraces`)
   - [ ] 7. The crown: radome, a turning radar, phased arrays, lattice masts (`bastion-crown`)
   - [ ] 8. Weathering: stains under every ledge, rust under steel, light moss (`bastion-weathering`)

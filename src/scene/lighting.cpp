@@ -31,6 +31,14 @@ FrameLighting collectLighting(World& world, float alpha) {
         lighting.spotLights.push_back(PlacedSpotLight{getRenderTransform(world, entity, alpha).position, light, entity});
     });
 
+    // Only the lit beacons: a dark one between flashes draws nothing.
+    world.each<Beacon, Transform>([&](Entity entity, Beacon& beacon, Transform&) {
+        if (beacon.level > 0.0f && beacon.intensity > 0.0f) {
+            lighting.beacons.push_back(PlacedBeacon{getRenderTransform(world, entity, alpha).position,
+                                                    beacon.colour * (beacon.intensity * beacon.level), beacon.lensRadius});
+        }
+    });
+
     world.each<ProbeCascades>([&](Entity, ProbeCascades& cascades) {
         if (!lighting.probeCascades) {
             lighting.probeCascades = cascades;

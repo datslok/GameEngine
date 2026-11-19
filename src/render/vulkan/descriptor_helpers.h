@@ -13,7 +13,7 @@
 * after them (the light probes' passes and debug balls, the glass pass).
 */
 
-// A layout of the given sets with one push constant range of pushBytes from offset 0, for pushStages.
+// A layout of the given sets with one push constant range of pushBytes from offset 0, for pushStages (none for 0 bytes).
 OwnedHandle<VkPipelineLayout> createPipelineLayout(VkDevice device, std::span<const VkDescriptorSetLayout> sets, VkShaderStageFlags pushStages,
                                                    const char* failure, std::uint32_t pushBytes);
 

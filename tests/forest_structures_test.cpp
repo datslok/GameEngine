@@ -431,6 +431,56 @@ namespace {
     }
 
     /*
+    * The obstruction lights: even levels from the head's roof down, never more than the spacing apart (FAA: about 105 m)
+    * nor more than one level a spacing, four a level at the section's chamfered corners just outside it, the top level on
+    * the roof; the same on a far tower.
+    */
+    void testBeacons() {
+        const BastionShape bastion = monolithBastion(0.0f, ForestBastionSettings{});
+        const float spacing = 105.0f;
+        const std::vector<Vec3> beacons = bastionBeacons(bastion, spacing);
+        const std::size_t levels = static_cast<std::size_t>(std::ceil(bastion.headTop / spacing));
+        assert(levels == 6 && beacons.size() == 4 * levels);
+
+        float lowest = bastion.headTop;
+        float highest = 0.0f;
+
+        for (std::size_t level = 0; level < levels; ++level) {
+            const float height = beacons[4 * level].y;
+            lowest = std::min(lowest, height);
+            highest = std::max(highest, height);
+
+            for (std::size_t corner = 0; corner < 4; ++corner) {
+                const Vec3& beacon = beacons[4 * level + corner];
+                assert(near(beacon.y, height, 1e-3f));
+
+                // Outside the section at its height: past its chamfer's line, |x| / half width + |z| / half depth beyond 1 there.
+                const float width = bastionWidthAt(bastion, std::min(height, bastion.headTop) - 0.5f);
+                const float depth = height > bastion.headBottom ? bastion.depthShare * bastion.tiers.back().width + 2.0f * bastion.headOverhang
+                                                                : bastion.depthShare * width;
+                const float chamfer = bastion.chamferShare * width;
+                assert(std::fabs(beacon.x) + std::fabs(beacon.z) > 0.5f * width + 0.5f * depth - chamfer);
+                assert(std::fabs(beacon.x) < 0.5f * width + 2.0f && std::fabs(beacon.z) < 0.5f * depth + 2.0f);
+            }
+
+            if (level > 0) {
+                assert(std::fabs(height - beacons[4 * (level - 1)].y) <= spacing + 1e-3f);
+            }
+        }
+
+        assert(highest >= bastion.headTop && highest < bastion.headTop + 2.0f);
+        assert(lowest <= spacing + 1e-3f && lowest > 0.0f);
+
+        // Each corner a different one: the four of a level are apart.
+        assert((beacons[0] - beacons[1]).length() > 10.0f && (beacons[0] - beacons[3]).length() > 10.0f);
+
+        const BastionShape far = farTowers().front();
+        const std::vector<Vec3> farBeacons = bastionBeacons(far, spacing);
+        assert(farBeacons.size() == 4 * static_cast<std::size_t>(std::ceil(far.headTop / spacing)));
+        assert(bastionBeacons(far, 0.0f).empty());
+    }
+
+    /*
     * The Ring: segments round its centre in the plane facing along z, each a closed prism; gaps between them; the lower
     * half below its centre (the ground); the segments near the top drifted outwards, the rest on the polygon.
     */
@@ -644,5 +694,6 @@ void testForestStructures() {
     testWindowBandImage();
     testLightStrips();
     testFloods();
+    testBeacons();
     testRing();
 }

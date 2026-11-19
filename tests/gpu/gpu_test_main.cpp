@@ -50,6 +50,8 @@ int main() {
             gpuTestDepthOfField(runner, report);
             gpuTestOverlay(runner, report);
             gpuTestStars(runner, report);
+            gpuTestBeaconSplat(runner, report);
+            gpuTestBeaconSplat(runner, report);
             gpuTestClusters(runner, report);
             gpuTestCascades(runner, report);
             gpuTestDdgiSampling(runner, report);

@@ -107,6 +107,8 @@ void testGoldenViewScenes();
 void testSun();
 void testCelestial();
 void testStars();
+void testBeacon();
+void testBeaconSplat();
 void testEyeAdaptation();
 void testGameRegistry();
 void testCommandRegistry();
@@ -381,6 +383,8 @@ const RoutineTest routineTests[] = {
     {"testSun", testSun},
     {"testCelestial", testCelestial},
     {"testStars", testStars},
+    {"testBeacon", testBeacon},
+    {"testBeaconSplat", testBeaconSplat},
     {"testEyeAdaptation", testEyeAdaptation},
     {"testGameRegistry", testGameRegistry},
     {"testCommandRegistry", testCommandRegistry},

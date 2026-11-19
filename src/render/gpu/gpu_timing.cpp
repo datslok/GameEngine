@@ -58,6 +58,8 @@ const char* gpuPassName(GpuPass pass) {
         return "SSR";
     case GpuPass::FogApply:
         return "FOGMIX";
+    case GpuPass::Beacons:
+        return "BEACONS";
     case GpuPass::Transparent:
         return "GLASS";
     case GpuPass::AntiAliasing:

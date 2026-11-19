@@ -39,6 +39,7 @@ enum class GpuPass {
     PlanarReflection, // a flat mirror's picture: the scene drawn again through it, and its blurrier levels
     Reflections,  // reflections: the depth and colour pyramids and the reflection pass
     FogApply,     // the picture before the glass seen through the fog
+    Beacons,      // beacons' splats, fogged at their own points (render/gpu/beacon_splat.h)
     Transparent,  // glass and blended surfaces, sorted, over the picture with its reflections (render/gpu/transparency.h)
     AntiAliasing, // TAA, FSR or DLSS, whichever smooths the frame (with the camera motion pass before FSR and DLSS)
     DepthOfField, // depth of field on the finished picture (render/gpu/depth_of_field.h), while it is on

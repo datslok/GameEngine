@@ -12,8 +12,8 @@ OwnedHandle<VkPipelineLayout> createPipelineLayout(VkDevice device, std::span<co
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = static_cast<std::uint32_t>(sets.size());
     layoutInfo.pSetLayouts = sets.data();
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &push;
+    layoutInfo.pushConstantRangeCount = pushBytes > 0 ? 1u : 0u;
+    layoutInfo.pPushConstantRanges = pushBytes > 0 ? &push : nullptr;
 
     VkPipelineLayout created = VK_NULL_HANDLE;
     vulkanCheck(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &created), failure);

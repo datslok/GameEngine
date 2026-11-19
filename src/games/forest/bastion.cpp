@@ -5,11 +5,13 @@
 #include "games/forest/structures.h"
 #include "games/forest/valley_shapes.h"
 #include "math/angles.h"
+#include "math/vec2.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <numbers>
 
 namespace {
     // The Bastion sinks this far into the ground, so uneven ground never shows under it; a far tower twice that.
@@ -84,6 +86,50 @@ namespace {
     constexpr float floodLeanOnLedge = 8.0f;
     constexpr float floodLeanOnGround = 15.0f;
     constexpr float floodAcross = 0.3f;
+
+    // The obstruction lights: how far out from their corner they stand, and how far above the head's roof the top ones.
+    constexpr float beaconOut = 0.5f;
+    constexpr float beaconAboveRoof = 0.5f;
+
+    // A tower's section at a height: its width (x), depth (z) and the chamfer its corners are cut by, as bastionMesh builds it.
+    struct TowerSection {
+        float width = 0.0f;
+        float depth = 0.0f;
+        float chamfer = 0.0f;
+    };
+
+    /*
+    * The section just below a height, so a level at a setback takes the wider tier it stands on: the glacis narrowing
+    * linearly from its foot (at -sink) to the first tier, the tiers, the head with its overhang.
+    */
+    TowerSection sectionBelow(const BastionShape& shape, float height) {
+        float width = 0.0f;
+        float depth = 0.0f;
+        const BastionTier& first = shape.tiers.front();
+        const BastionTier& top = shape.tiers.back();
+
+        if (height > shape.headBottom) {
+            width = top.width + 2.0f * shape.headOverhang;
+            depth = shape.depthShare * top.width + 2.0f * shape.headOverhang;
+        } else if (height <= shape.glacisTop) {
+            const float along = std::clamp((height + shape.sink) / std::max(shape.glacisTop + shape.sink, 1e-3f), 0.0f, 1.0f);
+            width = shape.glacisWidth + (first.width - shape.glacisWidth) * along;
+            depth = shape.depthShare * width;
+        } else {
+            width = top.width;
+
+            for (const BastionTier& tier : shape.tiers) {
+                if (height > tier.bottom && height <= tier.top) {
+                    width = tier.width;
+                    break;
+                }
+            }
+
+            depth = shape.depthShare * width;
+        }
+
+        return TowerSection{width, depth, std::min(shape.chamferShare * width, 0.45f * std::min(width, depth))};
+    }
 
     // A rectangle at a height with its corners chamfered, round from -x through +z to +x and -z (rising lofts face out).
     std::vector<Vec3> chamferedRectangle(float y, float width, float depth, float chamfer) {
@@ -180,6 +226,12 @@ void visit(ForestBastionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Strip brightness", settings.stripBrightness, {.min = 0.0f, .max = 1000.0f, .sliderMax = 100.0f});
     visitor.field("Flood intensity", settings.floodIntensity, {.min = 0.0f, .max = 100000.0f, .sliderMax = 10000.0f});
     visitor.field("Flood range", settings.floodRange, {.min = 1.0f, .max = 2000.0f, .sliderMax = 800.0f, .unit = "m"});
+    visitor.field("Beacon intensity", settings.beaconIntensity, {.min = 0.0f, .max = 100000.0f, .sliderMax = 1000.0f});
+    visitor.field("Beacon flashes", settings.beaconFlashesPerMinute, {.min = 0.0f, .max = 120.0f, .sliderMax = 60.0f, .unit = "/min"});
+    visitor.field("Beacon on time", settings.beaconOnSeconds, {.min = 0.0f, .max = 5.0f, .sliderMax = 2.0f, .unit = "s"});
+    visitor.field("Beacon spacing", settings.beaconSpacing, {.min = 10.0f, .max = 1000.0f, .sliderMax = 300.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Beacon spill", settings.beaconSpill, {.min = 0.0f, .max = 10000.0f, .sliderMax = 200.0f});
+    visitor.field("Beacon spill range", settings.beaconSpillRange, {.min = 0.01f, .max = 500.0f, .sliderMax = 60.0f, .unit = "m"});
 }
 
 BastionShape monolithBastion(float groundLevel, const ForestBastionSettings& settings) {
@@ -490,4 +542,33 @@ std::vector<FloodPlace> bastionFloods(const BastionShape& shape) {
     }
 
     return floods;
+}
+
+/*
+* n = ceil(roof / spacing) levels at roof k / n, k = 1..n, so neighbours (and the lowest from the foot) are roof / n <=
+* spacing apart. A corner's light stands on the middle of its chamfer, pushed out along the diagonal.
+*/
+std::vector<Vec3> bastionBeacons(const BastionShape& shape, float spacing) {
+    std::vector<Vec3> beacons;
+
+    if (!(spacing > 0.0f) || shape.tiers.empty() || !(shape.headTop > 0.0f)) {
+        return beacons;
+    }
+
+    const int levels = static_cast<int>(std::ceil(shape.headTop / spacing));
+    beacons.reserve(4 * static_cast<std::size_t>(levels));
+
+    for (int level = 1; level <= levels; ++level) {
+        const float height = shape.headTop * static_cast<float>(level) / static_cast<float>(levels);
+        const TowerSection section = sectionBelow(shape, height);
+        const float y = level == levels ? height + beaconAboveRoof : height;
+
+        for (const Vec2 corner : {Vec2{1.0f, 1.0f}, Vec2{-1.0f, 1.0f}, Vec2{-1.0f, -1.0f}, Vec2{1.0f, -1.0f}}) {
+            const float x = corner.x * (0.5f * section.width - 0.5f * section.chamfer + beaconOut * std::numbers::sqrt2_v<float> * 0.5f);
+            const float z = corner.y * (0.5f * section.depth - 0.5f * section.chamfer + beaconOut * std::numbers::sqrt2_v<float> * 0.5f);
+            beacons.push_back(Vec3{x, y, z});
+        }
+    }
+
+    return beacons;
 }
