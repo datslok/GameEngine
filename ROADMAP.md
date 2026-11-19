@@ -391,7 +391,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [x] Video memory in use on F4 (`vram-in-use`)
 - [x] DLSS Quality by default (`dlss-quality-default`)
 - [ ] The GPU-bound frame (later, the user's choice Nov 18 2026): each pass measured (shadows while turning too), then the levers in `docs/research/WORLDSCALE.md`, coarser leaves in the far cascades among them (`docs/research/SHADOWCACHE.md`)
-- [ ] A loading screen while the world builds, not a black window (`loading-screen`)
+- [x] A loading screen while the world builds, not a black window (`loading-screen`)
 - [ ] Far terrain following the camera, only if needed
 - [ ] Aerial perspective from the sky's tables, only if the haze looks wrong
 - [ ] Golden views, tests, packaging with the downloaded assets, docs
