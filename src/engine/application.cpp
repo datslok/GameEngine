@@ -24,6 +24,7 @@
 Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings,
                          SavedSettings saved, const std::vector<SettingEntry>& launchSettings, WindowVisibility visibility):
     game(game),
+    startup(profilerSeconds()),
     settings(initialSettings),
     defaultSettings(captureDefaultsAndLoad(settings, game, saved, launchSettings)),
     jobs(workerThreadCount(settings)),
@@ -32,16 +33,22 @@ Application::Application(const char* title, int width, int height, Game& game, c
     debugUi(window, renderer),
     timestep(settings.ticksPerSecond, settings.maxFrameSeconds)
 {
+    startup.lap("settings, window and renderer", profilerSeconds());
     requestedPresentMode = settings.presentMode;
     renderer.setPresentMode(requestedPresentMode);
 
     game.useJobs(jobs);
-    loadWorld();
+    workBehindLoadingScreen(loadingWorldTitle, [this] { this->game.onInit(world, assets); });
+    startup.lap("world", profilerSeconds());
+    uploadMeshesBehindLoadingScreen();
+    startup.lap("meshes", profilerSeconds());
 
     // The renderer's pipelines have been compiling on every core meanwhile; the rest with the loading screen up.
     if (!quitRequested) {
         waitForPipelines();
     }
+
+    startup.lap("shaders", profilerSeconds());
 
     mouseLookEnabled = game.wantsMouseLook();
     window.setMouseLookEnabled(mouseLookEnabled);
@@ -60,19 +67,29 @@ Application::Application(const char* title, int width, int height, Game& game, c
     }
 }
 
-// A frame of the loading screen at most this often: it only counts, so the threads get the cores.
+// A frame of the loading screen at most this often: it only counts, so the threads get the cores. Work that must stay on
+// the main thread (meshes going up) gets as long between frames.
 constexpr Uint32 loadingFrameMilliseconds = 33;
+constexpr double loadingStepSeconds = 0.033;
+
+// One loading frame, the window shown with the first (Window::reveal), so it never shows black; the sliding block's frame
+// counted across every stage, so it moves on smoothly from one to the next.
+void Application::drawLoadingFrame(LoadingProgress progress) {
+    progress.frame = loadingFrame++;
+    renderer.drawLoadingScreen(progress);
+    window.reveal();
+}
 
 /*
-* The game builds its world on a thread of its own (core/background_work.h) while this one keeps the loading screen
-* drawn and the window answering. Safe because a game never touches the renderer, the window or SDL (games run
-* headless), the job system takes work from any thread, and nothing else reads the world or the assets until it ends.
-* Closing the window meanwhile cannot stop the build, so it stops the drawing and quits once the build ends.
+* Work on a thread of its own (core/background_work.h) while this one keeps the loading screen drawn and the window
+* answering: the game building its world, and the first frame's scene and sky bake. Safe because a game never touches
+* the renderer, the window or SDL (games run headless), the job system takes work from any thread, and nothing else
+* reads the world or the assets until it ends; the loading frames touch only the swapchain and their frame slots.
+* Closing the window meanwhile cannot stop the work, so it stops the drawing and quits once the work ends.
 */
-void Application::loadWorld() {
-    std::uint64_t frame = 0;
-    runWhileWaiting([this] { game.onInit(world, assets); },
-                    [this, &frame] {
+void Application::workBehindLoadingScreen(std::string_view title, const std::function<void()>& work) {
+    runWhileWaiting(work,
+                    [this, title] {
                         if (quitRequested) {
                             return;
                         }
@@ -82,9 +99,27 @@ void Application::loadWorld() {
                             return;
                         }
 
-                        renderer.drawLoadingScreen(LoadingProgress{.title = loadingWorldTitle, .counted = false, .frame = frame++});
+                        drawLoadingFrame(LoadingProgress{.title = title, .counted = false});
                     },
                     std::chrono::milliseconds{loadingFrameMilliseconds});
+}
+
+/*
+* The world's meshes go up to the GPU before the first frame, counted on the loading screen: a slice of them between
+* frames (stepsWithinBudget), on this thread, since uploads and the screen share the GPU's queue.
+*/
+void Application::uploadMeshesBehindLoadingScreen() {
+    const std::size_t total = assets.getMeshCount();
+
+    while (!quitRequested && renderer.getMeshCount() < total) {
+        if (!window.processEvents(input)) {
+            quitRequested = true;
+            return;
+        }
+
+        const std::size_t done = stepsWithinBudget(renderer.getMeshCount(), total, loadingStepSeconds, profilerSeconds, [this](std::size_t) { uploadNextMesh(); });
+        drawLoadingFrame(LoadingProgress{.title = loadingSceneTitle, .done = done, .total = total});
+    }
 }
 
 void Application::waitForPipelines() {
@@ -95,7 +130,7 @@ void Application::waitForPipelines() {
         }
 
         const PipelineProgress progress = renderer.pipelineProgress();
-        renderer.drawLoadingScreen(LoadingProgress{.title = loadingShadersTitle, .done = progress.built, .total = progress.total});
+        drawLoadingFrame(LoadingProgress{.title = loadingShadersTitle, .done = progress.built, .total = progress.total});
         SDL_Delay(loadingFrameMilliseconds);
     }
 
@@ -335,27 +370,35 @@ void Application::applyMouseMode() {
 * Uploads must happen before the frame begins. New textures are compressed (or read from the texture cache) together,
 * a texture a job, then uploaded in handle order (docs/research/TEXTURECOMPRESSION.md).
 */
+/*
+* The next mesh the renderer lacks, converted to the render format once, as it first reaches the GPU; a deforming
+* mesh's rest shape is its topology's, built when it was added. A drawn-only mesh is in the render format already, and
+* is never a mirror (big rough scenery).
+*/
+void Application::uploadNextMesh() {
+    const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
+
+    if (assets.isDrawnOnly(next)) {
+        const IndexedMesh& drawn = assets.getDrawnMesh(next);
+        vertexEntriesByMesh.push_back(renderer.uploadMesh(drawn));
+        boundsByMesh.push_back(indexedMeshBounds(drawn));
+        flatFacesByMesh.push_back({});
+        return;
+    }
+
+    if (assets.isDeforming(next)) {
+        vertexEntriesByMesh.push_back(renderer.uploadMesh(assets.getDeformingTopology(next).rest, true));
+    } else {
+        vertexEntriesByMesh.push_back(renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next))));
+    }
+
+    boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
+    flatFacesByMesh.push_back(assets.isDeforming(next) ? std::vector<FlatFace>{} : findFlatFaces(assets.getMesh(next)));
+}
+
 void Application::prepareNewResources() {
     while (renderer.getMeshCount() < assets.getMeshCount()) {
-        const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
-        // Convert to the render format once, when the mesh first reaches the GPU; a deforming mesh's rest shape is its
-        // topology's, built when it was added.
-        // A drawn-only mesh is in the render format already, and is never a mirror (big rough scenery).
-        if (assets.isDrawnOnly(next)) {
-            const IndexedMesh& drawn = assets.getDrawnMesh(next);
-            vertexEntriesByMesh.push_back(renderer.uploadMesh(drawn));
-            boundsByMesh.push_back(indexedMeshBounds(drawn));
-            flatFacesByMesh.push_back({});
-            continue;
-        }
-
-        if (assets.isDeforming(next)) {
-            vertexEntriesByMesh.push_back(renderer.uploadMesh(assets.getDeformingTopology(next).rest, true));
-        } else {
-            vertexEntriesByMesh.push_back(renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next))));
-        }
-        boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
-        flatFacesByMesh.push_back(assets.isDeforming(next) ? std::vector<FlatFace>{} : findFlatFaces(assets.getMesh(next)));
+        uploadNextMesh();
     }
 
     const std::size_t firstTexture = renderer.getTextureCount();
@@ -389,18 +432,43 @@ void Application::prepareNewResources() {
     if (const double seconds = profilerSeconds() - cookStart; compress && seconds > 0.5) {
         SDL_Log("%llu textures compressed or read from %s in %.1f s", static_cast<unsigned long long>(newTextures), textureCacheFolder, seconds);
     }
+
+    if (!startupReported) {
+        startup.lap("textures", profilerSeconds());
+    }
+}
+
+/*
+* The first frame builds every still object's draws and bakes the sky visibility round the camera (seconds of CPU in
+* the forest): both behind the loading screen, on a thread of its own, exactly as render() would have done them here.
+*/
+FrameDescription Application::describeFirstFrame(float alpha, float frameSeconds) {
+    std::optional<FrameDescription> frame;
+    workBehindLoadingScreen(loadingSceneTitle, [&] {
+        frame.emplace(describeFrame(alpha, frameSeconds));
+        renderer.bakeSkyVisibilityAhead(*frame, settings.render);
+    });
+    return std::move(*frame);
 }
 
 /*
 * Draw the scene. alpha (0..1) is how far real time has moved past the last tick, and each object is drawn that far between its previous and current transform.
 */
 void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
+    if (!startupReported) {
+        startup.lap("first update", profilerSeconds());
+    }
+
     prepareNewResources();
     const double sceneStart = profilerSeconds();
 
     Camera& camera = game.getCamera();
-    FrameDescription frame = describeFrame(alpha, frameSeconds);
+    FrameDescription frame = startupReported ? describeFrame(alpha, frameSeconds) : describeFirstFrame(alpha, frameSeconds);
     const double debugStart = profilerSeconds();
+
+    if (!startupReported) {
+        startup.lap("first scene and sky bake", debugStart);
+    }
 
     // Debug shapes are gathered fresh every frame, so anything not added again disappears.
     debugDraw.clear();
@@ -454,6 +522,26 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     const bool rendered = renderer.render(frame, settings.render, ui);
     giveBackStillDraws(frame);
     profiler.record(renderSection, profilerSeconds() - renderStart);
+
+    // The start ends with the first frame drawn: one line in the log saying where its time went.
+    if (!startupReported) {
+        window.reveal(); // in case no loading frame could be drawn
+        startup.lap("first frame drawn", profilerSeconds());
+        SDL_Log("%s", startup.describe("Start-up").c_str());
+
+        // The first frame's renderer by stage (render/cpu_timing.h), where its one-off work shows.
+        StartupClock stages{0.0};
+        const CpuStageTimings& first = renderer.getLastFrameStats().cpu;
+        double reached = 0.0;
+
+        for (std::size_t stage = 0; stage < cpuStageCount; ++stage) {
+            reached += first.seconds[stage];
+            stages.lap(cpuStageName(static_cast<CpuStage>(stage)), reached);
+        }
+
+        SDL_Log("%s", stages.describe("First frame's renderer").c_str());
+        startupReported = true;
+    }
 
     // What finished frames left of the GPU cloths, for picking and grabbing them.
     applyClothReadbacks(world, renderer.takeClothReadbacks());

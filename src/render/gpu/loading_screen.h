@@ -39,8 +39,10 @@ struct LoadingScreenLayout {
     ScreenRect barFill;
 };
 
-// The screen's titles: while the game builds its world, then while the pipelines are built.
+// The screen's titles: while the game builds its world, while the meshes go up and the first frame is prepared, and
+// while the pipelines are built.
 inline constexpr std::string_view loadingWorldTitle = "LOADING THE WORLD";
+inline constexpr std::string_view loadingSceneTitle = "PREPARING THE SCENE";
 inline constexpr std::string_view loadingShadersTitle = "BUILDING SHADERS";
 
 // Frames the sliding block takes from one end of the bar to the other: about a second and a half at the screen's 30 a second.

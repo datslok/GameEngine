@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/job_system.h"
+#include "core/profiler.h"
+#include "core/startup_clock.h"
 #include "math/mat4.h"
 #include "render/gpu/bloom.h"
 #include "render/gpu/clusters.h"
@@ -140,6 +142,13 @@ public:
     */
     bool drawLoadingScreen(const LoadingProgress& progress);
 
+    /*
+    * The sky visibility bake render() starts with, done ahead of it for the first frame (seconds of CPU at start). It
+    * touches only the grid's CPU copy and its own threads, so it may run on another thread while this one draws only
+    * the loading screen; render() then finds little left to bake.
+    */
+    void bakeSkyVisibilityAhead(const FrameDescription& description, const RenderSettings& settings);
+
     // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
     // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU. A frame
     // with light probes is drawn probeWarmUpFrames times first, so the probes have gathered their light and bounces.
@@ -217,6 +226,9 @@ public:
 private:
     SDL_Window* window = nullptr;
     JobSystem& jobs;
+
+    // Times the constructor's steps from before Streamline and the device (the log's "Renderer start" line).
+    StartupClock creationClock{profilerSeconds()};
 
     // NVIDIA's Streamline, for DLSS (render/vulkan/vulkan_dlss.h): it must start before the device, which turns on the
     // extensions it asks for, and stop before the device goes (the destructor stops it first).

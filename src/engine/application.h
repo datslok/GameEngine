@@ -6,6 +6,7 @@
 #include "core/fixed_timestep.h"
 #include "core/job_system.h"
 #include "core/profiler.h"
+#include "core/startup_clock.h"
 #include "engine/debug_views.h"
 #include "engine/debug_ui.h"
 #include "ecs/world.h"
@@ -26,8 +27,10 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // Whether the engine loads the settings the debug UI saved (settings.cfg). Golden image captures ignore them, so every
@@ -110,9 +113,21 @@ private:
     // The engine's commands, those of engine/engine_commands.h and the ones needing the window and GPU.
     void registerCommands();
 
-    // The game's onInit on a thread of its own behind the loading screen ("LOADING THE WORLD", a sliding block), the
-    // window answering meanwhile; closing it quits once the build ends. Rethrows what onInit threw.
-    void loadWorld();
+    // One loading screen frame (render/gpu/loading_screen.h), the window shown with the first.
+    void drawLoadingFrame(LoadingProgress progress);
+
+    // Work on a thread of its own behind the loading screen (title, a sliding block), the window answering meanwhile;
+    // closing it quits once the work ends. Rethrows what the work threw.
+    void workBehindLoadingScreen(std::string_view title, const std::function<void()>& work);
+
+    // Every mesh up to the GPU before the first frame, a slice between loading frames, counted ("PREPARING THE SCENE").
+    void uploadMeshesBehindLoadingScreen();
+
+    // The next mesh the renderer lacks, uploaded with its bounds and flat faces.
+    void uploadNextMesh();
+
+    // The first frame's describeFrame and sky bake, behind the loading screen.
+    FrameDescription describeFirstFrame(float alpha, float frameSeconds);
 
     /*
     * Shows the loading screen (VulkanRenderer::drawLoadingScreen) until every pipeline the renderer asked for is built,
@@ -137,6 +152,12 @@ private:
     CommandReply stats();
 
     Game& game;
+
+    // Times the start from before the settings to the first frame drawn, written to the log then (the "Start-up" line);
+    // first, so it is started before anything else is built.
+    StartupClock startup;
+    bool startupReported = false;
+    std::uint64_t loadingFrame = 0; // loading screen frames drawn, which move its sliding block
 
     // Before the window and renderer, so the saved settings are loaded before anything is built from them (GPU validation and the
     // timestep are read once). defaultSettings is what they were before loading.

@@ -36,7 +36,7 @@ namespace {
         assert(blockTextWidth("", 2) == 0);
 
         // Every character the loading screen writes has a glyph.
-        for (const char character : std::string{std::string(loadingShadersTitle) + std::string(loadingWorldTitle) + "0123456789/"}) {
+        for (const char character : std::string{std::string(loadingShadersTitle) + std::string(loadingWorldTitle) + std::string(loadingSceneTitle) + "0123456789/"}) {
             if (character != ' ') {
                 assert(!blockText(std::string(1, character), 0, 0, 1).empty());
             }

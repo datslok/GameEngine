@@ -30,6 +30,12 @@ public:
     // For the renderer, which draws into this window.
     SDL_Window* getSdlWindow() const;
 
+    /*
+    * The window is made hidden and shown here, once something is drawn in it (the loading screen's first frame), so the
+    * seconds the renderer takes to start show no black window. Does nothing after the first time, or for --hidden.
+    */
+    void reveal();
+
     void toggleFullscreen();
 
     // Mouse look hides and captures the cursor; otherwise a visible cursor is confined to the window (MOBA).
@@ -53,6 +59,7 @@ private:
 
     SDL_Window* window = nullptr;
     bool videoInitialized = false;
+    bool revealPending = false; // made hidden, to be shown by reveal()
 
     bool mouseLookEnabled = true;
     bool debugUiOpen = false;

@@ -53,3 +53,23 @@ void runWhileWaiting(const std::function<void()>& work, const std::function<void
         std::rethrow_exception(workError);
     }
 }
+
+std::size_t stepsWithinBudget(std::size_t done, std::size_t total, double budgetSeconds, const std::function<double()>& clock,
+                              const std::function<void(std::size_t)>& step) {
+    if (done >= total) {
+        return done;
+    }
+
+    const double start = clock();
+
+    while (done < total) {
+        step(done);
+        ++done;
+
+        if (clock() - start >= budgetSeconds) {
+            break;
+        }
+    }
+
+    return done;
+}
