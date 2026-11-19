@@ -44,15 +44,19 @@ VulkanFog::VulkanFog(const VulkanDevice& device, ImmediateCommands& uploads, VkS
     light.shader = "assets/shaders/fog_light.comp.spv";
     light.sharedSets = {texturesLayout, frameLayout};
     light.sampledImages = 1;
-    light.storageImages = 1;
+    light.storageImages = 2;
     lightPipeline = std::make_unique<ComputePipeline>(device, light);
 
     ComputePipelineDescription integrate = light;
     integrate.shader = "assets/shaders/fog_integrate.comp.spv";
+    integrate.sampledImages = 2;
+    integrate.storageImages = 1;
     integratePipeline = std::make_unique<ComputePipeline>(device, integrate);
 
     ComputePipelineDescription apply = light;
     apply.shader = "assets/shaders/fog_apply.comp.spv";
+    apply.sampledImages = 1;
+    apply.storageImages = 1;
     apply.pushConstantBytes = sizeof(GpuFogPicturePass);
     applyPipeline = std::make_unique<ComputePipeline>(device, apply);
 
@@ -83,6 +87,7 @@ void VulkanFog::ensureGrid(const FogSettings& settings) {
     const VkImageUsageFlags usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     lighting[0] = fogVolume(device, across, down, deep, usage, "Fog lighting");
     lighting[1] = fogVolume(device, across, down, deep, usage, "Fog lighting");
+    fastLighting = fogVolume(device, across, down, deep, usage, "Fog fast lights");
     integrated = fogVolume(device, across, down, deep, usage, "Fog integrated");
     width = settings.gridWidth;
     height = settings.gridHeight;
@@ -131,8 +136,9 @@ void VulkanFog::bindScene(VkCommandBuffer commands, const ComputePipeline& pipel
 * The barriers: this frame's lighting grid from being read last frame (as the history, or by the integration) to being
 * written, its old contents discarded (every froxel is written); last frame's, already readable by compute, read as the
 * history (a grid never written yet is undefined, but the first frame keeps none of it: its weight is 0, and it is
-* moved to readable so the descriptor's layout holds). Then the lighting grid to readable and the integrated grid from
-* being read last frame (by the picture pass and glass) to being written, and after it readable by both.
+* moved to readable so the descriptor's layout holds). The fast lights' grid from being read by last frame's integration
+* to being written, its contents discarded (every froxel is written). Then both lighting grids to readable and the
+* integrated grid from being read last frame (by the picture pass and glass) to being written, and after it readable by both.
 */
 void VulkanFog::light(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frameSet) {
     current = 1 - current;
@@ -144,10 +150,12 @@ void VulkanFog::light(VkCommandBuffer commands, FrameDescriptors& descriptors, V
     }
 
     written.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
+    fastLighting.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
-    const std::array<ComputeBinding, 2> lightBindings{
+    const std::array<ComputeBinding, 3> lightBindings{
         sampledBinding(linear, history.getView()),
         storageImageBinding(written.getView()),
+        storageImageBinding(fastLighting.getView()),
     };
 
     bindScene(commands, *lightPipeline, textures, frameSet);
@@ -159,10 +167,12 @@ void VulkanFog::light(VkCommandBuffer commands, FrameDescriptors& descriptors, V
                   workgroupCount(deep, FOG_LIGHT_GROUP_SIDE));
 
     written.transition(commands, ImageState::ComputeRead);
+    fastLighting.transition(commands, ImageState::ComputeRead);
     integrated.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
-    const std::array<ComputeBinding, 2> integrateBindings{
+    const std::array<ComputeBinding, 3> integrateBindings{
         sampledBinding(nearest, written.getView()),
+        sampledBinding(nearest, fastLighting.getView()),
         storageImageBinding(integrated.getView()),
     };
 

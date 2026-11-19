@@ -62,6 +62,8 @@ private:
     std::unique_ptr<ComputePipeline> applyPipeline;
 
     std::array<VulkanImage, 2> lighting;
+    // The fast lights' light, lit fresh each frame (never a history), added by the integration.
+    VulkanImage fastLighting;
     VulkanImage integrated;
     VulkanImage clear;
     int current = 0;

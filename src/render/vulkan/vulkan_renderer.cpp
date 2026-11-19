@@ -1839,8 +1839,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Volumetric fog (render/gpu/volumetric_fog.h), its grid readied before the scene set points at it: the grid's camera
     // is the camera without the jitter (the froxels' own samples move instead), its samples turned every frame.
-    const GpuFog frameFog = fog->prepare(description.lighting.fogLayers, settings.fog, motionViewProjection, cameraOrigin, !probes.empty(), memoryFrameNumber,
-                                         camera.getFarPlane());
+    GpuFog frameFog = fog->prepare(description.lighting.fogLayers, settings.fog, motionViewProjection, cameraOrigin, !probes.empty(), memoryFrameNumber,
+                                   camera.getFarPlane());
+    // The fast lights (the flashlight) lit fresh outside the fog's history, so it does not trail behind them.
+    markFastFogLights(frameFog, lights.fastPoints, lights.fastSpots, settings.fog);
 
     // The wind force field (render/gpu/wind.h): its windows round the camera and the frame's time, before the scene set
     // is written with its record.

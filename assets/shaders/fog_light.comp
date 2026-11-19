@@ -10,7 +10,9 @@
 * much as the air sees the sky), through each layer's albedo and phase function weighed by its share of the
 * extinction there; the directional lights dimmed by the fog above the froxel (fogSunThrough). Last frame's grid, read where the froxel's middle was then (with
 * the camera still its own texel, nothing of its neighbours), keeps the history weight's share, so the frames' samples
-* average into a smooth grid.
+* average into a smooth grid. Lights marked fast (the flashlight; fogLightIsFast) stay out of it: lit fresh at the
+* froxel's middle, unjittered so they do not flicker, into a grid of their own the integration adds, so the fog does not
+* trail behind them.
 */
 #include "render/gpu/shader_shared.h"
 #include "lighting.glsl"
@@ -36,6 +38,7 @@ layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
 
 layout(set = 2, binding = 0) uniform sampler3D history;                // last frame's grid, filtered
 layout(set = 2, binding = 1, rgba16f) uniform writeonly image3D lighting; // rgb the scattered light, a the extinction
+layout(set = 2, binding = 2, rgba16f) uniform writeonly image3D fastLighting; // rgb the fast lights' scattered light, fresh
 
 // One point light's light scattered towards the eye at a point in the air; nothing beyond its range.
 vec3 pointLightInAir(int i, vec3 position, vec3 viewDirection, vec4 shares) {
@@ -125,6 +128,13 @@ void main() {
     vec4 shares = fogMediaShares(frameFog.media, height, distance);
     vec3 light = vec3(0.0);
 
+    // The fast lights' point: the froxel's middle, the same every frame.
+    vec3 middleCoordinate = fogFroxelCoordinate(froxel, size, vec3(0.0));
+    vec3 middle = fogVolumePoint(middleCoordinate, frameFog.inverseViewProjection, viewForward.xyz, range);
+    vec3 middleView = normalize(fogVolumePoint(vec3(middleCoordinate.xy, 1.0), frameFog.inverseViewProjection, viewForward.xyz, range));
+    vec4 middleShares = fogMediaShares(frameFog.media, middle.y + cameraOrigin.y, length(middle));
+    vec3 fast = vec3(0.0);
+
     for (int i = 0; i < counts.x; ++i) {
         vec3 irradiance = directional[i].radiance.rgb * fogSunThrough(height, directional[i].toLight.xyz);
         int tile = directional[i].shadowTile;
@@ -148,7 +158,13 @@ void main() {
             while (bits != 0u) {
                 int bit = findLSB(bits);
                 bits &= bits - 1u;
-                light += pointLightInAir(word * 32 + bit, position, viewDirection, shares);
+                int slot = word * 32 + bit;
+
+                if (fogLightIsFast(slot, false)) {
+                    fast += pointLightInAir(slot, middle, middleView, middleShares);
+                } else {
+                    light += pointLightInAir(slot, position, viewDirection, shares);
+                }
             }
         }
 
@@ -158,16 +174,30 @@ void main() {
             while (bits != 0u) {
                 int bit = findLSB(bits);
                 bits &= bits - 1u;
-                light += spotLightInAir(word * 32 + bit, position, viewDirection, shares);
+                int slot = word * 32 + bit;
+
+                if (fogLightIsFast(slot, true)) {
+                    fast += spotLightInAir(slot, middle, middleView, middleShares);
+                } else {
+                    light += spotLightInAir(slot, position, viewDirection, shares);
+                }
             }
         }
     } else {
         for (int i = 0; i < counts.y; ++i) {
-            light += pointLightInAir(i, position, viewDirection, shares);
+            if (fogLightIsFast(i, false)) {
+                fast += pointLightInAir(i, middle, middleView, middleShares);
+            } else {
+                light += pointLightInAir(i, position, viewDirection, shares);
+            }
         }
 
         for (int i = 0; i < counts.z; ++i) {
-            light += spotLightInAir(i, position, viewDirection, shares);
+            if (fogLightIsFast(i, true)) {
+                fast += spotLightInAir(i, middle, middleView, middleShares);
+            } else {
+                light += spotLightInAir(i, position, viewDirection, shares);
+            }
         }
     }
 
@@ -184,4 +214,5 @@ void main() {
     }
 
     imageStore(lighting, froxel, froxelLight);
+    imageStore(fastLighting, froxel, vec4(fast, 0.0));
 }

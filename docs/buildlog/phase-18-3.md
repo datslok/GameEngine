@@ -50,3 +50,10 @@
   - **Strips as geometry:** 1.5 m bars on the major fins, so they stay about a pixel at 1.5 km; emissive, live brightness.
   - **Floods as real spot lights (the user's choice over a painted glow):** 18 unshadowed spots on the ground before the glacis and on the ledges, so the fins catch the light and the slots stay dark; cost grows with lights x the pixels they reach.
   - **`GpuMaterial` 288 to 320 bytes:** the windows' two colours and pitch; the strip's slot in the unused `groundSlots.w`.
+- `fog-fast-lights` (Nov 20 2026): the fog stops trailing behind the flashlight (research `docs/research/FOGHISTORY.md`)
+  - **Cause:** each froxel keeps 90 % of last frame's light, so a moving light settles over about ten frames, a few tenths of a second at the forest's frame rate.
+  - **What shipped engines do:** the same blend (0.86-0.95) and accept the trail; Unreal and Godot document turning such lights out of the fog; Unity's shader has a to-do to keep dynamic lights out of the history; a per-froxel clamp only in a Frostbite thesis.
+  - **Chosen (option C, the user's choice):** lights flagged fast lit fresh each frame into a grid of their own, added by the integration; the history keeps only the rest. A mask of fast slots in the fog record (`markFastFogLights`; `GpuFog` 400 to 560 bytes); a setting to compare (`freshFastLights`).
+  - **At the froxel's middle, unjittered:** without the history's averaging a jittered sample would flicker; the middle is the same every frame, so the beam's edge is only as fine as the froxels.
+  - **Cost:** a second RGBA16F grid (160 x 90 x 64, 7.4 MB), one more texel read a froxel in the integration; the fast lights' shading the same as before.
+  - **Left for later:** other moving lights (searchlights, sweeping floods) still trail; a 6-neighbour clamp of the history if they do (ROADMAP).
