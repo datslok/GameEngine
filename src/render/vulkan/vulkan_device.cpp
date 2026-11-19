@@ -135,7 +135,7 @@ void VulkanDevice::createInstance(bool validation, const std::vector<std::string
 /*
 * A GPU qualifies if it runs Vulkan 1.3, can present to the window (when there is one), and has the features the renderer uses: dynamic
 * rendering (draw into images named when a pass begins, no render pass objects), synchronization2 (the clearer barrier
-* API), anisotropic filtering, depth clamping (SDL_GPU's default, kept so the pictures match: depths past the near
+* API), anisotropic filtering, 64-bit whole numbers in shaders, depth clamping (SDL_GPU's default, kept so the pictures match: depths past the near
 * and far planes are clamped instead of clipped), storage images of two-channel formats (the light probes' distances,
 * RG16F, written by compute), and descriptor indexing for bindless textures: one array of every texture,
 * indexed per object in the shader (runtimeDescriptorArray, nonuniform indexing), with slots that may be empty
@@ -159,6 +159,8 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     // triangle.vert's gl_ClipDistance: a mirror's picture cuts what is behind the mirror (render/gpu/planar_reflection.h).
     features.shaderClipDistance = VK_TRUE;
     features.shaderStorageImageExtendedFormats = VK_TRUE;
+    // 64-bit whole numbers in shaders: planting.glsl's hash is the CPU's 64-bit one, so the GPU plants what it does.
+    features.shaderInt64 = VK_TRUE;
 
     VkPhysicalDeviceVulkan13Features features13{};
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;

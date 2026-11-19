@@ -439,6 +439,7 @@ void ForestGame::buildGround(World& world, AssetManager& assets) {
     heights->grids.push_back(makeTerrainHeightGrid(forestTerrainCentre, rings[1].outerHalfSize, 4.0f * nearSpacing, forestHeight, getJobs()));
     land.landHalfSize = rings.back().outerHalfSize;
     land.heights = heights;
+    groundHeights = heights;
     land.centre = forestTerrainCentre;
     land.leafSize = nearSpacing * static_cast<float>(TERRAIN_GRID_QUADS);
     land.levels = 1;
@@ -666,15 +667,14 @@ void ForestGame::buildPlantingMaps() {
 * static yet: the trunks and leaves join the sky visibility grid's rays with the forest floor.
 */
 void ForestGame::buildTrees(World& world, AssetManager& assets) {
-    // The canopy trees share the emergents' lattice (each takes the thresholds above theirs) while their cells match.
-    const bool shareLattice = treeSettings.planting.footprintMetres == emergentSettings.planting.footprintMetres;
-    emergentPlacements = placeTrees(emergentSettings, valleyMaps, {}, emergentPlaceSeed);
-    treePlacements = placeTrees(treeSettings, valleyMaps, standingCrowns(emergentPlacements, emergentSettings), canopyPlaceSeed,
-                                shareLattice ? &emergentSettings.planting : nullptr);
-    std::vector<StandingCrown> bigTrunks = standingTrunks(treePlacements, midTrunkClearance);
-    const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, midTrunkClearance);
-    bigTrunks.insert(bigTrunks.end(), emergentTrunks.begin(), emergentTrunks.end());
-    midPlacements = placeTrees(midSettings, valleyMaps, bigTrunks, midPlaceSeed);
+    // Every layer at once (forest_planting.h), on the land drawn: the understorey and the palms are built after the trees.
+    const ForestPlanting planted =
+        plantThePatch(ForestSpecies{emergentSettings, treeSettings, midSettings, understoreySettings, palmSettings}, valleyMaps, *groundHeights, getJobs());
+    emergentPlacements = planted.emergents;
+    treePlacements = planted.canopy;
+    midPlacements = planted.mid;
+    understoreyPlacements = planted.understorey;
+    palmPlacements = planted.palms;
 
     if (treePlacements.empty() && emergentPlacements.empty() && midPlacements.empty()) {
         return;
@@ -726,11 +726,6 @@ namespace {
 
         return mesh;
     }
-
-    // The trunks the understorey keeps clear of, each as far round as its buttresses reach (the big trees') or its
-    // trunk (the mid layer's).
-    constexpr float bigTrunkReach = 2.0f;
-    constexpr float midTrunkReach = 0.4f;
 
     // How far a leaf card's outline stands out from its twig's texels, as a share of the cell: 4 texels of a 1024 cell
     // (the mips' blur reaches past a leaf's edge).
@@ -812,18 +807,7 @@ namespace {
     }
 }
 
-std::vector<StandingCrown> ForestGame::floorTrunks() const {
-    std::vector<StandingCrown> trunks = standingTrunks(treePlacements, bigTrunkReach);
-    const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, bigTrunkReach);
-    const std::vector<StandingCrown> midTrunks = standingTrunks(midPlacements, midTrunkReach);
-    trunks.insert(trunks.end(), emergentTrunks.begin(), emergentTrunks.end());
-    trunks.insert(trunks.end(), midTrunks.begin(), midTrunks.end());
-    return trunks;
-}
-
 void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
-    understoreyPlacements = placeUnderstorey(understoreySettings, valleyMaps, floorTrunks());
-
     if (understoreyPlacements.empty()) {
         return;
     }
@@ -892,8 +876,6 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
 * meshes added) and placed; every palm of a variant shares its meshes, so each is one instanced draw.
 */
 void ForestGame::buildPalms(World& world, AssetManager& assets) {
-    palmPlacements = placePalms(palmSettings, valleyMaps, floorTrunks());
-
     if (palmPlacements.empty()) {
         return;
     }

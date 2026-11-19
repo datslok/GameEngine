@@ -93,10 +93,10 @@ std::vector<float> makeBlueNoise(int size, std::uint32_t seed) {
     // A random tenth of the texels: a shuffle driven by the seed.
     std::vector<int> order(static_cast<std::size_t>(texels));
     std::iota(order.begin(), order.end(), 0);
-    std::uint64_t state = mixBits(seed + 0x9e3779b97f4a7c15ull);
+    std::uint64_t state = mixBits(seed + goldenGamma);
 
     for (int i = texels - 1; i > 0; --i) {
-        state = mixBits(state + 0x9e3779b97f4a7c15ull);
+        state = mixBits(state + goldenGamma);
         std::swap(order[static_cast<std::size_t>(i)], order[static_cast<std::size_t>(state % static_cast<std::uint64_t>(i + 1))]);
     }
 

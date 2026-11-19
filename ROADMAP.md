@@ -339,7 +339,12 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] The jungle patch along the path: canopy and emergents (`jungle-canopy`), midstorey (`jungle-midstorey`), scanned understorey (`understorey-scans`), palms (`jungle-palms`), lianas, climbers, epiphytes (`jungle-vines`, `jungle-climbers`, `jungle-epiphytes`), light through leaves (`leaf-transmission`), wind (below)
   - [ ] The rest of the valley, keeping the sight lines to the Monolith and the Ring (the user's order, Nov 19 2026: after the structures' stage 5, before their stages 6-14; research and the user's choices in `docs/research/VALLEY.md`); each stage measured before the next
     - [x] 1. Density maps a layer over floor, walls and rim, from the terrain, with ecotopes, noise gaps and sight corridors capping the canopy; the patch rebuilt from them (`valley-maps`)
-    - [ ] 2. Plants made on the GPU round the camera from the maps, by cells, into the GPU scene's records (Horizon's placement; design explained first) (`gpu-placement`)
+    - [ ] 2. Plants made on the GPU round the camera from the maps, by cells, every layer (Horizon's placement; the user's choice of the GPU deciding, Nov 19 2026; design in `docs/research/VALLEY.md`) (`gpu-placement`)
+      - [x] a. The placement maths as a `.glsl` library mirrored in C++, exact on both (`precise`, reciprocals and the axis from the CPU, the 64-bit hash); every layer planted a box at a time, a box alone the same as the whole (`gpu-placement`)
+      - [ ] b. Trees by cells on the GPU: the maps on the GPU, a record a plant, a part table a variant, cells made and dropped round the camera, culled a plant a view (mirrored), the vertex shaders' placed kind; the patch's tree entities retired; `placement-compare` (the GPU's cells against the CPU's)
+      - [ ] c. Shadows, velocity and sway for placed plants; shadow tiles redrawn by the cells that changed
+      - [ ] d. Palms and understorey on the GPU; the near trees' CPU mirror; lianas per near cell from it
+      - [ ] e. The whole valley: radii and cells a frame, measured (F4)
     - [ ] 3. The far tier: one impostor a tree past about 1 km, casting into the far shadow map (`impostor-fields`)
     - [ ] 4. The canopy in the terrain's colour and normal past a few km (`far-canopy`)
     - [ ] 5. The pillars' and islands' tops planted from their own maps (`valley-tops`)

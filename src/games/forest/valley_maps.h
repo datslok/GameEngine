@@ -6,6 +6,7 @@
 #include "games/forest/valley_shapes.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
+#include "scene/planting_maps.h"
 
 #include <array>
 #include <cstdint>
@@ -15,8 +16,8 @@
 * The valley's planting maps (ROADMAP phase 18, the rest of the valley's stage 1, docs/research/VALLEY.md): what every
 * layer of plants is planted from, in place of darts thrown one by one. Horizon Zero Dawn's way: only maps are stored;
 * each layer's density at a place is a small function of them, and an ordered dither turns the density into plants, the
-* same at a place whatever order or wherever it is asked, so any cell of the valley can be planted alone (on the CPU now,
-* on the GPU round the camera in stage 2).
+* same at a place whatever order or wherever it is asked, so any cell of the valley can be planted alone (scene/planting_maps.h,
+* the CPU's and the GPU's alike).
 *
 * - Ecotopes: how much of a place is floor jungle, wall slope, rim forest or bare (the clearing, the meadow, cliffs), from
 *   the land's shape across the valley and its slope. A layer's density is its plants a hectare in each, weighted.
@@ -25,6 +26,8 @@
 * - Canopy caps: the lowest a sight line passes over a place, for each layer's reach, so crowns stay under the lines from
 *   the designed viewpoints to the Monolith and the Ring (Ghost of Tsushima's cleared landmarks' views).
 * - Gaps: fractal noise, where the big trees thin out and palms and the understorey take the light (treefall gaps).
+* - The path: its distance, which a layer's density blends by, and its straight pieces, which a layer clears exactly.
+* - The axis: its x at each row's middle, read between them in straight lines (no sine on the GPU).
 */
 
 // A line of sight from somewhere walked to a landmark.
@@ -115,41 +118,14 @@ inline constexpr float ringFootShare = 1.5f;
 // The obstacles: the pillars, the Ring's two feet, and each tower's footprint (its widest section's half diagonal).
 std::vector<ValleyObstacle> forestObstacles(const std::vector<PillarPlacement>& pillars, const std::vector<BastionShape>& towers);
 
-// The farthest the clearance map tells apart, in metres: beyond, a place is simply far from every obstacle.
-inline constexpr float farthestClearance = 60.0f;
-
-// The canopy caps store heights in decimetres above -capFloorMetres; noCap where no line passes.
-inline constexpr float capFloorMetres = 1000.0f;
-inline constexpr std::uint16_t noCap = 0xffff;
-
 /*
-* One canopy cap map: over the lines' footprint grown by the largest reach, on a grid square to the world's axes, each
-* texel the lowest any line passes within reach of its middle and half a texel's diagonal more, so of anywhere in it
-* (rounded down, in decimetres above -capFloorMetres; noCap where none does).
-*/
-struct CanopyCap {
-    float reach = 0.0f;
-    Vec2 origin;
-    int columns = 0;
-    int rows = 0;
-    std::vector<std::uint16_t> heights;
-};
-
-/*
-* The maps over the extent, on a grid across the valley's axis: column c's middle at u = -halfWidth + (c + 0.5) texel
-* across the axis (x = valleyAxis(z) + u), row r's at z = northmost + (r + 0.5) texel. Each ecotope's weight in 0..255
-* (summing to 255), each clearance in decimetres (rounded down, at most farthestClearance), and one canopy cap a reach.
-* texelReach is the farthest a place lies from the middle of its texel, in metres across the ground (the axis winds, so
-* more than half a texel's diagonal): what the clearance read at a place gives away to stay a lower bound.
+* The valley's maps (scene/planting_maps.h's PlantingMaps, read there) and the settings they were built with: on a grid
+* across the valley's axis, the axis at each row's middle; the ecotopes; the gaps; the path's distance and pieces; the
+* clearance from the obstacles; one canopy cap a reach from the sight lines.
 */
 struct ValleyMaps {
     ForestPlantingSettings settings;
-    int columns = 0;
-    int rows = 0;
-    float texelReach = 0.0f;
-    std::vector<std::array<std::uint8_t, ecotopeCount>> ecotopes;
-    std::vector<std::uint16_t> clearance;
-    std::vector<CanopyCap> caps;
+    PlantingMaps planting;
 };
 
 /*
@@ -160,45 +136,21 @@ struct ValleyMaps {
 EcotopeWeights landEcotopes(const ForestPlantingSettings& settings, float x, float z, float slope);
 
 /*
-* The maps built on every core (each row its own job, so the same whatever the order): the ecotopes from the land's height
-* and slope at each texel, the clearance from the obstacles, one canopy cap for each reach in capReaches from the sight
-* lines.
+* The maps built on every core (each row its own job, so the same whatever the order): the axis at each row, the gaps
+* from their noise and the path's distance at each texel, the ecotopes from the land's height and slope, the
+* clearance from the obstacles, one canopy cap for each reach in capReaches from the sight lines.
 */
 ValleyMaps buildValleyMaps(const ForestPlantingSettings& settings, const std::vector<ValleyObstacle>& obstacles,
                            const std::vector<SightLine>& lines, const std::vector<float>& capReaches, JobSystem& jobs);
 
-// The ecotopes at a place, blended between the four texels round it; all bare outside the extent.
+// The ecotopes at a place, blended between the four texels round it, as shares summing to 1; all bare outside the maps.
 EcotopeWeights valleyEcotopes(const ValleyMaps& maps, float x, float z);
 
-// A lower bound on how far a place is from the nearest obstacle's edge (farthestClearance or more: far from all).
-float valleyClearance(const ValleyMaps& maps, float x, float z);
-
-/*
-* The lowest a sight line passes within reach of a place (a lower bound, in metres; very high where none does), from the
-* cap of the smallest reach at least reach. Throws when no cap reaches that far (the maps were built without it).
-*/
-float valleyCap(const ValleyMaps& maps, float reach, float x, float z);
-
-// How much of a gap a place is (0..1).
+// How much of a gap a place is (0..1), from the noise the gap map is built from.
 float valleyGap(const ForestPlantingSettings& settings, float x, float z);
 
-// A layer's share of its density at a distance from the path's centre line: 1 within nearPathMetres, farShare past
-// farPathMetres, a straight blend between (its clearance is kept at each plant's own place, by ditheredCells).
-float pathDensityShare(const PlantingLayer& layer, float pathDistance);
-
-/*
-* The share of a layer's dither cells planted at a place (0..1): its plants a hectare in each ecotope weighted by the
-* ecotope's share, times a cell's area, thinned or thickened in the gaps and by the path.
-*/
-float layerShare(const PlantingLayer& layer, const ValleyMaps& maps, float x, float z);
-
-/*
-* The ordered dither's threshold of a cell of a lattice (0..1): Roberts' R2 sequence over the cells, fract(column a1 +
-* row a2) with a1, a2 from the plastic number, in 32-bit whole numbers so every machine (and a shader) gets the same.
-* Any range of thresholds is spread evenly over the cells, so the cells under a share are about that share of them and
-* far apart where it is small.
-*/
-float ditherThreshold(int column, int row);
+// A layer's density for the planting (scene/planting_maps.h).
+PlantingDensity plantingDensity(const PlantingLayer& layer);
 
 // The region a layer is planted in now: within spread of the valley's axis, from northmost to southmost.
 struct PlantingRegion {
@@ -207,33 +159,6 @@ struct PlantingRegion {
     float spread = 0.0f;
 };
 
-/*
-* A dither cell planted: its lattice cell, its plant's place (x, z), its threshold, and the first of its own random
-* numbers left for its plant (forestUnitRandom(seed, firstDraw + k); the first two placed it).
-*/
-struct DitheredCell {
-    int column = 0;
-    int row = 0;
-    Vec2 place;
-    float threshold = 0.0f;
-    std::uint64_t firstDraw = 0;
-};
-
-inline constexpr std::uint64_t ditherDrawsUsed = 2;
-inline constexpr std::uint64_t ditherDrawsPerCell = 8;
-
-/*
-* A layer's cells planted over a region, in rows from the north: the lattice's cells footprintMetres square from the
-* world's origin, each planted when its threshold is under the layer's share at the cell's middle, its plant jittered
-* within the cell (jitterShare of it) by its own random numbers, kept when the plant is inside the region and clear of
-* the path. under is a layer sharing the lattice (same footprint) planted first: this one takes the band of thresholds
-* above its share, so the two never take the same cell. The same every run.
-*/
-std::vector<DitheredCell> ditheredCells(const PlantingLayer& layer, const ValleyMaps& maps, const PlantingRegion& region, std::uint64_t seed,
-                                        const PlantingLayer* under = nullptr);
-
-/*
-* Whether a plant of reach (its sphere's radius, centred over place) with its top at topHeight fits: its reach clear of
-* every obstacle, its top corridorClearance under every sight line within its reach.
-*/
-bool fitsTheMaps(const ValleyMaps& maps, const Vec2& place, float reach, float topHeight);
+// The box round a region on the ground (the axis winds, so wider than 2 spread), and whether a place is in the region.
+PlantingBox regionBox(const PlantingRegion& region);
+bool insideRegion(const PlantingRegion& region, const Vec3& foot);

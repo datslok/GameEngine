@@ -1,5 +1,7 @@
 #include "scene/terrain_heights.h"
 
+#include "scene/planting.h"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -38,14 +40,18 @@ namespace {
         return x >= grid.corner.x && x <= grid.corner.x + extent && z >= grid.corner.y && z <= grid.corner.y + extent;
     }
 
-    // The four points round a place, clamped onto the grid, interpolated by between (terrainBilinear or
-    // terrainTriangleHeight).
+    /*
+    * The four points round a place, clamped onto the grid, interpolated by between (terrainBilinear or
+    * terrainTriangleHeight). Times the spacing's reciprocal rather than over the spacing: a GPU divides less exactly
+    * than it multiplies, and the planting reads the ground on both (scene/planting.h).
+    */
     using Between = float (*)(float, float, float, float, float, float);
 
     float sampleGrid(const TerrainHeightGrid& grid, float x, float z, Between between) {
         const float last = static_cast<float>(grid.size - 1);
-        const float column = std::clamp((x - grid.corner.x) / grid.spacing, 0.0f, last);
-        const float row = std::clamp((z - grid.corner.y) / grid.spacing, 0.0f, last);
+        const float inverseSpacing = 1.0f / grid.spacing;
+        const float column = std::clamp(plantingCoordinate(x, grid.corner.x, inverseSpacing), 0.0f, last);
+        const float row = std::clamp(plantingCoordinate(z, grid.corner.y, inverseSpacing), 0.0f, last);
         const std::uint32_t left = std::min(static_cast<std::uint32_t>(column), grid.size - 2);
         const std::uint32_t top = std::min(static_cast<std::uint32_t>(row), grid.size - 2);
         const float across = column - static_cast<float>(left);

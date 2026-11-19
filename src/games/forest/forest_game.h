@@ -6,6 +6,7 @@
 #include "games/forest/bastion.h"
 #include "games/forest/drifting_rocks.h"
 #include "games/forest/forest_ground.h"
+#include "games/forest/forest_planting.h"
 #include "games/forest/forest_trees.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
@@ -27,6 +28,7 @@
 #include "scene/wind.h"
 #include "games/forest/forest_sway.h"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -329,7 +331,6 @@ private:
     void buildLianas(World& world, AssetManager& assets);
 
     // Every tree's trunk as far round as the floor's plants keep from it: the big trees' buttresses, the mid layer's trunk.
-    std::vector<StandingCrown> floorTrunks() const;
 
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
@@ -381,6 +382,7 @@ private:
     ForestValleySettings valleySettings;
     ForestPlantingSettings plantingSettings;
     ValleyMaps valleyMaps;
+    std::shared_ptr<const TerrainHeights> groundHeights; // the land drawn, which the plants stand on
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
     Atmosphere atmosphereSettings;

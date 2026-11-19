@@ -35,7 +35,6 @@ namespace {
     constexpr float leastFrontShare = 0.1f;
 
     // How far round the trunk the foot looks for the lowest ground (the buttresses' reach, at the variant's size).
-    constexpr float footReachMetres = 2.5f;
 
     // About one side of a tube every this many metres round it, between the fewest and the most.
     constexpr float tubeSideMetres = 0.15f;
@@ -127,18 +126,6 @@ namespace {
         std::array<int, 3> counts{};
         std::vector<std::vector<int>> cells;
     };
-
-    // The lowest ground under a trunk: at its foot and round it at reach metres.
-    float lowestGroundRound(float x, float z, float reach) {
-        float lowest = forestHeight(x, z);
-
-        for (int k = 0; k < viewpointsRound; ++k) {
-            const float turn = fullTurnRadians * static_cast<float>(k) / static_cast<float>(viewpointsRound);
-            lowest = std::min(lowest, forestHeight(x + reach * std::cos(turn), z + reach * std::sin(turn)));
-        }
-
-        return lowest;
-    }
 
     Vec3 eyeAt(float x, float z) {
         return Vec3{x, forestHeight(x, z) + sightEyeHeight, z};
@@ -970,115 +957,17 @@ float treeReach(const ForestTreeSettings& settings) {
     return std::max(crown.radius, crown.halfHeight) * (smallestTreeScale + treeScaleRange);
 }
 
-std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& standing,
-                                      std::uint64_t seed, const PlantingLayer* under) {
-    const int variants = std::max(settings.variants, 1);
-    std::vector<TreePlacement> candidates;
-    std::vector<DitheredCell> cells;
-
-    // Each cell's tree, kept where its crown fits the maps and its trunk is outside the crowns already standing.
-    for (const DitheredCell& cell : ditheredCells(settings.planting, maps, forestPatch, seed, under)) {
-        TreePlacement tree{
-            .foot = Vec3{cell.place.x, 0.0f, cell.place.y},
-            .scale = smallestTreeScale + treeScaleRange * forestUnitRandom(seed, cell.firstDraw),
-            .turnRadians = fullTurnRadians * forestUnitRandom(seed, cell.firstDraw + 1),
-            .variant = std::min(static_cast<int>(forestUnitRandom(seed, cell.firstDraw + 2) * static_cast<float>(variants)), variants - 1)
-        };
-        const bool underStanding = std::any_of(standing.begin(), standing.end(), [&](const StandingCrown& crown) {
-            return (cell.place - crown.foot).length() < crown.radius;
-        });
-
-        if (underStanding) {
-            continue;
-        }
-
-        tree.foot.y = lowestGroundRound(cell.place.x, cell.place.y, footReachMetres * tree.scale);
-        const float radius = placedCrownRadius(tree, settings);
-
-        if (fitsTheMaps(maps, cell.place, radius, placedCrownCentre(tree, settings).y + radius)) {
-            candidates.push_back(tree);
-            cells.push_back(cell);
-        }
-    }
-
-    if (candidates.empty()) {
-        return {};
-    }
-
-    // The cells by place on the lattice, to find each tree's neighbours.
-    int firstColumn = cells.front().column;
-    int lastColumn = firstColumn;
-    int firstRow = cells.front().row;
-    int lastRow = firstRow;
-
-    for (const DitheredCell& cell : cells) {
-        firstColumn = std::min(firstColumn, cell.column);
-        lastColumn = std::max(lastColumn, cell.column);
-        firstRow = std::min(firstRow, cell.row);
-        lastRow = std::max(lastRow, cell.row);
-    }
-
-    const int columns = lastColumn - firstColumn + 1;
-    std::vector<int> byCell(static_cast<std::size_t>(columns) * static_cast<std::size_t>(lastRow - firstRow + 1), -1);
-    const auto cellIndex = [&](int column, int row) {
-        return static_cast<std::size_t>(row - firstRow) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(column - firstColumn);
-    };
-
-    for (std::size_t i = 0; i < cells.size(); ++i) {
-        byCell[cellIndex(cells[i].column, cells[i].row)] = static_cast<int>(i);
-    }
-
-    // Each tree gives way to a closer neighbour of its own species with a lower threshold (then the earlier cell).
-    const float footprint = std::max(settings.planting.footprintMetres, 0.1f);
-    const int rings = static_cast<int>(std::ceil(settings.spacingShare * treeReach(settings) / footprint)) + 1;
-    std::vector<TreePlacement> trees;
-
-    for (std::size_t i = 0; i < cells.size(); ++i) {
-        const DitheredCell& cell = cells[i];
-        const float radius = placedCrownRadius(candidates[i], settings);
-        bool givesWay = false;
-
-        for (int row = std::max(cell.row - rings, firstRow); row <= std::min(cell.row + rings, lastRow) && !givesWay; ++row) {
-            for (int column = std::max(cell.column - rings, firstColumn); column <= std::min(cell.column + rings, lastColumn) && !givesWay; ++column) {
-                const int other = byCell[cellIndex(column, row)];
-
-                if (other < 0 || static_cast<std::size_t>(other) == i) {
-                    continue;
-                }
-
-                const DitheredCell& neighbour = cells[static_cast<std::size_t>(other)];
-                const bool first = neighbour.threshold < cell.threshold || (neighbour.threshold == cell.threshold && static_cast<std::size_t>(other) < i);
-                const float apart = (cell.place - neighbour.place).length();
-                givesWay = first && apart < settings.spacingShare * std::max(radius, placedCrownRadius(candidates[static_cast<std::size_t>(other)], settings));
-            }
-        }
-
-        if (!givesWay) {
-            trees.push_back(candidates[i]);
-        }
-    }
-
-    return trees;
-}
-
-std::vector<StandingCrown> standingTrunks(const std::vector<TreePlacement>& trees, float clearance) {
-    std::vector<StandingCrown> trunks;
-    trunks.reserve(trees.size());
-
-    for (const TreePlacement& tree : trees) {
-        trunks.push_back(StandingCrown{Vec2{tree.foot.x, tree.foot.z}, clearance});
-    }
-
-    return trunks;
-}
-
-std::vector<StandingCrown> standingCrowns(const std::vector<TreePlacement>& trees, const ForestTreeSettings& settings) {
-    std::vector<StandingCrown> crowns;
-    crowns.reserve(trees.size());
-
-    for (const TreePlacement& tree : trees) {
-        crowns.push_back(StandingCrown{Vec2{tree.foot.x, tree.foot.z}, placedCrownRadius(tree, settings)});
-    }
-
-    return crowns;
+PlantingLayerRecord treePlantingLayer(const ForestTreeSettings& settings, std::uint64_t seed) {
+    PlantingLayerRecord layer;
+    setPlantingDensity(layer, plantingDensity(settings.planting));
+    const CrownEnvelope crown = treeCrown(settings);
+    layer.seed = seed;
+    layer.kinds = std::max(settings.variants, 1);
+    layer.reachPerScale = {std::max(crown.radius, crown.halfHeight)};
+    layer.centrePerScale = {crown.centre.y};
+    layer.leastScale = smallestTreeScale;
+    layer.scaleRange = treeScaleRange;
+    layer.footRingPerScale = footReachMetres;
+    layer.spacingShare = settings.spacingShare;
+    return layer;
 }

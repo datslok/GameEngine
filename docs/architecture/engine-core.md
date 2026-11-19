@@ -109,7 +109,7 @@ Conventions (row-major `Mat4`, column vectors, right-handed, unit `Quat`s): root
 | `math/aabb.h`, `math/ray.h`, `math/frustum.h`, `math/closest_points.h`, `math/delaunay.h` | Bounds, rays, culling planes, segment and triangle distances, Bowyer-Watson triangulation |
 | `math/angles.h`, `math/smooth_step.h` | `fullTurnRadians`, `radiansFromDegrees`, `wrapAngle` (to -pi..pi); `smoothStep`, GLSL's smoothstep, for every C++ mirror |
 | `scene/interpolation.h` | `getRenderTransform` (Interpolation above) |
-| `core/hash.h`, `hash.glsl` | `Fnv1aHash` (change checks, the simulation hash), `mixBits` (before using a hash's bits as random numbers), `pcg3d` (GPU-friendly, mirrored) |
+| `core/hash.h`, `hash.glsl`, `hash64.glsl` | `Fnv1aHash` (change checks, the simulation hash), `mixBits` (before using a hash's bits as random numbers; mirrored for shaders with 64-bit whole numbers, numbers in `hash_shared.h`), `pcg3d` (GPU-friendly, mirrored) |
 | `core/profiler.h` | `Profiler`, `timeSection`: CPU sections averaged over `defaultProfileWindowSeconds` for F4 |
 | `core/half_float.h`, `core/raw_image.h`, `core/pixel.h` | Half floats, CPU images and their PNG packing, `Pixel` |
 | `core/build_info.h` | `isDebugBuild` (the makefile defines `ENGINE_DEBUG_BUILD` in debug builds) |

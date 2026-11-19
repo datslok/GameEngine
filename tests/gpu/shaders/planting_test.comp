@@ -1,0 +1,64 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// Runs planting.glsl's functions on the cases planting_gpu_test.cpp sends. 64-bit numbers come and go as four 16-bit
+// pieces, each a whole float, so no bit pattern is ever read as a float.
+#include "gpu_test.glsl"
+#include "planting.glsl"
+
+uint64_t fromPieces(vec4 pieces) {
+    return uint64_t(uint(pieces.x)) | (uint64_t(uint(pieces.y)) << 16) | (uint64_t(uint(pieces.z)) << 32) | (uint64_t(uint(pieces.w)) << 48);
+}
+
+vec4 toPieces(uint64_t value) {
+    return vec4(float(uint(value & 0xffffUL)), float(uint((value >> 16) & 0xffffUL)), float(uint((value >> 32) & 0xffffUL)),
+                float(uint((value >> 48) & 0xffffUL)));
+}
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_PLANTING_RANDOM) {
+        vec4 c = testInput(2);
+        testOutput(0, vec4(plantingRandom(fromPieces(a), fromPieces(testInput(1))), 0.0, 0.0, 0.0));
+        testOutput(1, toPieces(plantingCellKey(int(c.x), int(c.y))));
+    } else if (function == GPU_TEST_PLANTING_THRESHOLD) {
+        testOutput(0, vec4(plantingThreshold(int(a.x), int(a.y))));
+    } else if (function == GPU_TEST_PLANTING_SHARE) {
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        vec4 d = testInput(3);
+        float share = plantingShare(a.xyz, b.xyz, a.w, b.w, c.x);
+        testOutput(0, vec4(share, plantingPathShare(c.y, c.z, c.w, d.x, d.y), plantingTaken(d.z, d.w, share) ? 1.0 : 0.0, 0.0));
+    } else if (function == GPU_TEST_PLANTING_PLACE) {
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        vec2 place = plantingJitteredPlace(int(a.x), int(a.y), a.z, a.w, b.x, b.y);
+        testOutput(0, vec4(place, plantingScale(b.z, b.w, c.x), plantingTurn(c.y)));
+    } else if (function == GPU_TEST_PLANTING_KIND) {
+        testOutput(0, vec4(float(plantingUniformKind(a.x, int(a.y))), float(plantingSharedKind(a.x, testInput(1), int(a.z))), 0.0, 0.0));
+    } else if (function == GPU_TEST_PLANTING_TESTS) {
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        vec4 d = testInput(3);
+        float top = plantingTop(c.z, c.w, d.x, b.z);
+        testOutput(0, vec4(plantingWithin(a.xy, a.zw, b.x) ? 1.0 : 0.0, plantingFits(b.y, b.z, b.w, c.x, c.y) ? 1.0 : 0.0, top, 0.0));
+    } else if (function == GPU_TEST_PLANTING_STORED) {
+        vec4 b = testInput(1);
+        testOutput(0, vec4(plantingStored(a.x, a.y, a.z), plantingPathDistance(a.w), plantingCoordinate(b.x, b.y, b.z), plantingBetween(a.z, b.x, b.w)));
+    } else if (function == GPU_TEST_PLANTING_RING) {
+        testOutput(0, vec4(plantingRingPoint(a.xy, a.z, int(a.w)), 0.0, 0.0));
+    } else if (function == GPU_TEST_PLANTING_GIVES_WAY) {
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        testOutput(0, vec4(plantingGivesWay(a.xy, a.z, a.w, b.xy, b.z, b.w, c.x != 0.0, c.y) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_PLANTING_NEAR_SEGMENT) {
+        vec4 b = testInput(1);
+        testOutput(0, vec4(plantingNearSegment(a.xy, a.zw, b.xy, b.z, b.w) ? 1.0 : 0.0));
+    }
+}

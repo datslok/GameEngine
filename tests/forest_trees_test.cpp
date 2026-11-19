@@ -785,7 +785,7 @@ namespace {
     }
 
     /*
-    * The canopy trees' places, planted from the maps: within the patch, clear of the path, of each other's crowns'
+    * The canopy trees' places, planted alone from the maps: within the patch, clear of the path, of each other's crowns'
     * middles and of the pillars, sized and turned at random, standing on the lowest ground round the trunk, blocking no
     * sight line, about the patch's area at the floor's density, the same every run; where the maps cap everything
     * under the crowns' height, none is planted.
@@ -795,29 +795,31 @@ namespace {
         const ValleyMaps& maps = patchValleyMaps();
         const std::vector<PillarPlacement> pillars = placePillars(ValleyLayout{});
         const std::vector<SightLine> lines = forestSightLines();
-        const std::vector<TreePlacement> trees = placeTrees(settings, maps, {}, canopyPlaceSeed);
+        const PlantingLayerRecord layer = treePlantingLayer(settings, canopyPlaceSeed);
+        const std::vector<PlantedPlant> planted = plantAlone(layer, maps);
         const float patchHectares = (treeSouthmost - treeNorthmost) * 2.0f * treeSpread / 10000.0f;
-        assert(static_cast<float>(trees.size()) >= 0.5f * settings.planting.floorPerHectare * patchHectares);
-        assert(static_cast<float>(trees.size()) <= 1.1f * settings.planting.floorPerHectare * patchHectares);
+        assert(static_cast<float>(planted.size()) >= 0.5f * settings.planting.floorPerHectare * patchHectares);
+        assert(static_cast<float>(planted.size()) <= 1.1f * settings.planting.floorPerHectare * patchHectares);
         std::set<int> variants;
 
-        for (std::size_t i = 0; i < trees.size(); ++i) {
-            const TreePlacement& tree = trees[i];
+        for (std::size_t i = 0; i < planted.size(); ++i) {
+            const TreePlacement tree{planted[i].foot, planted[i].scale, planted[i].turnRadians, planted[i].kind};
             assert(tree.foot.z >= treeNorthmost && tree.foot.z <= treeSouthmost);
             assert(std::fabs(tree.foot.x - valleyAxis(tree.foot.z)) <= treeSpread);
-            assert(forestPathDistance(tree.foot.x, tree.foot.z) >= settings.planting.pathClearance);
+            assert(forestPathDistance(tree.foot.x, tree.foot.z) >= settings.planting.pathClearance - 1e-3f);
             assert(tree.scale >= 0.85f && tree.scale <= 1.15f && tree.variant >= 0 && tree.variant < settings.variants);
-            assert(tree.foot.y <= forestHeight(tree.foot.x, tree.foot.z) + 1e-4f && tree.foot.y > forestHeight(tree.foot.x, tree.foot.z) - 2.0f);
+            const float ground = terrainSurfaceHeight(patchTerrainHeights(), tree.foot.x, tree.foot.z);
+            assert(tree.foot.y <= ground && tree.foot.y > ground - 2.0f);
             variants.insert(tree.variant);
 
             const float radius = placedCrownRadius(tree, settings);
-            assert(near(radius, settings.crownRadius * tree.scale, 1e-4f) && radius <= treeReach(settings) + 1e-4f);
+            assert(radius == planted[i].reach && near(radius, settings.crownRadius * tree.scale, 1e-4f) && radius <= treeReach(settings) + 1e-4f);
             assert(near(placedCrownCentre(tree, settings).y, tree.foot.y + treeCrown(settings).centre.y * tree.scale, 1e-3f));
             assert(!blocksSight(placedCrownCentre(tree, settings), radius, lines));
 
             for (std::size_t j = 0; j < i; ++j) {
-                const float apart = (Vec2{tree.foot.x, tree.foot.z} - Vec2{trees[j].foot.x, trees[j].foot.z}).length();
-                assert(apart >= settings.spacingShare * std::max(radius, placedCrownRadius(trees[j], settings)));
+                const float apart = (Vec2{tree.foot.x, tree.foot.z} - Vec2{planted[j].foot.x, planted[j].foot.z}).length();
+                assert(apart >= settings.spacingShare * std::max(radius, planted[j].reach) - 1e-4f);
             }
 
             for (const PillarPlacement& pillar : pillars) {
@@ -826,8 +828,8 @@ namespace {
         }
 
         assert(variants.size() >= 2);
-        const std::vector<TreePlacement> again = placeTrees(settings, maps, {}, canopyPlaceSeed);
-        assert(again.size() == trees.size() && again.back().foot.x == trees.back().foot.x && again.back().turnRadians == trees.back().turnRadians);
+        const std::vector<PlantedPlant> again = plantAlone(layer, maps);
+        assert(again.size() == planted.size() && again.back().foot.x == planted.back().foot.x && again.back().turnRadians == planted.back().turnRadians);
 
         // A wall of sight lines at crown height across the whole patch leaves no room.
         std::vector<SightLine> wall;
@@ -837,7 +839,7 @@ namespace {
         }
 
         const ValleyMaps walled = buildValleyMaps(testPlantingSettings(), {}, wall, {treeReach(settings)}, testJobs());
-        assert(placeTrees(settings, walled, {}, canopyPlaceSeed).empty());
+        assert(plantAlone(layer, walled).empty());
     }
 
     /*
@@ -915,28 +917,24 @@ namespace {
     }
 
     /*
-    * The mid layer is placed after the big trees, under their crowns as much as between them, but its trunks keep
+    * The mid layer is planted after the big trees, under their crowns as much as between them, but its trunks keep
     * midTrunkClearance from theirs.
     */
     void testMidTreesStandUnderTheCanopy() {
-        const ValleyMaps& maps = patchValleyMaps();
+        const ForestPlanting& planted = defaultPatchPlanting();
         const ForestTreeSettings canopySettings;
-        const std::vector<TreePlacement> canopy = placeTrees(canopySettings, maps, {}, canopyPlaceSeed);
-        const std::vector<StandingCrown> trunks = standingTrunks(canopy, midTrunkClearance);
-        assert(trunks.size() == canopy.size() && trunks.front().radius == midTrunkClearance);
-
-        const ForestTreeSettings midSettings = midTreeSettings();
-        const std::vector<TreePlacement> mid = placeTrees(midSettings, maps, trunks, midPlaceSeed);
-        assert(mid.size() > 900);
+        assert(planted.mid.size() > 900);
         int underACrown = 0;
 
-        for (const TreePlacement& tree : mid) {
+        for (const TreePlacement& tree : planted.mid) {
             const Vec2 foot{tree.foot.x, tree.foot.z};
 
-            for (const TreePlacement& big : canopy) {
-                const float apart = (foot - Vec2{big.foot.x, big.foot.z}).length();
-                assert(apart >= midTrunkClearance);
-                underACrown += apart < placedCrownRadius(big, canopySettings) ? 1 : 0;
+            for (const std::vector<TreePlacement>* big : {&planted.canopy, &planted.emergents}) {
+                for (const TreePlacement& other : *big) {
+                    const float apart = (foot - Vec2{other.foot.x, other.foot.z}).length();
+                    assert(apart >= midTrunkClearance - 1e-4f);
+                    underACrown += big == &planted.canopy && apart < placedCrownRadius(other, canopySettings) ? 1 : 0;
+                }
             }
         }
 
@@ -967,35 +965,36 @@ namespace {
     }
 
     /*
-    * The canopy trees are placed after the emergents and keep clear of them: no canopy trunk inside an emergent's crown,
+    * The canopy trees are planted after the emergents and keep clear of them: no canopy trunk inside an emergent's crown,
     * as none is inside another canopy tree's. They share the emergents' lattice, taking the thresholds above theirs; each
     * species jitters its trees by its own seed.
     */
     void testCanopyTreesKeepClearOfEmergents() {
-        const ValleyMaps& maps = patchValleyMaps();
+        const ForestPlanting& planted = defaultPatchPlanting();
         const ForestTreeSettings emergentSettings = emergentTreeSettings();
         const ForestTreeSettings canopySettings;
-        const std::vector<TreePlacement> emergents = placeTrees(emergentSettings, maps, {}, emergentPlaceSeed);
-        assert(!emergents.empty());
-        const std::vector<StandingCrown> standing = standingCrowns(emergents, emergentSettings);
-        assert(standing.size() == emergents.size());
-        assert(near(standing.front().radius, placedCrownRadius(emergents.front(), emergentSettings), 1e-5f));
+        assert(!planted.emergents.empty() && !planted.canopy.empty());
+        const std::vector<PlantingLayerRecord> layers = forestPlantingLayers(defaultSpecies());
+        const PlantingLayerRecord& canopyLayer = layers[static_cast<std::size_t>(ForestLayer::Canopy)];
+        assert(canopyLayer.under == static_cast<int>(ForestLayer::Emergent) && canopyLayer.keepAway.size() == 1 && canopyLayer.keepAway.front().crown);
 
-        const std::vector<TreePlacement> canopy = placeTrees(canopySettings, maps, standing, canopyPlaceSeed, &emergentSettings.planting);
-        const std::vector<TreePlacement> alone = placeTrees(canopySettings, maps, {}, canopyPlaceSeed);
-        assert(!canopy.empty());
-        bool differs = canopy.size() != alone.size();
-
-        for (std::size_t i = 0; i < canopy.size(); ++i) {
-            for (const StandingCrown& crown : standing) {
-                assert((Vec2{canopy[i].foot.x, canopy[i].foot.z} - crown.foot).length() >= crown.radius);
+        for (const TreePlacement& tree : planted.canopy) {
+            for (const TreePlacement& emergent : planted.emergents) {
+                assert((Vec2{tree.foot.x, tree.foot.z} - Vec2{emergent.foot.x, emergent.foot.z}).length() >= placedCrownRadius(emergent, emergentSettings) - 1e-4f);
             }
+        }
 
-            differs = differs || canopy[i].foot.x != alone[i].foot.x;
+        // Alone, the canopy stands elsewhere; the emergents' own seed jitters them apart from the canopy's.
+        const std::vector<PlantedPlant> alone = plantAlone(treePlantingLayer(canopySettings, canopyPlaceSeed), patchValleyMaps());
+        bool differs = alone.size() != planted.canopy.size();
+
+        for (std::size_t i = 0; i < std::min(alone.size(), planted.canopy.size()) && !differs; ++i) {
+            differs = alone[i].foot.x != planted.canopy[i].foot.x;
         }
 
         assert(differs);
-        assert(placeTrees(emergentSettings, maps, {}, canopyPlaceSeed).front().foot.x != emergents.front().foot.x);
+        const std::vector<PlantedPlant> reseeded = plantAlone(treePlantingLayer(emergentSettings, canopyPlaceSeed), patchValleyMaps());
+        assert(reseeded.empty() || reseeded.front().foot.x != planted.emergents.front().foot.x);
     }
 
     /*

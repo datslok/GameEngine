@@ -122,6 +122,10 @@ $(OBJECT_DIR)/external/vma/vk_mem_alloc.o: CXXFLAGS += -Wno-unused-parameter -Wn
 # Silenced for the one file that includes them.
 $(OBJECT_DIR)/src/render/vulkan/vulkan_dlss.o: CXXFLAGS += -Wno-deprecated-declarations -Wno-missing-field-initializers -Wno-conversion-null -Wno-strict-aliasing
 
+# Planting's maths must round as the GPU's precise copy does (scene/planting.h): never a multiply and add fused into one
+# rounding. Plain x86-64 has no fused instruction, so this only guards a future -march.
+$(OBJECT_DIR)/src/scene/planting.o $(OBJECT_DIR)/src/scene/planting_maps.o $(OBJECT_DIR)/src/scene/terrain_heights.o: CXXFLAGS += -ffp-contract=off
+
 # The cloth's solver is optimised in the debug build too: unoptimised it runs the cloth lab's sheets at a quarter speed
 # (31 ms a tick against 8.3), and inner loops this hot are rarely what one steps through. -O2 after -O0 wins; -g stays.
 ifeq ($(BUILD),debug)

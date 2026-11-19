@@ -9,7 +9,7 @@ Land drawn as a quadtree of grid patches round the camera (CDLOD, Strugar 2010),
 Every function here is mirrored in `terrain.glsl` / `terrain_data.glsl`, so the patches the GPU draws are tested on the CPU.
 
 - `TerrainHeightGrid`: corner (least x, z), spacing, `size` points a side, heights row by row along x. `makeTerrainHeightGrid(centre, halfSize, spacing, height, jobs)` samples a function, a row a job.
-- `TerrainHeights`: up to `TERRAIN_MOST_GRIDS` (4) grids, finest first; a place reads the finest holding it, past all of them the coarsest's nearest edge.
+- `TerrainHeights`: up to `TERRAIN_MOST_GRIDS` (4) grids, finest first; a place reads the finest holding it, past all of them the coarsest's nearest edge. A place's grid coordinate is times the spacing's reciprocal (`plantingCoordinate`), so the planting reads the ground the same on the GPU (`planting.md`).
 
 | Function | Gives |
 |---|---|

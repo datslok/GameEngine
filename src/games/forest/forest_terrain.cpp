@@ -93,7 +93,7 @@ namespace {
 
     float latticeValue(int x, int z, std::uint32_t seed) {
         const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) << 32) | static_cast<std::uint32_t>(z);
-        const std::uint64_t bits = mixBits(key ^ mixBits(seed + 0x9e3779b97f4a7c15ull));
+        const std::uint64_t bits = mixBits(key ^ mixBits(seed + goldenGamma));
         return static_cast<float>(bits >> 40) * (1.0f / 16777216.0f);
     }
 
@@ -235,7 +235,7 @@ namespace {
 }
 
 float forestUnitRandom(std::uint64_t seed, std::uint64_t index) {
-    return static_cast<float>(mixBits(seed ^ mixBits(index + 0x9e3779b97f4a7c15ull)) >> 40) * (1.0f / 16777216.0f);
+    return static_cast<float>(mixBits(seed ^ mixBits(index + goldenGamma)) >> 40) * (1.0f / 16777216.0f);
 }
 
 std::uint32_t forestShapeSeed(std::uint32_t seed, std::uint32_t use) {

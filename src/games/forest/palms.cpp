@@ -15,12 +15,6 @@ namespace {
     // The palms' random numbers' seed, and each cell's numbers for its palm.
     constexpr std::uint64_t palmSeed = 0x50414c4dull;
 
-    enum PalmDraw : std::uint64_t {
-        Variant,
-        Scale,
-        Turn
-    };
-
     // The golden angle, pi (3 - sqrt 5): each frond turned this far round from the last, so none lines up with another.
     constexpr float goldenAngle = 2.39996323f;
 
@@ -442,38 +436,22 @@ PalmMeshes growPalmMeshes(const PalmShape& shape) {
     return meshes;
 }
 
-std::vector<PalmPlacement> placePalms(const ForestPalmSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& trunks) {
-    const int variants = std::max(settings.variants, 1);
-    std::vector<PalmPlacement> palms;
+PlantingLayerRecord palmPlantingLayer(const ForestPalmSettings& settings) {
+    PlantingLayerRecord layer;
+    setPlantingDensity(layer, plantingDensity(settings.planting));
+    layer.seed = palmSeed;
+    layer.kinds = std::max(settings.variants, 1);
+    layer.reachPerScale.clear();
 
-    for (const DitheredCell& cell : ditheredCells(settings.planting, maps, forestPatch, palmSeed)) {
-        const bool byTrunk = std::any_of(trunks.begin(), trunks.end(), [&](const StandingCrown& trunk) {
-            return (cell.place - trunk.foot).length() < trunk.radius + settings.trunkClearance;
-        });
-
-        if (byTrunk) {
-            continue;
-        }
-
-        const auto draw = [&](PalmDraw which) {
-            return forestUnitRandom(palmSeed, cell.firstDraw + which);
-        };
-
-        const PalmPlacement palm{
-            .foot = Vec3{cell.place.x, forestHeight(cell.place.x, cell.place.y) - understoreySinkMetres, cell.place.y},
-            .scale = 1.0f + palmScaleSpread * (2.0f * draw(Scale) - 1.0f),
-            .turnRadians = fullTurnRadians * draw(Turn),
-            .variant = std::min(static_cast<int>(draw(Variant) * static_cast<float>(variants)), variants - 1)
-        };
-
-        const float radius = palmRadius(settings, palm);
-
-        if (fitsTheMaps(maps, cell.place, radius, palmCentre(settings, palm).y + radius)) {
-            palms.push_back(palm);
-        }
+    for (int variant = 0; variant < layer.kinds; ++variant) {
+        layer.reachPerScale.push_back(0.5f * palmVariantHeight(settings, variant));
     }
 
-    return palms;
+    layer.centrePerScale = layer.reachPerScale;
+    layer.leastScale = 1.0f - palmScaleSpread;
+    layer.scaleRange = 2.0f * palmScaleSpread;
+    layer.footSink = understoreySinkMetres;
+    return layer;
 }
 
 float palmReach(const ForestPalmSettings& settings) {

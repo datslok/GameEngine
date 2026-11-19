@@ -11,7 +11,7 @@ Folders under `src/`, lowest layer first. A folder includes only from folders in
 | 1 | `core/` | Timestep, profiler, hashing, images, settings visitor, commands, job system | |
 | 1 | `input/` | `Input`, keys, mouse (no SDL) | |
 | 2 | `physics/` | Shapes, overlaps, raycasts, static level, character controller, particles, signed distance fields | |
-| 3 | `scene/` | Meshes, materials, lights, sky, camera, culling, LOD, terrain, wind, frame description | |
+| 3 | `scene/` | Meshes, materials, lights, sky, camera, culling, LOD, terrain, planting, wind, frame description | |
 | 4 | `assets/` | `AssetManager`, loaders (glTF, OBJ, images, stars) | |
 | 5 | `cloth/` | Cloth solvers, collision, patterns, seams, tethers | `assets/` |
 | 5 | `gameplay/` | Character movement, camera controllers, control modes, flashlight | |

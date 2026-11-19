@@ -301,7 +301,7 @@ bool tileSways(int sunCascade, const Vec3& reachCentre, float reachRadius, const
 }
 
 std::uint64_t swayingShadowSignature(std::uint64_t signature, bool somethingSways, std::uint64_t frame) {
-    return somethingSways ? mixBits(signature ^ mixBits(frame + 0x9e3779b97f4a7c15ull)) : signature;
+    return somethingSways ? mixBits(signature ^ mixBits(frame + goldenGamma)) : signature;
 }
 
 std::array<std::uint32_t, 3> packHangingVertex(const HangingVertex& vertex) {
