@@ -81,7 +81,7 @@ Everything on the air entity, rewritten each frame by `updateDaylight`:
 
 - **Sun** (`ForestSunSettings`): 5 degrees north, day 80, 9.5 h, still clock (`advanceSolarHours` in ticks), intensity 4 above the air, disc 5 times real.
 - **Atmosphere:** its ground the leaf litter's stand-in colour, so the planet past the land matches.
-- **Mist** (`ForestMistSettings`), two `Fog` layers: the haze on the air entity, 0.0005 per metre on the floor (about 6 km of sight), thinning by e every 300 m up, out to 20 km; the floor mist on `floorMist`, pooled, 0.03 per metre (about 100 m of sight) up to 12 m, fading over 4 m above, under the canopy trees' forks, out to 2 km. `Mist` switches both, `Floor mist` the pool.
+- **Mist** (`ForestMistSettings`), two `Fog` layers: the haze on the air entity, 0.0005 per metre on the floor (about 6 km of sight), thinning by e every 300 m up, out to 20 km; the floor mist on `floorMist`, pooled, 0.03 per metre (about 100 m of sight) up to 12 m, fading over 4 m above, under the canopy trees' forks, out to 2 km. `Mist` switches both, `Floor mist` the pool (off by default).
 - **Wind:** a `Wind` blowing down the valley (towards 270 degrees, 3 m/s; F5 Forest, Wind, live). The field: `wind.md`.
 - **Far plane** 25 km (reversed-Z keeps it precise).
 

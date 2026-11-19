@@ -66,3 +66,4 @@
   - **Why:** with the swaying fixed, near shadows still looked misplaced. Held 0.4 m right and 0.3 m below the eye, the lamp threw a leaf's shadow about 28 degrees aside at a metre; correct for a hand-held torch, but it reads as wrong on screen.
   - **0.15 m right, 0.1 m down** (about 10 degrees at a metre), keeping a little shadow depth; now `FlashlightSettings::handRight`/`handDown` (F5, `forest.flashlight.*`, the light lab's too), so the user can tune it live; the demo uses the defaults.
   - **Tested:** the pose follows the settings, at the eye the beam is the view's line; forest, light lab and demo place it from them.
+- `floor-mist-off` (Nov 19 2026): the forest's floor mist off by default (the user's choice, after looking at the flashlight and the Bastion's floods through it); F5 Mist, Floor mist, brings it back.

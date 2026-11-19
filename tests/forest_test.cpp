@@ -1082,18 +1082,24 @@ namespace {
     /*
     * Two layers of mist: the valley's thin haze, and a dense pool on the floor whose top and soft edge stay under the
     * canopy trees' forks (docs/research/FOGLAYERS.md), each a Fog the frame's lighting collects, the haze first. The
-    * floor's switch takes only the pool away; the mist's takes both.
+    * floor's switch takes only the pool away; the mist's takes both. The pool is off by default (the user, Nov 19 2026).
     */
     void testTheMistHasAFloorLayer() {
         Forest forest;
         Input input;
         const ForestMistSettings& settings = forest.game.getMistSettings();
-        assert(settings.enabled && settings.floorEnabled);
+        assert(settings.enabled && !settings.floorEnabled);
         assert(settings.fog.shape == FogShape::Exponential && settings.floor.shape == FogShape::Pooled);
         assert(settings.floor.baseHeight + settings.floor.scaleHeight < ForestTreeSettings{}.forkHeight);
         assert(settings.floor.density >= 0.02f && settings.floor.density <= 0.05f);
 
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         std::vector<Fog> layers = collectLighting(forest.world, 1.0f).fogLayers;
+        assert(layers.size() == 1 && layers[0].shape == FogShape::Exponential);
+
+        forest.game.getMistSettings().floorEnabled = true;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        layers = collectLighting(forest.world, 1.0f).fogLayers;
         assert(layers.size() == 2 && layers[0].shape == FogShape::Exponential && layers[1].shape == FogShape::Pooled);
         assert(layers[1].density == settings.floor.density);
 

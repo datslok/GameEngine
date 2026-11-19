@@ -59,7 +59,7 @@ void visit(ForestSunSettings& settings, SettingsVisitor& visitor);
 struct ForestMistSettings {
     bool enabled = true;
     Fog fog{.density = 0.0005f, .baseHeight = 0.0f, .scaleHeight = 300.0f, .maxDistance = 20000.0f};
-    bool floorEnabled = true;
+    bool floorEnabled = false; // off by default (the user, Nov 19 2026); F5 Mist, Floor mist
     Fog floor{.density = 0.03f, .baseHeight = 12.0f, .scaleHeight = 4.0f, .maxDistance = 2000.0f, .shape = FogShape::Pooled};
 };
 
