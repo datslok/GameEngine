@@ -20,13 +20,13 @@ struct FlashlightPose {
     Vec3 direction;
 };
 
-// Held in the right hand: this far right of and below the eye, aimed at the point this far straight ahead (where a
-// crosshair would be). Being off to the side, its shadows show beside things instead of hiding behind them.
-inline constexpr float flashlightHandRight = 0.4f;
-inline constexpr float flashlightHandDown = 0.3f;
+// Aimed at the point this far straight ahead of the eye (where a crosshair would be), wherever the hand holds it.
 inline constexpr float flashlightAimDistance = 8.0f;
 
-FlashlightPose flashlightInHand(const Camera& camera);
+struct FlashlightSettings;
+
+// Held in the right hand, settings.handRight right of and settings.handDown below the eye, aimed straight ahead.
+FlashlightPose flashlightInHand(const Camera& camera, const FlashlightSettings& settings);
 
 // Warm, like an incandescent torch. A large source radius keeps it gentle up close; the higher intensity carries it further.
 // Fast: it swings with the view, so its bounce light must follow it closely.
@@ -38,9 +38,16 @@ inline const SpotLight flashlightBeam{
     .fast = true
 };
 
-// The player's flashlight (F) as a setting too, so the set command switches it for scripts and AIs. Off at the start.
+/*
+* The player's flashlight (F) as a setting too, so the set command switches it for scripts and AIs. Off at the start.
+* The hand's offset from the eye, in metres: off to the side, shadows show beside things instead of hiding behind them,
+* but by the angle between eye and lamp, which at 0.4 m right and 0.3 m down threw a leaf's shadow about 28 degrees aside
+* at a metre and read as misplaced; close to the eye (about 10 degrees there) keeps a little depth (the user, Nov 19 2026).
+*/
 struct FlashlightSettings {
     bool on = false;
+    float handRight = 0.15f;
+    float handDown = 0.1f;
 };
 
 void visit(FlashlightSettings& settings, SettingsVisitor& visitor);

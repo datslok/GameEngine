@@ -76,7 +76,7 @@ What a mode change means for the game's own things stays in the game (the demo's
 |---|---|---|
 | `Spinner` | `gameplay/spinner` | Euler angles growing at constant speeds, posed from total simulation time |
 | `Firefly` | `gameplay/firefly` | `fireflyPosition(firefly, seconds)`: a circle round a centre whose radius, height and speed wobble |
-| `Flashlight` | `gameplay/flashlight` | A `SpotLight` entity (`flashlightBeam`, `fast`), removed when off; each switch a probe scene event; `flashlightInHand` places it right of and below the eye, aimed 8 ahead, every frame after the camera. `FlashlightSettings` (`on`, off at the start): the light lab's and the forest's switch, so F and the set command both reach it |
+| `Flashlight` | `gameplay/flashlight` | A `SpotLight` entity (`flashlightBeam`, `fast`), removed when off; each switch a probe scene event; `flashlightInHand` places it `handRight` right of and `handDown` below the eye (0.15, 0.1 m: close, so near shadows are not thrown far aside), aimed 8 ahead, every frame after the camera. `FlashlightSettings` (`on`, off at the start; the hand): the light lab's and the forest's, so F and the set command both reach it; the demo holds it by the defaults |
 | `Grenade` | `gameplay/grenade` | `secondsLeft`; `GrenadeSettings` (throw speed 15, lifetime 5 s, `ParticleSettings`) |
 
 - `throwGrenade(world, from, direction, looks, settings)`: `Transform` scaled to the particle radius, `PreviousTransform`, the looks, a unit `Sphere` `Collider`, a `Particle` along the normalised direction (thrower's velocity not added, so throws are predictable), a `Grenade`.

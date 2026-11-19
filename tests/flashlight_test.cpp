@@ -13,18 +13,32 @@ namespace {
 
     /*
     * In the right hand, a little to the right of the eye and below it (along the camera's up, which is the world's, so
-    * straight down however the view tilts), its beam through the point straight ahead.
+    * straight down however the view tilts) by the settings, its beam through the point straight ahead. Held close to the
+    * eye by default, so a near leaf's shadow lands nearly behind it as seen (the user, Nov 19 2026: 0.4 m right and
+    * 0.3 m down threw it about 28 degrees aside at a metre, which read as misplaced).
     */
     void testTheFlashlightIsHeldInTheRightHand() {
         const Camera camera = slantedCamera();
-        const FlashlightPose pose = flashlightInHand(camera);
+        const FlashlightSettings defaults;
+        assert(defaults.handRight > 0.0f && defaults.handRight <= 0.15f && defaults.handDown > 0.0f && defaults.handDown <= 0.1f);
+
+        FlashlightSettings settings;
+        settings.handRight = 0.25f;
+        settings.handDown = 0.2f;
+        const FlashlightPose pose = flashlightInHand(camera, settings);
         const Vec3 fromEye = pose.position - camera.getPosition();
 
-        assert(std::abs(fromEye.dot(camera.getRight()) - flashlightHandRight) < 1e-5f);
-        assert(std::abs(fromEye.dot(camera.getUp()) + flashlightHandDown) < 1e-5f);
+        assert(std::abs(fromEye.dot(camera.getRight()) - settings.handRight) < 1e-5f);
+        assert(std::abs(fromEye.dot(camera.getUp()) + settings.handDown) < 1e-5f);
 
         const Vec3 aimPoint = camera.getPosition() + camera.getForward() * flashlightAimDistance;
         assert(pose.direction.normalized().dot((aimPoint - pose.position).normalized()) > 0.99999f);
+
+        // At the eye, the beam is the view's own line.
+        settings.handRight = 0.0f;
+        settings.handDown = 0.0f;
+        const FlashlightPose atEye = flashlightInHand(camera, settings);
+        assert((atEye.position - camera.getPosition()).length() < 1e-5f && atEye.direction.normalized().dot(camera.getForward()) > 0.99999f);
     }
 
     // Off removes the light (no seat spent on it), on puts the same beam back; the entity stays either way.

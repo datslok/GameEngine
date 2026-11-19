@@ -719,7 +719,7 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
     signalClockJumps(world);
     updateDaylight(world);
     updateStreetLights(world);
-    flashlight.place(world, flashlightInHand(controls.getCamera()));
+    flashlight.place(world, flashlightInHand(controls.getCamera(), flashlightSettings));
 
     // The flashlight follows its setting, so a set command switches it; F flips the setting and the light together.
     if (flashlight.isOn(world) != flashlightSettings.on) {
