@@ -24,7 +24,7 @@ Every layer (trees, palms, understorey) is planted from maps, not darts (Horizon
 
 ## The forest's layers (`forest_planting`)
 
-`forestPlantingLayers(ForestSpecies)` → five `PlantingLayerRecord`s in `ForestLayer`'s order; `plantTheForest(species, maps, heights, box, jobs)` plants a box; `plantThePatch` the box round `forestPatch`, keeping what stands in it (the entities' patch until 2b's cells).
+`forestPlantingLayers(ForestSpecies)` → five `PlantingLayerRecord`s in `ForestLayer`'s order; `plantTheForest(species, maps, heights, box, jobs)` plants a box; `plantThePatch` the box round `forestPatch`, keeping what stands in it by the maps' axis (`insidePlantedRegion`, as the GPU draws the placed trees' patch; the entities' patch until 2b's cells).
 
 | Layer | Record (`treePlantingLayer`, `understoreyPlantingLayer`, `palmPlantingLayer`) | Keeps clear of |
 |---|---|---|
