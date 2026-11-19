@@ -1,6 +1,6 @@
 # Parallax and blended grounds
 
-Covers: `src/render/gpu/parallax`, `src/render/gpu/ground_layers`, `src/core/height_map`, `assets/shaders/parallax.glsl`, `assets/shaders/ground_layers.glsl`
+Covers: `src/render/gpu/parallax`, `src/render/gpu/ground_layers`, `src/render/gpu/window_mask`, `src/core/height_map`, `assets/shaders/parallax.glsl`, `assets/shaders/ground_layers.glsl`, `assets/shaders/window_mask.glsl`
 
 Surface detail beyond a normal map: height maps the view ray searches (parallax occlusion mapping), and grounds of up to four blended materials. Both run in the main pass's `scene_surface.glsl`; the lighting after them is `shading.md`.
 
@@ -87,14 +87,24 @@ Layers painted by world height, so every object with the material shows the same
 - **Water streaks** (`groundStreaks`): red = clean rock (1) to darkest stain (0), read on the two side projections stretched down the height (`streakPlace`: `streakWidth` across, `streakLength` down), darkening the albedo by up to `streakStrength`, on sides only (`streakShade`).
 - **Tone variation** (`groundVariation`, `variationShade`): slow noise (0.5 none) along each projection every `variationTile` m, lightening or darkening by up to `variationStrength`.
 
+### Slit windows (`render/gpu/window_mask`, faceted strata grounds)
+
+Rows of slit windows on walls without geometry, lit by the main pass's emission (research: `docs/research/STRUCTURES.md`, "Lights at night"). Numbers: `window_mask_shared.h`.
+
+- **Bands** (`Material::windowBands`): a linear strip over the strata's heights: red how much of the height rows cover, green the share lit, blue the share in the cool colour, alpha the slit's share of its cell across. Read like the strata (its mip from the height's change), so far away the rows' cover averages.
+- **Cells:** `windowPitch` metres across each face (`facetPlace`'s first coordinate), rows `WINDOW_ROW_HEIGHT` (1 m) for the hash; each window's lit, colour and brightness numbers are `pcg3d` of its column, row and the face's seed (`windowFaceSeed`: the facet numbers rounded to 1024 steps, so interpolating three equal corners cannot change it).
+- **Box-filtered across** (`pulseIntegral`, `pulseCoverage`): the slits' exact share of the pixel's footprint, from the running cover of periodic pulses, so a far slit is its true coverage, not a flickering hard edge.
+- **Far fade** (`windowFarShare`): from 0.5 to 1.5 cells a pixel, each window's states blend to their expected values (share lit, the colours' mix, brightness 1; lit windows vary 0.6-1.4), so a band's average light is the same near and far.
+- **Emission** (`windowEmission`): cover x across x lit x brightness x colour (`windowWarm`, `windowCool`, linear, brightness included), added to the surface's emission.
+
 ### Packing and the main pass
 
-- `MaterialTable::add` adds each layer first as a material of its own (shared with identical ones); the ground's `GpuMaterial` names them by index + 1 in `groundLayers`, with repeats, weights slot, switches (`GROUND_PROJECTED`, `GROUND_FACETS` with it, `GROUND_STRATA`, `GROUND_HEX`), strata, warp, streak and variation numbers in `groundBlend`, `groundFacing`, `groundSlots`, `groundStreaks`; which lane holds what: `render/gpu/material_uniforms.h`.
+- `MaterialTable::add` adds each layer first as a material of its own (shared with identical ones); the ground's `GpuMaterial` names them by index + 1 in `groundLayers`, with repeats, weights slot, switches (`GROUND_PROJECTED`, `GROUND_FACETS` with it, `GROUND_STRATA`, `GROUND_HEX`), strata, warp, streak and variation numbers in `groundBlend`, `groundFacing`, `groundSlots`, `groundStreaks`; the window bands' slot in `groundSlots.w` (faceted strata grounds only) and their colours and pitch in `windowWarm`, `windowCool`; which lane holds what: `render/gpu/material_uniforms.h`.
 - Throws `std::invalid_argument` for more than four layers or none, no weights texture, a layered layer, or a top layer not among them.
 - In `scene_surface.glsl`: the weights (B-spline at the mesh's UVs, or the strip with the top layer), then each needed layer's colour, metallic-roughness, occlusion, height and normal (at the ground's `normalScale`) at its repeated UVs, per projection or in the facet's plane, blended into the surface the rest of the shader lights. Parallax does not run on the layers.
 
 ## Tests
 
 - `parallax_test`: frame, steps, shifts, the crossing, flat maps, a tilted plane's exact crossing, a brick hiding mortar one way only, self-shadowing, the fade, the settings. `height_map_test`.
-- `ground_layers_test`: the blend, uneven and empty weights, refused materials, the frame, shares, places, normals, facet axes, places, normals and streaks, strata and top layer, warp, streaks, hex tiling, tone variation.
-- GPU: `parallax_gpu_test`, `ground_layers_gpu_test`. Also `material_uniforms_test`, `engine_commands_test`, `light_lab_test`.
+- `ground_layers_test`: the blend, uneven and empty weights, refused materials, the frame, shares, places, normals, facet axes, places, normals and streaks, the windows' packing, strata and top layer, warp, streaks, hex tiling, tone variation. `window_mask_test`: the running cover, box filtering against brute force, seeds and hashes, the far fade, emission near and far, and the near windows averaging to the far value.
+- GPU: `parallax_gpu_test`, `ground_layers_gpu_test`, `window_mask_gpu_test`. Also `material_uniforms_test`, `engine_commands_test`, `light_lab_test`.

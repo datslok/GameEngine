@@ -999,6 +999,47 @@ namespace {
         assert(ringCoating.groundLayers.front().texture != concrete.groundLayers.front().texture);
         assert(near(concrete.groundRepeats[0], 1.0f / forest.game.getBastionSettings().formworkTile, 1e-7f));
 
+        /*
+        * At night: the Bastion and each far tower carry a band strip of slit windows over their own heights, the bridge
+        * none; a light-strip mesh a tower, glowing; the Bastion's 18 floodlights, unshadowed, aimed up its walls.
+        */
+        const Material& bridge = forest.world.get<ModelRenderer>(forest.game.getMonolith().back()).parts.front().material;
+        assert(concrete.windowBands.isValid() && !bridge.windowBands.isValid() && concrete.windowPitch > 0.0f && concrete.windowWarm.x > 0.0f);
+        assert(concrete.strataTop - concrete.strataBottom > forest.game.getBastionSettings().height);
+        assert(forest.game.getLightStrips().size() == 11 && forest.game.getFloodlights().size() == 18);
+        assert(forest.world.get<ModelRenderer>(forest.game.getLightStrips().front()).parts.front().material.emissive.z > 0.0f);
+
+        for (const Entity flood : forest.game.getFloodlights()) {
+            const SpotLight& light = forest.world.get<SpotLight>(flood);
+            assert(!light.castsShadows && light.intensity == forest.game.getBastionSettings().floodIntensity && light.direction.y > 0.9f);
+        }
+
+        forest.game.getBastionSettings().floodIntensity = 900.0f;
+        forest.game.getBastionSettings().stripBrightness = 3.0f;
+        forest.game.getBastionSettings().windowBrightness = 2.0f;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(forest.world.get<SpotLight>(forest.game.getFloodlights().front()).intensity == 900.0f);
+        assert(near(forest.world.get<ModelRenderer>(forest.game.getLightStrips().back()).parts.front().material.emissive.z, 3.0f * bastionCoolLight.z, 1e-6f));
+        assert(near(forest.world.get<ModelRenderer>(forest.game.getMonolith().front()).parts.front().material.windowWarm.x, 2.0f * bastionWarmLight.x, 1e-6f));
+
+        /*
+        * The flashlight (gameplay/flashlight): off at the start, F switches it on in the right hand and off again, and so
+        * does its setting (the set command).
+        */
+        const Entity flashlight = forest.game.getFlashlight();
+        assert(!forest.game.getFlashlightSettings().on && !forest.world.has<SpotLight>(flashlight));
+        Input pressF;
+        pressF.beginFrame();
+        pressF.pressKey(Key::F);
+        forest.game.onInput(forest.world, pressF);
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(forest.game.getFlashlightSettings().on && forest.world.has<SpotLight>(flashlight));
+        const FlashlightPose held = flashlightInHand(forest.game.getCamera());
+        assert((forest.world.get<Transform>(flashlight).position - held.position).length() < 1e-4f);
+        forest.game.getFlashlightSettings().on = false;
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(!forest.world.has<SpotLight>(flashlight));
+
         forest.game.getStructureSettings().seamDepth = 2.0f;
         forest.game.getStructureSettings().seamTile = 32.0f;
         forest.game.getStructureSettings().coatingRoughness = 0.8f;

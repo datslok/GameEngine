@@ -5,6 +5,8 @@
 #include "scene/camera.h"
 #include "scene/light.h"
 
+class SettingsVisitor;
+
 /*
 * A flashlight a game can give its player (the demo's and the light lab's F key): a spotlight on its own entity,
 * switched on and off, and placed every frame (after the camera moves, since the camera moves per frame: placed per
@@ -35,6 +37,13 @@ inline const SpotLight flashlightBeam{
     .sourceRadius = 4.5f,
     .fast = true
 };
+
+// The player's flashlight (F) as a setting too, so the set command switches it for scripts and AIs. Off at the start.
+struct FlashlightSettings {
+    bool on = false;
+};
+
+void visit(FlashlightSettings& settings, SettingsVisitor& visitor);
 
 class Flashlight {
 public:

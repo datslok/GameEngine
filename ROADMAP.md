@@ -356,7 +356,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] 1. Faceted slabs in the stealth-alien look, kept for the Ring (`structure-slabs`)
   - [x] 2. Panel lines and sawtooth seams: a generated seam map read in each facet's own plane (`structure-seams`)
   - [x] 3. The Bastion's mass: armoured glacis, three setbacks of fins and slots, the command head on corbels, concrete with formwork; far towers from the same kit; the strut rebuilt as an armoured bridge (`bastion-mass`)
-  - [ ] 4. Slit windows, light strips up the fins and floodlit walls: a procedural mask in the facet plane, far slits kept at their average (`slit-windows`)
+  - [x] 4. Slit windows, light strips up the fins and floodlit walls: a procedural mask in the facet plane, far slits kept at their average (`slit-windows`)
   - [ ] 5. Obstruction lights: red levels every 105 m flashing together, sprites keeping their energy with distance (`obstruction-lights`)
   - [ ] 6. Garden terraces cantilevered from the sides and gardens on the setbacks, planted by the jungle's generators, strung with lights (`bastion-terraces`)
   - [ ] 7. The crown: radome, a turning radar, phased arrays, lattice masts (`bastion-crown`)

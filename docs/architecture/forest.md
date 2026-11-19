@@ -69,6 +69,10 @@ A military brutalist megatower, the Bastion, where the Monolith stood, ten far t
 
 - **Materials** (`seamMaterial`): one layer with a seam map read in each facet's plane (`GroundProjection::Facets`, `parallax-and-grounds.md`), painted by a one-texel strata strip. The Ring: `structureCoating` (`ForestStructureSettings`, F5 Structures): linear albedo 0.04 times a cool tint, roughness 0.65, facet tone 0.12, roughness 0.07, seam depth 1, tile 16 m. The Bastion, bridge and far towers: `bastionConcrete` (`ForestBastionSettings`, live): albedo 0.25, roughness 0.9, face tone 0.06 and roughness 0.04, formwork depth 1, tile 16.5 m. Each rewritten only when its settings change.
 - **Seam maps** (`structure_seams`, at 2048 texels, a row a job): `seamLayout` (the Ring) fills a 16 m tile with rows 2-4 m and panels 2-6 m (each row's splits from a random start), 30 % of row edges and 25 % of splits sawtooth at 45 degrees (teeth about 0.3 m, their period dividing the tile), an inset hatch in 15 % of panels. `formworkLayout` (concrete): pours of 2.75 m, panels a seventh of the tile, every other row moved half a panel, tie holes on a grid of 0.59 m, each fitted to a whole number in the tile. `seamDistance` to the nearest line or tie, `seamHeight` a groove 3 cm wide bevelled over 2 cm; `seamImages`: albedo with each panel's tone +-4 % and grooves at 0.55, height, normals 2 cm deep (`normalMapFromHeight`).
+- **At night** (`ForestBastionSettings`, live but the share lit):
+  - **Slit windows:** each tower its own band strip (`bastionWindowRows`, `windowBandImage`: 8 texels a metre over its own heights, the material's strata range set to them): pairs of 0.6 m rows 3 m apart every 40 m up each tier from 8 m above its bottom (share lit 0.45, 0.6 for the command pair over a setback; cool 0.35; slit half its 6 m cell), three 1 m visor rows round the head (lit 0.7, slits three quarters). Openings under 2 % of the wall. Colours `bastionWarmLight` (sodium) and `bastionCoolLight` (teal) times the brightness (6). The bridge has none.
+  - **Light strips** (`bastionStripsMesh`, `getLightStrips()`): a 1.5 m bar 0.2 m proud of every major fin, 8 m in from its tier's ends, glowing teal (12), on every tower.
+  - **Floodlights** (`bastionFloods`, `getFloodlights()`): 18 unshadowed spot lights on the Bastion, two before each long face and one before each side, on the ground 6 m out from the glacis's foot and on each setback's ledge 4 m out, aimed up and leaning 15 or 8 degrees in; warm white, intensity 1500, range 300 m, cone 18-30 degrees.
 - `getStructures()` lists every structure entity (the Ring, the Bastion, its bridge, the far towers); `getMonolith()` the Bastion and its bridge (static, with collision).
 
 ## Sky, air and wind
@@ -99,6 +103,7 @@ F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, H
 
 - **Start** (`ForestValleySettings::start`, `forest.valley.start`): `ForestStart::Rim` (the default, facing north) or `Trees` (`forestTreesStart`, `forest-trees.md`), set before the body spawns (`PlayerControls::setFirstPersonFeet`).
 - **Views** (`forestViews()`, `ForestView`): `rim` (from the start towards the Monolith), `ring` (the Ring from the path 230 m south), `wall` (up the Monolith from its foot).
+- **Flashlight** (`gameplay/flashlight`, `FlashlightSettings`, `forest.flashlight.on`): off at the start; F flips the setting, and each frame it is placed in the right hand and follows the setting, as in the light lab.
 - **Commands** (`addCommands`): `forest-view <name>` poses the free camera at a view; `forest-climber [n]` and `forest-epiphyte [n]` (`forest-trees.md`).
 - **Golden views:** `rim`, `ring`, `wall` at 9:30 and `rim-dusk` at 17:48.
 

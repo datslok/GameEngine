@@ -1,0 +1,31 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs window_mask.glsl's functions on the cases window_mask_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "window_mask.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_PULSE_COVERAGE) {
+        // Input: (centre, footprint, pitch, length). Output: (pulseIntegral at the centre, pulseCoverage, 0, 0).
+        vec4 a = testInput(0);
+        testOutput(0, vec4(pulseIntegral(a.x, a.z, a.w), pulseCoverage(a.x, a.y, a.z, a.w), 0.0, 0.0));
+    } else if (function == GPU_TEST_WINDOW_HASH) {
+        // Inputs: (across, height, pitch, 0), (facet numbers, footprint). Outputs: (windowHash, windowFarShare),
+        // (windowFaceSeed's bits as a float, 0, 0, 0).
+        vec4 a = testInput(0);
+        vec4 b = testInput(1);
+        uint seed = windowFaceSeed(b.xy);
+        testOutput(0, vec4(windowHash(a.x, a.y, a.z, seed), windowFarShare(b.zw, a.z)));
+        testOutput(1, vec4(float(seed), 0.0, 0.0, 0.0));
+    } else if (function == GPU_TEST_WINDOW_EMISSION) {
+        // Inputs: (place, footprint), band, (facet numbers, pitch, 0), (warm, 0), (cool, 0). Output: (windowEmission, 0).
+        vec4 a = testInput(0);
+        vec4 numbers = testInput(2);
+        testOutput(0, vec4(windowEmission(a.xy, a.zw, testInput(1), numbers.z, windowFaceSeed(numbers.xy), testInput(3).rgb, testInput(4).rgb), 0.0));
+    }
+}

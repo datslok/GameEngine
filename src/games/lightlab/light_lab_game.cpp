@@ -317,10 +317,6 @@ void visit(LightLabDeskLampSettings& settings, SettingsVisitor& visitor) {
     visitor.field("On", settings.on);
 }
 
-void visit(LightLabFlashlightSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("On", settings.on);
-}
-
 void visit(LightLabStainedGlassSettings& settings, SettingsVisitor& visitor) {
     visitor.field("On", settings.on);
 }
@@ -969,7 +965,7 @@ LightLabDeskLampSettings& LightLabGame::getDeskLampSettings() {
     return deskLampSettings;
 }
 
-LightLabFlashlightSettings& LightLabGame::getFlashlightSettings() {
+FlashlightSettings& LightLabGame::getFlashlightSettings() {
     return flashlightSettings;
 }
 

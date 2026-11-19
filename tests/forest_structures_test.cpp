@@ -314,6 +314,123 @@ namespace {
     }
 
     /*
+    * The window rows: a visor band of rows on the head, mostly lit; command rows just above each setback; all inside the
+    * tower's height, apart from each other, their shares in 0..1; and the openings under 5 % of the wall (military).
+    */
+    void testWindowRows() {
+        const BastionShape bastion = monolithBastion(0.0f, ForestBastionSettings{});
+        const std::vector<WindowRow> rows = bastionWindowRows(bastion);
+        assert(!rows.empty());
+        int visor = 0;
+        float opened = 0.0f;
+
+        for (std::size_t index = 0; index < rows.size(); ++index) {
+            const WindowRow& row = rows[index];
+            assert(row.bottom > bastion.glacisTop && row.bottom + row.height < bastion.headTop && row.height > 0.0f);
+            assert(row.lit >= 0.0f && row.lit <= 1.0f && row.cool >= 0.0f && row.cool <= 1.0f && row.fill > 0.0f && row.fill < 1.0f);
+            visor += row.bottom > bastion.headBottom ? 1 : 0;
+            opened += row.height * row.fill;
+
+            if (index > 0) {
+                assert(row.bottom > rows[index - 1].bottom + rows[index - 1].height + 0.5f);
+            }
+        }
+
+        assert(visor >= 2);
+
+        for (std::size_t tier = 1; tier < bastion.tiers.size(); ++tier) {
+            const float setback = bastion.tiers[tier].bottom;
+            const bool commanded = std::any_of(rows.begin(), rows.end(), [&](const WindowRow& row) {
+                return row.bottom > setback && row.bottom < setback + 12.0f;
+            });
+            assert(commanded);
+        }
+
+        assert(opened / (bastion.headTop - bastion.glacisTop) < 0.05f);
+    }
+
+    /*
+    * The band strip: from the sunk foot to the head's top at windowStripTexelsPerMetre, one texel tall, linear and kept
+    * exact; a row's middle fully covered with its shares, a blank wall uncovered but carrying the nearest row's shares
+    * (so mips do not dilute them), a row's edge texel partly covered; the lit share scaled as asked.
+    */
+    void testWindowBandImage() {
+        const BastionShape bastion = monolithBastion(0.0f, ForestBastionSettings{});
+        const std::vector<WindowRow> rows = bastionWindowRows(bastion);
+        const ImageData strip = windowBandImage(bastion, rows, 1.0f);
+        const float span = bastion.headTop + bastion.sink;
+        assert(strip.height == 1 && near(static_cast<float>(strip.width), span * windowStripTexelsPerMetre, 1.0f));
+        assert(strip.encoding == TextureEncoding::Linear && strip.storage == TextureStorage::Exact);
+
+        const auto texelAt = [&](const ImageData& image, float height) {
+            const auto texel = static_cast<std::size_t>((height + bastion.sink) / span * static_cast<float>(image.width));
+            return &image.pixels[texel * 4];
+        };
+        const WindowRow& row = rows.front();
+        const std::uint8_t* middle = texelAt(strip, row.bottom + 0.5f * row.height);
+        assert(middle[0] == 255 && near(middle[1], 255.0f * row.lit, 1.0f) && near(middle[2], 255.0f * row.cool, 1.0f) && near(middle[3], 255.0f * row.fill, 1.0f));
+        const std::uint8_t* blank = texelAt(strip, 0.5f * (bastion.glacisTop + 1.0f));
+        assert(blank[0] == 0 && near(blank[1], 255.0f * row.lit, 1.0f) && near(blank[3], 255.0f * row.fill, 1.0f));
+
+        const ImageData half = windowBandImage(bastion, rows, 0.5f);
+        assert(near(texelAt(half, row.bottom + 0.5f * row.height)[1], 127.5f * row.lit, 1.0f));
+
+        // A row's edge falls inside a texel (the strip's texels are not aligned to the rows): somewhere it is partly covered.
+        bool partly = false;
+
+        for (std::size_t texel = 0; texel < strip.width; ++texel) {
+            partly = partly || (strip.pixels[texel * 4] > 0 && strip.pixels[texel * 4] < 255);
+        }
+
+        assert(partly);
+    }
+
+    /*
+    * The light strips: a bar on the front of every major fin of every tier tall enough, standing just proud of it,
+    * closed; the far towers' too.
+    */
+    void testLightStrips() {
+        const BastionShape bastion = monolithBastion(0.0f, ForestBastionSettings{});
+        const Mesh strips = bastionStripsMesh(bastion);
+        assert(closedAndFacingOut(strips) && !strips.triangles.empty());
+        const BastionTier& first = bastion.tiers.front();
+        const float halfDepth = 0.5f * bastion.depthShare * first.width;
+        const float front = reachAlong(strips, Vec3{0.0f, 0.0f, 1.0f}, first.bottom, first.top);
+        assert(front > halfDepth + bastion.fins.majorDepth && front < halfDepth + bastion.fins.majorDepth + 0.5f);
+        assert(lowest(strips) > first.bottom && highest(strips) < bastion.headBottom);
+
+        for (const BastionShape& tower : farTowers()) {
+            assert(closedAndFacingOut(bastionStripsMesh(tower)));
+        }
+    }
+
+    /*
+    * The floods: at the foot of the glacis and on each setback's ledge, six a level (two on the front and back, one on
+    * each side), each just out from the wall above it, aimed up it and leaning a little towards it.
+    */
+    void testFloods() {
+        const BastionShape bastion = monolithBastion(0.0f, ForestBastionSettings{});
+        const std::vector<FloodPlace> floods = bastionFloods(bastion);
+        assert(floods.size() == 6 * bastion.tiers.size());
+
+        for (const FloodPlace& flood : floods) {
+            const Vec3 aim = flood.direction.normalized();
+            assert(aim.y > 0.9f);
+            const Vec2 out{flood.position.x, flood.position.z};
+            const Vec2 level{aim.x, aim.z};
+            assert(level.dot(out) < 0.0f);
+            const bool atFoot = near(flood.position.y, 0.0f, 1e-3f);
+            const bool onLedge = std::any_of(bastion.tiers.begin() + 1, bastion.tiers.end(), [&](const BastionTier& tier) {
+                return near(flood.position.y, tier.bottom, 1e-3f);
+            });
+            assert(atFoot || onLedge);
+
+            const float width = atFoot ? bastion.glacisWidth : bastionWidthAt(bastion, flood.position.y + 0.5f);
+            assert(std::fabs(flood.position.x) > 0.5f * width - 1e-3f || std::fabs(flood.position.z) > 0.5f * bastion.depthShare * width - 1e-3f);
+        }
+    }
+
+    /*
     * The Ring: segments round its centre in the plane facing along z, each a closed prism; gaps between them; the lower
     * half below its centre (the ground); the segments near the top drifted outwards, the rest on the polygon.
     */
@@ -523,5 +640,9 @@ void testForestStructures() {
     testBastionMesh();
     testFarTowers();
     testBridge();
+    testWindowRows();
+    testWindowBandImage();
+    testLightStrips();
+    testFloods();
     testRing();
 }

@@ -11,7 +11,7 @@ std430, mirrored byte for byte in the shaders, each size checked by a `static_as
 | Record | Bytes | Header | One per |
 |---|---|---|---|
 | `GpuInstance` | 208 | `gpu_scene.h` | `DrawItem` of the frame (instance i = draw i, the same for every view) |
-| `GpuMaterial` | 288 | `material_uniforms.h` | distinct material, deduplicated by `MaterialTable` |
+| `GpuMaterial` | 320 | `material_uniforms.h` | distinct material, deduplicated by `MaterialTable` |
 | `GpuDirectionalLight` | 64 | `light_uniforms.h` | seated directional light (`maxDirectionalLights` 4) |
 | `GpuPointLight` | 48 | `light_uniforms.h` | seated point light (`maxPointLights` 1024) |
 | `GpuSpotLight` | 128 | `light_uniforms.h` | seated spotlight (`maxSpotLights` 256), image lights' windows included |

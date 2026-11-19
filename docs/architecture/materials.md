@@ -29,7 +29,7 @@ What a surface is made of, from file to `Material`, and how cut-outs keep their 
 | Clear coat | `clearCoat` (red texture), `clearCoatRoughness` (green texture), `clearCoatNormalTexture`, `clearCoatNormalScale` | 0, 0, 1 |
 | Parallax | `heightTexture` (red: 1 top, 0 deepest), `heightScale` (texture units) | 0.03 |
 | Impostor | `impostorFrames` (atlas frames a side; `scene/impostor.h`) | 0 |
-| Ground layers | `groundLayers` (up to four plain materials), `groundWeights`, `groundRepeats`, `groundBlendDepth`, `groundProjection` (`TextureCoordinates`, `Axes` or `Facets`), `groundPaint` (`TextureCoordinates` or `Strata`), the strata, top-layer, warp, streak, hex tiling and variation fields | none |
+| Ground layers | `groundLayers` (up to four plain materials), `groundWeights`, `groundRepeats`, `groundBlendDepth`, `groundProjection` (`TextureCoordinates`, `Axes` or `Facets`), `groundPaint` (`TextureCoordinates` or `Strata`), the strata, top-layer, warp, streak, hex tiling and variation fields; slit windows on faceted strata grounds (`windowBands`, `windowPitch`, `windowWarm`, `windowCool`; `parallax-and-grounds.md`) | none |
 
 - `isCutOut(material)`: `Mask`. `isTransparent(material)`: `Blend` or `transmission` above 0, so drawn after the opaque scene.
 - Clear coat is ignored on transparent materials (their glass is a varnish already); parallax on cut-outs and transparent ones.

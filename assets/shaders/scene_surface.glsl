@@ -14,6 +14,7 @@
 #include "parallax.glsl"
 #include "ground_layers.glsl"
 #include "facet_variation.glsl"
+#include "window_mask.glsl"
 #include "impostor.glsl"
 #include "lighting.glsl"
 #include "mirrored_light.glsl"
@@ -1146,6 +1147,21 @@ void main() {
             }
 
             albedo.rgb *= variationShade(variation, material.groundStreaks.w);
+        }
+
+        /*
+        * Slit windows on faceted walls (window_mask.glsl): the band strip read at the world height as the strata are (its
+        * mips averaging the rows far away), the windows at the facet's place with the pixel's footprint there, each face
+        * its own seed from its facet numbers.
+        */
+        if (faceted && material.groundSlots.w != 0u) {
+            float windowHeight = relativePosition.y + cameraOrigin.y;
+            float bandPlace = strataPlace(windowHeight, material.groundBlend.y, material.groundBlend.z);
+            float bandScale = material.groundBlend.z * exp2(mipBias);
+            vec4 band = textureGrad(textures[nonuniformEXT(material.groundSlots.w)], vec2(bandPlace, 0.5), vec2(positionStepRight.y * bandScale, 0.0),
+                                    vec2(positionStepDown.y * bandScale, 0.0));
+            vec2 footprint = abs(facetStepAcross) + abs(facetStepDown);
+            emissive += windowEmission(facetUv, footprint, band, material.windowWarm.w, windowFaceSeed(textureUv), material.windowWarm.rgb, material.windowCool.rgb);
         }
 
         // Projected: each projection's blended texel decoded in its own plane and the three combined (projectedNormal),

@@ -124,6 +124,20 @@ GpuMaterial packMaterial(const Material& material) {
             data.groundStreaks[2] = 1.0f / material.streakLength;
         }
 
+        // Slit windows on faceted strata grounds, only with their band strip and a pitch.
+        const bool faceted = material.groundProjection == GroundProjection::Facets && material.groundPaint == GroundPaint::Strata;
+
+        if (faceted && material.windowBands.isValid() && material.windowPitch > 0.0f) {
+            data.groundSlots[3] = bindlessTextureSlot(material.windowBands);
+            data.windowWarm[0] = std::max(material.windowWarm.x, 0.0f);
+            data.windowWarm[1] = std::max(material.windowWarm.y, 0.0f);
+            data.windowWarm[2] = std::max(material.windowWarm.z, 0.0f);
+            data.windowWarm[3] = material.windowPitch;
+            data.windowCool[0] = std::max(material.windowCool.x, 0.0f);
+            data.windowCool[1] = std::max(material.windowCool.y, 0.0f);
+            data.windowCool[2] = std::max(material.windowCool.z, 0.0f);
+        }
+
         // Tone variation over projected layers, only with its texture.
         if (projected && material.groundVariation.isValid() && material.variationTile > 0.0f) {
             data.groundSlots[2] = bindlessTextureSlot(material.groundVariation);

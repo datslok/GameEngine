@@ -4,6 +4,7 @@
 #include "games/forest/forest_terrain.h"
 #include "games/forest/structures.h"
 #include "games/forest/valley_shapes.h"
+#include "math/angles.h"
 
 #include <algorithm>
 #include <array>
@@ -56,6 +57,33 @@ namespace {
     constexpr float parapetHeight = 1.2f;
     constexpr float parapetThickness = 0.6f;
     constexpr float bridgeInside = 4.0f;
+
+    // The window rows (bastionWindowRows): a pair's rows this far apart, the first pair this far above its tier's bottom,
+    // none closer than this to its top; their height, shares lit (the command pair over a setback more), cool and fill.
+    constexpr float pairApart = 3.0f;
+    constexpr float firstPairAbove = 8.0f;
+    constexpr float rowsBelowTop = 10.0f;
+    constexpr WindowRow tierRow{.height = 0.6f, .lit = 0.45f, .cool = 0.35f, .fill = 0.5f};
+    constexpr float commandLit = 0.6f;
+    // The head's visor band: three rows at these shares of the head's height, taller, mostly lit, long slits.
+    constexpr std::array<float, 3> visorRows{0.3f, 0.5f, 0.7f};
+    constexpr WindowRow visorRow{.height = 1.0f, .lit = 0.7f, .cool = 0.3f, .fill = 0.75f};
+
+    // The light strips: their width (at most this share of a major fin's), how far proud of the fin and how far into it
+    // they stand, how far in from their tier's ends they stop, and the least tier height that takes one.
+    constexpr float stripWidth = 1.5f;
+    constexpr float stripFinShare = 0.4f;
+    constexpr float stripProud = 0.2f;
+    constexpr float stripInto = 0.05f;
+    constexpr float stripEndInset = 8.0f;
+
+    // The floodlights: how far out from the wall above they stand (on a ledge; on the ground, from the glacis's foot), how
+    // far they lean towards it (degrees), and where the two before a long face stand across it (shares of its width).
+    constexpr float floodOutOnLedge = 4.0f;
+    constexpr float floodOutOnGround = 6.0f;
+    constexpr float floodLeanOnLedge = 8.0f;
+    constexpr float floodLeanOnGround = 15.0f;
+    constexpr float floodAcross = 0.3f;
 
     // A rectangle at a height with its corners chamfered, round from -x through +z to +x and -z (rising lofts face out).
     std::vector<Vec3> chamferedRectangle(float y, float width, float depth, float chamfer) {
@@ -146,6 +174,12 @@ void visit(ForestBastionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Concrete roughness", settings.concreteRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Formwork depth", settings.formworkDepth, {.min = 0.0f, .max = 10.0f, .sliderMax = 3.0f});
     visitor.field("Formwork tile", settings.formworkTile, {.min = 1.0f, .max = 200.0f, .sliderMax = 64.0f, .unit = "m"});
+    visitor.field("Windows lit", settings.windowsLit, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Window brightness", settings.windowBrightness, {.min = 0.0f, .max = 1000.0f, .sliderMax = 50.0f});
+    visitor.field("Window pitch", settings.windowPitch, {.min = 0.5f, .max = 50.0f, .sliderMax = 20.0f, .unit = "m"});
+    visitor.field("Strip brightness", settings.stripBrightness, {.min = 0.0f, .max = 1000.0f, .sliderMax = 100.0f});
+    visitor.field("Flood intensity", settings.floodIntensity, {.min = 0.0f, .max = 100000.0f, .sliderMax = 10000.0f});
+    visitor.field("Flood range", settings.floodRange, {.min = 1.0f, .max = 2000.0f, .sliderMax = 800.0f, .unit = "m"});
 }
 
 BastionShape monolithBastion(float groundLevel, const ForestBastionSettings& settings) {
@@ -306,4 +340,154 @@ Mesh bridgeMesh(const BridgeShape& bridge) {
     }
 
     return mesh;
+}
+
+/*
+* Pairs up each tier from firstPairAbove until rowsBelowTop is left, the first over a setback (any tier but the first)
+* the command level; then the visor rows round the head.
+*/
+std::vector<WindowRow> bastionWindowRows(const BastionShape& shape) {
+    std::vector<WindowRow> rows;
+
+    for (std::size_t tier = 0; tier < shape.tiers.size(); ++tier) {
+        const BastionTier& level = shape.tiers[tier];
+
+        for (float pair = level.bottom + firstPairAbove; pair + pairApart + tierRow.height <= level.top - rowsBelowTop; pair += windowPairSpacing) {
+            const bool command = tier > 0 && pair == level.bottom + firstPairAbove;
+
+            for (const float bottom : {pair, pair + pairApart}) {
+                WindowRow row = tierRow;
+                row.bottom = bottom;
+                row.lit = command ? commandLit : tierRow.lit;
+                rows.push_back(row);
+            }
+        }
+    }
+
+    const float headHeight = shape.headTop - shape.headBottom;
+
+    for (const float share : visorRows) {
+        WindowRow row = visorRow;
+        row.bottom = shape.headBottom + share * headHeight - 0.5f * visorRow.height;
+        rows.push_back(row);
+    }
+
+    return rows;
+}
+
+/*
+* Each texel's cover is the share of its height under rows; its shares are the row nearest its middle (by the gap to the
+* row's span), so the blank wall carries them and mips average only the cover.
+*/
+ImageData windowBandImage(const BastionShape& shape, const std::vector<WindowRow>& rows, float litScale) {
+    const float span = shape.headTop + shape.sink;
+    const auto texels = static_cast<std::uint32_t>(std::ceil(span * windowStripTexelsPerMetre));
+    const float texelHeight = span / static_cast<float>(texels);
+    ImageData image{texels, 1, std::vector<std::uint8_t>(static_cast<std::size_t>(texels) * 4, 0), TextureEncoding::Linear};
+    image.storage = TextureStorage::Exact;
+
+    if (rows.empty()) {
+        return image;
+    }
+
+    const auto byte = [](float value) {
+        return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+
+    for (std::uint32_t texel = 0; texel < texels; ++texel) {
+        const float low = -shape.sink + texelHeight * static_cast<float>(texel);
+        const float high = low + texelHeight;
+        const float middle = 0.5f * (low + high);
+        float cover = 0.0f;
+        const WindowRow* nearest = &rows.front();
+        float nearestGap = 1e30f;
+
+        for (const WindowRow& row : rows) {
+            cover += std::max(std::min(high, row.bottom + row.height) - std::max(low, row.bottom), 0.0f) / texelHeight;
+            const float gap = std::max({row.bottom - middle, middle - (row.bottom + row.height), 0.0f});
+
+            if (gap < nearestGap) {
+                nearestGap = gap;
+                nearest = &row;
+            }
+        }
+
+        std::uint8_t* pixel = &image.pixels[static_cast<std::size_t>(texel) * 4];
+        pixel[0] = byte(cover);
+        pixel[1] = byte(nearest->lit * litScale);
+        pixel[2] = byte(nearest->cool);
+        pixel[3] = byte(nearest->fill);
+    }
+
+    return image;
+}
+
+// A bar on each major fin's front, on every face of every tier tall enough for its insets.
+Mesh bastionStripsMesh(const BastionShape& shape) {
+    Mesh mesh;
+    std::uint64_t facet = 0;
+
+    for (const BastionTier& tier : shape.tiers) {
+        const float bottom = tier.bottom + stripEndInset;
+        const float top = tier.top - stripEndInset;
+
+        if (top <= bottom) {
+            continue;
+        }
+
+        const float depth = shape.depthShare * tier.width;
+        const float chamfer = shape.chamferShare * tier.width;
+
+        for (const TierFace& face : tierFaces(tier.width, depth, chamfer)) {
+            const std::vector<FinPlace> places = finPlaces(face.span, shape.fins);
+            const float share = places.empty() ? 0.0f : face.span / static_cast<float>(places.size());
+            const float finWidth = std::min(shape.fins.majorWidth, 0.9f * share);
+            const float width = std::min(stripWidth, stripFinShare * finWidth);
+
+            for (const FinPlace& place : places) {
+                if (!place.major || width <= 0.0f || shape.fins.majorDepth <= 0.0f) {
+                    continue;
+                }
+
+                const Vec3 base{0.0f, bottom, 0.0f};
+                const Vec3 left = face.across * (place.centre - 0.5f * width);
+                const Vec3 right = face.across * (place.centre + 0.5f * width);
+                const Vec3 inner = face.normal * (face.distance + shape.fins.majorDepth - stripInto);
+                const Vec3 outer = face.normal * (face.distance + shape.fins.majorDepth + stripProud);
+                appendExtrusion(mesh, {base + left + inner, base + right + inner, base + right + outer, base + left + outer}, Vec3{0.0f, top - bottom, 0.0f},
+                                shape.seed, facet, FacetNumbers::PerFace);
+            }
+        }
+    }
+
+    return mesh;
+}
+
+/*
+* A level's floods stand before the wall above it: on the ground before the glacis's foot for the first tier, on the
+* ledge below for the others. Each aims up, turned towards the wall by its lean.
+*/
+std::vector<FloodPlace> bastionFloods(const BastionShape& shape) {
+    std::vector<FloodPlace> floods;
+
+    for (std::size_t tier = 0; tier < shape.tiers.size(); ++tier) {
+        const bool onGround = tier == 0;
+        const float wallWidth = onGround ? shape.glacisWidth : shape.tiers[tier].width;
+        const float out = onGround ? floodOutOnGround : floodOutOnLedge;
+        const float lean = radiansFromDegrees(onGround ? floodLeanOnGround : floodLeanOnLedge);
+        const float y = onGround ? 0.0f : shape.tiers[tier].bottom;
+
+        for (const TierFace& face : tierFaces(wallWidth, shape.depthShare * wallWidth, shape.chamferShare * wallWidth)) {
+            const bool longFace = std::fabs(face.normal.z) > 0.5f;
+            const std::vector<float> across = longFace ? std::vector<float>{-floodAcross * wallWidth, floodAcross * wallWidth} : std::vector<float>{0.0f};
+
+            for (const float along : across) {
+                const Vec3 position = face.normal * (face.distance + out) + face.across * along + Vec3{0.0f, y, 0.0f};
+                const Vec3 direction = Vec3{0.0f, std::cos(lean), 0.0f} - face.normal * std::sin(lean);
+                floods.push_back(FloodPlace{.position = position, .direction = direction});
+            }
+        }
+    }
+
+    return floods;
 }

@@ -27,10 +27,12 @@ struct MaterialData {
     uvec4 groundWeights;    // x: the weights texture's slot (linear RGBA, a channel a layer); y: GROUND_PROJECTED, GROUND_STRATA, GROUND_HEX; z: the top layer plus one (0 none)
     vec4 groundBlend;       // x: the height blend's depth; y: the strata's bottom (world height); z: one over their span; w: the warp's metres
     vec4 groundFacing;      // x, y: the normal's upward part where the top layer starts and is full; z: one over the warp's tile; w: one over the tone variation's
-    uvec4 groundSlots;      // x: the strata warp's texture slot; y: the streaks'; z: the tone variation's
+    uvec4 groundSlots;      // x: the strata warp's texture slot; y: the streaks'; z: the tone variation's; w: the window bands' (window_mask.glsl)
     vec4 groundStreaks;     // x: the streaks' strength; y: one over their width; z: one over their length; w: the tone variation's strength
     vec4 diffuseTransmission; // light through a leaf (brdf.glsl, addDiffuseTransmission): rgb its tint (linear), w its share (0 none)
     vec4 facetVariation;    // each flat facet's own tone and roughness (facet_variation.glsl): x the tone's share, y the roughness's amount (0 none)
+    vec4 windowWarm;        // slit windows (window_mask.glsl): rgb the warm colour (linear, brightness included), w the cells' pitch (metres)
+    vec4 windowCool;        // rgb the cool colour
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

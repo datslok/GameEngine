@@ -192,6 +192,14 @@ struct Material {
     TextureHandle groundVariation;
     float variationStrength = 0.0f;
     float variationTile = 160.0f;
+    // Slit windows (render/gpu/window_mask.h), on faceted strata grounds only: windowBands, a linear RGBA strip over the
+    // strata's heights (red the rows' cover, green the share lit, blue the share in the cool colour, alpha the slit's
+    // share of its cell across), the cells windowPitch metres apart across each face, and the two colours (linear light,
+    // brightness included). No texture: no windows.
+    TextureHandle windowBands;
+    float windowPitch = 6.0f;
+    Vec3 windowWarm{0.0f, 0.0f, 0.0f};
+    Vec3 windowCool{0.0f, 0.0f, 0.0f};
 };
 
 inline bool isCutOut(const Material& material) {

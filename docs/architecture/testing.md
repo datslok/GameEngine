@@ -86,6 +86,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `motion_blur.glsl` | `render/gpu/motion_blur` | `motion_blur_gpu_test.cpp` |
 | `depth_of_field.glsl` | `render/gpu/depth_of_field` | `depth_of_field_gpu_test.cpp` |
 | `dither.glsl` | `core/srgb`, `core/dither` | `dither_gpu_test.cpp` |
+| `window_mask.glsl` | `render/gpu/window_mask` | `window_mask_gpu_test.cpp` |
 | `culling.glsl`, `level_of_detail.glsl` | `render/gpu/cull_records` | `cull_records_gpu_test.cpp` |
 | `camera_culling.glsl` | `render/gpu/camera_culling` | `cull_records_gpu_test.cpp` |
 | `level_fade.glsl` | `render/gpu/level_fade` | `level_fade_gpu_test.cpp` |

@@ -1,4 +1,6 @@
 #include "gameplay/flashlight.h"
+
+#include "core/settings_visitor.h"
 #include "math/transform.h"
 #include "scene/lighting.h"
 
@@ -6,6 +8,10 @@
 * The beam starts beside the eye and passes through the point straight ahead of it, so the middle of the lit patch is
 * where you look whatever the distance to it.
 */
+void visit(FlashlightSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("On", settings.on);
+}
+
 FlashlightPose flashlightInHand(const Camera& camera) {
     const Vec3 position = camera.getPosition() + camera.getRight() * flashlightHandRight - camera.getUp() * flashlightHandDown;
     const Vec3 aimPoint = camera.getPosition() + camera.getForward() * flashlightAimDistance;

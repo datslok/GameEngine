@@ -18,6 +18,7 @@
 #include "games/forest/understorey.h"
 #include "games/forest/valley_shapes.h"
 #include "gameplay/control_mode.h"
+#include "gameplay/flashlight.h"
 #include "gameplay/player_controls.h"
 #include "physics/static_level.h"
 #include "scene/atmosphere.h"
@@ -195,6 +196,12 @@ public:
     ForestRockSettings& getRockSettings();
     ForestStructureSettings& getStructureSettings();
     ForestBastionSettings& getBastionSettings();
+    // The towers' light strips (the Bastion's first, then the far towers'), and the Bastion's floodlights.
+    const std::vector<Entity>& getLightStrips() const;
+    const std::vector<Entity>& getFloodlights() const;
+    // The player's flashlight (F, off at the start) and its entity.
+    FlashlightSettings& getFlashlightSettings();
+    Entity getFlashlight() const;
     // Every structure's entity: the Ring, the Bastion and its bridge, the far towers.
     const std::vector<Entity>& getStructures() const;
     const std::vector<Entity>& getRockShapes() const;
@@ -402,6 +409,10 @@ private:
     Entity ring;
     std::vector<Entity> monolith; // the Bastion, then its bridge
     std::vector<Entity> structures;
+    std::vector<Entity> lightStrips;
+    std::vector<Entity> floodlights;
+    Flashlight flashlight;
+    FlashlightSettings flashlightSettings;
     Entity sun;
     Entity air;
     Entity floorMist; // the mist's pool on the valley's floor, a second Fog beside the air's haze
