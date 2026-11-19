@@ -138,7 +138,7 @@ The game starts in first person; F1-F3 switch modes. Every game shares the camer
 | **F3** | Free camera mode |
 | **Alt+Enter** | Toggle fullscreen |
 | **Escape** | Release the mouse |
-| **F** | Toggle the flashlight (off at the start; in MOBA mode the duck carries it) |
+| **F** | Toggle the flashlight in the demo, the light lab and the forest (off at the start; in MOBA mode the duck carries it) |
 | **L** | Toggle the light lab's back-room ceiling lamp, or the demo's field of 100 coloured lamps |
 | **K** | Toggle the light lab's street lights, or the demo's four floodlights (on at the start) |
 | **Left mouse (held)** | Drag the cloth lab's sheet where the crosshair points, within 10 m |

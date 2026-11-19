@@ -144,13 +144,6 @@ struct LightLabStainedGlassSettings {
 
 void visit(LightLabStainedGlassSettings& settings, SettingsVisitor& visitor);
 
-// The player's flashlight (F), as a setting too, so the set command switches it for scripts and AIs. Off at the start.
-struct LightLabFlashlightSettings {
-    bool on = false;
-};
-
-void visit(LightLabFlashlightSettings& settings, SettingsVisitor& visitor);
-
 inline const Vec3 labDeskLampPosition{labTableX - labTableHalfLength - 0.3f, labTableHeight + 0.35f, labTableZ + 0.1f};
 inline const SpotLight labDeskLampBeam{
     .colour = Vec3{1.0f, 0.82f, 0.6f},
@@ -267,7 +260,7 @@ public:
     LightLabFenceTorchSettings& getFenceTorchSettings();
     Entity getFenceTorch() const;
     LightLabDeskLampSettings& getDeskLampSettings();
-    LightLabFlashlightSettings& getFlashlightSettings();
+    FlashlightSettings& getFlashlightSettings();
     Entity getDeskLamp() const;
     LightLabStainedGlassSettings& getStainedGlassSettings();
 
@@ -351,7 +344,7 @@ private:
 
     // Switched by its settings every frame (see LightLabDeskLampSettings): a Transform always, its SpotLight while on.
     LightLabDeskLampSettings deskLampSettings;
-    LightLabFlashlightSettings flashlightSettings;
+    FlashlightSettings flashlightSettings;
     Entity deskLamp;
 
     // Switched by its settings every frame (see LightLabStainedGlassSettings): the window's material, clear or stained

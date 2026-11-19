@@ -11,6 +11,7 @@
 #include "scene/indexed_mesh.h"
 #include "scene/simplify_mesh.h"
 #include "gameplay/first_person_body.h"
+#include "math/angles.h"
 #include "math/transform.h"
 #include "scene/light.h"
 #include "scene/model_renderer.h"
@@ -201,7 +202,28 @@ namespace {
         material.normalScale = std::max(settings.formworkDepth, 0.0f);
         material.facetTone = concreteFaceTone;
         material.facetRoughness = concreteFaceRoughness;
+        // The slit windows' colours at their brightness, and their cells' pitch (only towers with a band strip show them).
+        const float brightness = std::max(settings.windowBrightness, 0.0f);
+        material.windowWarm = bastionWarmLight * brightness;
+        material.windowCool = bastionCoolLight * brightness;
+        material.windowPitch = std::max(settings.windowPitch, 0.5f);
     }
+
+    // The light strips' glow: the cool colour at the strips' brightness, on a dark painted bar.
+    void applyStripSettings(Material& material, const ForestBastionSettings& settings) {
+        material.emissive = bastionCoolLight * std::max(settings.stripBrightness, 0.0f);
+    }
+
+    // A floodlight's intensity and reach.
+    void applyFloodSettings(SpotLight& light, const ForestBastionSettings& settings) {
+        light.intensity = std::max(settings.floodIntensity, 0.0f);
+        light.range = std::max(settings.floodRange, 1.0f);
+    }
+
+    // The floodlights' cone (half-angles, degrees) and source size (metres): a wide wash, soft up close.
+    constexpr float floodInnerDegrees = 18.0f;
+    constexpr float floodOuterDegrees = 30.0f;
+    constexpr float floodSourceRadius = 2.0f;
 
     /*
     * A structure's material (games/forest/structures, structure_seams): one layer with a seam map, read once in each
@@ -324,6 +346,7 @@ const char* ForestGame::title() const {
 }
 
 void ForestGame::onInit(World& world, AssetManager& assets) {
+    flashlight.create(world, flashlightSettings.on);
     buildGround(world, assets);
     buildShapes(world, assets);
     buildTrees(world, assets);
@@ -529,12 +552,52 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         structures.push_back(entity);
     };
 
+    /*
+    * At night (stage 4): each tower its own band strip of slit windows over its own heights (the bridge none), a mesh of
+    * light strips on its major fins, and the Bastion its floodlights, unshadowed, washing its walls.
+    */
+    Material strip;
+    strip.colour = Pixel{20, 22, 24};
+    strip.roughness = 0.5f;
+    applyStripSettings(strip, bastionSettings);
+
+    const auto addTower = [&](const BastionShape& tower, bool solid) {
+        Material material = concrete;
+        material.windowBands = assets.addTexture(windowBandImage(tower, bastionWindowRows(tower), bastionSettings.windowsLit));
+        material.strataBottom = tower.foot.y - tower.sink;
+        material.strataTop = tower.foot.y + tower.headTop;
+        const Transform place{.position = tower.foot};
+        const Entity entity = addShape(world, assets.addMesh(bastionMesh(tower)), material, place, solid);
+
+        if (solid) {
+            staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(entity)), place.getMatrix());
+            monolith.push_back(entity);
+        }
+
+        structures.push_back(entity);
+        lightStrips.push_back(addShape(world, assets.addMesh(bastionStripsMesh(tower)), strip, place));
+    };
+
     const BastionShape bastion = monolithBastion(clearingLevel(), bastionSettings);
-    addSolid(bastionMesh(bastion), Transform{.position = bastion.foot});
+    addTower(bastion, true);
     addSolid(bridgeMesh(monolithBridge(clearingLevel(), bastion)), Transform{});
 
     for (const BastionShape& tower : farTowers()) {
-        structures.push_back(addShape(world, assets.addMesh(bastionMesh(tower)), concrete, Transform{.position = tower.foot}));
+        addTower(tower, false);
+    }
+
+    for (const FloodPlace& place : bastionFloods(bastion)) {
+        SpotLight light{.colour = bastionFloodLight,
+                        .direction = place.direction,
+                        .innerAngle = radiansFromDegrees(floodInnerDegrees),
+                        .outerAngle = radiansFromDegrees(floodOuterDegrees),
+                        .sourceRadius = floodSourceRadius,
+                        .castsShadows = false};
+        applyFloodSettings(light, bastionSettings);
+        const Entity flood = world.create();
+        world.add(flood, Transform{.position = bastion.foot + place.position});
+        world.add(flood, light);
+        floodlights.push_back(flood);
     }
 }
 
@@ -1198,6 +1261,10 @@ void ForestGame::onInput(World& world, const Input& input) {
     if (input.wasKeyPressed(Key::F4)) {
         debugViewEnabled = !debugViewEnabled;
     }
+
+    if (input.wasKeyPressed(Key::F)) {
+        flashlightSettings.on = !flashlightSettings.on;
+    }
 }
 
 void ForestGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
@@ -1206,7 +1273,10 @@ void ForestGame::onFixedUpdate(World& world, float tickSeconds, double simulatio
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
 
-// The daylight, haze and blend follow the settings every frame, so a slider or a set command changes them at once.
+/*
+* The daylight, haze and blend follow the settings every frame, so a slider or a set command changes them at once; the
+* flashlight (gameplay/flashlight) follows the camera that just moved, and its setting, so F or a set command switches it.
+*/
 void ForestGame::onUpdate(World& world, const Input& input, float frameSeconds, float alpha) {
     // Motion from the previous mode must not rotate the new camera pose.
     if (!controls.updateModeSwitching(world, input)) {
@@ -1214,6 +1284,11 @@ void ForestGame::onUpdate(World& world, const Input& input, float frameSeconds, 
     }
 
     updateDaylight(world);
+    flashlight.place(world, flashlightInHand(controls.getCamera()));
+
+    if (flashlight.isOn(world) != flashlightSettings.on) {
+        flashlight.toggle(world);
+    }
 }
 
 void ForestGame::updateDaylight(World& world) {
@@ -1294,6 +1369,15 @@ void ForestGame::updateDaylight(World& world) {
                 applyBastionSettings(world.get<ModelRenderer>(structure).parts.front().material, bastionSettings);
                 markRenderChanged(world, structure);
             }
+        }
+
+        for (const Entity strips : lightStrips) {
+            applyStripSettings(world.get<ModelRenderer>(strips).parts.front().material, bastionSettings);
+            markRenderChanged(world, strips);
+        }
+
+        for (const Entity flood : floodlights) {
+            applyFloodSettings(world.get<SpotLight>(flood), bastionSettings);
         }
 
         appliedBastionSettings = bastionSettings;
@@ -1398,6 +1482,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Bastion", [&] {
         visit(bastionSettings, visitor);
+    });
+    visitor.group("Flashlight", [&] {
+        visit(flashlightSettings, visitor);
     });
     visitor.group("Hangings", [&] {
         visit(hangingSettings, visitor);
@@ -1624,6 +1711,22 @@ ForestStructureSettings& ForestGame::getStructureSettings() {
 
 ForestBastionSettings& ForestGame::getBastionSettings() {
     return bastionSettings;
+}
+
+const std::vector<Entity>& ForestGame::getLightStrips() const {
+    return lightStrips;
+}
+
+const std::vector<Entity>& ForestGame::getFloodlights() const {
+    return floodlights;
+}
+
+FlashlightSettings& ForestGame::getFlashlightSettings() {
+    return flashlightSettings;
+}
+
+Entity ForestGame::getFlashlight() const {
+    return flashlight.getEntity();
 }
 
 const std::vector<Entity>& ForestGame::getStructures() const {

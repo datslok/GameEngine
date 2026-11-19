@@ -248,6 +248,11 @@
 #define GPU_TEST_THINNED_SHARE 0
 #define GPU_TEST_THINNED_CARD 1
 
+// window_mask_test.comp
+#define GPU_TEST_PULSE_COVERAGE 0
+#define GPU_TEST_WINDOW_HASH 1
+#define GPU_TEST_WINDOW_EMISSION 2
+
 // facet_variation_test.comp
 #define GPU_TEST_FACET_TONE 0
 #define GPU_TEST_FACET_ROUGHNESS 1

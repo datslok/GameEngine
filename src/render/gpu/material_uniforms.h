@@ -39,8 +39,8 @@ struct GpuMaterial {
     // weights texture's slot (0 for a material without layers), the switches (GROUND_PROJECTED, GROUND_FACETS, GROUND_STRATA,
     // render/gpu/ground_layers_shared.h) and the top layer's number plus one (0 none); the blend depth, the strata's
     // bottom, one over their span and the warp's metres; the height of the normal's upward part where the top layer
-    // starts and is full, one over the warp's tile and one over the tone variation's; the warp's, the streaks' and the
-    // tone variation's texture slots; and the streaks' strength, one over their width and their length, and the
+    // starts and is full, one over the warp's tile and one over the tone variation's; the warp's, the streaks', the tone
+    // variation's and the window bands' texture slots; and the streaks' strength, one over their width and their length, and the
     // variation's strength. GROUND_HEX in the switches reads each layer by hex tiling.
     std::uint32_t groundLayers[4];
     float groundRepeats[4];
@@ -55,9 +55,13 @@ struct GpuMaterial {
     // Each flat facet's own tone and roughness (render/gpu/facet_variation.h): x the tone's share, y the roughness's
     // amount (0 none); zw unused.
     float facetVariation[4];
+    // Slit windows (render/gpu/window_mask.h; their band strip's slot in groundSlots.w, 0 none): rgb the warm colour,
+    // w the cells' pitch (metres); rgb the cool colour, w unused.
+    float windowWarm[4];
+    float windowCool[4];
 };
 
-static_assert(sizeof(GpuMaterial) == 288, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 320, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

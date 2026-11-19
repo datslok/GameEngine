@@ -579,6 +579,37 @@ namespace {
         coating.groundProjection = GroundProjection::TextureCoordinates;
         assert(packMaterial(coating).groundWeights[1] == 0u && packMaterial(coating).groundSlots[1] == 0u);
     }
+
+    /*
+    * Slit windows in the table: the band strip's slot, the colours and the pitch, only on a faceted strata ground with a
+    * strip and a pitch; on any other ground, none (the shader reads the windows' places from the facets and the strata).
+    */
+    void testTheTableCarriesWindows() {
+        Material wall;
+        wall.groundLayers.resize(1);
+        wall.groundWeights = TextureHandle{3};
+        wall.groundProjection = GroundProjection::Facets;
+        wall.groundPaint = GroundPaint::Strata;
+        wall.windowBands = TextureHandle{8};
+        wall.windowPitch = 6.0f;
+        wall.windowWarm = Vec3{4.0f, 2.0f, 0.5f};
+        wall.windowCool = Vec3{0.5f, 3.0f, 4.0f};
+        const GpuMaterial packed = packMaterial(wall);
+        assert(packed.groundSlots[3] == 9 && packed.windowWarm[0] == 4.0f && packed.windowWarm[2] == 0.5f && packed.windowWarm[3] == 6.0f);
+        assert(packed.windowCool[1] == 3.0f);
+
+        wall.groundPaint = GroundPaint::TextureCoordinates;
+        assert(packMaterial(wall).groundSlots[3] == 0u && packMaterial(wall).windowWarm[3] == 0.0f);
+        wall.groundPaint = GroundPaint::Strata;
+        wall.groundProjection = GroundProjection::Axes;
+        assert(packMaterial(wall).groundSlots[3] == 0u);
+        wall.groundProjection = GroundProjection::Facets;
+        wall.windowPitch = 0.0f;
+        assert(packMaterial(wall).groundSlots[3] == 0u);
+        wall.windowPitch = 6.0f;
+        wall.windowBands = TextureHandle{};
+        assert(packMaterial(wall).groundSlots[3] == 0u);
+    }
 }
 
 void testGroundLayers() {
@@ -586,6 +617,7 @@ void testGroundLayers() {
     testFacetPlacesKeepSeamsLevel();
     testFacetNormalsAndStreaks();
     testTheTableCarriesFacets();
+    testTheTableCarriesWindows();
     testHexTilingHidesTheRepeat();
     testToneVariation();
     testTheTableCarriesHexTilingAndVariation();
