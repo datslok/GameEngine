@@ -16,6 +16,7 @@
 #include "games/forest/lianas.h"
 #include "games/forest/palms.h"
 #include "games/forest/understorey.h"
+#include "games/forest/valley_maps.h"
 #include "games/forest/valley_shapes.h"
 #include "gameplay/control_mode.h"
 #include "gameplay/flashlight.h"
@@ -187,6 +188,9 @@ public:
     Entity getRing() const;
     const std::vector<Entity>& getMonolith() const;
     ForestValleySettings& getValleySettings();
+    // The planting maps' settings (read at start-up) and the maps every plant is planted from.
+    ForestPlantingSettings& getPlantingSettings();
+    const ValleyMaps& getValleyMaps() const;
     Entity getSun() const;
     Entity getAir() const;
     PlayerControls& getControls();
@@ -281,6 +285,7 @@ private:
 
     // The trees between the Ring and the clearing: the emergents placed first, the canopy trees round them, the mid
     // layer under and between them, each species a few variants grown, each placed many times.
+    void buildPlantingMaps();
     void buildTrees(World& world, AssetManager& assets);
 
     // What a species' variants grow climbers with (games/forest/climbers.h): the settings and the stems' and leaves'
@@ -374,6 +379,8 @@ private:
     ForestFloorSettings floorSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
+    ForestPlantingSettings plantingSettings;
+    ValleyMaps valleyMaps;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
     Atmosphere atmosphereSettings;

@@ -36,7 +36,7 @@ namespace {
         const ForestUnderstoreySettings settings;
         const std::vector<StandingCrown> trunks = someTrunks();
         const std::vector<SightLine> lines = forestSightLines();
-        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, trunks, lines);
+        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, patchValleyMaps(), trunks);
         assert(plants.size() > 1000);
         std::array<int, understoreyKindCount> kinds{};
         float nearCount = 0.0f;
@@ -46,7 +46,7 @@ namespace {
             assert(plant.foot.z >= treeNorthmost && plant.foot.z <= treeSouthmost);
             assert(std::fabs(plant.foot.x - valleyAxis(plant.foot.z)) <= treeSpread);
             const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
-            assert(fromPath >= settings.pathClearance);
+            assert(fromPath >= settings.planting.pathClearance);
             assert(near(plant.foot.y, forestHeight(plant.foot.x, plant.foot.z) - understoreySinkMetres, 1e-4f));
             assert(plant.variantPick >= 0.0f && plant.variantPick < 1.0f);
 
@@ -57,8 +57,8 @@ namespace {
             assert(plant.scale >= 1.0f - understoreyScaleSpread - 1e-5f && plant.scale <= 1.0f + understoreyScaleSpread + 1e-5f);
             assert(!blocksSight(understoreyCentre(settings, plant), understoreyRadius(settings, plant), lines));
             ++kinds[static_cast<std::size_t>(plant.kind)];
-            nearCount += fromPath < settings.nearPathMetres ? 1.0f : 0.0f;
-            farCount += fromPath > settings.farPathMetres ? 1.0f : 0.0f;
+            nearCount += fromPath < settings.planting.nearPathMetres ? 1.0f : 0.0f;
+            farCount += fromPath > settings.planting.farPathMetres ? 1.0f : 0.0f;
         }
 
         for (int count : kinds) {
@@ -68,40 +68,42 @@ namespace {
         // Thicker near the path: there the plants per grid cell are near one; far out, about farShare of that.
         assert(nearCount > 0.0f && farCount > 0.0f);
 
-        const std::vector<UnderstoreyPlacement> again = placeUnderstorey(settings, trunks, lines);
+        const std::vector<UnderstoreyPlacement> again = placeUnderstorey(settings, patchValleyMaps(), trunks);
         assert(again.size() == plants.size() && again.back().foot.x == plants.back().foot.x && again.back().kind == plants.back().kind);
     }
 
-    // The near share is all of the grid's cells there, the far one farShare of them: compared per square metre on a wide
-    // stretch with no trunks or sight lines.
+    // The near share is all of the lattice's cells there, the far one farShare of them: compared per square metre on a
+    // wide stretch with no trunks, obstacles, sight lines or gaps.
     void testTheUnderstoreyThinsAwayFromThePath() {
-        const ForestUnderstoreySettings settings;
-        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, {}, {});
+        ForestUnderstoreySettings settings;
+        settings.planting.gapShare = 1.0f;
+        const ValleyMaps open = buildValleyMaps(testPlantingSettings(), {}, {}, {understoreyReach(settings)}, testJobs());
+        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, open, {});
         int near = 0;
         int far = 0;
 
         for (const UnderstoreyPlacement& plant : plants) {
             const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
-            near += fromPath >= settings.pathClearance + settings.spacing && fromPath < settings.nearPathMetres ? 1 : 0;
-            far += fromPath > settings.farPathMetres ? 1 : 0;
+            near += fromPath >= settings.planting.pathClearance + settings.planting.footprintMetres && fromPath < settings.planting.nearPathMetres ? 1 : 0;
+            far += fromPath > settings.planting.farPathMetres ? 1 : 0;
         }
 
         // Cells near the path are all kept, far ones about farShare of them; both
         // bands' areas are measured by the grid's own cells, counted with nothing kept out.
         ForestUnderstoreySettings everything = settings;
-        everything.farShare = 1.0f;
+        everything.planting.farShare = 1.0f;
         int nearCells = 0;
         int farCells = 0;
 
-        for (const UnderstoreyPlacement& plant : placeUnderstorey(everything, {}, {})) {
+        for (const UnderstoreyPlacement& plant : placeUnderstorey(everything, open, {})) {
             const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
-            nearCells += fromPath >= settings.pathClearance + settings.spacing && fromPath < settings.nearPathMetres ? 1 : 0;
-            farCells += fromPath > settings.farPathMetres ? 1 : 0;
+            nearCells += fromPath >= settings.planting.pathClearance + settings.planting.footprintMetres && fromPath < settings.planting.nearPathMetres ? 1 : 0;
+            farCells += fromPath > settings.planting.farPathMetres ? 1 : 0;
         }
 
         const float nearShare = static_cast<float>(near) / static_cast<float>(nearCells);
         const float farShare = static_cast<float>(far) / static_cast<float>(farCells);
-        assert(nearShare > 0.95f && farShare > settings.farShare - 0.1f && farShare < settings.farShare + 0.1f);
+        assert(nearShare > 0.95f && farShare > settings.planting.farShare - 0.1f && farShare < settings.planting.farShare + 0.1f);
     }
 
     /*
@@ -136,7 +138,7 @@ namespace {
     */
     void testTheUnderstoreySettings() {
         ForestUnderstoreySettings settings;
-        assert(settings.keepShare > settings.shadowKeepShare && settings.farShare < 1.0f);
+        assert(settings.keepShare > settings.shadowKeepShare && settings.planting.farShare < 1.0f);
 
         for (int kind = 0; kind < understoreyKindCount; ++kind) {
             const float height = understoreyHeight(settings, static_cast<UnderstoreyKind>(kind));
@@ -145,7 +147,7 @@ namespace {
 
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 18 && counter.live == 0);
+        assert(counter.fields == 23 && counter.live == 0);
 
         // Its cards (scene/impostor.h) take over a few tens of metres away: a plant is a twentieth of a tree's height, so
         // its card's error is about that share of the trees' too, and its frames fewer texels, never big on screen.

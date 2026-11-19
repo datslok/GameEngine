@@ -22,17 +22,14 @@
 
 // The palms (F5 Forest, Palms; read at start-up).
 struct ForestPalmSettings {
-    // The grid the palms are thrown on (one at most a cell, jittered within it), metres.
-    float spacing = 5.0f;
+    // How the palms are planted from the valley's maps (valley_maps), as the understorey: every 5 m cell on the floor
+    // within 25 m of the path's centre, 30% of them past 60 m; twice as many in the gaps, where palms take the light
+    // first (Synthetic Silviculture); 2 m clear of the path's centre.
+    PlantingLayer planting{.floorPerHectare = 400.0f, .wallPerHectare = 100.0f, .rimPerHectare = 150.0f, .footprintMetres = 5.0f,
+                           .jitterShare = 1.0f, .gapShare = 2.0f, .pathClearance = 2.0f, .nearPathMetres = 25.0f, .farPathMetres = 60.0f,
+                           .farShare = 0.3f};
 
-    // Every cell is planted within nearPathMetres of the path's centre, farShare of them past farPathMetres, a straight
-    // blend between, as the understorey's.
-    float nearPathMetres = 25.0f;
-    float farPathMetres = 60.0f;
-    float farShare = 0.3f;
-
-    // How far palms keep from the path's centre and from every trunk's reach (metres).
-    float pathClearance = 2.0f;
+    // How far palms keep from every trunk's reach (metres).
     float trunkClearance = 1.0f;
 
     // The shortest and tallest variant (metres): understorey palms are 2-6 m (Astrocaryum alatum, Geonoma, Chamaedorea).
@@ -227,12 +224,14 @@ struct PalmPlacement {
 };
 
 /*
-* The palms' places, as the understorey's (plantedCells): a jittered grid spacing apart over the trees' stretch, thick
-* by the path and thinning away from it, clear of the path and every trunk, none whose nominal size meets a sight line.
-* The same every run.
+* The palms' places, planted from the maps as the understorey's (ditheredCells over forestPatch): sized and turned at
+* random, clear of every trunk, each fitting the maps (its nominal sphere clear of every obstacle and under every sight
+* line). The same every run.
 */
-std::vector<PalmPlacement> placePalms(const ForestPalmSettings& settings, const std::vector<StandingCrown>& trunks,
-                                      const std::vector<SightLine>& sightLines);
+std::vector<PalmPlacement> placePalms(const ForestPalmSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& trunks);
+
+// The farthest any palm's nominal sphere reaches (the tallest variant at its largest): the canopy cap it reads.
+float palmReach(const ForestPalmSettings& settings);
 
 // A palm's nominal sphere in the world, its height across (for the sight lines).
 Vec3 palmCentre(const ForestPalmSettings& settings, const PalmPlacement& palm);

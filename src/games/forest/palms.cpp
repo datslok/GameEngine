@@ -12,9 +12,8 @@
 namespace {
     const Vec3 up{0.0f, 1.0f, 0.0f};
 
-    // The palms' random numbers: their seed, and each cell's numbers (three placing it, three for its palm).
+    // The palms' random numbers' seed, and each cell's numbers for its palm.
     constexpr std::uint64_t palmSeed = 0x50414c4dull;
-    constexpr std::uint64_t palmDrawsPerCell = plantingDrawsUsed + 3;
 
     enum PalmDraw : std::uint64_t {
         Variant,
@@ -169,11 +168,9 @@ namespace {
 }
 
 void visit(ForestPalmSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Spacing", settings.spacing, {.min = 1.0f, .max = 50.0f, .sliderMax = 15.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Near path", settings.nearPathMetres, {.min = 0.0f, .max = 500.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Far path", settings.farPathMetres, {.min = 0.0f, .max = 500.0f, .sliderMax = 150.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Far share", settings.farShare, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
-    visitor.field("Path clearance", settings.pathClearance, {.min = 0.0f, .max = 20.0f, .sliderMax = 6.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.group("Planting", [&] {
+        visit(settings.planting, visitor);
+    });
     visitor.field("Trunk clearance", settings.trunkClearance, {.min = 0.0f, .max = 10.0f, .sliderMax = 4.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Shortest", settings.shortest, {.min = 0.5f, .max = 20.0f, .sliderMax = 8.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Tallest", settings.tallest, {.min = 0.5f, .max = 20.0f, .sliderMax = 8.0f, .unit = "m", .applies = FieldApplies::AtStartup});
@@ -445,14 +442,19 @@ PalmMeshes growPalmMeshes(const PalmShape& shape) {
     return meshes;
 }
 
-std::vector<PalmPlacement> placePalms(const ForestPalmSettings& settings, const std::vector<StandingCrown>& trunks,
-                                      const std::vector<SightLine>& sightLines) {
-    const PlantingGrid grid{settings.spacing, settings.nearPathMetres, settings.farPathMetres, settings.farShare, settings.pathClearance,
-                            settings.trunkClearance};
+std::vector<PalmPlacement> placePalms(const ForestPalmSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& trunks) {
     const int variants = std::max(settings.variants, 1);
     std::vector<PalmPlacement> palms;
 
-    for (const PlantedCell& cell : plantedCells(grid, trunks, palmSeed, palmDrawsPerCell)) {
+    for (const DitheredCell& cell : ditheredCells(settings.planting, maps, forestPatch, palmSeed)) {
+        const bool byTrunk = std::any_of(trunks.begin(), trunks.end(), [&](const StandingCrown& trunk) {
+            return (cell.place - trunk.foot).length() < trunk.radius + settings.trunkClearance;
+        });
+
+        if (byTrunk) {
+            continue;
+        }
+
         const auto draw = [&](PalmDraw which) {
             return forestUnitRandom(palmSeed, cell.firstDraw + which);
         };
@@ -464,12 +466,25 @@ std::vector<PalmPlacement> placePalms(const ForestPalmSettings& settings, const 
             .variant = std::min(static_cast<int>(draw(Variant) * static_cast<float>(variants)), variants - 1)
         };
 
-        if (!blocksSight(palmCentre(settings, palm), palmRadius(settings, palm), sightLines)) {
+        const float radius = palmRadius(settings, palm);
+
+        if (fitsTheMaps(maps, cell.place, radius, palmCentre(settings, palm).y + radius)) {
             palms.push_back(palm);
         }
     }
 
     return palms;
+}
+
+float palmReach(const ForestPalmSettings& settings) {
+    const int variants = std::max(settings.variants, 1);
+    float tallest = 0.0f;
+
+    for (int variant = 0; variant < variants; ++variant) {
+        tallest = std::max(tallest, palmVariantHeight(settings, variant));
+    }
+
+    return 0.5f * tallest * (1.0f + palmScaleSpread);
 }
 
 float palmRadius(const ForestPalmSettings& settings, const PalmPlacement& palm) {

@@ -10,7 +10,7 @@ Three, each a `ForestTreeSettings` (F5 Forest, Canopy trees, Emergent trees, Mid
 
 | | Canopy (defaults) | Emergent (`emergentTreeSettings`) | Mid (`midTreeSettings`) |
 |---|---|---|---|
-| Count, variants | 80, 4 | 10, 3 | 1200, 4 |
+| Floor a hectare asked (in the patch), variants | 30 (79), 4 | 2.8 (9), 3 | 480 (1,212), 4 |
 | Height, fork | 38, 18 m | 55, 36 m | 15, 10 m |
 | Crown radius | 16 m | 14 m | 5 m |
 | Limbs, clumps (radius) | 4, 14 (5.5 m) | 5, 12 (5 m) | 3, 5 (2.2 m) |
@@ -61,9 +61,11 @@ Engine side: `level-of-detail.md`. Per variant (`plantTrees` in `forest_game`):
 
 ## Placing trees
 
-- `placeTrees(settings, pillars, sightLines, standing, seed)` → `TreePlacement {foot, scale, turnRadians, variant}`: dart throwing between z `treeNorthmost` (-210) and `treeSouthmost` (-40), within `treeSpread` (130 m) of the valley's axis, trunks `treePathGap` (6 m) from the path's centre, outside each other's and standing trees' crowns, crowns clear of pillars (1.3 pillar radii), 85-115% size, any turn, on the lowest ground within 2.5 m of the trunk.
-- Order: emergents (`emergentPlaceSeed`); canopy trees (`canopyPlaceSeed`) with no trunk inside a standing crown (`standingCrowns` → `StandingCrown`); the mid layer (`midPlaceSeed`) under and between them, trunks `midTrunkClearance` (4 m) from theirs (`standingTrunks`).
-- **Sight lines** (`forestSightLines` → `SightLine`; the user's requirement): from eye height (`sightEyeHeight` 1.7 m) on the path every `sightLineSpacing` (10 m), round the meadow and round the clearing, to a point 250 m up the Monolith's face and to the Ring's top. A tree whose crown sphere (`placedCrownCentre`, `placedCrownRadius`) meets one (`blocksSight`, `segmentMeetsSphere`) is not planted.
+- `placeTrees(settings, maps, standing, seed, under)` → `TreePlacement {foot, scale, turnRadians, variant}`: the species' layer of the planting maps (`forest-plants.md`, Planting maps) over `forestPatch` (z `treeNorthmost` -210 to `treeSouthmost` -40, within `treeSpread` 130 m of the axis) until stage 2 plants round the camera. Each cell's tree 85-115% size (`smallestTreeScale`, `treeScaleRange`), any turn, on the lowest ground within 2.5 m of the trunk.
+- Kept when its trunk is outside the standing crowns, its crown sphere (`placedCrownCentre`, `placedCrownRadius`) fits the maps (clear of obstacles, under the corridors), then not within `spacingShare` of a neighbour of its species with a lower threshold (the earlier cell on a tie): local, so any cell decides alone.
+- Order: emergents (`emergentPlaceSeed`); canopy trees (`canopyPlaceSeed`) sharing the emergents' 12 m lattice (the thresholds above theirs) while the footprints match, no trunk inside an emergent's crown (`standingCrowns` → `StandingCrown`); the mid layer (`midPlaceSeed`, 4 m cells) under and between them, trunks `midTrunkClearance` (4 m) from theirs (`standingTrunks`).
+- `treeReach` (the largest crown sphere) names the canopy cap a species reads.
+- **Sight lines** (`forestSightLines` → `SightLine`; the user's requirement): from eye height (`sightEyeHeight` 1.7 m) on the path every `sightLineSpacing` (10 m), round the meadow and round the clearing, to a point 250 m up the Monolith's face and to the Ring's top. They are the planting maps' corridors; `blocksSight` (`segmentMeetsSphere`) is the tests' check that nothing planted meets one.
 - **Start among the trees** (`forestTreesStart`): `treesStartDistance` (12 m) south of the tree with the most others within `treesStartNeighbourhood` (60 m), facing it.
 
 ## Lianas (`lianas`)

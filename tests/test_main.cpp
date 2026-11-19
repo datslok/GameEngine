@@ -67,6 +67,7 @@ void testDriftingRocks();
 void testForestTrees();
 void testUnderstorey();
 void testPalms();
+void testValleyMaps();
 void testLianas();
 void testClimbers();
 void testEpiphytes();
@@ -402,6 +403,7 @@ const RoutineTest routineTests[] = {
     {"testForestTrees", testForestTrees},
     {"testUnderstorey", testUnderstorey},
     {"testPalms", testPalms},
+    {"testValleyMaps", testValleyMaps},
     {"testLianas", testLianas},
     {"testClimbers", testClimbers},
     {"testEpiphytes", testEpiphytes},

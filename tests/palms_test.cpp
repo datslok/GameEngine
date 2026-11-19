@@ -243,21 +243,25 @@ namespace {
     }
 
     /*
-    * The shared planting grid keeps the understorey where it was: with no sight lines, the understorey stands exactly on
-    * the cells planted with its grid, in order.
+    * The understorey stands on its layer's dithered cells (valley_maps), in order: each plant on a cell's place, the
+    * few cells left out only by the trunk or the maps.
     */
-    void testThePlantingGridKeepsTheUnderstorey() {
+    void testTheUnderstoreyStandsOnItsCells() {
         const ForestUnderstoreySettings settings;
-        const PlantingGrid grid{settings.spacing, settings.nearPathMetres, settings.farPathMetres, settings.farShare, settings.pathClearance,
-                                settings.trunkClearance};
+        const ValleyMaps& maps = patchValleyMaps();
         const std::vector<StandingCrown> trunks{StandingCrown{Vec2{valleyAxis(-100.0f) + 15.0f, -100.0f}, 2.0f}};
-        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, trunks, {});
-        const std::vector<PlantedCell> cells = plantedCells(grid, trunks, understoreySeed, understoreyDrawsPerCell);
-        assert(!plants.empty() && cells.size() == plants.size());
+        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, maps, trunks);
+        const std::vector<DitheredCell> cells = ditheredCells(settings.planting, maps, forestPatch, understoreySeed);
+        assert(!plants.empty() && plants.size() <= cells.size() && 10 * plants.size() > 9 * cells.size());
+        std::size_t next = 0;
 
-        for (std::size_t plant = 0; plant < plants.size(); plant += 13) {
-            assert(cells[plant].place.x == plants[plant].foot.x && cells[plant].place.y == plants[plant].foot.z);
-            assert(cells[plant].firstDraw % understoreyDrawsPerCell == plantingDrawsUsed);
+        for (const UnderstoreyPlacement& plant : plants) {
+            while (next < cells.size() && (cells[next].place.x != plant.foot.x || cells[next].place.y != plant.foot.z)) {
+                ++next;
+            }
+
+            assert(next < cells.size());
+            ++next;
         }
     }
 
@@ -267,14 +271,14 @@ namespace {
         const ForestPalmSettings settings;
         const std::vector<StandingCrown> trunks{StandingCrown{Vec2{valleyAxis(-150.0f) + 10.0f, -150.0f}, 2.0f}};
         const std::vector<SightLine> lines = forestSightLines();
-        const std::vector<PalmPlacement> palms = placePalms(settings, trunks, lines);
+        const std::vector<PalmPlacement> palms = placePalms(settings, patchValleyMaps(), trunks);
         assert(palms.size() > 100);
         std::vector<int> variants(static_cast<std::size_t>(settings.variants), 0);
 
         for (const PalmPlacement& palm : palms) {
             assert(palm.foot.z >= treeNorthmost && palm.foot.z <= treeSouthmost);
             assert(std::fabs(palm.foot.x - valleyAxis(palm.foot.z)) <= treeSpread);
-            assert(forestPathDistance(palm.foot.x, palm.foot.z) >= settings.pathClearance);
+            assert(forestPathDistance(palm.foot.x, palm.foot.z) >= settings.planting.pathClearance);
             assert(near(palm.foot.y, forestHeight(palm.foot.x, palm.foot.z) - understoreySinkMetres, 1e-4f));
             assert((Vec2{palm.foot.x, palm.foot.z} - trunks.front().foot).length() >= trunks.front().radius + settings.trunkClearance);
             assert(palm.scale >= 1.0f - palmScaleSpread - 1e-5f && palm.scale <= 1.0f + palmScaleSpread + 1e-5f);
@@ -291,7 +295,7 @@ namespace {
         assert(near(palmRadius(settings, first), 0.5f * palmVariantHeight(settings, first.variant) * first.scale, 1e-5f));
         assert(near(palmCentre(settings, first).y, first.foot.y + palmRadius(settings, first), 1e-4f));
 
-        const std::vector<PalmPlacement> again = placePalms(settings, trunks, lines);
+        const std::vector<PalmPlacement> again = placePalms(settings, patchValleyMaps(), trunks);
         assert(again.size() == palms.size() && again.back().foot.x == palms.back().foot.x && again.back().variant == palms.back().variant);
     }
 
@@ -375,7 +379,7 @@ namespace {
         ForestPalmSettings settings;
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 19 && counter.live == 0);
+        assert(counter.fields == 24 && counter.live == 0);
         assert(settings.shortest >= 1.5f && settings.tallest <= 6.0f && settings.shortest < settings.tallest);
         assert(settings.leastFronds <= settings.mostFronds && settings.variants >= 4);
         assert(settings.shadowCascades >= 1 && settings.shadowCascades <= 2);
@@ -430,7 +434,7 @@ void testPalms() {
     testThePalmVariants();
     testAPalmIsGrown();
     testAPalmThinsLeafletByLeaflet();
-    testThePlantingGridKeepsTheUnderstorey();
+    testTheUnderstoreyStandsOnItsCells();
     testThePalmsArePlaced();
     testTheLeafletsPictures();
     testAMeanColourCountsOnlyTheLeaves();
