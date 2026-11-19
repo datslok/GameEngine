@@ -22,6 +22,7 @@
 #include "render/gpu/volumetric_fog.h"
 #include "render/gpu/wind.h"
 #include "scene/level_of_detail.h"
+#include "scene/planting_cells.h"
 #include "scene/terrain.h"
 
 /*
@@ -79,6 +80,10 @@ struct RenderSettings {
 
     // How far each level of the terrain reaches (scene/terrain.h).
     TerrainSettings terrain;
+
+    // The planting cells round the camera made on the GPU (scene/planting_cells.h, render/vulkan/vulkan_planting.h): off
+    // while nothing draws them.
+    PlantingCellSettings planting;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

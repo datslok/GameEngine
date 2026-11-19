@@ -1,0 +1,24 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// The planting cells' first pass a layer (render/vulkan/vulkan_planting.h): each cell of the layer's candidates' lattice
+// over each cell made this frame (a workgroup row a cell) gets its candidate, earlier layers' kept plants already
+// standing. Every lattice cell is written, kept cleared, so the scratch needs no clearing between frames.
+#include "planting_cells.glsl"
+
+layout(local_size_x = PLANTING_GROUP_SIZE) in;
+
+void main() {
+    uint cell = gl_WorkGroupID.y;
+    PlantingJob job = jobOf(cell, passLayer);
+    uint index = gl_GlobalInvocationID.x;
+
+    if (cell >= cellCount || index >= latticeCount(job.candidates)) {
+        return;
+    }
+
+    int column = job.candidates.x + int(index % uint(job.candidates.z));
+    int row = job.candidates.y + int(index / uint(job.candidates.z));
+    plantingCandidates[job.candidateFirst + index] = plantingCandidateAt(passLayer, cell, column, row);
+}

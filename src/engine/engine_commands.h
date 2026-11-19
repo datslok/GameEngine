@@ -57,3 +57,9 @@ void addRenderCommands(CommandRegistry& registry, RenderSettings& settings, Typi
 * cull-compare (render/gpu/camera_culling.h): compare asks for the next frame's GPU-built lists to be compared with the CPU's and returns the last comparison's report (empty when none has finished).
 */
 void addCullCompareCommand(CommandRegistry& registry, std::function<std::string()> compare);
+
+/*
+* placement-compare (render/vulkan/vulkan_planting.h): compare asks for the next frame's planting cells to be read back
+* and planted again on the CPU, and returns the last comparison's report (empty when none has finished).
+*/
+void addPlacementCompareCommand(CommandRegistry& registry, std::function<std::string()> compare);

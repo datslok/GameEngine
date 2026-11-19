@@ -123,6 +123,12 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             frame.windAnchors = anchors.anchors;
         }
     });
+    world.each<PlantingSource>([&](Entity, PlantingSource& source) {
+        if (!frame.planting) {
+            frame.planting = source.field;
+            frame.plantingVersion = source.version;
+        }
+    });
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();
 
     if (renderers == nullptr) {

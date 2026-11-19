@@ -14,6 +14,7 @@
 #include "scene/material.h"
 #include "scene/mesh_level.h"
 #include "scene/model_renderer.h"
+#include "scene/planting_cells.h"
 #include "scene/terrain_heights.h"
 #include "scene/wind.h"
 #include "physics/static_level.h"
@@ -217,6 +218,11 @@ struct FrameDescription {
 
     // What hanging things hang from (scene/wind.h, the first WindAnchors placed), none without.
     std::shared_ptr<const std::vector<WindAnchor>> windAnchors{};
+
+    // The maps and layers the GPU plants its cells round the camera from (scene/planting_cells.h, the first
+    // PlantingSource placed), uploaded again when the field or its version changes; none without one.
+    std::shared_ptr<const PlantingField> planting{};
+    std::uint64_t plantingVersion = 0;
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.

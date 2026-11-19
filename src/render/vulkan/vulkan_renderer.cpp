@@ -156,6 +156,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     cullFrameDraws.resize(framesInFlight);
     cullCompares.resize(framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
+    planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -1006,6 +1007,7 @@ FrameContext VulkanRenderer::beginFrame() {
         takeCameraCull(*culled, frameIndex);
     }
 
+    planting->collect(frameIndex, jobs);
     collectClothReadbacks();
 
     frame.descriptors->reset();
@@ -1177,6 +1179,10 @@ void VulkanRenderer::finishGpuTimings(FrameContext& context) {
 std::string VulkanRenderer::compareCulling() {
     cullCompareAsked = true;
     return cullCompareReport;
+}
+
+std::string VulkanRenderer::comparePlacement() {
+    return planting->compare();
 }
 
 /*
@@ -1963,6 +1969,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::Wind);
     }
 
+    // The planting cells round the camera made this frame (render/vulkan/vulkan_planting.h), on the ground the scene's
+    // heights hold (uploaded with the scene set above). Nothing draws them yet.
+    if (planting->prepare(description.planting, description.plantingVersion, description.terrainHeights, settings.planting, cameraOrigin,
+                          frame.frameIndex)) {
+        beginGpuPass(frame, GpuPass::Planting);
+        planting->record(frame.commands, frame.descriptors, uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get(), frame.frameIndex);
+        endGpuPass(frame, GpuPass::Planting);
+    }
+
     // The lists feed both clustered shading and its heatmap.
     if (settings.clusteredShading || settings.clusterHeatmap) {
         beginGpuPass(frame, GpuPass::Clusters);
@@ -2550,14 +2565,7 @@ void VulkanRenderer::updateTerrainHeights(const FrameDescription& description) {
     const std::vector<std::uint32_t> words = packTerrainHeights(*source);
     const VkDeviceSize bytes = words.size() * sizeof(std::uint32_t);
     device.waitIdle();
-    terrainHeights = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
-    VulkanBuffer staging{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
-    std::memcpy(staging.getMapped(), words.data(), bytes);
-    staging.flush();
-    uploads.run([&](VkCommandBuffer commands) {
-        const VkBufferCopy copy{0, 0, bytes};
-        vkCmdCopyBuffer(commands, staging.get(), terrainHeights.get(), 1, &copy);
-    });
+    terrainHeights = gpuBufferHolding(device, uploads, words.data(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     uploadedTerrain = source;
     uploadedTerrainVersion = description.terrainHeightsVersion;
 }
@@ -3830,14 +3838,7 @@ void VulkanRenderer::updateVertexRecords(const void* records, VkDeviceSize bytes
     }
 
     device.waitIdle();
-    buffer = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
-    VulkanBuffer staging{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
-    std::memcpy(staging.getMapped(), records, bytes);
-    staging.flush();
-    uploads.run([&](VkCommandBuffer commands) {
-        const VkBufferCopy copy{0, 0, bytes};
-        vkCmdCopyBuffer(commands, staging.get(), buffer.get(), 1, &copy);
-    });
+    buffer = gpuBufferHolding(device, uploads, records, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     changed = false;
 }
 
@@ -3963,6 +3964,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     reflections->setFramesInFlight(count);
     eyeAdaptation->setFramesInFlight(count);
     cameraCulling->setFramesInFlight(count);
+    planting->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
     cullFrameViews.assign(count, {});
     cullFrameDraws.assign(count, 0);

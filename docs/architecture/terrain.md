@@ -1,12 +1,12 @@
 # Terrain and ground following
 
-Covers: `src/scene/terrain`, `src/scene/terrain_heights`, `src/scene/terrain_shared.h`, `src/scene/ground_follow`, `src/render/gpu/terrain_gpu`, `assets/shaders/terrain.glsl`, `assets/shaders/terrain_data.glsl`
+Covers: `src/scene/terrain`, `src/scene/terrain_heights`, `src/scene/terrain_shared.h`, `src/scene/ground_follow`, `src/render/gpu/terrain_gpu`, `assets/shaders/terrain.glsl`, `assets/shaders/terrain_heights.glsl`, `assets/shaders/terrain_data.glsl`
 
 Land drawn as a quadtree of grid patches round the camera (CDLOD, Strugar 2010), and flat meshes lifted onto it by the vertex shaders. Research: `docs/research/LOD.md`, Terrain; `docs/research/GROUNDCOVER.md`. Where it sits in frame building (TERRAIN, ATTACH): [game-interface.md](game-interface.md). The forest's land: [forest.md](forest.md).
 
 ## Heights (`scene/terrain_heights`)
 
-Every function here is mirrored in `terrain.glsl` / `terrain_data.glsl`, so the patches the GPU draws are tested on the CPU.
+Every function here is mirrored in `terrain.glsl` / `terrain_heights.glsl` / `terrain_data.glsl`, so the patches the GPU draws are tested on the CPU. The heights' reads (`terrain_heights.glsl`, the scene set's binding 35 unless the includer names another) multiply by each grid's reciprocal spacing made on the CPU (`GpuTerrainGrid::inverseSpacing`) and are `precise`, so `terrainSurfaceHeight` is the CPU's bit for bit (the planting cells stand plants on it).
 
 - `TerrainHeightGrid`: corner (least x, z), spacing, `size` points a side, heights row by row along x. `makeTerrainHeightGrid(centre, halfSize, spacing, height, jobs)` samples a function, a row a job.
 - `TerrainHeights`: up to `TERRAIN_MOST_GRIDS` (4) grids, finest first; a place reads the finest holding it, past all of them the coarsest's nearest edge. A place's grid coordinate is times the spacing's reciprocal (`plantingCoordinate`), so the planting reads the ground the same on the GPU (`planting.md`).

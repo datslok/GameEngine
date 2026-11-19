@@ -23,6 +23,7 @@
 | `forest_helpers.h` | `TestForest`, `FieldCounter`, `trianglesFaceTheirNormals` |
 | `cloth_helpers.h` | `untetheredSettings` |
 | `cull_helpers.h` | `randomCullScene`, `packCullSceneLevels` (GPU-driven drawing's scenes) |
+| `planting_helpers.h` | `straightMaps`, `rollingGround`, `threeLayers`, `samePlant` (planting from maps) |
 
 ## Known issue
 

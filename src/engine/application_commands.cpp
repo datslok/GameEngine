@@ -46,6 +46,9 @@ void Application::registerCommands() {
     addCullCompareCommand(commands, [this] {
         return renderer.compareCulling();
     });
+    addPlacementCompareCommand(commands, [this] {
+        return renderer.comparePlacement();
+    });
     game.addCommands(commands, world);
 
     commands.add("screenshot", "screenshot <file.png> [width height]",

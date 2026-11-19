@@ -121,7 +121,7 @@ build/game.exe --send camera 0 2 10 0 1 0                   # stand at 0 2 10, l
 build/game.exe --send screenshot build/shots/a.png
 ```
 
-Also `get`, `list`, `reset`, `preset`, `typical-gpu`, `save-settings`, `pause`, `resume`, `step`, `debug-view`, `cull-compare`, `stats`, `wait`, `quit`. At start: `--set key=value`, `--run script.txt`, `--port`, `--hidden`, `--typical-gpu`. Details: [settings and commands](docs/architecture/settings-and-commands.md).
+Also `get`, `list`, `reset`, `preset`, `typical-gpu`, `save-settings`, `pause`, `resume`, `step`, `debug-view`, `cull-compare`, `placement-compare`, `stats`, `wait`, `quit`. At start: `--set key=value`, `--run script.txt`, `--port`, `--hidden`, `--typical-gpu`. Details: [settings and commands](docs/architecture/settings-and-commands.md).
 
 ## Sharing the demo
 

@@ -60,6 +60,7 @@
 #include "render/vulkan/vulkan_motion_blur.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
+#include "render/vulkan/vulkan_planting.h"
 #include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_camera_culling.h"
 #include "render/vulkan/vulkan_lasting_buffer.h"
@@ -132,6 +133,10 @@ public:
     // cull-compare: asks for the next frame's GPU-culled lists to be compared with the CPU's, and returns the last
     // comparison's report (empty while none has finished).
     std::string compareCulling();
+
+    // placement-compare: asks for the next frame's planting cells to be read back and planted again on the CPU, and
+    // returns the last comparison's report (empty while none has finished).
+    std::string comparePlacement();
 
     // Waits for every pipeline asked for, rethrowing the first that failed to build.
     void finishPipelines();
@@ -353,6 +358,7 @@ private:
 
     // The wind force field (render/gpu/wind.h) and this frame's record, prepared before the scene set is written.
     std::unique_ptr<VulkanWind> wind;
+    std::unique_ptr<VulkanPlanting> planting;
     GpuWindField frameWind{};
 
     // The sky visibility grid (render/gpu/sky_visibility.h): baked on the CPU round the camera, its points copied up

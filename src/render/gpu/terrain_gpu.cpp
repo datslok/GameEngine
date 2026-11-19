@@ -20,7 +20,8 @@ std::vector<std::uint32_t> packTerrainHeights(const TerrainHeights& heights) {
 
     for (std::size_t index = 0; index < heights.grids.size(); ++index) {
         const TerrainHeightGrid& grid = heights.grids[index];
-        header.grids[index] = GpuTerrainGrid{.corner = {grid.corner.x, grid.corner.y}, .spacing = grid.spacing, .size = grid.size, .offset = offset, .unused = {}};
+        header.grids[index] = GpuTerrainGrid{.corner = {grid.corner.x, grid.corner.y}, .spacing = grid.spacing, .size = grid.size, .offset = offset,
+                                              .inverseSpacing = 1.0f / grid.spacing, .unused = {}};
         offset += static_cast<std::uint32_t>(grid.heights.size());
     }
 

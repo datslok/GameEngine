@@ -4,6 +4,7 @@
 #include "math/vec2.h"
 #include "math/vec3.h"
 #include "scene/planting.h"
+#include "scene/planting_shared.h"
 #include "scene/terrain_heights.h"
 
 #include <array>
@@ -29,12 +30,12 @@ struct PlantingCap {
     std::vector<std::uint16_t> heights;
 };
 
-inline constexpr std::uint16_t plantingNoCap = 0xffff;
-inline constexpr float plantingCapFloorMetres = 1000.0f;
-inline constexpr float plantingUncapped = 1e9f;
+inline constexpr std::uint16_t plantingNoCap = PLANTING_NO_CAP;
+inline constexpr float plantingCapFloorMetres = static_cast<float>(PLANTING_CAP_FLOOR_METRES);
+inline constexpr float plantingUncapped = static_cast<float>(PLANTING_UNCAPPED);
 
 // The farthest the clearance map tells apart, in metres: beyond, a place is simply far from every obstacle.
-inline constexpr float plantingFarthestClearance = 60.0f;
+inline constexpr float plantingFarthestClearance = static_cast<float>(PLANTING_FARTHEST_CLEARANCE);
 
 /*
 * The maps on a grid across a winding axis: row r's middle at z = northmost + (r + 0.5) texel, where the axis is at
@@ -189,6 +190,48 @@ struct PlantingBox {
     float north = 0.0f;
     float south = 0.0f;
 };
+
+/*
+* A layer's dither cells over a box, a cell more each way (columns along x, rows along z, from the first): those whose
+* plant could stand in it, since a plant strays at most a cell from its own.
+*/
+struct PlantingLattice {
+    int firstColumn = 0;
+    int firstRow = 0;
+    int columns = 0;
+    int rows = 0;
+
+    bool holds(int column, int row) const;
+    std::size_t index(int column, int row) const;
+    std::size_t count() const;
+};
+
+PlantingLattice plantingLatticeOver(const PlantingBox& box, float footprint);
+
+// The most cells plantingLatticeOver gives any box of this size, wherever it lies (a cell more for rounding).
+std::size_t plantingLatticeCapacity(float width, float height, float footprint);
+
+// How far round a plant its own layer's neighbours can make it give way, in lattice cells (0 without spacing).
+int plantingSpacingRings(const PlantingLayerRecord& layer);
+
+// How far a keep-away reaches: the other layer's largest reach for a crown, else its radius.
+float plantingKeepAwayReach(const PlantingKeepAway& keep, const std::vector<PlantingLayerRecord>& layers);
+
+/*
+* What planting a box plants of each layer: standing, the box its kept plants are needed over (the asked box joined
+* with what every later layer reads of it); candidates, that box grown by its spacing's rings and a cell, the
+* candidates its spacing reads. plantLayers plants these, and the GPU's cells the same (render/gpu/planting_cells.h).
+*/
+struct PlantingLayerBoxes {
+    PlantingBox standing;
+    PlantingBox candidates;
+};
+
+std::vector<PlantingLayerBoxes> plantingLayerBoxes(const std::vector<PlantingLayerRecord>& layers, const PlantingBox& box);
+
+// Throws std::invalid_argument for a layer reading itself or a later one, sharing a lattice of another footprint, or
+// with its kinds, sizes or footprint out of range.
+void checkPlantingLayers(const std::vector<PlantingLayerRecord>& layers);
 
 /*
 * Every layer's plants standing in a box, in order (each layer's cells by rows from the north), layers in order: each

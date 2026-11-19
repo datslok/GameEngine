@@ -1,0 +1,56 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// The planting cells' second pass a layer (render/vulkan/vulkan_planting.h): each candidate over the layer's standing
+// lattice is kept unless it gives way to a nearer one of its layer with a lower threshold (the earlier cell on a tie),
+// as plantLayers keeps them. Reads only whether its neighbours are candidates, writes only its own kept mark.
+#include "planting_cells.glsl"
+
+layout(local_size_x = PLANTING_GROUP_SIZE) in;
+
+void main() {
+    uint cell = gl_WorkGroupID.y;
+    PlantingJob job = jobOf(cell, passLayer);
+    uint index = gl_GlobalInvocationID.x;
+
+    if (cell >= cellCount || index >= latticeCount(job.standing)) {
+        return;
+    }
+
+    int column = job.standing.x + int(index % uint(job.standing.z));
+    int row = job.standing.y + int(index / uint(job.standing.z));
+    uint at = job.candidateFirst + latticeIndex(job.candidates, column, row);
+    PlantingCandidate plant = plantingCandidates[at];
+
+    if (plant.candidate == 0u) {
+        return;
+    }
+
+    PlantingLayer layer = plantingLayers[passLayer];
+    int rings = layer.spacingRings;
+    vec2 place = plant.footScale.xz;
+    bool givesWay = false;
+
+    for (int r = row - rings; r <= row + rings && !givesWay; ++r) {
+        for (int c = column - rings; c <= column + rings && !givesWay; ++c) {
+            if (c == column && r == row) {
+                continue;
+            }
+
+            PlantingCandidate other = plantingCandidates[job.candidateFirst + latticeIndex(job.candidates, c, r)];
+
+            if (other.candidate == 0u) {
+                continue;
+            }
+
+            bool earlier = r < row || (r == row && c < column);
+            givesWay = plantingGivesWay(place, plant.turnPickReachThreshold.z, plant.turnPickReachThreshold.w, other.footScale.xz,
+                                        other.turnPickReachThreshold.z, other.turnPickReachThreshold.w, earlier, layer.spacingShare);
+        }
+    }
+
+    if (!givesWay) {
+        plantingCandidates[at].kept = 1u;
+    }
+}

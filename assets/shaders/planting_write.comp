@@ -1,0 +1,75 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// The planting cells' last pass a layer (render/vulkan/vulkan_planting.h): one workgroup a cell made writes the layer's
+// kept plants standing in the cell's box into its slot, in rows from the north as plantLayers returns them, by a
+// prefix sum over the box's lattice a row of PLANTING_WRITE_GROUP_SIZE at a time (no atomics, so the order is fixed),
+// and their count. Plants past the slot's room are counted as a problem and left out.
+#include "planting_cells.glsl"
+
+layout(local_size_x = PLANTING_WRITE_GROUP_SIZE) in;
+
+shared uint taken[PLANTING_WRITE_GROUP_SIZE];
+
+void main() {
+    uint cell = gl_WorkGroupID.x;
+
+    if (cell >= cellCount) {
+        return;
+    }
+
+    PlantingJob job = jobOf(cell, passLayer);
+    uint lane = gl_LocalInvocationID.x;
+    uint count = latticeCount(job.box);
+    uint written = 0u;
+
+    for (uint first = 0u; first < count; first += PLANTING_WRITE_GROUP_SIZE) {
+        uint index = first + lane;
+        bool take = false;
+        PlantingCandidate plant;
+
+        if (index < count) {
+            int column = job.box.x + int(index % uint(job.box.z));
+            int row = job.box.y + int(index / uint(job.box.z));
+            plant = plantingCandidates[job.candidateFirst + latticeIndex(job.candidates, column, row)];
+            vec3 foot = plant.footScale.xyz;
+            take = plant.kept != 0u && foot.x >= job.bounds.x && foot.x < job.bounds.y && foot.z >= job.bounds.z && foot.z < job.bounds.w;
+        }
+
+        // Hillis-Steele inclusive prefix sum of the lanes taking a plant.
+        taken[lane] = take ? 1u : 0u;
+        barrier();
+
+        for (uint step = 1u; step < PLANTING_WRITE_GROUP_SIZE; step <<= 1u) {
+            uint add = lane >= step ? taken[lane - step] : 0u;
+            barrier();
+            taken[lane] += add;
+            barrier();
+        }
+
+        uint place = written + taken[lane] - 1u;
+
+        if (take) {
+            if (place < job.capacity) {
+                PlacedPlant placed;
+                placed.foot = plant.footScale.xyz;
+                placed.scale = plant.footScale.w;
+                placed.turnRadians = plant.turnPickReachThreshold.x;
+                placed.pick = plant.turnPickReachThreshold.y;
+                placed.kind = plant.kind;
+                placed.threshold = plant.turnPickReachThreshold.w;
+                placedPlants[job.plantFirst + place] = placed;
+            } else {
+                plantingProblem(PLANTING_PROBLEM_FULL);
+            }
+        }
+
+        written += taken[PLANTING_WRITE_GROUP_SIZE - 1u];
+        barrier();
+    }
+
+    if (lane == 0u) {
+        plantingCounts[job.countPlace] = min(written, job.capacity);
+    }
+}

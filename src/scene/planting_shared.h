@@ -35,4 +35,12 @@
 #define PLANTING_DECIMETRE 0.1
 #define PLANTING_CENTIMETRE 0.01
 
+// The maps' limits: the farthest clearance told apart (metres), a cap texel no sight line passes over, the height read
+// there (metres), caps stored as decimetres above this many metres down, and the farthest path distance stored (cm).
+#define PLANTING_FARTHEST_CLEARANCE 60.0
+#define PLANTING_NO_CAP 65535u
+#define PLANTING_UNCAPPED 1e9
+#define PLANTING_CAP_FLOOR_METRES 1000.0
+#define PLANTING_FARTHEST_PATH 65535.0
+
 #endif

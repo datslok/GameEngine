@@ -10,7 +10,7 @@ namespace {
     constexpr float byteWhole = 255.0f;
 
     // The farthest the path map stores (65535 cm), read outside the maps.
-    constexpr float farthestPath = 65535.0f;
+    constexpr float farthestPath = static_cast<float>(PLANTING_FARTHEST_PATH);
 
     // Whether a place lies outside the maps' grid (across the axis, or past the first or last row).
     bool outsideTheMaps(const PlantingMaps& maps, float x, float z) {
@@ -56,49 +56,16 @@ namespace {
         return PlantingBox{std::min(a.west, b.west), std::max(a.east, b.east), std::min(a.north, b.north), std::max(a.south, b.south)};
     }
 
-    // A layer's lattice cells over a box, a cell more each way.
-    struct LatticeRange {
-        int firstColumn = 0;
-        int firstRow = 0;
-        int columns = 0;
-        int rows = 0;
-
-        bool holds(int column, int row) const {
-            return column >= firstColumn && column < firstColumn + columns && row >= firstRow && row < firstRow + rows;
-        }
-
-        std::size_t index(int column, int row) const {
-            return static_cast<std::size_t>(row - firstRow) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(column - firstColumn);
-        }
-    };
-
-    LatticeRange latticeOver(const PlantingBox& box, float footprint) {
-        const int firstColumn = static_cast<int>(std::floor(box.west / footprint)) - 1;
-        const int firstRow = static_cast<int>(std::floor(box.north / footprint)) - 1;
-        const int lastColumn = static_cast<int>(std::floor(box.east / footprint)) + 1;
-        const int lastRow = static_cast<int>(std::floor(box.south / footprint)) + 1;
-        return LatticeRange{firstColumn, firstRow, lastColumn - firstColumn + 1, lastRow - firstRow + 1};
-    }
-
     // A layer's plants standing over its range, by cell (-1 where none stands), for the layers after it.
     struct StandingLayer {
-        LatticeRange range;
+        PlantingLattice range;
         std::vector<int> byCell;
         std::vector<PlantedPlant> plants;
     };
 
-    // How far round a plant its own layer's neighbours can make it give way, in lattice cells.
-    int spacingRings(const PlantingLayerRecord& layer) {
-        return layer.spacingShare > 0.0f ? static_cast<int>(std::ceil(layer.spacingShare * plantingLayerReach(layer) / layer.footprint)) + 1 : 0;
-    }
-
-    float keepAwayReach(const PlantingKeepAway& keep, const std::vector<PlantingLayerRecord>& layers) {
-        return keep.crown ? plantingLayerReach(layers[static_cast<std::size_t>(keep.layer)]) : keep.radius;
-    }
-
     // Whether any plant of a layer before stands within a keep-away's reach of a place.
     bool keptAway(const PlantingKeepAway& keep, const StandingLayer& standing, float footprint, float reach, const Vec2& place) {
-        const LatticeRange& range = standing.range;
+        const PlantingLattice& range = standing.range;
         const int firstColumn = static_cast<int>(std::floor((place.x - reach) / footprint)) - 1;
         const int lastColumn = static_cast<int>(std::floor((place.x + reach) / footprint)) + 1;
         const int firstRow = static_cast<int>(std::floor((place.y - reach) / footprint)) - 1;
@@ -127,32 +94,6 @@ namespace {
         return false;
     }
 
-    void checkLayers(const std::vector<PlantingLayerRecord>& layers) {
-        for (std::size_t i = 0; i < layers.size(); ++i) {
-            const PlantingLayerRecord& layer = layers[i];
-
-            if (layer.under >= static_cast<int>(i) ||
-                (layer.under >= 0 && layers[static_cast<std::size_t>(layer.under)].footprint != layer.footprint)) {
-                throw std::invalid_argument("plantLayers: a layer shares the lattice of a later layer or one of another footprint");
-            }
-
-            for (const PlantingKeepAway& keep : layer.keepAway) {
-                if (keep.layer < 0 || keep.layer >= static_cast<int>(i)) {
-                    throw std::invalid_argument("plantLayers: a layer keeps away from itself or a later layer");
-                }
-            }
-
-            const bool sized = (layer.reachPerScale.size() == 1 || static_cast<int>(layer.reachPerScale.size()) == layer.kinds) &&
-                               layer.centrePerScale.size() == layer.reachPerScale.size();
-            const bool shares = layer.kindShares.empty() ||
-                                (static_cast<int>(layer.kindShares.size()) == layer.kinds - 1 && layer.kinds <= plantingMostSharedKinds);
-
-            if (layer.kinds < 1 || layer.kinds > plantingMostKinds || !sized || !shares || !(layer.footprint > 0.0f)) {
-                throw std::invalid_argument("plantLayers: a layer's kinds, sizes or footprint are out of range");
-            }
-        }
-    }
-
     // A cell's plant before its own layer's spacing: none where the dither, the path, a layer before or the maps refuse.
     std::optional<PlantedPlant> candidateAt(const std::vector<PlantingLayerRecord>& layers, std::size_t which, const std::vector<StandingLayer>& standing,
                                             const PlantingMaps& maps, const TerrainHeights& heights, int column, int row) {
@@ -178,7 +119,7 @@ namespace {
         for (const PlantingKeepAway& keep : layer.keepAway) {
             const PlantingLayerRecord& other = layers[static_cast<std::size_t>(keep.layer)];
 
-            if (keptAway(keep, standing[static_cast<std::size_t>(keep.layer)], other.footprint, keepAwayReach(keep, layers), place)) {
+            if (keptAway(keep, standing[static_cast<std::size_t>(keep.layer)], other.footprint, plantingKeepAwayReach(keep, layers), place)) {
                 return std::nullopt;
             }
         }
@@ -223,6 +164,90 @@ namespace {
         plant.column = column;
         plant.row = row;
         return plant;
+    }
+}
+
+bool PlantingLattice::holds(int column, int row) const {
+    return column >= firstColumn && column < firstColumn + columns && row >= firstRow && row < firstRow + rows;
+}
+
+std::size_t PlantingLattice::index(int column, int row) const {
+    return static_cast<std::size_t>(row - firstRow) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(column - firstColumn);
+}
+
+std::size_t PlantingLattice::count() const {
+    return static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
+}
+
+PlantingLattice plantingLatticeOver(const PlantingBox& box, float footprint) {
+    const int firstColumn = static_cast<int>(std::floor(box.west / footprint)) - 1;
+    const int firstRow = static_cast<int>(std::floor(box.north / footprint)) - 1;
+    const int lastColumn = static_cast<int>(std::floor(box.east / footprint)) + 1;
+    const int lastRow = static_cast<int>(std::floor(box.south / footprint)) + 1;
+    return PlantingLattice{firstColumn, firstRow, lastColumn - firstColumn + 1, lastRow - firstRow + 1};
+}
+
+// floor(a + w) - floor(a) is at most ceil(w); the cell either way makes three more, and one more covers the division's rounding.
+std::size_t plantingLatticeCapacity(float width, float height, float footprint) {
+    const auto side = [footprint](float extent) {
+        return static_cast<std::size_t>(std::ceil(std::max(extent, 0.0f) / footprint)) + 4;
+    };
+    return side(width) * side(height);
+}
+
+int plantingSpacingRings(const PlantingLayerRecord& layer) {
+    return layer.spacingShare > 0.0f ? static_cast<int>(std::ceil(layer.spacingShare * plantingLayerReach(layer) / layer.footprint)) + 1 : 0;
+}
+
+float plantingKeepAwayReach(const PlantingKeepAway& keep, const std::vector<PlantingLayerRecord>& layers) {
+    return keep.crown ? plantingLayerReach(layers[static_cast<std::size_t>(keep.layer)]) : keep.radius;
+}
+
+/*
+* Backwards: each layer's standing box is the asked one joined with what every later layer reads of it (that layer's
+* candidates' box grown by the keep-away's reach and two cells of each lattice), its candidates' box its own grown by its
+* spacing's rings and a cell.
+*/
+std::vector<PlantingLayerBoxes> plantingLayerBoxes(const std::vector<PlantingLayerRecord>& layers, const PlantingBox& box) {
+    std::vector<PlantingLayerBoxes> boxes(layers.size(), PlantingLayerBoxes{box, box});
+
+    for (std::size_t back = layers.size(); back-- > 0;) {
+        const PlantingLayerRecord& layer = layers[back];
+        boxes[back].candidates = grown(boxes[back].standing, static_cast<float>(plantingSpacingRings(layer) + 1) * layer.footprint);
+
+        for (const PlantingKeepAway& keep : layer.keepAway) {
+            const std::size_t other = static_cast<std::size_t>(keep.layer);
+            const float reach = plantingKeepAwayReach(keep, layers) + 2.0f * layer.footprint + 2.0f * layers[other].footprint;
+            boxes[other].standing = joined(boxes[other].standing, grown(boxes[back].candidates, reach));
+        }
+    }
+
+    return boxes;
+}
+
+void checkPlantingLayers(const std::vector<PlantingLayerRecord>& layers) {
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        const PlantingLayerRecord& layer = layers[i];
+
+        if (layer.under >= static_cast<int>(i) ||
+            (layer.under >= 0 && layers[static_cast<std::size_t>(layer.under)].footprint != layer.footprint)) {
+            throw std::invalid_argument("plantLayers: a layer shares the lattice of a later layer or one of another footprint");
+        }
+
+        for (const PlantingKeepAway& keep : layer.keepAway) {
+            if (keep.layer < 0 || keep.layer >= static_cast<int>(i)) {
+                throw std::invalid_argument("plantLayers: a layer keeps away from itself or a later layer");
+            }
+        }
+
+        const bool sized = (layer.reachPerScale.size() == 1 || static_cast<int>(layer.reachPerScale.size()) == layer.kinds) &&
+                           layer.centrePerScale.size() == layer.reachPerScale.size();
+        const bool shares = layer.kindShares.empty() ||
+                            (static_cast<int>(layer.kindShares.size()) == layer.kinds - 1 && layer.kinds <= plantingMostSharedKinds);
+
+        if (layer.kinds < 1 || layer.kinds > plantingMostKinds || !sized || !shares || !(layer.footprint > 0.0f)) {
+            throw std::invalid_argument("plantLayers: a layer's kinds, sizes or footprint are out of range");
+        }
     }
 }
 
@@ -348,36 +373,21 @@ float plantingLayerShare(const PlantingLayerRecord& layer, const PlantingMaps& m
 }
 
 /*
-* Backwards first: each layer's box is the asked one joined with what every later layer reads of it (that layer's
-* candidates' box grown by the keep-away's reach and a cell of each lattice either way), its candidates' box its own grown
-* by its spacing's rings. Then forwards: each layer's candidates on the jobs (a row each), then those its spacing keeps,
-* by cell for the layers after, and those inside the asked box for the caller.
+* Each layer's boxes first (plantingLayerBoxes), then forwards: each layer's candidates on the jobs (a row each), then
+* those its spacing keeps, by cell for the layers after, and those inside the asked box for the caller.
 */
 std::vector<std::vector<PlantedPlant>> plantLayers(const std::vector<PlantingLayerRecord>& layers, const PlantingMaps& maps,
                                                    const TerrainHeights& heights, const PlantingBox& box, JobSystem& jobs) {
-    checkLayers(layers);
+    checkPlantingLayers(layers);
     const std::size_t count = layers.size();
-    std::vector<PlantingBox> needed(count, box);
-    std::vector<PlantingBox> candidateBoxes(count, box);
-
-    for (std::size_t back = count; back-- > 0;) {
-        const PlantingLayerRecord& layer = layers[back];
-        candidateBoxes[back] = grown(needed[back], static_cast<float>(spacingRings(layer) + 1) * layer.footprint);
-
-        for (const PlantingKeepAway& keep : layer.keepAway) {
-            const std::size_t other = static_cast<std::size_t>(keep.layer);
-            const float reach = keepAwayReach(keep, layers) + 2.0f * layer.footprint + 2.0f * layers[other].footprint;
-            needed[other] = joined(needed[other], grown(candidateBoxes[back], reach));
-        }
-    }
-
+    const std::vector<PlantingLayerBoxes> boxes = plantingLayerBoxes(layers, box);
     std::vector<StandingLayer> standing(count);
     std::vector<std::vector<PlantedPlant>> planted(count);
 
     for (std::size_t which = 0; which < count; ++which) {
         const PlantingLayerRecord& layer = layers[which];
-        const LatticeRange candidateRange = latticeOver(candidateBoxes[which], layer.footprint);
-        std::vector<std::optional<PlantedPlant>> candidates(static_cast<std::size_t>(candidateRange.columns) * static_cast<std::size_t>(candidateRange.rows));
+        const PlantingLattice candidateRange = plantingLatticeOver(boxes[which].candidates, layer.footprint);
+        std::vector<std::optional<PlantedPlant>> candidates(candidateRange.count());
 
         jobs.parallelFor(static_cast<std::size_t>(candidateRange.rows), 1, [&](std::size_t rowIndex) {
             const int row = candidateRange.firstRow + static_cast<int>(rowIndex);
@@ -388,9 +398,9 @@ std::vector<std::vector<PlantedPlant>> plantLayers(const std::vector<PlantingLay
         });
 
         StandingLayer& kept = standing[which];
-        kept.range = latticeOver(needed[which], layer.footprint);
-        kept.byCell.assign(static_cast<std::size_t>(kept.range.columns) * static_cast<std::size_t>(kept.range.rows), -1);
-        const int rings = spacingRings(layer);
+        kept.range = plantingLatticeOver(boxes[which].standing, layer.footprint);
+        kept.byCell.assign(kept.range.count(), -1);
+        const int rings = plantingSpacingRings(layer);
 
         for (int row = kept.range.firstRow; row < kept.range.firstRow + kept.range.rows; ++row) {
             for (int column = kept.range.firstColumn; column < kept.range.firstColumn + kept.range.columns; ++column) {

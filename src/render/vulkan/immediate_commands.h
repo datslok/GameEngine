@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/vulkan/owned_handle.h"
+#include "render/vulkan/vulkan_memory.h"
 
 #include "volk/volk.h"
 
@@ -28,3 +29,10 @@ private:
     VkCommandBuffer commands = VK_NULL_HANDLE;
     OwnedHandle<VkFence> finished;
 };
+
+/*
+* A buffer in GPU memory holding bytes copied through a staging buffer (waited for), with usage and
+* VK_BUFFER_USAGE_TRANSFER_DST_BIT: for records that change rarely (the terrain's heights, per-vertex records, the
+* planting field). Whoever replaces one the frames in flight may still read waits for the GPU first.
+*/
+VulkanBuffer gpuBufferHolding(const VulkanDevice& device, ImmediateCommands& uploads, const void* bytes, VkDeviceSize size, VkBufferUsageFlags usage);

@@ -62,28 +62,29 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
 | 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
 | 7 | Wind [WIND] | the wind field runs | wind (`render/gpu/wind`) |
-| 8 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
-| 9 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
-| 10 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |
-| 11 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
-| 12 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
-| 13-16 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
-| 17 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
-| 18 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
-| 19 | Main [MAIN] | always; sky and stars drawn in it or in a block of their own after | here |
-| 20 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
-| 21 | Motion [MOTION] | temporal AA: moved or swaying draws into the velocity image | `anti-aliasing.md` |
-| 22 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
-| 23 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
-| 24 | Reflections [SSR] | reflections on | `reflections.md` |
-| 25 | Fog apply [FOGMIX] | fog | `fog.md` |
-| 26 | Beacons [BEACONS] | lit beacons in the frame | `lights.md` |
-| 27 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
-| 28 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
-| 29 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
-| 30 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
-| 31 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
-| 32 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
+| 8 | Planting [PLANTING] | planting cells made, or read back (`placement-compare`) | `planting.md` |
+| 9 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
+| 10 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
+| 11 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |
+| 12 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
+| 13 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
+| 14-17 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
+| 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
+| 19 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
+| 20 | Main [MAIN] | always; sky and stars drawn in it or in a block of their own after | here |
+| 21 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
+| 22 | Motion [MOTION] | temporal AA: moved or swaying draws into the velocity image | `anti-aliasing.md` |
+| 23 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
+| 24 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
+| 25 | Reflections [SSR] | reflections on | `reflections.md` |
+| 26 | Fog apply [FOGMIX] | fog | `fog.md` |
+| 27 | Beacons [BEACONS] | lit beacons in the frame | `lights.md` |
+| 28 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
+| 29 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
+| 30 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
+| 31 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
+| 32 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
+| 33 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
 
 The F4 readout groups them: setup to the prepass; lighting from `firstLightingPass` (PYRAMID) to MAIN; picture from `firstPicturePass` (BALLS) on (`engine/debug_views.h`).
 

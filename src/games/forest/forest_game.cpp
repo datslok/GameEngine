@@ -16,6 +16,7 @@
 #include "scene/beacon.h"
 #include "scene/light.h"
 #include "scene/model_renderer.h"
+#include "scene/planting_cells.h"
 #include "scene/probe_volume.h"
 #include "scene/impostor.h"
 #include "scene/still_draws.h"
@@ -391,6 +392,8 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     sun = world.create();
     world.add(sun, DirectionalLight{});
     air = world.create();
+    // The field the GPU plants its cells round the camera from (scene/planting_cells.h): compared, not drawn yet.
+    world.add(air, PlantingSource{std::make_shared<const PlantingField>(PlantingField{valleyMaps.planting, forestPlantingLayers(plantingSpecies())}), 1});
     floorMist = world.create();
     probes = world.create();
     world.add(probes, ProbeCascades{});
@@ -660,6 +663,10 @@ void ForestGame::buildPlantingMaps() {
     valleyMaps = buildValleyMaps(plantingSettings, forestObstacles(pillars, towers), forestSightLines(), reaches, getJobs());
 }
 
+ForestSpecies ForestGame::plantingSpecies() const {
+    return ForestSpecies{emergentSettings, treeSettings, midSettings, understoreySettings, palmSettings};
+}
+
 /*
 * The variants are grown on every core, each into its own slot, and drawn only. Every tree of a variant shares its two
 * meshes, so the GPU draws all of them in one instanced draw each; each is turned and scaled by its Transform. The
@@ -668,8 +675,7 @@ void ForestGame::buildPlantingMaps() {
 */
 void ForestGame::buildTrees(World& world, AssetManager& assets) {
     // Every layer at once (forest_planting.h), on the land drawn: the understorey and the palms are built after the trees.
-    const ForestPlanting planted =
-        plantThePatch(ForestSpecies{emergentSettings, treeSettings, midSettings, understoreySettings, palmSettings}, valleyMaps, *groundHeights, getJobs());
+    const ForestPlanting planted = plantThePatch(plantingSpecies(), valleyMaps, *groundHeights, getJobs());
     emergentPlacements = planted.emergents;
     treePlacements = planted.canopy;
     midPlacements = planted.mid;

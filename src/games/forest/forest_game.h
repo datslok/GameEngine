@@ -288,6 +288,9 @@ private:
     // The trees between the Ring and the clearing: the emergents placed first, the canopy trees round them, the mid
     // layer under and between them, each species a few variants grown, each placed many times.
     void buildPlantingMaps();
+
+    // The species' settings every layer is planted from (forest_planting.h).
+    ForestSpecies plantingSpecies() const;
     void buildTrees(World& world, AssetManager& assets);
 
     // What a species' variants grow climbers with (games/forest/climbers.h): the settings and the stems' and leaves'
