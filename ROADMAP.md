@@ -337,7 +337,12 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [ ] The forest: grown trees on the floor, the pillars' tops and the islands, the understorey, logs and rocks (research in `docs/research/TREES.md`, `docs/research/JUNGLE.md`)
   - [x] Grown trees (`tree-growth`)
   - [x] The jungle patch along the path: canopy and emergents (`jungle-canopy`), midstorey (`jungle-midstorey`), scanned understorey (`understorey-scans`), palms (`jungle-palms`), lianas, climbers, epiphytes (`jungle-vines`, `jungle-climbers`, `jungle-epiphytes`), light through leaves (`leaf-transmission`), wind (below)
-  - [ ] The rest of the valley, keeping the sight lines to the Monolith and the Ring (the user's order, Nov 19 2026: after the structures' stage 5, before their stages 6-14; research first: filling square kilometres, with the GPU-bound frame's levers)
+  - [ ] The rest of the valley, keeping the sight lines to the Monolith and the Ring (the user's order, Nov 19 2026: after the structures' stage 5, before their stages 6-14; research and the user's choices in `docs/research/VALLEY.md`); each stage measured before the next
+    - [ ] 1. Density maps a layer over floor, walls and rim, from the terrain, with ecotopes, noise gaps and sight corridors capping the canopy; the patch rebuilt from them (`valley-maps`)
+    - [ ] 2. Plants made on the GPU round the camera from the maps, by cells, into the GPU scene's records (Horizon's placement; design explained first) (`gpu-placement`)
+    - [ ] 3. The far tier: one impostor a tree past about 1 km, casting into the far shadow map (`impostor-fields`)
+    - [ ] 4. The canopy in the terrain's colour and normal past a few km (`far-canopy`)
+    - [ ] 5. The pillars' and islands' tops planted from their own maps (`valley-tops`)
 - [x] Smooth moving shadows in the far map (`far-shadow-movers`)
 - [x] Staggered far cascades (`cascade-stagger`)
 - [x] The frame built on every core (`frame-build-speed`)

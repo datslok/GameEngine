@@ -52,6 +52,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/OCCLUSION.md` | Occlusion culling: the depth pyramid, two-phase culling, foliage (phase 18) |
 | `docs/research/GPUDRIVEN.md` | GPU-driven drawing: culling, levels and batching on the GPU, the CPU baseline (phase 18) |
 | `docs/research/WORLDSCALE.md` | Cutting the GPU frame: shipped games' budgets, upscaler cost, foliage, per-view budgets, VRS, async compute (phase 18) |
+| `docs/research/VALLEY.md` | Filling the valley: placement by density maps and cells, far forest tiers, sight corridors (phase 18) |
 | `docs/research/STRUCTURES.md` | The structures half reclaimed: scale cues, plating, moss and streaks, vines on structures, lights, km searchlight beams in fog (phase 18) |
 | `docs/research/FOGLAYERS.md` | Several fog media at once: exponential layers, pools under the canopy, later local fog volumes (phase 18) |
 | `docs/research/FOGHISTORY.md` | The froxel fog's history behind fast lights (a swinging flashlight): what shipped engines do, options (phase 18) |
