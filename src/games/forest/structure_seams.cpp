@@ -212,7 +212,48 @@ float seamDistance(const SeamLayout& layout, Vec2 place) {
         nearest = std::min(nearest, outlineDistance(hatch, inside));
     }
 
+    // The nearest tie hole's middle: the grid divides the tile, so the hole nearest a place is in its own grid square.
+    if (layout.tiePitch > 0.0f) {
+        const float half = 0.5f * layout.tiePitch;
+        nearest = std::min(nearest, Vec2{wrapped(inside.x, layout.tiePitch) - half, wrapped(inside.y, layout.tiePitch) - half}.length());
+    }
+
     return nearest;
+}
+
+/*
+* Each spacing rounded to a whole number of the tile (at least one), so pours, panels and ties meet themselves across
+* the tile's edges; odd rows' splits moved half a panel.
+*/
+SeamLayout formworkLayout(float tileMetres) {
+    if (!(tileMetres >= formworkPour)) {
+        throw std::invalid_argument("A formwork tile needs room for a pour");
+    }
+
+    const auto fitted = [&](float spacing) {
+        return tileMetres / std::max(1.0f, std::round(tileMetres / spacing));
+    };
+    const float pour = fitted(formworkPour);
+    const float panel = fitted(formworkPanel);
+    const int rows = static_cast<int>(std::lround(tileMetres / pour));
+    const int panels = static_cast<int>(std::lround(tileMetres / panel));
+    SeamLayout layout;
+    layout.tile = tileMetres;
+    layout.tiePitch = fitted(formworkTie);
+
+    for (int row = 0; row < rows; ++row) {
+        SeamRow seamRow;
+        seamRow.bottom = SeamLine{.at = pour * static_cast<float>(row)};
+        const float shift = row % 2 == 0 ? 0.0f : 0.5f * panel;
+
+        for (int split = 0; split < panels; ++split) {
+            seamRow.splits.push_back(SeamLine{.at = shift + panel * static_cast<float>(split)});
+        }
+
+        layout.rows.push_back(std::move(seamRow));
+    }
+
+    return layout;
 }
 
 float seamHeight(float distance) {

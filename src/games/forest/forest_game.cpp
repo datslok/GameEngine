@@ -184,24 +184,56 @@ namespace {
     }
 
     /*
-    * The structures' coating (games/forest/structures, structure_seams): one layer with the seam map, read once in each
-    * facet's own plane, painted everywhere by a strip of one texel (strata, so the mesh's texture coordinates stay the
-    * facets' numbers), then the facets' own tone and roughness on top.
+    * The Bastion's concrete (games/forest/bastion), applied when its settings change: the layer's albedo and roughness,
+    * the formwork's seams at the ground's normal scale and repeating every formworkTile metres; each face's own tone a
+    * little apart, as pours of concrete differ.
     */
-    Material structureCoating(AssetManager& assets, JobSystem& jobs, const ForestStructureSettings& settings) {
-        SeamImages seams = seamImages(seamLayout(ForestStructureSettings{}.seamTile, seamSeed), seamTexels, jobs);
-        Material coat;
-        coat.texture = assets.addTexture(std::move(seams.albedo));
-        coat.normalTexture = assets.addTexture(std::move(seams.normal));
+    constexpr float concreteFaceTone = 0.06f;
+    constexpr float concreteFaceRoughness = 0.04f;
+
+    void applyBastionSettings(Material& material, const ForestBastionSettings& settings) {
+        Material& concrete = material.groundLayers.front();
+        const std::uint8_t grey = linearToSrgbByte(std::max(settings.concreteAlbedo, 0.0f));
+        concrete.colour = Pixel{grey, grey, grey};
+        concrete.roughness = settings.concreteRoughness;
+        concrete.metallic = 0.0f;
+        material.groundRepeats[0] = 1.0f / std::max(settings.formworkTile, 0.1f);
+        material.normalScale = std::max(settings.formworkDepth, 0.0f);
+        material.facetTone = concreteFaceTone;
+        material.facetRoughness = concreteFaceRoughness;
+    }
+
+    /*
+    * A structure's material (games/forest/structures, structure_seams): one layer with a seam map, read once in each
+    * facet's own plane, painted everywhere by a strip of one texel (strata, so the mesh's texture coordinates stay the
+    * facets' numbers), then the facets' own tone and roughness on top; its numbers are the apply function's to set.
+    */
+    Material seamMaterial(AssetManager& assets, SeamImages seams) {
+        Material layer;
+        layer.texture = assets.addTexture(std::move(seams.albedo));
+        layer.normalTexture = assets.addTexture(std::move(seams.normal));
 
         ImageData everywhere{1, 1, {255, 0, 0, 0}, TextureEncoding::Linear};
         everywhere.storage = TextureStorage::Exact;
         Material material;
-        material.groundLayers.push_back(coat);
+        material.groundLayers.push_back(layer);
         material.groundProjection = GroundProjection::Facets;
         material.groundPaint = GroundPaint::Strata;
         material.groundWeights = assets.addTexture(std::move(everywhere));
+        return material;
+    }
+
+    // The Ring's stealth coating: the sawtooth seam map.
+    Material structureCoating(AssetManager& assets, JobSystem& jobs, const ForestStructureSettings& settings) {
+        Material material = seamMaterial(assets, seamImages(seamLayout(ForestStructureSettings{}.seamTile, seamSeed), seamTexels, jobs));
         applyStructureSettings(material, settings);
+        return material;
+    }
+
+    // The Bastion's concrete: the formwork's seam map, made for the default tile (the setting scales it).
+    Material bastionConcrete(AssetManager& assets, JobSystem& jobs, const ForestBastionSettings& settings) {
+        Material material = seamMaterial(assets, seamImages(formworkLayout(ForestBastionSettings{}.formworkTile), seamTexels, jobs));
+        applyBastionSettings(material, settings);
         return material;
     }
 
@@ -382,7 +414,7 @@ void ForestGame::buildGround(World& world, AssetManager& assets) {
 
 /*
 * A few pillar and island shapes, each placed many times turned and scaled, so the GPU draws all of one shape in one
-* instanced draw. Only the Monolith is static and walked against: five faceted slabs and a strut; the pillars, islands and Ring
+* instanced draw. Only the Bastion and its bridge are static and walked against; the pillars, islands, Ring and far towers
 * stand clear of the path, so nobody walks into them yet.
 */
 void ForestGame::buildShapes(World& world, AssetManager& assets) {
@@ -478,31 +510,31 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         driftingRocks.push_back(entity);
     }
 
-    // The structures (games/forest/structures): faceted, in one matte coating whose facets each keep their own tone.
+    // The Ring (games/forest/structures), the alien relic: faceted, in a matte stealth coating whose facets each keep
+    // their own tone. It stands across the path, its centre at the ground there, so its lower half is buried.
     const Material coating = structureCoating(assets, getJobs(), structureSettings);
     appliedStructureSettings = structureSettings;
-
-    // The Ring stands across the path, its centre at the ground there, so its lower half is buried.
     ring = addShape(world, assets.addMesh(ringSegmentsMesh(forestRingRadius, forestRingTubeRadius, forestShapeSeed(0, 43))), coating,
                     Transform{.position = onGround(forestRingPlace.x, forestRingPlace.y)});
     structures.push_back(ring);
 
-    // The Monolith's slabs and its strut are static and walked against.
+    // The Bastion (games/forest/bastion) and its bridge to the pillar, static and walked against; the far towers from
+    // the same kit, all in concrete with formwork.
+    const Material concrete = bastionConcrete(assets, getJobs(), bastionSettings);
+    appliedBastionSettings = bastionSettings;
     const auto addSolid = [&](Mesh mesh, const Transform& transform) {
-        const Entity entity = addShape(world, assets.addMesh(std::move(mesh)), coating, transform, true);
+        const Entity entity = addShape(world, assets.addMesh(std::move(mesh)), concrete, transform, true);
         staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(entity)), transform.getMatrix());
         monolith.push_back(entity);
         structures.push_back(entity);
     };
 
-    for (const SlabShape& slab : monolithSlabs(clearingLevel())) {
-        addSolid(slabMesh(slab), Transform{.position = slab.foot});
-    }
+    const BastionShape bastion = monolithBastion(clearingLevel(), bastionSettings);
+    addSolid(bastionMesh(bastion), Transform{.position = bastion.foot});
+    addSolid(bridgeMesh(monolithBridge(clearingLevel(), bastion)), Transform{});
 
-    addSolid(strutMesh(monolithStrut(clearingLevel())), Transform{});
-
-    for (const SlabShape& spire : farSpires()) {
-        structures.push_back(addShape(world, assets.addMesh(slabMesh(spire)), coating, Transform{.position = spire.foot}));
+    for (const BastionShape& tower : farTowers()) {
+        structures.push_back(addShape(world, assets.addMesh(bastionMesh(tower)), concrete, Transform{.position = tower.foot}));
     }
 }
 
@@ -1249,13 +1281,22 @@ void ForestGame::updateDaylight(World& world) {
         appliedRockSettings = rockSettings;
     }
 
+    // The Ring's coating and the concrete of everything else, each rewritten only when its settings change.
     if (appliedStructureSettings != structureSettings) {
+        applyStructureSettings(world.get<ModelRenderer>(ring).parts.front().material, structureSettings);
+        markRenderChanged(world, ring);
+        appliedStructureSettings = structureSettings;
+    }
+
+    if (appliedBastionSettings != bastionSettings) {
         for (const Entity structure : structures) {
-            applyStructureSettings(world.get<ModelRenderer>(structure).parts.front().material, structureSettings);
-            markRenderChanged(world, structure);
+            if (structure != ring) {
+                applyBastionSettings(world.get<ModelRenderer>(structure).parts.front().material, bastionSettings);
+                markRenderChanged(world, structure);
+            }
         }
 
-        appliedStructureSettings = structureSettings;
+        appliedBastionSettings = bastionSettings;
     }
 
     for (const Entity rock : driftingRocks) {
@@ -1354,6 +1395,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Structures", [&] {
         visit(structureSettings, visitor);
+    });
+    visitor.group("Bastion", [&] {
+        visit(bastionSettings, visitor);
     });
     visitor.group("Hangings", [&] {
         visit(hangingSettings, visitor);
@@ -1576,6 +1620,10 @@ ForestRockSettings& ForestGame::getRockSettings() {
 
 ForestStructureSettings& ForestGame::getStructureSettings() {
     return structureSettings;
+}
+
+ForestBastionSettings& ForestGame::getBastionSettings() {
+    return bastionSettings;
 }
 
 const std::vector<Entity>& ForestGame::getStructures() const {

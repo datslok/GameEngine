@@ -13,7 +13,7 @@
 
 /*
 * The valley's big shapes (ROADMAP phase 18): sandstone pillars and floating islands carved by the valley's beds and
-* the pillar the Monolith's strut reaches, all generated, and where they stand (the structures: games/forest/structures).
+* the pillar the Bastion's bridge reaches, all generated, and where they stand (the structures: games/forest/bastion).
 */
 
 /*
@@ -149,5 +149,5 @@ std::vector<PillarPlacement> placePillars(const ValleyLayout& layout);
 */
 std::vector<IslandPlacement> placeIslands(const ValleyLayout& layout, const std::vector<PillarPlacement>& pillars);
 
-// The pillar the Monolith's strut reaches (games/forest/structures, monolithStrut), west of it.
+// The pillar the Bastion's bridge reaches (games/forest/bastion, monolithBridge), west of it.
 PillarPlacement monolithPillar(float groundLevel);

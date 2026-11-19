@@ -2,7 +2,7 @@
 
 Research for ROADMAP phase 18's "The structures, half reclaimed": the Monolith (600 m), the Ring (400 m, on edge, sunk to its waist), the far towers, searchlights. Today they are generated boxes and a torus (`valley_shapes`). Concept sheets (code-painted mood sketches): https://claude.ai/artifact/3EUTrgyrfZWKjyGX7F9fAS (private).
 
-**Direction (the user's choices):** the Monolith as a staggered group of five slabs (240-600 m, angled tops, one chamfered shoulder each), not one spire; alien in a stealth language (flat facets, sharp chamfers, matte charcoal, sawtooth seams; light only as straight lines along edges and at 45 degrees); running (lit lines, scanning beams); a human research camp in warm sodium light for scale; a ringed gas giant in the sky. The new pieces (faceted generator, matte coating, straight emissive lines, the camp kit, the planet) still need their own research.
+**Direction (the user's choices, Nov 19 2026, replacing the stealth-alien look):** cyberpunk and brutalist, very imposing (references: tall slabs stepping in, vertical fins and deep slots, a heavy head or crown, legs and buttresses at the foot; concrete and dark metal, formwork panels, rust and stains; thousands of small windows, light strips, neon, warning lights; a small city or camp at the foot, fog, flying craft, dusk and night). The megatower rises out of the jungle, which stays; running and lit at night; the Monolith and the far spires redone in the new style, the Ring kept as the alien relic the city was built around. Still kept from before: a research camp in warm light for scale, the gas giant. The stealth-slab notes below stay as research for the Ring; the new pieces (brutalist massing, windows at scale, cyberpunk light) need their own research.
 
 "src" = from the linked source; "practice" = common practice, no primary source found: numbers to tune; "recalled" = from memory, not re-checked.
 
@@ -131,16 +131,58 @@ Research for ROADMAP phase 18's "The structures, half reclaimed": the Monolith (
 - **Real sizes** (2 asin(R/a)): Jupiter from Io 19.5, Europa 12.2 degrees; Saturn from Dione 18.4, Tethys 23.6, Enceladus 29.3 degrees. Regular moons orbit in the ring plane, so from them rings are edge-on; an open ring needs an inclined orbit (a deliberate fiction). Tidally locked: the planet stays put, its phase cycles once an orbit.
 - **Planetshine:** `E = p E_sun (R/d)² Φ(α)`, `Φ = (sin α + (π-α) cos α)/π`: a 20 degree full disc gives ~70 lux at 5.2 AU, ~1,900 lux at 1 AU (full moon 0.25 lux): a real second directional light with a wide source. Eclipses: circle-circle overlap of the discs on the CPU, multiplying the sun.
 
-## Planned: weathering
+## Planned: the Bastion
 
-The user's choices (Nov 19 2026): lightly reclaimed (the slabs stay mostly clean charcoal; every amount a setting), seams generated in code, three branches looked at in turn.
+The user's choices (Nov 19 2026): concept A2, the terraced Bastion (sheets above); stages in the order mass, windows, lights; the strut rebuilt as an armoured bridge.
 
-- **Facet-planar projection (2a):** the slabs' facets face every way (hexagon sections), so triplanar would cross-fade seams on a facet turned 30 degrees. Each flat facet reads once in its own plane: across `A = normalize(up x n)`, up `B = n x A` (`= up - n (n.up)`, normalised); place `(p.A, p.y)` on steep facets (`|n.y|` under a limit), so horizontal seams meet at every edge round a slab, and `(p.A, p.B)` on flatter ones. A degenerate `A` (facing straight up or down) takes the object's x. The normal map's tilt is turned by `(A, B, n)`. Cost: one read a layer instead of up to three.
-- **Seam map (2a):** generated, seamless, 16 m tile at 2048 px (0.8 cm a texel): rows 2-4 m, panels 2-6 m, some edges sawtooth at 45 degrees, now and then a small inset hatch; grooves 3 cm wide, darker in the albedo, as a height map turned into a normal map. Per-triangle offsets are not possible: a facet's two triangles carry different numbers.
-- **Layers (2b):** coating with seams, wet stain, moss, soil, painted by a strip a structure (generated from its foot, shoulder and band heights): moss on what faces up and in a band rising from the foot, soil in the first metres, stain below each ledge fading down 20-40 m, its height map the streak pattern stretched 1:20 so the height blend breaks the band into streaks.
-- **Overgrowth (2c):** strands from anchors along each shoulder's outer lip, draped down the face 0.3 m off it (the face widens downwards); ferns, shrubs and small trees on the shoulders; a soil berm 2-5 m against each foot, rubble of coating chunks, denser understorey at the base, nothing placed inside a footprint.
-- **Cost grows with:** structure pixels (2a, 2b), strands and plants near the camera (2c).
-- **Left out:** edge wear (a matte coating has no clear coat to chip).
+- **Shape kit (`bastion-mass`):** every part a convex prism or a loft of two convex sections (box, chamfered box, battered glacis, wedge corbel); a quad's two triangles and a cap's fan share one pair of facet numbers, so a flat face keeps one tone. Fins on each face of a tier: the face's flat span W at pitch p gets an odd n = 2 round((W / p - 1) / 2) + 1 fins at W / n, so they never end in a half fin and stand symmetric; every 4th from the middle a major fin.
+- **Numbers (the approved sheet, the research where it had none):** 610 m; glacis 0-80 m, 1.45 x the shaft's width at the ground; tiers to 0.49, 0.77, 0.92 of the height at widths 1, 0.75, 0.55 of 200 m, depth 0.75 of the width; head 0.92-1.0, overhanging 30 m a side on 45 degree corbels under the major fins; fins every 7 m, 1.5 m wide, 2.5 m deep, major 6 m wide, 8 m deep. Far towers: the spires' places and heights, width height / 4-8, fins only, every 24 m.
+- **Concrete:** albedo 0.25, roughness 0.9, the seam map in formwork: a 16.5 m tile of 2.75 m pours, panels a seventh of the tile staggered by half a panel row on row, tie holes on a grid of about 0.6 m. The Ring keeps the stealth coating and its sawtooth seams.
+- **Bridge:** a chamfered box 14 x 8 m with parapets from inside the pillar into the second tier's side, 331 m up, walked on.
+- **Cost grows with:** nothing per frame beyond drawing a few tens of thousands of triangles, still and GPU-culled.
+
+## The military megatower (direction v5)
+
+Concept sheets (four concepts: Bastion, Spear, Bulwark, Twin Pylons): https://claude.ai/artifact/KfyixvEX1qjCe2cwvLAW2z (private). [V] read in a primary source, [S] secondary or snippet, [K] background knowledge, not checked.
+
+**Precedent.**
+
+- Blade Runner 2049 (DNEG): "heavy top" buildings, a slab on a column; scales leap-frogging (base, a much larger middle, larger still); signage kept sparse; thick even fog, areas pulled into it on purpose ([vfxblog](https://vfxblog.com/2017/10/26/lets-move-to-la-in-2049)) [V]. Deakins: London brutalism "the key" [S].
+- Control's Oldest House: 33 Thomas St, windowless, "20th century fortress", long vertical concrete indents ([Game Developer](https://www.gamedeveloper.com/art/the-real-buildings-that-inspired-i-control-i-s-oldest-house)) [V]; 33 Thomas St is 170 m, 29 floors of 5.5 m, six protrusions for ducts and stairs, vent openings at floors 10 and 29 ([Wikipedia](https://en.wikipedia.org/wiki/33_Thomas_Street)) [V].
+- Cyberpunk 2077: big shapes first, detail grouped, negative space for the eye to rest; "corporate neomilitarism" one of its four eras ([80.lv](https://80.lv/articles/interview-how-cyberpunk-2077-s-night-city-was-built-almost-entirely-by-hand/)) [V].
+- Pattern [K]: one dominant silhouette, a heavy top, a stepped or battered base, detail clustered at base and crown, plain shafts between, fog for depth.
+
+**Military, not residential.**
+
+- Flak towers: 39-54 m tall, 43-71 m square, walls to 3.5 m, gun platforms at the corners ([Wikipedia](https://en.wikipedia.org/wiki/Flak_tower)) [V]. Cheyenne Mountain tunnels 14 x 18.4 m, 25 t blast door [V]. PAVE PAWS array faces 22.1 m, tilted 20 degrees [V]; Fylingdales radomes 40 m [V].
+- Rules [K]: openings under 5-10 % of the wall (25-40 % residential), only in bands at command and plant levels (slits, a visor band); a 5-6 m plant rhythm, not 3 m floors; battered base walls 8-15 degrees, 45 degree chamfers; bolted plates, masts and sensors at the crown, hazard stripes and stencils at doors and pads.
+
+**Generator parameters for the 600 m tower** [K, from the above]:
+
+| Part | Numbers |
+|---|---|
+| Plinth | bastion 45-60 m tall, 1.3-1.5 x the shaft's width, battered 8-15 degrees, corner platforms cantilevered 8-12 m |
+| Setbacks | 3-4, near 0.35, 0.60, 0.82 of the height, each 6-12 % of the width a side, a heavy band 4-6 m |
+| Fins | minor every 6-8 m, 1.5-3 m deep; every 3rd-4th a major fin 4-8 m wide, 6-10 m deep, full height; slots 2-4 m wide, 5-10 m deep |
+| Rhythm | joints every 5.5 m, pours 2.75 m, formwork 1.22 x 2.44 m, ties on 0.6 m |
+| Head | 0.12-0.18 of the height, overhanging 10-20 m a side on 45 degree corbels; visor band 6-10 m of slits 0.4-0.8 x 4-10 m |
+| Openings | under 5 %; hangar bays 30-50 x 10-15 m at 0.6-0.75 of the height; pads 25-35 m, 3-5 m thick |
+| Crown | radomes 12-25 m, phased arrays 22 m tilted 20 degrees, lattice masts 40-100 m |
+| Materials | concrete albedo 0.22-0.30 linear, roughness 0.8-0.95 (wet streaks 0.4-0.6); painted steel 0.06, 0.55; rust (0.20, 0.09, 0.04), 0.9; stains x 0.55-0.75, 3-10 x a ledge's depth long, rust 0.5-3 m under steel |
+| Far towers | height 4-8 x width, fins only 8-15 m wide on a 20-30 m pitch, head 0.1-0.15 of the height, a crown motif each by seed |
+
+- Shape grammars (Müller et al. 2006 CGA, after Wonka 2003; [SIGGRAPH](https://history.siggraph.org/?p=113547)) [S]: scope boxes split by `Subdiv` and `Repeat` (whole tiles fitted), `Comp` into faces; order for us: mass, faces, bays (fins and slots), level bands, openings in tagged bands, clutter. Cost grows with instances near the camera; far towers need mass and fins only.
+
+## Lights at night (direction v5)
+
+- **Windows as a procedural mask** in the facet's plane (the same coordinates as the seam map): cell = floor(place / pitch), the opening a box step, a hash per cell for lit or dark, colour, luma; about 20-40 ALU a pixel, no texture, cost grows with the tower's pixels [K]. City Sample's window material: one threshold for the share lit, luma and colour variation, a seed per instance ([forum](https://forums.unrealengine.com/t/city-sample-buildings-light-of-window/662133/2)) [S]. Interior mapping (van Dongen 2008) is pointless for slits.
+- **Far and small:** at 0.67 of 1080p a render pixel is about 0.9 mrad (0.9 m at 1 km); a slit is sub-pixel past about 300 m. Box-filter the mask by the pixel footprint and fade to its expected value (share lit x luminance x opening area / cell area) past a cell, or TAA's clamp erases or flickers it [K].
+- **Point lights as sprites:** GTA V draws every small light as an instanced 32 x 32 quad ([Courrèges](https://www.adriancourreges.com/blog/2015/11/02/gta-v-graphics-study-part-2/)) [V]; keep energy, L = I / (d^2 Omega) with Omega at least 2 x 2 render pixels; MSFS's sprites that do not dim with distance are the failure to avoid [S]. A 2000 cd beacon at 5 km over one pixel is about 100 cd/m2: visible without faking.
+- **Obstruction lights** (FAA AC 70/7460-1M, [poster](https://www.flashtechnology.com/wp-content/uploads/2021/01/Flash-FAA-AC-70_7460-1M-Tower-Guidelines-Poster.pdf)) [V]: over 1750 ft, 11 L-864 red (2000 cd) flashing together at 30 a minute; levels at most about 105 m apart [K]; ICAO medium-intensity red 2000 cd, 20-60 flashes a minute, low-intensity steady 32 cd ([Annex 14](https://www.flashtechnology.com/wp-content/uploads/2017/09/ICAO-Annex-14-Chapter-6-2013.pdf)) [S]. Pad edges aviation green [S].
+- **Luminance** [K]: lit window from outside 20-150 cd/m2, LED billboards capped 300-600 cd/m2 [S], neon tube 10^3-10^4, concrete under sky glow 10^-3-10^-2; sodium 2000 K, LED 3000-5000 K. Night exposure: clamp eye adaptation's range and meter so a few bright sprites do not pull it down.
+- **Markings** (stencils, hull numbers, chevrons) are painted albedo lit by floods, not emissive [K].
+- **Bloom:** CoD AW's 13-tap downsample with a Karis average on the first step only, tent upsample, against pulsing ([Jimenez](https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/)) [S].
+- **Cost:** the mask grows with tower pixels (well under 0.1 ms estimated); sprites with visible emitters (ten thousand is trivial); real clustered lights only for a few dozen emitters that light geometry (hangar mouths, fin feet, pads); shadowed spots for searchlights only.
 
 ## The engine today (survey)
 
