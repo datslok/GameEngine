@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/vec2.h"
 #include "math/vec3.h"
 #include "scene/mesh.h"
 
@@ -7,72 +8,33 @@
 #include <vector>
 
 /*
-* The valley's structures in their stealth-alien look (ROADMAP phase 18, docs/research/STRUCTURES.md): the Monolith as
-* five faceted slabs with a strut to its pillar, the Ring as segments round a polygon, the far spires. Every shape is
-* lofted from sections and shaded flat; each triangle carries two random numbers in its texture coordinate, read by
-* materials with facet variation (Material::facetTone, facetRoughness) as its own tone and roughness.
+* The valley's structures' shape kit (ROADMAP phase 18, docs/research/STRUCTURES.md) and the Ring. Every shape is lofted
+* from convex sections and shaded flat; each triangle carries two random numbers in its texture coordinate, read by
+* materials with facet variation (Material::facetTone, facetRoughness) as its own tone and roughness. The Ring keeps the
+* stealth-alien look, a number pair a triangle; the Bastion (games/forest/bastion) a pair a flat face, so its walls stay
+* one tone each.
 */
 
-// How far a slab's shoulder rises while it steps in (metres): short, so the step's facets face the sky.
-inline constexpr float slabShoulderRise = 3.0f;
-
-// A level of a slab: its height above the foot (metres; the first is below, sunk), its width and depth as shares of
-// the slab's, how far its middle stands to the side (metres along x), and how far its front ridge stands off the
-// slab's (a share of the width), so the ridge zigzags and the faces break into facets turned their own ways.
-struct SlabLevel {
-    float height = 0.0f;
-    float widthShare = 1.0f;
-    float depthShare = 1.0f;
-    float offset = 0.0f;
-    float ridgeShift = 0.0f;
+// Which triangles share a pair of facet numbers: each its own, or every triangle of one flat face (a side quad, a cap).
+enum class FacetNumbers {
+    PerTriangle,
+    PerFace
 };
 
 /*
-* A slab: its foot (the middle of its footprint, at the ground's level), its width (x) and depth (z) there, its height,
-* where its front ridge stands across the width (-1..1; the back is the front turned half round), its levels bottom
-* to top and the seed of its facets' numbers. Each level's cross-section is a hexagon: the left edge, the front ridge, a
-* knee between the ridge and the right edge, the right edge, and the same turned half round, so each side has three
-* facets a band.
+* Sections lofted into a closed surface: each a convex polygon of the same number of points, which go round from -u
+* through +v to +u and -v where u x v points back along the loft (as round a box seen from above, the loft rising: the
+* polygon's winding normal, (b - a) x (c - b), points along the loft), so the sides between neighbouring sections face
+* out; both ends capped by fans. The vertices are shared, the triangles flat. facet counts the number pairs taken from
+* seed, so several lofts into one mesh keep drawing new ones.
 */
-struct SlabShape {
-    Vec3 foot;
-    float width = 0.0f;
-    float depth = 0.0f;
-    float height = 0.0f;
-    float ridgeShare = 0.0f;
-    std::vector<SlabLevel> levels;
-    std::uint32_t seed = 0;
-};
+void appendLoft(Mesh& mesh, const std::vector<std::vector<Vec3>>& sections, std::uint32_t seed, std::uint64_t& facet, FacetNumbers numbers);
 
-/*
-* A slab of the Monolith's kind: sunk below its foot, nearly upright up to shoulderShare of its height, there stepping in
-* a quarter over slabShoulderRise, then rising to a chisel top cut towards +x (cut 1) or -x (cut -1), its front ridge
-* zigzagging between levels. Its depth is slabDepthShare of its width.
-*/
-SlabShape makeSlab(Vec3 foot, float width, float height, float cut, float shoulderShare, float ridgeShare, std::uint32_t seed);
+// A convex polygon pushed along offset into a closed prism, the polygon turned round first if its winding faces back.
+void appendExtrusion(Mesh& mesh, const std::vector<Vec3>& polygon, const Vec3& offset, std::uint32_t seed, std::uint64_t& facet, FacetNumbers numbers);
 
-// The slab's faceted surface in its own frame (the origin at its foot): its levels lofted, capped below and on top.
-Mesh slabMesh(const SlabShape& slab);
-
-// The Monolith: five slabs across the clearing's north end, the tallest 600 m with its front ridge on forestMonolithPlace.
-std::vector<SlabShape> monolithSlabs(float groundLevel);
-
-// The far spires: needles 300-800 m tall standing 2.5-7 km away in the haze, each on the ground under it.
-std::vector<SlabShape> farSpires();
-
-// A straight strut of rhombus section, thickness across, from one point to another, with its facets' seed.
-struct StrutShape {
-    Vec3 from;
-    Vec3 to;
-    float thickness = 0.0f;
-    std::uint32_t seed = 0;
-};
-
-// The strut from the Monolith's pillar (monolithPillar) into the side of a slab, where the bridge was.
-StrutShape monolithStrut(float groundLevel);
-
-// The strut's faceted surface in world coordinates.
-Mesh strutMesh(const StrutShape& strut);
+// A section at a point of a loft: offsets (along -u .. +v .. +u .. -v) round a centre.
+std::vector<Vec3> sectionAt(Vec3 centre, Vec3 u, Vec3 v, const std::vector<Vec2>& offsets);
 
 // The Ring's segments round its polygon, and the triangles each is made of (eight sides, two caps of six).
 inline constexpr int ringSegments = 20;

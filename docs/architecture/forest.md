@@ -1,6 +1,6 @@
 # Forest
 
-Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/games/forest/forest_ground`, `src/games/forest/forest_sway`, `src/games/forest/structures`, `src/games/forest/structure_seams`
+Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/games/forest/forest_ground`, `src/games/forest/forest_sway`, `src/games/forest/structures`, `src/games/forest/structure_seams`, `src/games/forest/bastion`
 
 `ForestGame` (`--game forest`, title "Forest"): a jungle valley at a scale meant to be felt. Rules for working here: `src/games/forest/CLAUDE.md`; research: `docs/research/JUNGLE.md`. North is -z.
 
@@ -53,21 +53,23 @@ A `Terrain` (CDLOD; engine side: `terrain.md`) on its own entity:
 - **Leaf materials:** `forestLeafMaterial` (an atlas as a double-sided cut-out, opacity in alpha, mips keeping coverage; the ivy `LeafSet017` by default), `forestLeafClusterMaterial`, and drawn ones (palm, aroid, epiphyte, grass, floor cover, moss), each with its plants.
 - **Light through leaves** (`ForestLeafLightSettings`, F5 Leaf light, start-up; `withLeafLight`): `Material::diffuseTransmission` share 1, tint (0.8, 1, 0.4), on every leaf material; `engine.render.materials.lightThroughLeaves` switches it live.
 
-## The structures (`structures`)
+## The structures (`structures`, `bastion`)
 
-Stealth-alien shapes (design: `docs/research/STRUCTURES.md`), every one lofted from sections by `appendLoft`: convex polygons of equal size whose points go round from -u through +v to +u and -v (u x v back along the loft), so the sides face out; both ends capped; vertices shared, triangles flat (no corner normals). Each triangle's corners share one texture coordinate, two `forestUnitRandom` numbers, read as its facet's tone and roughness (`Material::facetTone`, `facetRoughness`; `materials.md`).
+A military brutalist megatower, the Bastion, where the Monolith stood, ten far towers from its kit, and the Ring kept as the alien relic (design and plan: `docs/research/STRUCTURES.md`).
+
+- **Shape kit** (`structures`): `appendLoft` lofts convex sections of equal size, their points round from -u through +v to +u and -v (the winding normal along the loft), sides facing out, both ends capped by fans; vertices shared, triangles flat (no corner normals). `appendExtrusion` pushes a convex polygon along an offset, turning it round when it winds backwards. Each triangle's corners share one texture coordinate, two `forestUnitRandom` numbers read as the facet's tone and roughness (`Material::facetTone`, `facetRoughness`; `materials.md`): `FacetNumbers::PerTriangle` for the Ring's stealth facets, `PerFace` for the Bastion, so a quad's halves and a cap's fan keep one tone.
+- **Fins** (`finPlaces`): a face's flat span W at pitch p takes an odd n = 2 round((W / p - 1) / 2) + 1, each in the middle of its W / n, symmetric, never cut at a corner; every `majorEvery`-th from the middle major.
 
 | Shape | Built by | Form |
 |---|---|---|
-| Slab | `makeSlab`, `slabMesh` | hexagon sections (left edge, front ridge, a knee, right edge, the same turned half round: three facets a side a band; `ridgeShare` across, zigzagging by each level's `ridgeShift`), bands every 60-120 m on the Monolith: sunk 10 m, nearly upright to `shoulderShare` of the height, a shoulder stepping in a quarter over `slabShoulderRise` (3 m, so its facets face the sky: upward part 0.55-0.9, the rock's moss range), a chisel top cut towards `cut`'s side |
-| The Monolith | `monolithSlabs` | five slabs 240-600 m tall, 79-110 m wide, depth 0.45 of width, tops cut alternately; the tallest's front ridge on `forestMonolithPlace`, the others staggered 10-20 m behind |
-| Strut | `monolithStrut`, `strutMesh` | an 8 m rhombus from inside `monolithPillar` into the second slab's side, 331 m up |
+| The Bastion | `monolithBastion`, `bastionMesh` | `ForestBastionSettings` (F5 Bastion, start-up): 610 m; a glacis lofted from 1.45 x the shaft's 200 m at 10 m below the clearing to the first tier at 80 m; tiers to 0.49, 0.77, 0.92 of the height at 1, 0.75, 0.55 of the width; depth 0.75 of the width, corners chamfered 0.06; fins every 7 m, 1.5 m wide, 2.5 m deep, every 4th 6 m wide, 8 m deep; a head to the top overhanging 30 m on 45 degree corbels (1 m narrower than the major fins under them, so no two sides share a plane). Its first tier's front face on `forestMonolithPlace` |
+| Bridge | `monolithBridge`, `bridgeMesh` | a 14 x 8 m box, lower edges chamfered, 1.2 m parapets; from inside `monolithPillar` straight into the second tier's west face, 4 m in, its deck 331 m up |
+| Far towers | `farTowers` | at the old spires' ten places, 300-800 m, 4.5-7.5 times as tall as wide, tiers to 0.5, 0.78, 0.9, fins only 9 m wide every 24 m, sunk 20 m |
 | The Ring | `ringSegmentsMesh` | `ringSegments` (20) straight prisms round a polygon, middles `forestRingRadius` out, chamfered square section of half `forestRingTubeRadius`, ends cut on radial planes 1.5 m short; within 30 degrees of the top drifted 3-10 m out and turned up to 1 degree. One mesh, at the ground with no scale |
-| Far spires | `farSpires` | ten needles 300-800 m at the old towers' places, sunk 20 m |
 
-- One material for all (`structureCoating`, `applyStructureSettings`, `ForestStructureSettings`): a layered material of one layer, the matte coating (linear albedo 0.04 times a cool tint, roughness 0.65) with the seam map, read in each facet's plane (`GroundProjection::Facets`, `parallax-and-grounds.md`), painted by a one-texel strata strip; facet tone 0.12, facet roughness 0.07; seam depth (the normal scale) 1, seam tile 16 m; rewritten when the settings change (`appliedStructureSettings`).
-- **Seam map** (`structure_seams`): `seamLayout` fills a 16 m tile with rows 2-4 m and panels 2-6 m (each row's splits from a random start), 30 % of row edges and 25 % of splits sawtooth at 45 degrees (teeth about 0.3 m, their period dividing the tile), an inset hatch in 15 % of panels; `seamDistance` to the nearest line, `seamHeight` a groove 3 cm wide bevelled over 2 cm; `seamImages` at 2048 texels (a row a job): albedo with each panel's tone ±4 % and grooves at 0.55, height, normals 2 cm deep (`normalMapFromHeight`).
-- `getStructures()` lists every structure entity; `getMonolith()` its slabs and the strut (static, with collision).
+- **Materials** (`seamMaterial`): one layer with a seam map read in each facet's plane (`GroundProjection::Facets`, `parallax-and-grounds.md`), painted by a one-texel strata strip. The Ring: `structureCoating` (`ForestStructureSettings`, F5 Structures): linear albedo 0.04 times a cool tint, roughness 0.65, facet tone 0.12, roughness 0.07, seam depth 1, tile 16 m. The Bastion, bridge and far towers: `bastionConcrete` (`ForestBastionSettings`, live): albedo 0.25, roughness 0.9, face tone 0.06 and roughness 0.04, formwork depth 1, tile 16.5 m. Each rewritten only when its settings change.
+- **Seam maps** (`structure_seams`, at 2048 texels, a row a job): `seamLayout` (the Ring) fills a 16 m tile with rows 2-4 m and panels 2-6 m (each row's splits from a random start), 30 % of row edges and 25 % of splits sawtooth at 45 degrees (teeth about 0.3 m, their period dividing the tile), an inset hatch in 15 % of panels. `formworkLayout` (concrete): pours of 2.75 m, panels a seventh of the tile, every other row moved half a panel, tie holes on a grid of 0.59 m, each fitted to a whole number in the tile. `seamDistance` to the nearest line or tie, `seamHeight` a groove 3 cm wide bevelled over 2 cm; `seamImages`: albedo with each panel's tone +-4 % and grooves at 0.55, height, normals 2 cm deep (`normalMapFromHeight`).
+- `getStructures()` lists every structure entity (the Ring, the Bastion, its bridge, the far towers); `getMonolith()` the Bastion and its bridge (static, with collision).
 
 ## Sky, air and wind
 

@@ -719,9 +719,10 @@ namespace {
         assert(down && near(down->hit.point.y, forestHeight(x, z), 0.05f));
 
         const float level = forestHeight(forestClearingCentre.x, forestClearingCentre.y);
-        // Beside the tallest slab's front ridge (it zigzags), so the facet there stands a little behind the ridge's line.
-        const std::optional<LevelHit> ahead = raycast(forest.game.getLevel(), Ray{Vec3{-13.0f, level + 50.0f, -300.0f}, Vec3{0.0f, 0.0f, -1.0f}});
-        assert(ahead && ahead->hit.point.z < forestMonolithPlace.y + 0.01f && ahead->hit.point.z > forestMonolithPlace.y - 3.0f);
+        // Above the glacis the Bastion's first tier stops a ray on its front face or on a fin standing out of it.
+        const std::optional<LevelHit> ahead = raycast(forest.game.getLevel(), Ray{Vec3{-13.0f, level + 150.0f, -300.0f}, Vec3{0.0f, 0.0f, -1.0f}});
+        const float finDepth = forest.game.getBastionSettings().majorFinDepth;
+        assert(ahead && ahead->hit.point.z > forestMonolithPlace.y - 0.01f && ahead->hit.point.z < forestMonolithPlace.y + finDepth + 0.01f);
 
         const DirectionalLight& sun = forest.world.get<DirectionalLight>(forest.game.getSun());
         assert(sun.castsShadows && sun.intensity > 0.0f && sun.direction.y < 0.0f);
@@ -982,23 +983,41 @@ namespace {
         }
 
         /*
-        * The structures: one coating layer with the seam map, read in each facet's plane, painted everywhere by strata (the
-        * mesh's texture coordinates are the facets' numbers); the seams' depth and tile and the coating apply live.
+        * The structures: each one layer with a seam map, read in each facet's plane, painted everywhere by strata (the
+        * meshes' texture coordinates are the facets' numbers). The Ring in the stealth coating, the Bastion, its bridge and
+        * the far towers in concrete with formwork; each material's settings apply live.
         */
         for (const Entity structure : forest.game.getStructures()) {
-            const Material& coating = forest.world.get<ModelRenderer>(structure).parts.front().material;
-            assert(coating.groundLayers.size() == 1 && coating.groundProjection == GroundProjection::Facets && coating.groundPaint == GroundPaint::Strata);
-            assert(coating.groundLayers.front().texture.isValid() && coating.groundLayers.front().normalTexture.isValid() && coating.facetTone > 0.0f);
+            const Material& material = forest.world.get<ModelRenderer>(structure).parts.front().material;
+            assert(material.groundLayers.size() == 1 && material.groundProjection == GroundProjection::Facets && material.groundPaint == GroundPaint::Strata);
+            assert(material.groundLayers.front().texture.isValid() && material.groundLayers.front().normalTexture.isValid() && material.facetTone > 0.0f);
         }
+
+        assert(forest.game.getMonolith().size() == 2 && forest.game.getStructures().size() == 2 + 1 + 10);
+        const Material& ringCoating = forest.world.get<ModelRenderer>(forest.game.getRing()).parts.front().material;
+        const Material& concrete = forest.world.get<ModelRenderer>(forest.game.getMonolith().front()).parts.front().material;
+        assert(ringCoating.groundLayers.front().texture != concrete.groundLayers.front().texture);
+        assert(near(concrete.groundRepeats[0], 1.0f / forest.game.getBastionSettings().formworkTile, 1e-7f));
 
         forest.game.getStructureSettings().seamDepth = 2.0f;
         forest.game.getStructureSettings().seamTile = 32.0f;
         forest.game.getStructureSettings().coatingRoughness = 0.8f;
+        forest.game.getBastionSettings().formworkDepth = 1.5f;
+        forest.game.getBastionSettings().formworkTile = 33.0f;
+        forest.game.getBastionSettings().concreteRoughness = 0.7f;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
 
+        const Material& ringAfter = forest.world.get<ModelRenderer>(forest.game.getRing()).parts.front().material;
+        assert(ringAfter.normalScale == 2.0f && near(ringAfter.groundRepeats[0], 1.0f / 32.0f, 1e-7f) && ringAfter.groundLayers.front().roughness == 0.8f);
+        assert(forest.world.has<RenderChanged>(forest.game.getRing()));
+
         for (const Entity structure : forest.game.getStructures()) {
-            const Material& coating = forest.world.get<ModelRenderer>(structure).parts.front().material;
-            assert(coating.normalScale == 2.0f && near(coating.groundRepeats[0], 1.0f / 32.0f, 1e-7f) && coating.groundLayers.front().roughness == 0.8f);
+            if (structure == forest.game.getRing()) {
+                continue;
+            }
+
+            const Material& after = forest.world.get<ModelRenderer>(structure).parts.front().material;
+            assert(after.normalScale == 1.5f && near(after.groundRepeats[0], 1.0f / 33.0f, 1e-7f) && after.groundLayers.front().roughness == 0.7f);
             assert(forest.world.has<RenderChanged>(structure));
         }
 

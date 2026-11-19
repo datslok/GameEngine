@@ -1,3 +1,4 @@
+#include "games/forest/bastion.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/structure_seams.h"
 #include "games/forest/structures.h"
@@ -21,10 +22,6 @@ namespace {
 
     Vec3 triangleNormal(const Mesh& mesh, const Triangle& triangle) {
         return faceNormal(mesh.vertices[triangle.first], mesh.vertices[triangle.second], mesh.vertices[triangle.third]);
-    }
-
-    Vec3 triangleMiddle(const Mesh& mesh, const Triangle& triangle) {
-        return (corner(mesh, triangle.first) + corner(mesh, triangle.second) + corner(mesh, triangle.third)) / 3.0f;
     }
 
     /*
@@ -108,44 +105,161 @@ namespace {
     }
 
     /*
-    * A slab: closed, flat facets each with its own numbers, as tall as asked and sunk below its foot; its sides below the
-    * shoulder nearly upright (no moss), its shoulder's facets turned to the sky as much as the rock's moss asks (an upward
-    * part past 0.55), and its top cut to the side its cut says. Indexed, every vertex keeps its triangle's face normal.
+    * A flat face keeps one tone: two triangles sharing an edge in one plane (a side quad's halves, a cap's fan) share
+    * their number pair, and no pair is shared by triangles facing different ways. Every triangle shaded flat.
     */
-    void testSlab() {
-        const SlabShape slab = makeSlab(Vec3{10.0f, 3.0f, -20.0f}, 100.0f, 400.0f, 1.0f, 0.5f, 0.25f, 7u);
-        const Mesh mesh = slabMesh(slab);
-        assert(closedAndFacingOut(mesh));
-        assert(facetsCarryTheirOwnNumbers(mesh));
-        assert(near(highest(mesh), 400.0f, 1e-3f));
-        assert(lowest(mesh) < -5.0f);
+    bool facesShareTheirNumbers(const Mesh& mesh) {
+        std::map<std::pair<std::size_t, std::size_t>, std::vector<std::size_t>> byEdge;
+        std::map<std::pair<float, float>, Vec3> normalByNumbers;
 
-        const float shoulder = 0.5f * 400.0f;
-        bool sawShoulder = false;
-        float topX = 0.0f;
+        for (std::size_t index = 0; index < mesh.triangles.size(); ++index) {
+            const Triangle& triangle = mesh.triangles[index];
 
-        for (const Triangle& triangle : mesh.triangles) {
-            const Vec3 middle = triangleMiddle(mesh, triangle);
-            const Vec3 normal = triangleNormal(mesh, triangle);
-
-            if (middle.y > 0.0f && middle.y < shoulder - 1.0f) {
-                assert(std::fabs(normal.y) < 0.1f);
+            if (!triangle.uvs[0] || triangle.normals[0]) {
+                return false;
             }
 
-            if (middle.y > shoulder && middle.y < shoulder + slabShoulderRise) {
-                assert(normal.y > 0.55f && normal.y < 0.95f);
-                sawShoulder = true;
+            const Vec3 normal = triangleNormal(mesh, triangle);
+            const auto [known, added] = normalByNumbers.try_emplace({triangle.uvs[0]->x, triangle.uvs[0]->y}, normal);
+
+            if (!added && known->second.dot(normal) < 0.999f) {
+                return false;
+            }
+
+            const std::size_t corners[3]{triangle.first, triangle.second, triangle.third};
+
+            for (int side = 0; side < 3; ++side) {
+                byEdge[{std::min(corners[side], corners[(side + 1) % 3]), std::max(corners[side], corners[(side + 1) % 3])}].push_back(index);
             }
         }
+
+        for (const auto& [edge, triangles] : byEdge) {
+            for (std::size_t a = 0; a < triangles.size(); ++a) {
+                for (std::size_t b = a + 1; b < triangles.size(); ++b) {
+                    const Triangle& first = mesh.triangles[triangles[a]];
+                    const Triangle& second = mesh.triangles[triangles[b]];
+                    const bool coplanar = triangleNormal(mesh, first).dot(triangleNormal(mesh, second)) > 0.9999f;
+
+                    if (coplanar && (*first.uvs[0] - *second.uvs[0]).length() > 0.0f) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // How far the mesh reaches along a direction among its points between two heights.
+    float reachAlong(const Mesh& mesh, const Vec3& direction, float low, float high) {
+        float reach = -1e9f;
 
         for (const Vec4& point : mesh.vertices) {
-            if (point.y > 399.0f) {
-                topX = point.x;
+            if (point.y >= low && point.y <= high) {
+                reach = std::max(reach, Vec3{point.x, point.y, point.z}.dot(direction));
             }
         }
 
-        assert(sawShoulder && topX > 0.2f * 100.0f);
-        assert(makeSlab(Vec3{}, 100.0f, 400.0f, -1.0f, 0.5f, 0.25f, 7u).levels.back().offset < 0.0f);
+        return reach;
+    }
+
+    /*
+    * Fins across a face: an odd number, symmetric about the middle, evenly spaced each in the middle of its share of the
+    * span (so the outer ones end inside it, never cut at a corner), the spacing as near the pitch as a whole number
+    * allows; the middle one major, and every majorEvery-th from it, mirrored. None on a span narrower than the pitch.
+    */
+    void testFinPlaces() {
+        const BastionFins fins{.pitch = 7.0f, .width = 1.5f, .depth = 2.5f, .majorEvery = 4, .majorWidth = 6.0f, .majorDepth = 8.0f};
+
+        for (const float span : {20.0f, 64.0f, 176.0f, 188.0f, 300.5f}) {
+            const std::vector<FinPlace> places = finPlaces(span, fins);
+            const std::size_t count = places.size();
+            assert(count % 2 == 1);
+            const float step = span / static_cast<float>(count);
+            assert(std::fabs(step - fins.pitch) <= fins.pitch * 0.34f);
+            assert(near(places.front().centre, -0.5f * span + 0.5f * step, 1e-3f) && near(places.back().centre, 0.5f * span - 0.5f * step, 1e-3f));
+            assert(places[count / 2].major && near(places[count / 2].centre, 0.0f, 1e-3f));
+
+            for (std::size_t index = 0; index < count; ++index) {
+                assert(near(places[index].centre, -places[count - 1 - index].centre, 1e-3f));
+                assert(places[index].major == places[count - 1 - index].major);
+                const bool everyFourth = (index > count / 2 ? index - count / 2 : count / 2 - index) % 4 == 0;
+                assert(places[index].major == everyFourth);
+
+                if (index > 0) {
+                    assert(near(places[index].centre - places[index - 1].centre, step, 1e-3f));
+                }
+            }
+        }
+
+        assert(finPlaces(5.0f, fins).empty());
+        assert(finPlaces(100.0f, BastionFins{}).empty());
+    }
+
+    /*
+    * The Bastion at the Monolith's place: its foot on the clearing's level, its first tier's front face on the Monolith's
+    * line; the glacis wider at the ground and meeting the first tier; tiers touching and stepping in; the head overhanging
+    * the top tier on every side and topping out at the height asked.
+    */
+    void testBastionShape() {
+        const float level = 3.0f;
+        const ForestBastionSettings settings;
+        const BastionShape bastion = monolithBastion(level, settings);
+        assert(bastion.foot.y == level && bastion.sink > 0.0f);
+        assert(near(bastion.foot.z + 0.5f * bastion.depthShare * bastion.tiers.front().width, forestMonolithPlace.y, 1e-3f));
+        assert(near(bastion.foot.x, forestMonolithPlace.x, 1e-3f));
+        assert(bastion.tiers.size() == 3 && bastion.tiers.front().width == settings.shaftWidth);
+        assert(near(bastion.glacisWidth, settings.glacisShare * settings.shaftWidth, 1e-3f) && bastion.glacisTop == settings.glacisHeight);
+        assert(bastion.tiers.front().bottom == bastion.glacisTop);
+
+        for (std::size_t index = 1; index < bastion.tiers.size(); ++index) {
+            assert(bastion.tiers[index].bottom == bastion.tiers[index - 1].top && bastion.tiers[index].width < bastion.tiers[index - 1].width);
+        }
+
+        assert(bastion.headBottom == bastion.tiers.back().top && near(bastion.headTop, settings.height, 1e-3f));
+        assert(bastion.headOverhang == settings.headOverhang && bastion.headTop - bastion.headBottom > 0.05f * settings.height);
+        assert(bastionWidthAt(bastion, 0.5f * (bastion.tiers[1].bottom + bastion.tiers[1].top)) == bastion.tiers[1].width);
+        assert(bastionWidthAt(bastion, settings.height + 1.0f) == 0.0f);
+    }
+
+    /*
+    * The Bastion's surface: closed and facing out, every flat face one tone; from the sunk glacis to the head's top; the
+    * glacis's foot the widest part; fins standing out of every face of the first tier (the major ones as deep as asked;
+    * a fin's corners are at its tier's bottom and top, so the whole tier is searched);
+    * corbels under the head reaching its edge; and the head overhanging the top tier. Indexed, each vertex keeps its face's
+    * normal, so it is shaded flat.
+    */
+    void testBastionMesh() {
+        const ForestBastionSettings settings;
+        const BastionShape bastion = monolithBastion(0.0f, settings);
+        const Mesh mesh = bastionMesh(bastion);
+        assert(closedAndFacingOut(mesh) && facesShareTheirNumbers(mesh));
+        assert(near(highest(mesh), settings.height, 1e-3f) && near(lowest(mesh), -bastion.sink, 1e-3f));
+
+        const float halfGlacis = 0.5f * bastion.glacisWidth;
+        assert(near(reachAlong(mesh, Vec3{1.0f, 0.0f, 0.0f}, -1e9f, 1e9f), halfGlacis, 1e-3f));
+
+        const BastionTier& first = bastion.tiers.front();
+        const float halfWidth = 0.5f * first.width;
+        const float halfDepth = 0.5f * bastion.depthShare * first.width;
+        assert(near(reachAlong(mesh, Vec3{0.0f, 0.0f, 1.0f}, first.bottom + 0.01f, first.top + 0.01f), halfDepth + settings.majorFinDepth, 1e-3f));
+        assert(near(reachAlong(mesh, Vec3{0.0f, 0.0f, -1.0f}, first.bottom + 0.01f, first.top + 0.01f), halfDepth + settings.majorFinDepth, 1e-3f));
+        assert(near(reachAlong(mesh, Vec3{1.0f, 0.0f, 0.0f}, first.bottom + 0.01f, first.top + 0.01f), halfWidth + settings.majorFinDepth, 1e-3f));
+        assert(near(reachAlong(mesh, Vec3{-1.0f, 0.0f, 0.0f}, first.bottom + 0.01f, first.top + 0.01f), halfWidth + settings.majorFinDepth, 1e-3f));
+
+        const BastionTier& top = bastion.tiers.back();
+        const float headHalfWidth = 0.5f * top.width + bastion.headOverhang;
+        assert(near(reachAlong(mesh, Vec3{1.0f, 0.0f, 0.0f}, bastion.headBottom + 1.0f, bastion.headTop), headHalfWidth, 1e-3f));
+        // The corbels at 45 degrees: each starts on the top tier's face an overhang below the head (a corner there, at the
+        // face) and meets the head's underside at its edge.
+        const float topHalfDepth = 0.5f * bastion.depthShare * top.width;
+        bool corbelFoot = false;
+
+        for (const Vec4& point : mesh.vertices) {
+            corbelFoot = corbelFoot || (near(point.y, bastion.headBottom - bastion.headOverhang, 1e-3f) && near(point.z, topHalfDepth, 0.5f));
+        }
+
+        assert(corbelFoot);
 
         const IndexedMesh indexed = buildIndexedMesh(mesh);
 
@@ -159,61 +273,44 @@ namespace {
     }
 
     /*
-    * The Monolith: five slabs on the clearing's level, the tallest 600 m with its front ridge on the Monolith's line,
-    * each sunk into the ground; their fronts staggered, so no two faces lie in one plane; the strut from the bridge's
-    * pillar reaching into a slab tall enough to hold it.
+    * The far towers: ten at the old spires' places, each on the ground under it, 300-800 m tall and 4-8 times as tall as
+    * wide, their fins only the major kind, their surfaces closed.
     */
-    void testMonolith() {
-        const float level = 3.0f;
-        const std::vector<SlabShape> slabs = monolithSlabs(level);
-        assert(slabs.size() == 5);
-        float tallest = 0.0f;
-        std::size_t tallestIndex = 0;
+    void testFarTowers() {
+        const std::vector<BastionShape> towers = farTowers();
+        assert(towers.size() == 10);
 
-        for (std::size_t index = 0; index < slabs.size(); ++index) {
-            const Mesh mesh = slabMesh(slabs[index]);
-            assert(closedAndFacingOut(mesh));
-            assert(slabs[index].foot.y == level && lowest(mesh) < 0.0f);
-
-            if (highest(mesh) > tallest) {
-                tallest = highest(mesh);
-                tallestIndex = index;
-            }
-
-            for (std::size_t other = index + 1; other < slabs.size(); ++other) {
-                assert(std::fabs(slabs[index].foot.z - slabs[other].foot.z) > 1.0f);
-            }
+        for (const BastionShape& tower : towers) {
+            const float width = tower.tiers.front().width;
+            assert(tower.headTop >= 300.0f && tower.headTop <= 800.0f);
+            assert(tower.headTop / width >= 4.0f && tower.headTop / width <= 8.0f);
+            assert(near(tower.foot.y, forestHeight(tower.foot.x, tower.foot.z), 1e-3f));
+            assert(tower.fins.majorEvery == 1 && tower.fins.pitch >= 20.0f);
+            const Mesh mesh = bastionMesh(tower);
+            assert(closedAndFacingOut(mesh) && near(highest(mesh), tower.headTop, 1e-3f));
         }
-
-        assert(near(tallest, 600.0f, 1e-3f));
-        const SlabShape& main = slabs[tallestIndex];
-        assert(near(main.foot.z + 0.5f * main.depth, forestMonolithPlace.y, 1e-3f));
-
-        const StrutShape strut = monolithStrut(level);
-        const Mesh strutShape = strutMesh(strut);
-        assert(closedAndFacingOut(strutShape) && facetsCarryTheirOwnNumbers(strutShape));
-        const PillarPlacement pillar = monolithPillar(level);
-        assert((Vec2{strut.from.x, strut.from.z} - Vec2{pillar.foot.x, pillar.foot.z}).length() < pillar.radius);
-        assert(strut.from.y < pillar.foot.y + pillar.height);
-
-        const auto holds = std::any_of(slabs.begin(), slabs.end(), [&](const SlabShape& slab) {
-            return std::fabs(strut.to.x - slab.foot.x) < 0.5f * slab.width && slab.foot.y + slab.height > strut.to.y + 50.0f;
-        });
-        assert(holds);
     }
 
-    // The far spires: ten, each as tall as asked above the ground under it, closed, coming to a point.
-    void testSpires() {
-        const std::vector<SlabShape> spires = farSpires();
-        assert(spires.size() == 10);
+    /*
+    * The bridge: from inside the Monolith's pillar, below its top, straight into the Bastion's west side at the deck's
+    * height (inside its face, not through it), level; its surface closed, its deck walkable (the highest points are the
+    * parapets', a little above the deck).
+    */
+    void testBridge() {
+        const float level = 3.0f;
+        const BastionShape bastion = monolithBastion(level, ForestBastionSettings{});
+        const BridgeShape bridge = monolithBridge(level, bastion);
+        const PillarPlacement pillar = monolithPillar(level);
+        assert((Vec2{bridge.from.x, bridge.from.z} - Vec2{pillar.foot.x, pillar.foot.z}).length() < pillar.radius);
+        assert(bridge.from.y < pillar.foot.y + pillar.height && near(bridge.from.y, level + 331.0f, 1e-3f) && bridge.to.y == bridge.from.y);
 
-        for (const SlabShape& spire : spires) {
-            const Mesh mesh = slabMesh(spire);
-            assert(closedAndFacingOut(mesh));
-            assert(near(highest(mesh), spire.height, 1e-3f) && spire.height >= 300.0f && spire.height <= 800.0f);
-            assert(near(spire.foot.y, forestHeight(spire.foot.x, spire.foot.z), 1e-3f));
-            assert(spire.levels.back().widthShare < 0.05f);
-        }
+        const float face = bastion.foot.x - 0.5f * bastionWidthAt(bastion, bridge.to.y - level);
+        assert(bridge.to.x > face + 1.0f && bridge.to.x < face + 10.0f);
+        assert(std::fabs(bridge.to.z - bastion.foot.z) < 0.5f * bastion.depthShare * bastionWidthAt(bastion, bridge.to.y - level));
+
+        const Mesh mesh = bridgeMesh(bridge);
+        assert(closedAndFacingOut(mesh) && facesShareTheirNumbers(mesh));
+        assert(highest(mesh) > bridge.from.y + 0.5f && highest(mesh) < bridge.from.y + 2.0f && lowest(mesh) < bridge.from.y - 0.8f * bridge.depth);
     }
 
     /*
@@ -348,6 +445,36 @@ namespace {
     }
 
     /*
+    * Formwork: pours of equal height, as near formworkPour as a whole number fits, all straight; each row's panels equal,
+    * every other row's moved half a panel; no hatches; tie holes on a grid fitted to the tile, a seam at each hole's
+    * middle and none between holes away from the joints.
+    */
+    void testFormworkLayout() {
+        const SeamLayout layout = formworkLayout(16.5f);
+        assert(layout.tile == 16.5f && layout.rows.size() == 6 && layout.hatches.empty());
+        assert(near(layout.tiePitch, 16.5f / 28.0f, 1e-6f));
+
+        for (std::size_t row = 0; row < layout.rows.size(); ++row) {
+            const SeamRow& seamRow = layout.rows[row];
+            assert(near(seamRow.bottom.at, 2.75f * static_cast<float>(row), 1e-4f) && !seamRow.bottom.sawtooth);
+            assert(seamRow.splits.size() == 7);
+            const float panel = 16.5f / 7.0f;
+            assert(near(seamRow.splits.front().at, row % 2 == 0 ? 0.0f : 0.5f * panel, 1e-4f));
+
+            for (std::size_t split = 1; split < seamRow.splits.size(); ++split) {
+                assert(near(seamRow.splits[split].at - seamRow.splits[split - 1].at, panel, 1e-4f) && !seamRow.splits[split].sawtooth);
+            }
+        }
+
+        const float pitch = layout.tiePitch;
+        const Vec2 hole{3.5f * pitch, 3.5f * pitch};
+        assert(near(seamDistance(layout, hole), 0.0f, 1e-5f));
+        assert(near(seamDistance(layout, hole + Vec2{16.5f, -16.5f}), 0.0f, 1e-4f));
+        // Halfway between four holes, over a metre from the first row's joints (at 0 and 2.36 m across, 0 and 2.75 m up).
+        assert(seamDistance(layout, Vec2{2.0f * pitch, 3.0f * pitch}) > 0.4f);
+    }
+
+    /*
     * The textures: square, sRGB albedo, linear height and normals; panels lighter and higher than grooves; the normal
     * flat in a panel's middle and leaning towards a groove on its bevel (just under a boundary, up the picture);
     * seamless, the first column as close to the last as any two neighbours.
@@ -389,9 +516,12 @@ namespace {
 void testForestStructures() {
     testSeamLayout();
     testSeamDistance();
+    testFormworkLayout();
     testSeamImages();
-    testSlab();
-    testMonolith();
-    testSpires();
+    testFinPlaces();
+    testBastionShape();
+    testBastionMesh();
+    testFarTowers();
+    testBridge();
     testRing();
 }
