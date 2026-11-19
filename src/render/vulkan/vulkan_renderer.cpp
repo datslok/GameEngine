@@ -1354,7 +1354,7 @@ namespace {
 * The window's image cleared to the background as the rendering begins, then the bar and the text as cleared
 * rectangles: the one way to draw that needs no pipeline, since none may be built yet.
 */
-bool VulkanRenderer::drawLoadingScreen(const PipelineProgress& progress) {
+bool VulkanRenderer::drawLoadingScreen(const LoadingProgress& progress) {
     if (!prepareSwapchain()) {
         SDL_Delay(10);
         return false;
@@ -1379,7 +1379,7 @@ bool VulkanRenderer::drawLoadingScreen(const PipelineProgress& progress) {
         beginRendering(frame.commands, extent, &colour, nullptr);
         renderingOpen = true;
 
-        const LoadingScreenLayout screen = layoutLoadingScreen(static_cast<int>(extent.width), static_cast<int>(extent.height), progress.built, progress.total);
+        const LoadingScreenLayout screen = layoutLoadingScreen(static_cast<int>(extent.width), static_cast<int>(extent.height), progress);
         clearRectangles(frame.commands, extent, std::span<const ScreenRect>{&screen.barBack, 1}, loadingBarTrack);
         clearRectangles(frame.commands, extent, std::span<const ScreenRect>{&screen.barFill, 1}, loadingBarFill);
         clearRectangles(frame.commands, extent, screen.text, loadingText);

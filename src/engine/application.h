@@ -110,6 +110,10 @@ private:
     // The engine's commands, those of engine/engine_commands.h and the ones needing the window and GPU.
     void registerCommands();
 
+    // The game's onInit on a thread of its own behind the loading screen ("LOADING THE WORLD", a sliding block), the
+    // window answering meanwhile; closing it quits once the build ends. Rethrows what onInit threw.
+    void loadWorld();
+
     /*
     * Shows the loading screen (VulkanRenderer::drawLoadingScreen) until every pipeline the renderer asked for is built,
     * handling the window's events meanwhile, so it keeps answering; closing it quits. Rethrows a failed build.

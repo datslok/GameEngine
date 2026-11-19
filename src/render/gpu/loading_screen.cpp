@@ -69,13 +69,14 @@ namespace {
         return nullptr;
     }
 
-    // The screen's title, the font pixel as a share of its height (and the least), the gaps and the bar, in font pixels.
-    constexpr std::string_view loadingTitle = "BUILDING SHADERS";
+    // The font pixel as a share of the screen's height (and the least), the gaps and the bar, in font pixels; the sliding
+    // block's share of the bar.
     constexpr int heightPerPixel = 180;
     constexpr int smallestPixel = 2;
     constexpr int lineGap = 4;
     constexpr int barGap = 8;
     constexpr int barThickness = 3;
+    constexpr int slidingBlockShare = 4;
 }
 
 std::vector<ScreenRect> blockText(std::string_view text, int x, int y, int pixel) {
@@ -112,23 +113,40 @@ int blockTextWidth(std::string_view text, int pixel) {
     return (letters * blockGlyphWidth + (letters - 1)) * pixel;
 }
 
-// The title, the count and the bar stacked and centred as one block.
-LoadingScreenLayout layoutLoadingScreen(int width, int height, std::size_t built, std::size_t total) {
+/*
+* The title, the count and the bar stacked and centred as one block. The sliding block's place is a triangle wave of
+* the frame: up over loadingSlideFrames, down over as many.
+*/
+LoadingScreenLayout layoutLoadingScreen(int width, int height, const LoadingProgress& progress) {
     const int pixel = std::max(smallestPixel, height / heightPerPixel);
     const int lineHeight = blockGlyphHeight * pixel;
     const int blockHeight = 2 * lineHeight + (lineGap + barGap + barThickness) * pixel;
     const int top = std::max(0, (height - blockHeight) / 2);
-    const std::string count = std::to_string(built) + " / " + std::to_string(total);
 
     LoadingScreenLayout screen;
-    screen.text = blockText(loadingTitle, (width - blockTextWidth(loadingTitle, pixel)) / 2, top, pixel);
+    screen.text = blockText(progress.title, (width - blockTextWidth(progress.title, pixel)) / 2, top, pixel);
     const int countTop = top + lineHeight + lineGap * pixel;
-    const std::vector<ScreenRect> counted = blockText(count, (width - blockTextWidth(count, pixel)) / 2, countTop, pixel);
-    screen.text.insert(screen.text.end(), counted.begin(), counted.end());
+
+    if (progress.counted) {
+        const std::string count = std::to_string(progress.done) + " / " + std::to_string(progress.total);
+        const std::vector<ScreenRect> counted = blockText(count, (width - blockTextWidth(count, pixel)) / 2, countTop, pixel);
+        screen.text.insert(screen.text.end(), counted.begin(), counted.end());
+    }
 
     const int barWidth = width / 2;
     screen.barBack = ScreenRect{(width - barWidth) / 2, countTop + lineHeight + barGap * pixel, barWidth, barThickness * pixel};
     screen.barFill = screen.barBack;
-    screen.barFill.width = total == 0 ? 0 : static_cast<int>(static_cast<long long>(barWidth) * static_cast<long long>(std::min(built, total)) / static_cast<long long>(total));
+
+    if (progress.counted) {
+        const std::size_t done = std::min(progress.done, progress.total);
+        screen.barFill.width = progress.total == 0 ? 0 : static_cast<int>(static_cast<long long>(barWidth) * static_cast<long long>(done) / static_cast<long long>(progress.total));
+        return screen;
+    }
+
+    const std::uint64_t phase = progress.frame % (2 * loadingSlideFrames);
+    const std::uint64_t along = phase <= loadingSlideFrames ? phase : 2 * loadingSlideFrames - phase;
+    screen.barFill.width = barWidth / slidingBlockShare;
+    const long long travel = barWidth - screen.barFill.width;
+    screen.barFill.x += static_cast<int>(travel * static_cast<long long>(along) / static_cast<long long>(loadingSlideFrames));
     return screen;
 }

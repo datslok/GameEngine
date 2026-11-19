@@ -1,6 +1,6 @@
 # Engine core
 
-Covers: `src/engine/application`, `src/engine/engine_settings`, `src/engine/state_hash`, `src/core/fixed_timestep`, `src/core/job_system`, `src/ecs/`, `src/input/`, `src/platform/window`, `src/platform/sdl_input`, `src/core/`, `src/math/`, `src/scene/interpolation`, `assets/shaders/hash.glsl`
+Covers: `src/engine/application`, `src/engine/engine_settings`, `src/engine/state_hash`, `src/core/fixed_timestep`, `src/core/job_system`, `src/core/background_work`, `src/ecs/`, `src/input/`, `src/platform/window`, `src/platform/sdl_input`, `src/core/`, `src/math/`, `src/scene/interpolation`, `assets/shaders/hash.glsl`
 
 The loop, its timing, threads, entities and input. Rules for working here: `src/engine/CLAUDE.md`, `src/ecs/CLAUDE.md`.
 
@@ -21,7 +21,7 @@ Owns, in declaration order (destroyed in reverse):
 | `input`, `world`, `assets` | |
 | `debugUi` | Destroyed before the renderer it draws with |
 
-**Start:** `game.onInit`, then `waitForPipelines` (the loading screen until every pipeline is built), then the command server, so `--send` waits for a ready game.
+**Start:** `loadWorld` (`game.onInit` on a thread of its own through `runWhileWaiting`, `core/background_work`, while the main thread draws the loading screen and answers the window; safe since games are headless and nothing else reads the world meanwhile; closing quits once it ends), then `waitForPipelines` (the loading screen until every pipeline is built), then the command server, so `--send` waits for a ready game.
 
 **Each frame:**
 

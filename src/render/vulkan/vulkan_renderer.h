@@ -11,6 +11,7 @@
 #include "render/gpu/terrain_gpu.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/loading_screen.h"
 #include "render/gpu/shadow_atlas.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/shadow_map.h"
@@ -133,11 +134,11 @@ public:
     void finishPipelines();
 
     /*
-    * One frame of the loading screen for this progress (render/gpu/loading_screen.h): the title, the count and a bar,
+    * One frame of the loading screen for this progress (render/gpu/loading_screen.h): the title, the count or a sliding block, and a bar,
     * drawn by clearing rectangles of the window's image, so it needs no pipeline. Returns false, drawing nothing, when no
     * image was available.
     */
-    bool drawLoadingScreen(const PipelineProgress& progress);
+    bool drawLoadingScreen(const LoadingProgress& progress);
 
     // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
     // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU. A frame

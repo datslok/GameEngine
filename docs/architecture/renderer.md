@@ -122,7 +122,7 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 
 - **`PipelineCompiler`** (owned by `VulkanDevice`, stopped first in its teardown): one worker per core (`defaultWorkers`). `submit` → `PipelineFuture`; `take` waits and hands it over or rethrows; `progress`; `waitAll` rethrows the first unreported error. A future dropped untaken destroys its pipeline; a build whose future is gone before it starts is skipped. Holds nothing of the GPU, so `pipeline_compiler_test` uses stand-in handles.
 - **`VulkanPipeline`, `ComputePipeline`:** make their layouts at once (`DescriptorLayouts` is not thread-safe), hand the SPIR-V load and `vkCreate*Pipelines` to the compiler as a static build over copies of what it needs; the first `get()` waits for its own build.
-- **Loading screen:** `Application` runs `onInit` while pipelines compile, then `waitForPipelines` calls `drawLoadingScreen` about 30 times a second, handling events (closing quits). "BUILDING SHADERS", built / total and a bar (`layoutLoadingScreen`), drawn by `vkCmdClearAttachments` alone in a 5 x 7 block font (`blockText`), since no pipeline may be ready.
+- **Loading screen:** `drawLoadingScreen` about 30 times a second while the `Application` loads (events handled, closing quits): during `loadWorld` "LOADING THE WORLD" over a block sliding along the bar (`loadingSlideFrames`, the work cannot count), then during `waitForPipelines` "BUILDING SHADERS", built / total and a filling bar (`LoadingProgress`, `layoutLoadingScreen`). Drawn by `vkCmdClearAttachments` alone in a 5 x 7 block font (`blockText`), since no pipeline may be ready.
 - Not compiled this way: ImGui's own pipeline, the GPU tests' (built on first use).
 
 ## Kept from SDL_GPU

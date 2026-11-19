@@ -1,5 +1,6 @@
 #include "engine/application.h"
 #include "assets/texture_cooking.h"
+#include "core/background_work.h"
 #include "core/build_info.h"
 #include "scene/flat_faces.h"
 #include "engine/debug_views.h"
@@ -13,6 +14,7 @@
 #include "scene/terrain.h"
 
 #include <SDL3/SDL.h>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -34,10 +36,12 @@ Application::Application(const char* title, int width, int height, Game& game, c
     renderer.setPresentMode(requestedPresentMode);
 
     game.useJobs(jobs);
-    game.onInit(world, assets);
+    loadWorld();
 
     // The renderer's pipelines have been compiling on every core meanwhile; the rest with the loading screen up.
-    waitForPipelines();
+    if (!quitRequested) {
+        waitForPipelines();
+    }
 
     mouseLookEnabled = game.wantsMouseLook();
     window.setMouseLookEnabled(mouseLookEnabled);
@@ -59,6 +63,30 @@ Application::Application(const char* title, int width, int height, Game& game, c
 // A frame of the loading screen at most this often: it only counts, so the threads get the cores.
 constexpr Uint32 loadingFrameMilliseconds = 33;
 
+/*
+* The game builds its world on a thread of its own (core/background_work.h) while this one keeps the loading screen
+* drawn and the window answering. Safe because a game never touches the renderer, the window or SDL (games run
+* headless), the job system takes work from any thread, and nothing else reads the world or the assets until it ends.
+* Closing the window meanwhile cannot stop the build, so it stops the drawing and quits once the build ends.
+*/
+void Application::loadWorld() {
+    std::uint64_t frame = 0;
+    runWhileWaiting([this] { game.onInit(world, assets); },
+                    [this, &frame] {
+                        if (quitRequested) {
+                            return;
+                        }
+
+                        if (!window.processEvents(input)) {
+                            quitRequested = true;
+                            return;
+                        }
+
+                        renderer.drawLoadingScreen(LoadingProgress{.title = loadingWorldTitle, .counted = false, .frame = frame++});
+                    },
+                    std::chrono::milliseconds{loadingFrameMilliseconds});
+}
+
 void Application::waitForPipelines() {
     while (!renderer.pipelineProgress().done()) {
         if (!window.processEvents(input)) {
@@ -66,7 +94,8 @@ void Application::waitForPipelines() {
             return;
         }
 
-        renderer.drawLoadingScreen(renderer.pipelineProgress());
+        const PipelineProgress progress = renderer.pipelineProgress();
+        renderer.drawLoadingScreen(LoadingProgress{.title = loadingShadersTitle, .done = progress.built, .total = progress.total});
         SDL_Delay(loadingFrameMilliseconds);
     }
 
