@@ -98,7 +98,7 @@ The CPU's reference for a tile's casters (`shadowTileCasters`: `castersInReach`,
 
 - Separate-movers tiles first: still copy redrawn if needed, patches copied into the atlas.
 - Atlas `DepthTarget`, loaded and stored (only some tiles change); per tile: viewport, `shadowClearPipeline` (`fullscreen_triangle.vert` at `gpuFarDepth`, depth `ALWAYS`) unless it keeps movers apart, `GpuShadowView` pushed, casters drawn; then `DepthFragmentRead`. No pass at all when nothing changed.
-- Pipelines: `shadow.vert`/`shadow.frag` (positions only) and for cut-outs `shadow_cut_out.vert`/`cut_out.frag` (holes thrown away), both reading instances through `drawnObject` so placed plants' entries draw too (`planting.md`); depth `GREATER`, no culling (`VK_CULL_MODE_NONE`), no hardware depth bias (its slope-scaled part detached shadows from pillars seen edge-on by small tiles).
+- Pipelines: `shadow.vert`/`shadow.frag` (positions only) and for cut-outs `shadow_cut_out.vert`/`cut_out.frag` (holes thrown away), both reading instances through `drawnObject` so placed plants' entries draw too (`planting.md`), and bending lianas' template tubes onto their records (`liana_data.glsl`, wind.md); depth `GREATER`, no culling (`VK_CULL_MODE_NONE`), no hardware depth bias (its slope-scaled part detached shadows from pillars seen edge-on by small tiles).
 - Coloured shadow maps after, when glass needs them (`drawGlassShadows`, `glass.md`).
 
 ## Lookups and soft shadows
