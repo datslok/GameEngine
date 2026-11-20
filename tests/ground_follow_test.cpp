@@ -49,6 +49,12 @@ namespace {
 
         // Without any land, nothing moves (the shaders' terrainHeight reads 0 with no grids).
         assert(liftedOntoGround(TerrainHeights{}, Vec3{1.0f, 2.0f, 3.0f}).y == 2.0f);
+
+        // An object standing on the land (a placed patch, its matrix at its foot's height) is lifted by the land's height
+        // less its own: a point of it lies at the land plus its height above its foot.
+        const float foot = terrainSurfaceHeight(heights, 3.0f, -2.0f);
+        const Vec3 standing = liftedOntoGround(heights, Vec3{3.5f, foot + 0.4f, -2.25f}, foot);
+        assert(near(standing.y, 0.4f + terrainSurfaceHeight(heights, 3.5f, -2.25f), 1e-5f));
     }
 
     /*
@@ -84,6 +90,10 @@ namespace {
 
         // An unknown size stays unknown.
         assert(liftedSphere(BoundingSphere{}, wavy).radius < 0.0f);
+
+        // Standing higher moves it down by as much, the same size.
+        const BoundingSphere standing = liftedSphere(sphere, wavy, 2.0f);
+        assert(near(standing.centre.y, onWaves.centre.y - 2.0f, 1e-5f) && standing.radius == onWaves.radius);
     }
 
     /*
@@ -104,6 +114,15 @@ namespace {
         assert(draws[0].bounds.centre.y == 0.0f && draws[0].levelBounds.centre.y == 0.0f);
         assert(near(draws[1].bounds.centre.y, plane(0.0f, 0.0f), 1e-3f) && near(draws[1].levelBounds.centre.y, plane(0.0f, 0.0f), 1e-3f));
         assert(draws[1].levelBounds.radius > 2.0f);
+
+        // A draw standing at a height (its matrix's origin) is lifted by the land less that height.
+        std::vector<DrawItem> raised(1);
+        raised[0].followsGround = true;
+        raised[0].model = Mat4::translation(0.0f, 3.0f, 0.0f);
+        raised[0].bounds = BoundingSphere{Vec3{0.0f, 3.0f, 0.0f}, 1.0f};
+        raised[0].levelBounds = raised[0].bounds;
+        liftGroundDraws(raised, &heights);
+        assert(near(raised[0].bounds.centre.y, plane(0.0f, 0.0f), 1e-3f));
 
         std::vector<DrawItem> without(1);
         without[0].followsGround = true;

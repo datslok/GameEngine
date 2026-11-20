@@ -52,7 +52,7 @@ void main() {
     }
 
     vec4 world = instance.model * vec4(position, 1.0);
-    world.y += groundLift(instance.material.w, world.xyz);
+    world.y += groundLift(instance.material.w, world.xyz, instance.model[3].y);
 
     // In the sun's nearest cascades, the wind's sway as the camera's views draw it; the rest keep still shadows.
     if (tileOptions.x != 0.0) {

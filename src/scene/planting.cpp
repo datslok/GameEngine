@@ -67,6 +67,18 @@ float plantingTurn(float draw) {
     return plantingFullTurn * draw;
 }
 
+int plantingCoverKind(int value) {
+    return (value - 1) / PLANTING_COVER_TURNS;
+}
+
+float plantingCoverTurn(int value) {
+    return static_cast<float>((value - 1) % PLANTING_COVER_TURNS) * static_cast<float>(PLANTING_QUARTER_TURN);
+}
+
+int plantingCoverValue(int kind, int quarterTurns) {
+    return 1 + kind * PLANTING_COVER_TURNS + quarterTurns;
+}
+
 int plantingUniformKind(float draw, int count) {
     return std::min(static_cast<int>(draw * static_cast<float>(count)), count - 1);
 }

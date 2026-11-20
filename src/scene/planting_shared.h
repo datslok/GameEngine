@@ -31,6 +31,11 @@
 #define PLANTING_MOST_KINDS 32
 #define PLANTING_MOST_SHARED_KINDS 5
 
+// A cover layer's map byte a lattice cell (PlantingCoverMap): 0 nothing, else 1 + its kind times this many turns plus
+// its quarter turns; a quarter turn in radians.
+#define PLANTING_COVER_TURNS 4
+#define PLANTING_QUARTER_TURN 1.5707963267948966
+
 // The stored maps' steps: clearance and caps in decimetres, the path's signed distance in centimetres.
 #define PLANTING_DECIMETRE 0.1
 #define PLANTING_CENTIMETRE 0.01

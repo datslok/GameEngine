@@ -30,6 +30,22 @@ struct PlantingCap {
     std::vector<std::uint16_t> heights;
 };
 
+/*
+* A cover layer's map (ROADMAP phase 18, d3): a byte a cell of the layer's own lattice, from firstColumn and firstRow on,
+* rows from the north: 0 plants nothing, else plantingCoverValue's kind and quarter turns. Baked by the game from what
+* covers the ground there (the forest's paint), so the cell's plant needs no dither, share or random kind.
+*/
+struct PlantingCoverMap {
+    int firstColumn = 0;
+    int firstRow = 0;
+    int columns = 0;
+    int rows = 0;
+    std::vector<std::uint8_t> values;
+};
+
+// A cover map's byte at a lattice cell (0 outside it).
+int plantingCoverAt(const PlantingCoverMap& map, int column, int row);
+
 inline constexpr std::uint16_t plantingNoCap = PLANTING_NO_CAP;
 inline constexpr float plantingCapFloorMetres = static_cast<float>(PLANTING_CAP_FLOOR_METRES);
 inline constexpr float plantingUncapped = static_cast<float>(PLANTING_UNCAPPED);
@@ -46,7 +62,8 @@ inline constexpr float plantingFarthestClearance = static_cast<float>(PLANTING_F
 *   pathPoints, its straight pieces, pathInverseLengths one over each piece's length squared);
 * - clearance: decimetres to the nearest obstacle's edge at the texel's middle (at most the farthest told apart), less
 *   texelReach when read (the farthest a place lies from its texel's middle), so a lower bound;
-* - caps: one a reach, smallest first; corridorClearance how far under a cap every top stays.
+* - caps: one a reach, smallest first; corridorClearance how far under a cap every top stays;
+* - coverMaps: the cover layers' (PlantingLayerRecord::coverMap), on their own lattices.
 * inverseTexel is 1 / texelMetres, made once on the CPU so both sides multiply by the same number.
 */
 struct PlantingMaps {
@@ -66,6 +83,7 @@ struct PlantingMaps {
     std::vector<float> pathInverseLengths;
     std::vector<std::uint16_t> clearance;
     std::vector<PlantingCap> caps;
+    std::vector<PlantingCoverMap> coverMaps;
 };
 
 // The axis's x at a place's z, blended between the rows' middles (held past the first and last).
@@ -127,7 +145,10 @@ struct PlantingKeepAway {
 * - scale from leastScale to leastScale + scaleRange; footRingPerScale: the trunk's ring the lowest ground is read on (0:
 *   the ground at the foot alone), footSink how far it is sunk;
 * - spacingShare: a plant gives way to an earlier one of its own layer closer than this share of the larger reach (0:
-*   none); keepAway: earlier layers' plants it keeps clear of.
+*   none); keepAway: earlier layers' plants it keeps clear of;
+* - coverMap: a cover layer's map in the maps' coverMaps (-1: none). A cover layer plants exactly the cells its map
+*   names, at the cell's middle, its kind and turn from the byte (plantingCoverKind, plantingCoverTurn), its scale and
+*   pick drawn as any layer's, on the ground at its middle; the dither, shares, path, keep-aways and fits are not asked.
 */
 struct PlantingLayerRecord {
     std::array<float, 3> sharePerWeight{};
@@ -151,6 +172,7 @@ struct PlantingLayerRecord {
     float footSink = 0.0f;
     float spacingShare = 0.0f;
     std::vector<PlantingKeepAway> keepAway;
+    int coverMap = -1;
 };
 
 /*
@@ -242,6 +264,9 @@ std::vector<PlantingLayerBoxes> plantingLayerBoxes(const std::vector<PlantingLay
 // Throws std::invalid_argument for a layer reading itself or a later one, sharing a lattice of another footprint, or
 // with its kinds, sizes or footprint out of range.
 void checkPlantingLayers(const std::vector<PlantingLayerRecord>& layers);
+
+// Throws std::invalid_argument for a cover layer whose map the maps lack, is the wrong size, or names a kind it lacks.
+void checkPlantingCover(const std::vector<PlantingLayerRecord>& layers, const PlantingMaps& maps);
 
 /*
 * Every layer's plants standing in a box, in order (each layer's cells by rows from the north), layers in order: each

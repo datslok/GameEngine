@@ -24,7 +24,7 @@ struct PlacedKind {
     uint parts;
     uint variants;    // its looks, chosen by the plant's pick (placedKindSlot)
     uint variantSlot; // the slot of its variant 1, the rest after it
-    uint unused;
+    uint unbounded;   // 1: its layer drawn wherever planted, past the view's region
     uint part[PLACED_MOST_PARTS];
 };
 

@@ -25,7 +25,8 @@ inline constexpr int plantingMostKeepAways = PLANTING_MOST_KEEP_AWAYS;
 * The maps' buffer starts with this; their words follow, each map's first word given (counted from the words' start):
 * the axis (a float a row), the ecotopes (a word a texel, floor to bare from the low byte), gaps (four texels a word),
 * the path's distances and the clearance (two texels a word, the first low), the path's points (x, z) and each piece's
-* inverse length squared, the caps (PLANTING_CAP_WORDS each) and their heights (two a word).
+* inverse length squared, the caps (PLANTING_CAP_WORDS each) and their heights (two a word), the cover maps
+* (PLANTING_COVER_MAP_WORDS each) and their bytes (four a word).
 */
 struct GpuPlantingMapsHeader {
     std::int32_t columns;
@@ -48,9 +49,12 @@ struct GpuPlantingMapsHeader {
     std::uint32_t capsFirst;
     std::uint32_t capCount;
     std::uint32_t flags;
+    std::uint32_t coverMapsFirst;
+    std::uint32_t coverMapCount;
+    std::uint32_t unused[2];
 };
 
-static_assert(sizeof(GpuPlantingMapsHeader) == 80, "GpuPlantingMapsHeader must match planting_cells.glsl's PlantingMaps");
+static_assert(sizeof(GpuPlantingMapsHeader) == 96, "GpuPlantingMapsHeader must match planting_cells.glsl's PlantingMaps");
 
 // The maps' buffer: the header's words, then the maps'.
 std::vector<std::uint32_t> packPlantingMaps(const PlantingMaps& maps);
@@ -59,7 +63,8 @@ std::vector<std::uint32_t> packPlantingMaps(const PlantingMaps& maps);
 PlantingMaps unpackPlantingMaps(std::span<const std::uint32_t> words);
 
 // One layer (PlantingLayerRecord), its keep-aways' reaches made on the CPU, its kinds' sizes in full tables; sharedKinds
-// 1 where kinds are chosen by kindShares (unused shares 2, past every draw), 0 where alike.
+// 1 where kinds are chosen by kindShares (unused shares 2, past every draw), 0 where alike; coverMap a cover layer's
+// map (-1 none).
 struct GpuPlantingLayer {
     float sharePerWeight[3];
     float gapStep;
@@ -89,9 +94,11 @@ struct GpuPlantingLayer {
     std::uint32_t keepCrown[PLANTING_MOST_KEEP_AWAYS];
     float reachPerScale[PLANTING_MOST_KINDS];
     float centrePerScale[PLANTING_MOST_KINDS];
+    std::int32_t coverMap;
+    std::uint32_t unused[3];
 };
 
-static_assert(sizeof(GpuPlantingLayer) == 432, "GpuPlantingLayer must match planting_cells.glsl's PlantingLayer");
+static_assert(sizeof(GpuPlantingLayer) == 448, "GpuPlantingLayer must match planting_cells.glsl's PlantingLayer");
 
 // Throws std::invalid_argument for layers plantLayers refuses or a layer keeping away from more than plantingMostKeepAways.
 std::vector<GpuPlantingLayer> packPlantingLayers(const std::vector<PlantingLayerRecord>& layers);

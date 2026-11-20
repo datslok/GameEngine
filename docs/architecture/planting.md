@@ -27,6 +27,7 @@ Plants placed from maps by an ordered dither, a box at a time, the same on the C
 | `plantingPathShare` | 1 within near, farShare past far, straight between |
 | `plantingTaken(threshold, below, share)` | the band from `below` (a layer sharing the lattice) to below + share |
 | `plantingJitteredPlace`, `plantingScale`, `plantingTurn`, `plantingUniformKind`, `plantingSharedKind` | a cell's plant from its own random numbers (`PLANTING_DRAW_*`: scale, turn, kind, pick after the two placing it) |
+| `plantingCoverKind`, `plantingCoverTurn`, `plantingCoverValue` | a cover layer's byte to its kind and quarter turns and back (`PLANTING_COVER_TURNS`, `PLANTING_QUARTER_TURN`) |
 | `plantingNearSegment` | closer than a radius to a piece of path (nearest point, squared) |
 | `plantingRingPoint` | eight points round a trunk (the lowest ground) |
 | `plantingTop`, `plantingFits`, `plantingGivesWay` | a sphere under the caps and clear of obstacles; a plant giving way to a nearer earlier one of its layer |
@@ -44,6 +45,7 @@ A grid across a winding axis (row r's middle at northmost + (r + 0.5) texel, the
 | `pathPoints`, `pathInverseLengths` | the path's straight pieces | `plantingClearOfThePath`: exact, for its clearance |
 | `clearance` | decimetres to the nearest obstacle at a texel's middle (at most `plantingFarthestClearance`) | nearest texel less `texelReach`: a lower bound |
 | `caps` | a reach each, smallest first, square to the world; decimetres above -1000 m | the smallest at least the reach; `plantingUncapped` where no line passes |
+| `coverMaps` (`PlantingCoverMap`) | a cover layer's byte a cell of its own lattice: 0 nothing, else 1 + kind x 4 + quarter turns (`plantingCoverValue`), baked by the game | `plantingCoverAt`: exact; 0 outside |
 
 A signed path distance was tried: blended straight across the line, but the sign flips past the path's ends, drawing false lines of "on the path" across the valley; the unsigned map blurs the centre line's V by up to a metre, so clearance tests the pieces themselves.
 
@@ -58,6 +60,7 @@ A signed path distance was tried: blended straight across the line, but the sign
 | `leastScale`, `scaleRange`, `footRingPerScale`, `footSink` | size; the lowest ground on a ring round the trunk (0: at the foot), sunk |
 | `spacingShare` | gives way to a candidate of its layer with a lower threshold (the earlier cell on a tie) nearer than this share of the larger reach |
 | `keepAway` | earlier layers' plants it stays clear of: within a radius of their trunks, or their own reach (`crown`) |
+| `coverMap` | a cover layer's map (-1 none): exactly the cells it names planted, at their middles on the ground, kind and turn from the byte (`plantingCoverKind`, `plantingCoverTurn`: whole numbers and quarter turns, exact both sides), scale and pick drawn as any layer's; no dither, shares, path, keep-aways or fits; may not share a lattice or keep away (`checkPlantingLayers`); its map must exist, be its size and name only its kinds (`checkPlantingCover`) |
 
 ## Planting a box (`plantLayers`)
 
@@ -78,7 +81,7 @@ A world's `PlantingSource` (a `PlantingField`: maps and layer records; the fores
 | `PlantingCellRing` | cells held and their slots: drops first, then the cells within the radius not held, nearest first (then row, column), each into the lowest free slot; a new size or radius starts again; ordered by cell, never address |
 | `plantingSlotCount` | the cells touching twice the drop distance a side: 13 x 13 = 169 |
 | `PlantingSlotLayout` | a slot: each layer's lattice over a cell (`plantingLatticeCapacity`); a cell made: each layer's lattice over its candidates' box |
-| Records (`planting_records`) | maps header 80 B + words (bytes and halves packed), `GpuPlantingLayer` 432 B (keep-aways' reaches and spacing rings from the CPU), `GpuPlantingJob` 80 B a layer of a cell made (its three lattices, box, places), candidate 48 B, `GpuPlacedPlant` 32 B |
+| Records (`planting_records`) | maps header 96 B + words (bytes and halves packed; cover maps `PLANTING_COVER_MAP_WORDS` each, then their bytes), `GpuPlantingLayer` 448 B (`coverMap` among them) (keep-aways' reaches and spacing rings from the CPU), `GpuPlantingJob` 80 B a layer of a cell made (its three lattices, box, places), candidate 48 B, `GpuPlacedPlant` 32 B |
 | `VulkanPlanting` [PLANTING] | uploads the field when it, its version, the cell size, radius or cells a frame change (every cell made anew); after WIND |
 
 Three passes a layer over the frame's cells (a workgroup row a cell), in layer order, a barrier between each:
@@ -100,11 +103,11 @@ A field's `PlantingLooks` (on its `PlantingSource`, read every frame) names how 
 | Piece | What |
 |---|---|
 | Frame (`appendPlantedParts`) | each kind's parts as draws (`rendererPartDraw`, shared with entities), `plantedKinds` runs, the region; attached by the engine as the frame's draws (bounds, levels, entries) |
-| Table (`buildPlacedTable`) | parts by style (`GpuPlacedPart` 112 B: cull record and levels in the plant's frame, first group), a group a part's level slot, a kind's parts by index (`GpuPlacedKind` 64 B, `PLACED_MOST_PARTS` 12); a kind given several looks (`PlantedKindLook::variant`, 0 to n - 1) draws the one its plant's pick chooses (`placedKindSlot`: min(pick x n, n - 1), mirrored), its variants past the first in its layer's top kind slots, refused where they reach a look's kind; each style's groups one run; each layer's reach (`PlacedLayerReach`: its parts' bounds across, up and down a unit of scale, seen, casting, most parts); refuses glass, unpooled meshes, past the passes' limits |
+| Table (`buildPlacedTable`) | parts by style (`GpuPlacedPart` 112 B: cull record and levels in the plant's frame, first group), a group a part's level slot, a kind's parts by index (`GpuPlacedKind` 64 B, `PLACED_MOST_PARTS` 12; `unbounded` on every kind slot of a layer its `PlantedLayerDrawing` says is); a ground-following part's culling sphere grown by its layer's `groundRelief` (its vertices lifted onto the land: [terrain.md](terrain.md)); a kind given several looks (`PlantedKindLook::variant`, 0 to n - 1) draws the one its plant's pick chooses (`placedKindSlot`: min(pick x n, n - 1), mirrored), its variants past the first in its layer's top kind slots, refused where they reach a look's kind; each style's groups one run; each layer's reach (`PlacedLayerReach`: its parts' bounds across, up and down a unit of scale, seen, casting, most parts); refuses glass, unpooled meshes, past the passes' limits |
 | Blocks (`placedBlocks`, `placedBlockRuns`) | 64 places of a held slot's drawn layer each (`GpuPlacedBlock`); about 2,000 at 300 m; a run a held cell's drawn layer |
 | Cell boxes (`placedCellChunk`) | a run's box as a `GpuCullChunk`: the cell grown by the reach at the layer's largest scale, the ground's range under it (`terrainHeightRange`, taken once while held) less the foot sink, the chunks' margin (`setCullChunkBox`); seen and casting flags from the layer |
 | Views (`placedViews`, `GpuPlacedView` 304 B) | the camera, each probe face captured, each shadow tile drawing its casters (`setPlacedViews`; not the mirror: flat faces only); each takes the blocks of the runs whose box `chunkInView` passes, as items (`GpuPlacedItem`: block, view), its entries after the view before's, room for two a part of its layer's most-parted kind a plant (one in a shadow tile: no fades) |
-| Region (`insidePlantedRegion`, `plantingInsideRegion`) | z between north and south, within spread of the maps' axis (the GPU has only the maps) |
+| Region (`insidePlantedRegion`, `plantingInsideRegion`) | z between north and south, within spread of the maps' axis (the GPU has only the maps); an unbounded layer's plants (`PlantingLooks::layers`, by layer) drawn wherever planted |
 | Instances | each part's `GpuInstance` packed with the moving draws' (`SceneRecords::planted`, the frame's materials), in the table's order, scene binding 44; the slots' plants 43, every view's entries 45 |
 
 Four passes [PLACED], after the planting's (`VulkanPlacedDrawing`, `placed_cull_*.comp`), every view at once:

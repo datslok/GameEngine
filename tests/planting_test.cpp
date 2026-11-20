@@ -221,8 +221,9 @@ namespace {
     * whatever order the pieces are planted: what lets the cells round the camera be planted one by one, on either side.
     */
     void testABoxAloneIsTheSameAsTheWhole() {
-        const PlantingMaps maps = straightMaps();
-        const std::vector<PlantingLayerRecord> layers = threeLayers();
+        PlantingMaps maps = straightMaps();
+        std::vector<PlantingLayerRecord> layers = threeLayers();
+        layers.push_back(coverLayer(maps));
         const PlantingBox whole{-100.0f, 100.0f, -180.0f, -20.0f};
         const std::vector<std::vector<PlantedPlant>> all = plantLayers(layers, maps, rollingGround(), whole, testJobs());
 
@@ -289,7 +290,89 @@ namespace {
     }
 }
 
+namespace {
+    // A cover byte gives back its kind and quarter turns, every kind with every turn; the turn exactly so many quarters.
+    void testTheCoverBytes() {
+        for (int kind = 0; kind < plantingMostKinds; ++kind) {
+            for (int quarters = 0; quarters < 4; ++quarters) {
+                const int value = plantingCoverValue(kind, quarters);
+                assert(value >= 1 && value <= 255 && plantingCoverKind(value) == kind);
+                assert(plantingCoverTurn(value) == static_cast<float>(quarters) * static_cast<float>(PLANTING_QUARTER_TURN));
+            }
+        }
+
+        const PlantingCoverMap map{.firstColumn = -2, .firstRow = 3, .columns = 2, .rows = 2, .values = {1, 2, 3, 4}};
+        assert(plantingCoverAt(map, -2, 3) == 1 && plantingCoverAt(map, -1, 4) == 4);
+        assert(plantingCoverAt(map, -3, 3) == 0 && plantingCoverAt(map, 0, 3) == 0 && plantingCoverAt(map, -2, 5) == 0);
+    }
+
+    /*
+    * A cover layer after the others plants exactly the cells its map names, whatever the dither, the path and the obstacle
+    * would say: one plant a named cell whose middle the box holds, at that middle on the drawn ground, its kind and turn
+    * the byte's, its scale and pick drawn as any layer's.
+    */
+    void testACoverLayerPlantsItsMap() {
+        PlantingMaps maps = straightMaps();
+        std::vector<PlantingLayerRecord> layers = threeLayers();
+        layers.push_back(coverLayer(maps));
+        const PlantingBox box{-100.0f, 100.0f, -180.0f, -20.0f};
+        const std::vector<PlantedPlant> planted = plantLayers(layers, maps, rollingGround(), box, testJobs()).back();
+        const PlantingCoverMap& map = maps.coverMaps.back();
+        std::size_t named = 0;
+
+        for (int row = map.firstRow; row < map.firstRow + map.rows; ++row) {
+            for (int column = map.firstColumn; column < map.firstColumn + map.columns; ++column) {
+                const float x = (static_cast<float>(column) + 0.5f) * 8.0f;
+                const float z = (static_cast<float>(row) + 0.5f) * 8.0f;
+                named += plantingCoverAt(map, column, row) != 0 && x >= box.west && x < box.east && z >= box.north && z < box.south ? 1 : 0;
+            }
+        }
+
+        assert(planted.size() == named && named > 300);
+
+        for (const PlantedPlant& plant : planted) {
+            const int value = plantingCoverAt(map, plant.column, plant.row);
+            assert(value != 0 && plant.kind == plantingCoverKind(value) && plant.turnRadians == plantingCoverTurn(value));
+            assert(plant.foot.x == (static_cast<float>(plant.column) + 0.5f) * 8.0f && plant.foot.z == (static_cast<float>(plant.row) + 0.5f) * 8.0f);
+            assert(plant.foot.y == terrainSurfaceHeight(rollingGround(), plant.foot.x, plant.foot.z));
+            assert(plant.scale == 1.0f && plant.reach == 5.7f && plant.pick >= 0.0f && plant.pick < 1.0f);
+        }
+    }
+
+    // A cover layer may not share a lattice or keep away; its map must exist, be its size and name only its kinds.
+    void testCoverLayersAreChecked() {
+        const auto refused = [](const std::vector<PlantingLayerRecord>& layers, const PlantingMaps& maps) {
+            try {
+                plantLayers(layers, maps, rollingGround(), PlantingBox{-10.0f, 10.0f, -60.0f, -40.0f}, testJobs());
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+
+            return false;
+        };
+
+        PlantingMaps maps = straightMaps();
+        std::vector<PlantingLayerRecord> layers = threeLayers();
+        layers.push_back(coverLayer(maps));
+        assert(!refused(layers, maps));
+        layers.back().keepAway = {PlantingKeepAway{.layer = 0, .radius = 2.0f}};
+        assert(refused(layers, maps));
+        layers.back().keepAway.clear();
+        layers.back().coverMap = 1;
+        assert(refused(layers, maps));
+        layers.back().coverMap = 0;
+        layers.back().kinds = 7;
+        assert(refused(layers, maps));
+        layers.back().kinds = 8;
+        maps.coverMaps.back().values.pop_back();
+        assert(refused(layers, maps));
+    }
+}
+
 void testPlanting() {
+    testTheCoverBytes();
+    testACoverLayerPlantsItsMap();
+    testCoverLayersAreChecked();
     testTheRandomNumbersAndTheDither();
     testTheMaths();
     testTheMapReads();

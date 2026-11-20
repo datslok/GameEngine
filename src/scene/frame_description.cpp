@@ -81,6 +81,7 @@ DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const
 */
 void appendPlantedParts(FrameDescription& frame, const PlantingLooks& looks) {
     frame.plantedRegion = looks.region;
+    frame.plantedLayers = looks.layers;
 
     for (const PlantedKindLook& kind : looks.kinds) {
         PlantedKindParts run{.layer = kind.layer, .kind = kind.kind, .first = frame.plantedParts.size(), .variant = kind.variant};

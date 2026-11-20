@@ -141,8 +141,9 @@ void visit(ForestGrassSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Tallest", settings.tallest, {.min = 0.01f, .max = 3.0f, .sliderMax = 1.5f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Blade width", settings.bladeWidth, {.min = 0.001f, .max = 0.1f, .sliderMax = 0.04f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Clump", settings.clumpMetres, {.min = 0.05f, .max = 10.0f, .sliderMax = 3.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Variants", settings.variants, {.min = 1, .max = 16, .sliderMax = 8, .applies = FieldApplies::AtStartup});
-    visitor.field("Density steps", settings.densitySteps, {.min = 1, .max = 16, .sliderMax = 8, .applies = FieldApplies::AtStartup});
+    // At most 8 x 4 patch kinds: a planting layer's (PLANTING_MOST_KINDS).
+    visitor.field("Variants", settings.variants, {.min = 1, .max = 8, .applies = FieldApplies::AtStartup});
+    visitor.field("Density steps", settings.densitySteps, {.min = 1, .max = 4, .applies = FieldApplies::AtStartup});
     visitor.field("Reach", settings.reachMetres, {.min = 0.0f, .max = 2000.0f, .sliderMax = 500.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Least paint", settings.leastPaint, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Half distance", settings.halfDistance, {.min = 1.0f, .max = 500.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});

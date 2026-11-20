@@ -392,13 +392,13 @@ namespace {
         assert(trees > 0);
         const ForestSwaySettings defaults;
 
-        for (const Entity entity : forest.game.getGrass()) {
-            const WindSway& sway = forest.world.get<ModelRenderer>(entity).sway;
-            assert(sway.kind == SwayKind::Grass && sway.bend == defaults.grass.bend && sway.height > 0.0f);
-        }
+        // The ground cover's patches are looks: the grass's and the floor's sway as grass.
+        assert(!forest.game.getCoverLooks().empty());
 
-        for (const Entity entity : forest.game.getFloorCover()) {
-            assert(forest.world.get<ModelRenderer>(entity).sway.kind == SwayKind::Grass);
+        for (const PlantedKindLook& look : forest.game.getCoverLooks()) {
+            const WindSway& sway = look.models.front().sway;
+            assert(sway.kind == SwayKind::Grass && sway.height > 0.0f);
+            assert(look.layer != forestGrassPlanting || sway.bend == defaults.grass.bend);
         }
 
         for (const Entity entity : forest.game.getLianas()) {
@@ -424,8 +424,9 @@ namespace {
         forest.game.getSwaySettings().grass.bend = 0.9f;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
 
-        for (const Entity entity : forest.game.getGrass()) {
-            assert(forest.world.get<ModelRenderer>(entity).sway.bend == 0.9f && forest.world.has<RenderChanged>(entity));
+        // Given anew in the looks the GPU's cells draw.
+        for (const PlantedKindLook& look : forest.world.get<PlantingSource>(forest.game.getAir()).looks->kinds) {
+            assert(look.layer != forestGrassPlanting || look.models.front().sway.bend == 0.9f);
         }
 
         FieldCounter counter;

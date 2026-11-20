@@ -107,6 +107,28 @@ inline std::vector<PlantingLayerRecord> threeLayers() {
     return {big, small, plants};
 }
 
+/*
+* A cover layer on an 8 m lattice, its map added to maps: 25 x 21 cells from column -12 and row -23 (x -96 to 104, z
+* -184 to -16), each naming one of 8 kinds and a quarter turn, every seventh empty.
+*/
+inline PlantingLayerRecord coverLayer(PlantingMaps& maps) {
+    PlantingCoverMap map{.firstColumn = -12, .firstRow = -23, .columns = 25, .rows = 21, .values = {}};
+
+    for (int cell = 0; cell < map.columns * map.rows; ++cell) {
+        map.values.push_back(static_cast<std::uint8_t>(cell % 7 == 0 ? 0 : plantingCoverValue(cell % 8, (cell / 3) % 4)));
+    }
+
+    maps.coverMaps.push_back(std::move(map));
+    PlantingLayerRecord layer;
+    layer.footprint = 8.0f;
+    layer.seed = 0x7777u;
+    layer.kinds = 8;
+    layer.reachPerScale = {5.7f};
+    layer.centrePerScale = {0.3f};
+    layer.coverMap = static_cast<int>(maps.coverMaps.size()) - 1;
+    return layer;
+}
+
 inline bool samePlant(const PlantedPlant& a, const PlantedPlant& b) {
     return a.foot.x == b.foot.x && a.foot.y == b.foot.y && a.foot.z == b.foot.z && a.scale == b.scale && a.turnRadians == b.turnRadians &&
            a.kind == b.kind && a.pick == b.pick && a.reach == b.reach && a.threshold == b.threshold && a.column == b.column && a.row == b.row;

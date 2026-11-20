@@ -18,11 +18,12 @@ layout(std430, set = 1, binding = 36) readonly buffer TerrainPatches {
     TerrainPatch terrainPatches[];
 };
 
-// How far a vertex of an instance of a kind is lifted at a place in the world: the drawn land's height there for a mesh
-// following the ground (INSTANCE_KIND_FOLLOWS_GROUND, scene/ground_follow.h, liftedOntoGround), nothing for any other.
-// The drawn height, not the smooth one, which lies centimetres off the triangles and buried fallen leaves.
-float groundLift(uint kind, vec3 world) {
-    return kind == uint(INSTANCE_KIND_FOLLOWS_GROUND) ? terrainSurfaceHeight(world.xz) : 0.0;
+// How far a vertex of an instance of a kind is lifted at a place in the world: the drawn land's height there less the
+// height its object stands at (its matrix's origin: 0 for an entity's patch, the land under a placed plant's foot) for
+// a mesh following the ground (INSTANCE_KIND_FOLLOWS_GROUND, scene/ground_follow.h, liftedOntoGround), nothing for any
+// other. The drawn height, not the smooth one, which lies centimetres off the triangles and buried fallen leaves.
+float groundLift(uint kind, vec3 world, float standing) {
+    return kind == uint(INSTANCE_KIND_FOLLOWS_GROUND) ? terrainSurfaceHeight(world.xz) - standing : 0.0;
 }
 
 // The land's unit normal from its slope over step metres either way.

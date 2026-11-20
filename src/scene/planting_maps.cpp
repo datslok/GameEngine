@@ -94,10 +94,39 @@ namespace {
         return false;
     }
 
+    // A cover layer's cell's plant: the one its map names, at the cell's middle on the ground (PlantingLayerRecord).
+    std::optional<PlantedPlant> coverAt(const PlantingLayerRecord& layer, const PlantingMaps& maps, const TerrainHeights& heights, int column, int row) {
+        const int value = plantingCoverAt(maps.coverMaps[static_cast<std::size_t>(layer.coverMap)], column, row);
+
+        if (value == 0) {
+            return std::nullopt;
+        }
+
+        const std::uint64_t draws = plantingCellKey(column, row) * plantingDrawsPerCell + plantingDrawsUsed;
+        const Vec2 place = plantingJitteredPlace(column, row, layer.footprint, 0.0f, 0.5f, 0.5f);
+        PlantedPlant plant;
+        plant.scale = plantingScale(layer.leastScale, layer.scaleRange, plantingRandom(layer.seed, draws + PLANTING_DRAW_SCALE));
+        plant.turnRadians = plantingCoverTurn(value);
+        plant.kind = plantingCoverKind(value);
+        plant.pick = plantingRandom(layer.seed, draws + PLANTING_DRAW_PICK);
+        const std::size_t size = layer.reachPerScale.size() == 1 ? 0 : static_cast<std::size_t>(plant.kind);
+        plant.reach = layer.reachPerScale[size] * plant.scale;
+        plant.foot = Vec3{place.x, terrainSurfaceHeight(heights, place.x, place.y) - layer.footSink, place.y};
+        plant.threshold = plantingThreshold(column, row);
+        plant.column = column;
+        plant.row = row;
+        return plant;
+    }
+
     // A cell's plant before its own layer's spacing: none where the dither, the path, a layer before or the maps refuse.
     std::optional<PlantedPlant> candidateAt(const std::vector<PlantingLayerRecord>& layers, std::size_t which, const std::vector<StandingLayer>& standing,
                                             const PlantingMaps& maps, const TerrainHeights& heights, int column, int row) {
         const PlantingLayerRecord& layer = layers[which];
+
+        if (layer.coverMap >= 0) {
+            return coverAt(layer, maps, heights, column, row);
+        }
+
         const float footprint = layer.footprint;
         const float threshold = plantingThreshold(column, row);
         const float middleX = (static_cast<float>(column) + 0.5f) * footprint;
@@ -248,7 +277,46 @@ void checkPlantingLayers(const std::vector<PlantingLayerRecord>& layers) {
         if (layer.kinds < 1 || layer.kinds > plantingMostKinds || !sized || !shares || !(layer.footprint > 0.0f)) {
             throw std::invalid_argument("plantLayers: a layer's kinds, sizes or footprint are out of range");
         }
+
+        if (layer.coverMap >= 0 && (layer.under >= 0 || !layer.keepAway.empty())) {
+            throw std::invalid_argument("plantLayers: a cover layer shares a lattice or keeps away from another layer");
+        }
     }
+}
+
+void checkPlantingCover(const std::vector<PlantingLayerRecord>& layers, const PlantingMaps& maps) {
+    for (const PlantingLayerRecord& layer : layers) {
+        if (layer.coverMap < 0) {
+            continue;
+        }
+
+        if (layer.coverMap >= static_cast<int>(maps.coverMaps.size())) {
+            throw std::invalid_argument("plantLayers: a cover layer names a map the maps lack");
+        }
+
+        const PlantingCoverMap& map = maps.coverMaps[static_cast<std::size_t>(layer.coverMap)];
+
+        if (map.columns < 0 || map.rows < 0 || map.values.size() != static_cast<std::size_t>(map.columns) * static_cast<std::size_t>(map.rows)) {
+            throw std::invalid_argument("plantLayers: a cover map's size is not its columns times its rows");
+        }
+
+        for (const std::uint8_t value : map.values) {
+            if (value != 0 && plantingCoverKind(value) >= layer.kinds) {
+                throw std::invalid_argument("plantLayers: a cover map names a kind its layer lacks");
+            }
+        }
+    }
+}
+
+int plantingCoverAt(const PlantingCoverMap& map, int column, int row) {
+    const int across = column - map.firstColumn;
+    const int down = row - map.firstRow;
+
+    if (across < 0 || down < 0 || across >= map.columns || down >= map.rows) {
+        return 0;
+    }
+
+    return map.values[static_cast<std::size_t>(down) * static_cast<std::size_t>(map.columns) + static_cast<std::size_t>(across)];
 }
 
 float plantingAxisAt(const PlantingMaps& maps, float z) {
@@ -384,6 +452,7 @@ float plantingLayerShare(const PlantingLayerRecord& layer, const PlantingMaps& m
 std::vector<std::vector<PlantedPlant>> plantLayers(const std::vector<PlantingLayerRecord>& layers, const PlantingMaps& maps,
                                                    const TerrainHeights& heights, const PlantingBox& box, JobSystem& jobs) {
     checkPlantingLayers(layers);
+    checkPlantingCover(layers, maps);
     const std::size_t count = layers.size();
     const std::vector<PlantingLayerBoxes> boxes = plantingLayerBoxes(layers, box);
     std::vector<StandingLayer> standing(count);

@@ -1130,12 +1130,18 @@ namespace {
         assert(looks);
         assert(looks->region.northmost == forestPatch.northmost && looks->region.southmost == forestPatch.southmost &&
                looks->region.spread == forestPatch.spread);
-        // The trees' looks, then the understorey's and the palms'.
-        assert(looks->kinds.size() == game.getTreeLooks().size() + game.getPlantLooks().size());
+        // The trees' looks, then the understorey's and the palms', then the ground cover's.
+        const std::size_t plantsEnd = game.getTreeLooks().size() + game.getPlantLooks().size();
+        assert(looks->kinds.size() == plantsEnd + game.getCoverLooks().size());
 
         for (std::size_t each = 0; each < looks->kinds.size(); ++each) {
             const PlantedKindLook& kind = looks->kinds[each];
             const bool big = kind.layer == static_cast<int>(ForestLayer::Emergent) || kind.layer == static_cast<int>(ForestLayer::Canopy);
+
+            if (each >= plantsEnd) {
+                assert(kind.layer == forestGrassPlanting || kind.layer == forestFloorPlanting);
+                continue;
+            }
 
             if (each >= game.getTreeLooks().size()) {
                 assert(kind.layer == static_cast<int>(ForestLayer::Understorey) || kind.layer == static_cast<int>(ForestLayer::Palms));
@@ -1183,7 +1189,7 @@ namespace {
         const float plantBend = game.getSwaySettings().plants.bend;
         game.getSwaySettings().plants.bend = plantBend * 2.0f;
         frame();
-        assert(plantingSourceOf(world).looks->kinds.back().models[0].sway.bend != swayed->kinds.back().models[0].sway.bend);
+        assert(plantingSourceOf(world).looks->kinds[plantsEnd - 1].models[0].sway.bend != swayed->kinds[plantsEnd - 1].models[0].sway.bend);
         game.getSwaySettings().plants.bend = plantBend;
         frame();
         assert(plantingSourceOf(world).looks->kinds.front().models[0].sway.bend == looks->kinds.front().models[0].sway.bend);

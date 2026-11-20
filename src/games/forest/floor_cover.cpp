@@ -97,8 +97,9 @@ void visit(ForestFloorSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Tallest seedling", settings.tallestSeedling, {.min = 0.02f, .max = 3.0f, .sliderMax = 1.5f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Ferns per m2", settings.fernsPerSquareMetre, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Fern length", settings.fernLength, {.min = 0.05f, .max = 3.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Variants", settings.variants, {.min = 1, .max = 16, .sliderMax = 8, .applies = FieldApplies::AtStartup});
-    visitor.field("Density steps", settings.densitySteps, {.min = 1, .max = 16, .sliderMax = 8, .applies = FieldApplies::AtStartup});
+    // At most 8 x 4 patch kinds: a planting layer's (PLANTING_MOST_KINDS).
+    visitor.field("Variants", settings.variants, {.min = 1, .max = 8, .applies = FieldApplies::AtStartup});
+    visitor.field("Density steps", settings.densitySteps, {.min = 1, .max = 4, .applies = FieldApplies::AtStartup});
     visitor.field("Reach", settings.reachMetres, {.min = 0.0f, .max = 2000.0f, .sliderMax = 500.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Least paint", settings.leastPaint, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Half distance", settings.halfDistance, {.min = 1.0f, .max = 500.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});

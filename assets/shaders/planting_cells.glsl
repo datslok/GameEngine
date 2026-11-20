@@ -36,6 +36,9 @@ layout(std430, set = 0, binding = PLANTING_MAPS_BINDING) readonly buffer Plantin
     uint capsFirst;
     uint capCount;
     uint mapFlags;
+    uint coverMapsFirst;
+    uint coverMapCount;
+    uvec2 mapsUnused;
     uint mapWords[];
 };
 
@@ -69,6 +72,10 @@ struct PlantingLayer {
     uvec4 keepCrown;
     float reachPerScale[PLANTING_MOST_KINDS];
     float centrePerScale[PLANTING_MOST_KINDS];
+    int coverMap;
+    uint layerUnused0;
+    uint layerUnused1;
+    uint layerUnused2;
 };
 
 layout(std430, set = 0, binding = PLANTING_LAYERS_BINDING) readonly buffer PlantingLayers {
@@ -378,6 +385,49 @@ bool keptAway(PlantingLayer layer, uint keep, uint cell, vec2 place) {
 
 // A cell's plant before its own layer's spacing, as candidateAt makes it: none where the dither, the path, a layer
 // before or the maps refuse (candidate 0).
+// A cover map's byte at a lattice cell, 0 outside it (plantingCoverAt).
+int plantingCoverAt(uint map, int column, int row) {
+    uint at = coverMapsFirst + map * uint(PLANTING_COVER_MAP_WORDS);
+    int across = column - int(mapWords[at]);
+    int down = row - int(mapWords[at + 1u]);
+    int columns = int(mapWords[at + 2u]);
+    int rows = int(mapWords[at + 3u]);
+
+    if (across < 0 || down < 0 || across >= columns || down >= rows) {
+        return 0;
+    }
+
+    return int(mapByte(mapWords[at + 4u], uint(down * columns + across)));
+}
+
+// A cover layer's cell's plant: the one its map names, at the cell's middle on the ground (planting_maps.cpp's coverAt).
+PlantingCandidate plantingCoverCandidate(PlantingLayer layer, PlantingCandidate none, int column, int row) {
+    int value = plantingCoverAt(uint(layer.coverMap), column, row);
+
+    if (value == 0) {
+        return none;
+    }
+
+    uint64_t seed = layerSeed(layer);
+    uint64_t draws = plantingCellKey(column, row) * uint64_t(PLANTING_DRAWS_PER_CELL) + uint64_t(PLANTING_DRAWS_USED);
+    vec2 place = plantingJitteredPlace(column, row, layer.footprint, 0.0, 0.5, 0.5);
+    float scale = plantingScale(layer.leastScale, layer.scaleRange, plantingRandom(seed, draws + uint64_t(PLANTING_DRAW_SCALE)));
+    int kind = plantingCoverKind(value);
+    float pick = plantingRandom(seed, draws + uint64_t(PLANTING_DRAW_PICK));
+    uint size = layer.sizes == 1u ? 0u : uint(kind);
+    precise float reach = layer.reachPerScale[size] * scale;
+    precise float footHeight = terrainSurfaceHeight(place) - layer.footSink;
+
+    PlantingCandidate plant;
+    plant.footScale = vec4(place.x, footHeight, place.y, scale);
+    plant.turnPickReachThreshold = vec4(plantingCoverTurn(value), pick, reach, plantingThreshold(column, row));
+    plant.kind = uint(kind);
+    plant.candidate = 1u;
+    plant.kept = 0u;
+    plant.unused = 0u;
+    return plant;
+}
+
 PlantingCandidate plantingCandidateAt(uint layerIndex, uint cell, int column, int row) {
     PlantingLayer layer = plantingLayers[layerIndex];
     PlantingCandidate none;
@@ -387,6 +437,10 @@ PlantingCandidate plantingCandidateAt(uint layerIndex, uint cell, int column, in
     none.candidate = 0u;
     none.kept = 0u;
     none.unused = 0u;
+
+    if (layer.coverMap >= 0) {
+        return plantingCoverCandidate(layer, none, column, row);
+    }
 
     float footprint = layer.footprint;
     float threshold = plantingThreshold(column, row);

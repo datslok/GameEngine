@@ -658,22 +658,23 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
 
     // Spheres around each draw let the renderer skip what a view cannot see: attached to the draws built this frame,
     // since kept still draws keep theirs. Those following the ground are lifted onto the land the shaders lift them
-    // onto (the last terrain's heights, as the frame's are below).
+    // onto (the last terrain's heights, as the frame's are below); planted parts are not, their spheres being in their
+    // plant's frame (the placed table grows them by their layer's relief instead: placed_drawing.h).
     const TerrainHeights* groundHeights = terrains.empty() ? nullptr : terrains.back().first->heights.get();
-    const auto attach = [&](std::span<DrawItem> draws) {
+    const auto attach = [&](std::span<DrawItem> draws, const TerrainHeights* lifting) {
         attachBoundingSpheres(draws, boundsByMesh);
         attachFlatFaces(draws, flatFacesByMesh);
         attachVertexEntries(draws, vertexEntriesByMesh);
         attachMeshLevels(draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
-        liftGroundDraws(draws, groundHeights);
+        liftGroundDraws(draws, lifting);
     };
 
     for (const DrawRange& range : frame.builtStillDraws) {
-        attach(std::span<DrawItem>{frame.draws}.subspan(range.first, range.count));
+        attach(std::span<DrawItem>{frame.draws}.subspan(range.first, range.count), groundHeights);
     }
 
-    attach(builtDraws);
-    attach(frame.plantedParts);
+    attach(builtDraws, groundHeights);
+    attach(frame.plantedParts, nullptr);
     partDone(SceneStage::Attach);
 
     for (const auto& [terrain, nodes] : terrains) {

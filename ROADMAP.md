@@ -349,12 +349,14 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
         - [ ] c3. Rays meeting placed plants (ray tracing, probes): instances the GPU writes from the placed records (option B, Nov 20 2026), when ray tracing or the far tiers need it; the GPU's lianas with them (their coarsest tubes written by a compute pass a cell, `docs/research/VINES.md`)
       - [ ] d. Every layer on the GPU and the near trees on the CPU (the user's go, Nov 20 2026; c3 parked until ray tracing or the far tiers need it)
         - [x] d1. The understorey and palms as placed looks (levels, cards, fades, thinning), their entities retired; still the patch (`gpu-understorey`)
-        - [ ] d2. The near trees on the CPU in cells round the player, the lianas drawn by the GPU from records a cell (the user's choice, Nov 20 2026: meshes cannot be freed; `docs/research/VINES.md`)
+        - [x] d2. The near trees on the CPU in cells round the player, the lianas drawn by the GPU from records a cell (the user's choice, Nov 20 2026: meshes cannot be freed; `docs/research/VINES.md`)
           - [x] d2a. The big trees planted on the CPU in 64 m cells (over the patch for now), the same maths; each crown's lianas chosen by its own random stream; the commands and the start numbered from the patch planted once (`near-tree-mirror`)
           - [x] d2b. The cells held round the player within 200 m; liana records a cell slot; one template tube at three levels bent onto the catenary by the shaders (mirrored `.glsl`), the wind worked out there; the liana meshes and the anchor table retired; holds inside the crowns' envelopes (`gpu-lianas`)
           - [x] d2c. Ivy as template cards along the lianas, dense in the crowns, every other card dropped far off (`gpu-ivy`)
-          - [ ] d2d. Persson's wire anti-aliasing, if far lianas flicker
-        - [ ] d3. Grass and floor cover as placed layers: a patch an 8 m lattice cell, the paint's means baked into a map, placed plants following the ground; their entity cells retired (`gpu-ground-cover`)
+          - [x] d2d. Persson's wire anti-aliasing, if far lianas flicker: not needed, no flicker (the user, Nov 20 2026)
+        - [x] d3. Grass and floor cover as placed layers: a patch an 8 m lattice cell, the paint's means baked into a map, placed plants following the ground; their entity cells retired (`gpu-ground-cover`; the user's go, Nov 20 2026)
+          - [x] d3a. The engine: a layer's kind and quarter turns read from a baked byte map, ground-following placed parts (lifted by the land under each vertex less the land under the plant), a region a layer, culling spheres grown by the land's relief; CPU tests and `placement-compare`
+          - [x] d3b. The forest's grass and floor cover as two such layers, their entity cells retired; the frame measured before and after
       - [ ] e. The whole valley (the user's go, Nov 20 2026)
         - [ ] e1. The patch's limit gone; trees in 128 m cells to about 1 km, small plants and ground cover in 64 m cells to about 200 m, each set of cells planting what it reads; trees faded in over the last cell (`valley-wide-cells`)
         - [ ] e2. Measured at the rim, the path and the meadow (F4), radii and levers tuned
