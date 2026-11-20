@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <iterator>
 #include <vector>
 
 namespace {
@@ -77,13 +79,15 @@ namespace {
         assert(near(polylineLength(taut.points), straight * 1.005f, straight * 0.01f) && (taut.points.back() - low).length() < 1e-3f);
     }
 
-    // Crowns in rows 15 m apart along the path (x = 0) and away from it, 25 m up, 8 m round, over flat ground.
+    // Crowns in rows 15 m apart along the path (x = 0) and away from it, 25 m up, 8 m round, over flat ground, each its own identity.
     std::vector<LianaCrown> testCrowns() {
         std::vector<LianaCrown> crowns;
 
         for (int row = 0; row < 6; ++row) {
             for (int column = 0; column < 10; ++column) {
-                crowns.push_back(LianaCrown{Vec3{static_cast<float>(column) * 15.0f - 30.0f, 25.0f, static_cast<float>(row) * 15.0f}, 8.0f});
+                crowns.push_back(LianaCrown{.centre = Vec3{static_cast<float>(column) * 15.0f - 30.0f, 25.0f, static_cast<float>(row) * 15.0f},
+                                            .radius = 8.0f,
+                                            .identity = 1000u + static_cast<std::uint64_t>(row * 10 + column)});
             }
         }
 
@@ -139,17 +143,84 @@ namespace {
 
         assert(loops > 0 && ropes > 0);
 
-        // The path's rows (|x| up to 15 m: 3 of each 10) carry more often than the rest.
-        int nearCarrying = 0;
-        int farCarrying = 0;
-
         for (std::size_t crown = 0; crown < crowns.size(); ++crown) {
             assert(perCrown[crown] <= settings.mostPerTree);
-            (std::abs(crowns[crown].centre.x) <= settings.pathReach ? nearCarrying : farCarrying) += perCrown[crown] > 0 ? 1 : 0;
+        }
+
+        // The path's rows (|x| up to 15 m: 3 of each 10) carry more often than the rest: shares far enough apart (0.95
+        // against 0.3) that 60 crowns show it every time, where the defaults' (0.95 against 0.8) are within chance.
+        ForestLianaSettings contrast = settings;
+        contrast.treeShare = 0.3f;
+        int nearCarrying = 0;
+        int farCarrying = 0;
+        std::vector<bool> carrying(crowns.size(), false);
+
+        for (const Liana& liana : chooseLianas(crowns, contrast, 7, flatGround, pathAlongZ)) {
+            carrying[static_cast<std::size_t>(liana.crown)] = true;
+        }
+
+        for (std::size_t crown = 0; crown < crowns.size(); ++crown) {
+            (std::abs(crowns[crown].centre.x) <= settings.pathReach ? nearCarrying : farCarrying) += carrying[crown] ? 1 : 0;
         }
 
         assert(static_cast<float>(nearCarrying) / 18.0f > static_cast<float>(farCarrying) / 42.0f);
         assert(farCarrying > 0);
+    }
+
+    /*
+    * A crown's lianas are its own (ROADMAP phase 18, d2a): chosen among only it and its neighbours within neighbourSpan,
+    * the neighbours carrying none, they are exactly those chosen among every crown, their far crowns the same by
+    * identity; a crown that does not carry hangs none of its own, yet others loop into it.
+    */
+    void testACrownsLianasAreItsOwn() {
+        const std::vector<LianaCrown> crowns = testCrowns();
+        const ForestLianaSettings settings;
+        const std::vector<Liana> all = chooseLianas(crowns, settings, 7, flatGround, pathAlongZ);
+        int compared = 0;
+        int loopedIntoOthers = 0;
+
+        for (std::size_t chosen = 0; chosen < crowns.size(); ++chosen) {
+            std::vector<LianaCrown> few;
+
+            for (const LianaCrown& crown : crowns) {
+                const Vec3 apart = crown.centre - crowns[chosen].centre;
+
+                if (Vec3{apart.x, 0.0f, apart.z}.length() <= settings.neighbourSpan) {
+                    few.push_back(crown);
+                    few.back().carries = crown.identity == crowns[chosen].identity;
+                }
+            }
+
+            const std::vector<Liana> alone = chooseLianas(few, settings, 7, flatGround, pathAlongZ);
+            std::vector<Liana> expected;
+            std::copy_if(all.begin(), all.end(), std::back_inserter(expected), [&](const Liana& liana) {
+                return static_cast<std::size_t>(liana.crown) == chosen;
+            });
+            assert(alone.size() == expected.size());
+
+            for (std::size_t index = 0; index < alone.size(); ++index) {
+                const Liana& mine = alone[index];
+                const Liana& theirs = expected[index];
+                assert(few[static_cast<std::size_t>(mine.crown)].carries);
+                assert((mine.from - theirs.from).length() == 0.0f && (mine.to - theirs.to).length() == 0.0f);
+                assert(mine.length == theirs.length && mine.radius == theirs.radius && mine.seed == theirs.seed);
+                assert((mine.otherCrown < 0) == (theirs.otherCrown < 0));
+
+                if (mine.otherCrown >= 0) {
+                    assert(few[static_cast<std::size_t>(mine.otherCrown)].identity == crowns[static_cast<std::size_t>(theirs.otherCrown)].identity);
+                    loopedIntoOthers += 1;
+                }
+
+                compared += 1;
+            }
+        }
+
+        assert(compared == static_cast<int>(all.size()) && loopedIntoOthers > 0);
+
+        // Each liana's own seed for its leaves.
+        for (std::size_t index = 1; index < all.size(); ++index) {
+            assert(all[index].seed != all[index - 1].seed);
+        }
     }
 
     // An ivy card's vertices (appendLeafCards draws whole squares).
@@ -241,6 +312,7 @@ void testLianas() {
     testDiametersFollowTheCensus();
     testTheCatenary();
     testChoosingLianas();
+    testACrownsLianasAreItsOwn();
     testLianaMeshes();
     testIvyIsDensestInTheCrowns();
     testTheForestHangsThem();

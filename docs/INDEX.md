@@ -45,7 +45,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/LOD.md` | Level of detail, impostors, card thinning |
 | `docs/research/JUNGLE.md` | The jungle's layers, sizes and density (phase 18) |
 | `docs/research/TREES.md` | Growing trees (phase 18) |
-| `docs/research/VINES.md` | Lianas, climbers, epiphytes (phase 18) |
+| `docs/research/VINES.md` | Lianas, climbers, epiphytes; lianas drawn by the GPU at valley scale (phase 18) |
 | `docs/research/WIND.md` | The wind field and swaying |
 | `docs/research/GROUNDCOVER.md` | Grass and floor cover |
 | `docs/research/TEXTURECOMPRESSION.md` | Block-compressed textures, the encoder, the texture cache |

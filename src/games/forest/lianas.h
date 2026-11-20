@@ -44,15 +44,20 @@ float lianaDiameter(float share);
 */
 HangingStrand catenaryStrand(const Vec3& from, const Vec3& to, float length, float radius, float step = lianaStepMetres);
 
-// A tree's crown lianas hang from: its bounding sphere in the world.
+/*
+* A tree's crown lianas hang from: its bounding sphere in the world, the tree's identity (the same tree has the same one
+* whichever box planted it: near_trees.h), and whether it hangs lianas of its own here (a neighbour only takes loops).
+*/
 struct LianaCrown {
     Vec3 centre;
     float radius = 0.0f;
+    std::uint64_t identity = 0;
+    bool carries = true;
 };
 
 /*
 * One liana: from a hold in the lower part of crown, to a hold in otherCrown's (a loop) or to the ground (a rope,
-* otherCrown -1), length metres along, radius metres round.
+* otherCrown -1), length metres along, radius metres round, and its own seed (its leaves).
 */
 struct Liana {
     Vec3 from;
@@ -61,6 +66,7 @@ struct Liana {
     float radius = 0.0f;
     int crown = 0;
     int otherCrown = -1;
+    std::uint32_t seed = 0;
 };
 
 // How many lianas and how they hang (F5 Forest, Lianas; start-up: the meshes are built once).
@@ -97,11 +103,12 @@ struct ForestLianaSettings {
 void visit(ForestLianaSettings& settings, SettingsVisitor& visitor);
 
 /*
-* The lianas of a patch's crowns: each crown carries some with the settings' share (pathShare within pathReach of the
+* The lianas of the carrying crowns: each carries some with the settings' share (pathShare within pathReach of the
 * path, by pathDistance at its centre), 1 to mostPerTree of them, each a rope (ropeShare, or no neighbour) or a loop to
-* a random neighbour; holds at random in the lower part of the crowns, a rope's foot 1-6 m off across the ground
-* (groundHeight) and sunk lianaGroundSink into it; thickness by lianaDiameter times the settings' thickness. The same
-* seed gives the same lianas.
+* a random neighbour (any crown within neighbourSpan across, in the list's order); holds at random in the lower part
+* of the crowns, a rope's foot 1-6 m off across the ground (groundHeight) and sunk lianaGroundSink into it; thickness by
+* lianaDiameter times the settings' thickness. Each crown draws from its own stream (seed and its identity), so its
+* lianas are the same among any crowns holding its neighbours in the same order: a cell of land hangs its own alone.
 */
 std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings, std::uint64_t seed,
                                 const std::function<float(float, float)>& groundHeight, const std::function<float(float, float)>& pathDistance);

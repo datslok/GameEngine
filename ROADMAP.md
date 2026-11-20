@@ -346,10 +346,14 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
       - [ ] c. Shadows, velocity, sway and the captures for placed plants; then `placedTrees` on and the patch's tree entities retired (the user's picks, Nov 19 2026: two steps, stand-ins kept, culling by cells then blocks then plants)
         - [x] c1. Placed plants in every view (camera, its velocity list, probe faces, shadow tiles drawn), each view's GPU work only over the blocks of its cells in view (each cell's box tested on the CPU); shadow tiles redrawn by the cells made or dropped and by a new table; the shadows' stand-ins and the sway in the looks
         - [x] c2. The trees always placed (`placedTrees` gone) and the patch's tree entities retired, every part of them (no sky blocker lost: trees were never static, so the sky bake never saw them); lianas stay, from the CPU's planting; the turn's sine and cosine once a vertex; the placed views' unused moving-list flag dropped
-        - [ ] c3. Rays meeting placed plants (ray tracing, probes): instances the GPU writes from the placed records (option B, Nov 20 2026), when ray tracing or the far tiers need it
+        - [ ] c3. Rays meeting placed plants (ray tracing, probes): instances the GPU writes from the placed records (option B, Nov 20 2026), when ray tracing or the far tiers need it; the GPU's lianas with them (their coarsest tubes written by a compute pass a cell, `docs/research/VINES.md`)
       - [ ] d. Every layer on the GPU and the near trees on the CPU (the user's go, Nov 20 2026; c3 parked until ray tracing or the far tiers need it)
         - [x] d1. The understorey and palms as placed looks (levels, cards, fades, thinning), their entities retired; still the patch (`gpu-understorey`)
-        - [ ] d2. The near trees planted on the CPU in cells round the player, the same maths; lianas made and dropped with them, their wind anchors a cell's; the commands and the start from them (`near-tree-mirror`)
+        - [ ] d2. The near trees on the CPU in cells round the player, the lianas drawn by the GPU from records a cell (the user's choice, Nov 20 2026: meshes cannot be freed; `docs/research/VINES.md`)
+          - [x] d2a. The big trees planted on the CPU in 64 m cells (over the patch for now), the same maths; each crown's lianas chosen by its own random stream; the commands and the start numbered from the patch planted once (`near-tree-mirror`)
+          - [ ] d2b. The cells held round the player within 200 m; liana records a cell slot; one template tube at three levels bent onto the catenary by the shaders (mirrored `.glsl`), the wind worked out there; the liana meshes and the anchor table retired
+          - [ ] d2c. Ivy as template cards along the lianas, dense in the crowns
+          - [ ] d2d. Persson's wire anti-aliasing, if far lianas flicker
         - [ ] d3. Grass and floor cover as placed layers: a patch an 8 m lattice cell, the paint's means baked into a map, placed plants following the ground; their entity cells retired (`gpu-ground-cover`)
       - [ ] e. The whole valley (the user's go, Nov 20 2026)
         - [ ] e1. The patch's limit gone; trees in 128 m cells to about 1 km, small plants and ground cover in 64 m cells to about 200 m, each set of cells planting what it reads; trees faded in over the last cell (`valley-wide-cells`)

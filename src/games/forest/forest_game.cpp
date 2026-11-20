@@ -1036,20 +1036,34 @@ namespace {
 /*
 * From the canopy and emergent trees' crowns (the mid layer's are too thin for these woody ones), over the valley's
 * ground, more along the path. Bark as the trees', ivy as the islands' vines; still, drawn only, into the nearest
-* cascades only.
+* cascades only. Hung cell by cell over the patch (near_trees.h), as the cells round the player will hang them: the
+* cells' crowns and lianas joined into one list, each cell's crowns after the last's.
 */
 void ForestGame::buildLianas(World& world, AssetManager& assets) {
+    const ForestSpecies species = plantingSpecies();
+    const NearTreeSources sources{.species = species,
+                                  .maps = valleyMaps.planting,
+                                  .heights = *groundHeights,
+                                  .region = forestPatch,
+                                  .lianas = lianaSettings,
+                                  .lianaSeed = lianaSeed};
+    std::vector<NearTree> trees;
     std::vector<LianaCrown> crowns;
+    std::vector<Liana> lianas;
 
-    for (const TreePlacement& tree : treePlacements) {
-        crowns.push_back(LianaCrown{placedCrownCentre(tree, treeSettings), placedCrownRadius(tree, treeSettings)});
+    for (const PlantingCell& cell : nearCellsOver(regionBox(forestPatch), nearTreeSettings.cellMetres)) {
+        NearTreeCell made = makeNearTreeCell(cell, nearTreeSettings.cellMetres, sources, getJobs());
+        const int first = static_cast<int>(crowns.size());
+
+        for (Liana& liana : made.lianas) {
+            liana.crown += first;
+            liana.otherCrown = liana.otherCrown >= 0 ? liana.otherCrown + first : -1;
+            lianas.push_back(liana);
+        }
+
+        trees.insert(trees.end(), made.trees.begin(), made.trees.end());
+        crowns.insert(crowns.end(), made.crowns.begin(), made.crowns.end());
     }
-
-    for (const TreePlacement& tree : emergentPlacements) {
-        crowns.push_back(LianaCrown{placedCrownCentre(tree, emergentSettings), placedCrownRadius(tree, emergentSettings)});
-    }
-
-    const std::vector<Liana> lianas = chooseLianas(crowns, lianaSettings, lianaSeed, forestHeight, forestPathDistance);
 
     if (lianas.empty()) {
         return;
@@ -1057,23 +1071,19 @@ void ForestGame::buildLianas(World& world, AssetManager& assets) {
 
     /*
     * Each liana hangs in the wind between two anchors (scene/wind.h): its hold in its crown, moving as that tree's crown
-    * does there, and its far end, in another crown or fixed on the ground. The crowns are the canopy trees' then the
-    * emergents', as above.
+    * does there, and its far end, in another crown or fixed on the ground.
     */
-    const auto treeOfCrown = [&](int crown) {
-        const bool canopy = static_cast<std::size_t>(crown) < treePlacements.size();
-        const TreePlacement& tree = canopy ? treePlacements[static_cast<std::size_t>(crown)] : emergentPlacements[static_cast<std::size_t>(crown) - treePlacements.size()];
-        const std::vector<float>& heights = canopy ? canopyHeights : emergentHeights;
-        const float height = static_cast<std::size_t>(tree.variant) < heights.size() ? heights[static_cast<std::size_t>(tree.variant)] : 1.0f;
-        return std::pair{&tree, height};
-    };
     const auto anchorAt = [&](int crown, const Vec3& point) {
         if (lianaAnchors.size() >= static_cast<std::size_t>(windAnchorOwn)) {
             return windAnchorFixed;
         }
 
-        const auto [tree, height] = treeOfCrown(crown);
-        lianaAnchors.push_back(WindAnchor{.foot = tree->foot, .height = height, .scale = tree->scale, .bend = swaySettings.trees.bend, .point = point});
+        const NearTree& tree = trees[static_cast<std::size_t>(crown)];
+        const std::vector<float>& heights = tree.layer == ForestLayer::Emergent ? emergentHeights : canopyHeights;
+        const std::size_t variant = static_cast<std::size_t>(tree.placement.variant);
+        const float height = variant < heights.size() ? heights[variant] : 1.0f;
+        lianaAnchors.push_back(WindAnchor{.foot = tree.placement.foot, .height = height, .scale = tree.placement.scale, .bend = swaySettings.trees.bend,
+                                          .point = point});
         return static_cast<std::uint16_t>(lianaAnchors.size() - 1);
     };
     std::vector<std::array<std::uint16_t, 2>> anchors;
@@ -1607,6 +1617,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Lianas", [&] {
         visit(lianaSettings, visitor);
+    });
+    visitor.group("Near trees", [&] {
+        visit(nearTreeSettings, visitor);
     });
     visitor.group("Climbers", [&] {
         visit(climberSettings, visitor);

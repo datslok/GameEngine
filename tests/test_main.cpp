@@ -73,6 +73,7 @@ void testPlantingCells();
 void testPlantingRecords();
 void testPlacedDrawing();
 void testLianas();
+void testNearTrees();
 void testClimbers();
 void testEpiphytes();
 void testGrass();
@@ -413,6 +414,7 @@ const RoutineTest routineTests[] = {
     {"testPlantingRecords", testPlantingRecords},
     {"testPlacedDrawing", testPlacedDrawing},
     {"testLianas", testLianas},
+    {"testNearTrees", testNearTrees},
     {"testClimbers", testClimbers},
     {"testEpiphytes", testEpiphytes},
     {"testGrass", testGrass},

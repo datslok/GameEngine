@@ -87,3 +87,29 @@ In stages, each its own branch, judged by eye:
 Each stage measured (triangles, shadow cost, the frame) before the next. Wind comes after, with the hanging ones swinging slowly by their length.
 
 **Later, if they flicker:** Persson's wire anti-aliasing for thin vines, in the main and shadow passes.
+
+## At valley scale: lianas drawn by the GPU
+
+Built once at start-up, the patch's lianas are meshes: about 20-40 KB each (a tube of 4-6 sides every 0.5 m plus its ivy). Across e1's 1 km of trees that is tens of thousands of lianas, gigabytes, and the mesh pool only grows (`VulkanMeshPool`: appended, never freed), so cells could not drop theirs. The user's choice (Nov 20 2026): the GPU draws them from small records, which scales best.
+
+**How others draw thin procedural strands:**
+
+- **A template mesh bent by a record a strand** (Ghost of Tsushima's grass, GDC 2021, [session](https://gdcvault.com/play/1027214/contactUs); [a reimplementation](https://cainrademan.github.io/Unity-Grass/)): one shared blade mesh whose vertices carry only their place along the blade; the vertex shader reads the blade's record from a buffer by its instance and puts each vertex on a Bezier curve, wind moving its control points. 15 vertices near, 7 far, crossed between.
+- **Strands tessellated from points** (Frostbite's hair, [SIGGRAPH 2019](https://www.advances.realtimerendering.com/s2019/hair_presentation_final.pdf), [blog](https://www.ea.com/frostbite/news/frostbite-hair-rendering-and-simulation-2)): about 25 points a strand, drawn as a strip; far away fewer, thicker strands (AMD's TressFX LOD, [GDC 2014](https://fr.slideshare.net/DevCentralAMD/grass-fur-and-all-things-hairy-amd-at-gdc14)).
+- **Hanging cables as catenaries in the shader** ([Godot catenary](https://github.com/Donitzo/godot-catenary); DreamWorks' cobwebs used a parabola as cheaper, [talk](https://research.dreamworks.com/wp-content/uploads/2018/07/63-lee-Edited.pdf)): the curve's constants found once off the GPU, each vertex placed in closed form.
+- **Thin wires stay a pixel wide** (Persson's wire AA, above; [Unigine's vertex-shader form](https://developer.unigine.com/forum/topic/1524-solved-mesh_wire_base-material/)): widened to a pixel in the vertex shader, faded by a dither (not blending, which depth effects would break) by true width over drawn width.
+
+**The plan:**
+
+| Part | How | Cost grows with |
+|---|---|---|
+| Record a liana | Holds, length, radius, the catenary's `a` and lowest point solved on the CPU (`catenaryStrand`'s halving), its two trees' sway (foot, height, scale): about 100 bytes, against 20-40 KB of mesh | lianas held |
+| Records a cell | A fixed range a CPU cell slot (as the GPU's cells), written when the cell is made; a dropped cell's range is simply reused | cells made |
+| Tube | One shared template tube (rings × sides, each vertex its ring's share along and its angle round), a level a ring count (about 48 / 16 / 6 rings, 6 / 4 / 3 sides) chosen by the existing levels on the record's box; the vertex shader puts each ring on the catenary in closed form (`cosh`, `sinh`), mirrored in a `.glsl` library | lianas drawn × their level's rings |
+| Wind | The hanging data (`HangingVertex`: along, arm, swing length) worked out in the shader from the ring's share and the curve; the anchors' trees carried in the record, so the 65,534-anchor table goes | as the tube |
+| Ivy | A template of leaf cards along a unit length, each card's place and seed in its vertices; cards kept densely inside either crown (the record's two spheres) and sparsely elsewhere, the rest collapsed to nothing; lianas binned by length so few cards are wasted | as the tube |
+| Passes | The same `triangle_vertex` path every pass uses (prepass, main, shadows in the nearest 2 cascades, velocity from last frame's wind): one shaping function as `thinnedVertex` is | none extra |
+| Thin | Persson's widening to a pixel and dither fade, if they flicker | none extra |
+
+- Ray tracing (the user's choice, Nov 20 2026: with the placed trees in c3, not before; the trees are not in rays yet either): a compute pass writes each near liana's coarsest tube (6 rings x 3 sides, about 36 triangles, about 1.5 KB) into its cell slot's buffer when the cell is made, a fast-built structure a slot, ivy cards not opaque; rest pose, as the trees. So the catenary stays in a `.glsl` library a compute pass can call. Weighed: boxes with the ray queries' own hit test (tiny, but slow and in every tracing shader); NVIDIA's linear swept spheres (exact and fast, Blackwell only: at most an extra on top).
+- Agreement: the C++ mirror places the same points, so the GPU test compares positions and a CPU test the records against today's `catenaryStrand`.

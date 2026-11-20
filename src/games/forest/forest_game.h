@@ -15,6 +15,7 @@
 #include "games/forest/floor_cover.h"
 #include "games/forest/grass.h"
 #include "games/forest/lianas.h"
+#include "games/forest/near_trees.h"
 #include "games/forest/palms.h"
 #include "games/forest/understorey.h"
 #include "games/forest/valley_maps.h"
@@ -364,6 +365,7 @@ private:
     ForestUnderstoreySettings understoreySettings;
     ForestPalmSettings palmSettings;
     ForestLianaSettings lianaSettings;
+    ForestNearTreeSettings nearTreeSettings;
     ForestClimberSettings climberSettings;
     ForestEpiphyteSettings epiphyteSettings;
     ForestGrassSettings grassSettings;
