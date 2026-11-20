@@ -1,12 +1,10 @@
 #pragma once
 
-#include "core/job_system.h"
 #include "core/settings_visitor.h"
 #include "games/forest/island_hangings.h"
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -15,7 +13,8 @@
 * Lianas, the woody vines hanging in the jungle patch (docs/research/VINES.md, stage 1): loops sagging from one crown into a
 * neighbour's, and ropes hanging from a crown to the ground, as old lianas are left when their hosts grow and fall. Each
 * hangs as a catenary between its two holds, its thickness drawn from Barro Colorado's census, swept into a bark tube,
-* with ivy only where it runs through a crown. Built once at start-up in world space, a chunk of ground a mesh.
+* (its ivy, dense where it runs through a crown, returns in ROADMAP d2c). Drawn by the GPU from a record each
+* (scene/liana_shape.h), in the near cells round the player (near_trees.h).
 */
 
 // The most metres between a liana's points: each ring of its tube.
@@ -26,9 +25,6 @@ inline constexpr float lianaGroundSink = 0.2f;
 
 // The sun's cascades lianas cast into (ModelRenderer::shadowCascades): thin lines the coarser texels cannot show.
 inline constexpr int lianaShadowCascades = 2;
-
-// Lianas thicker than this across get tubes of more sides.
-inline constexpr float lianaThickDiameter = 0.05f;
 
 /*
 * A liana's stem across in metres for a share (0..1) of all lianas, rising with it, by Barro Colorado's 50 ha census
@@ -45,15 +41,26 @@ float lianaDiameter(float share);
 HangingStrand catenaryStrand(const Vec3& from, const Vec3& to, float length, float radius, float step = lianaStepMetres);
 
 /*
-* A tree's crown lianas hang from: its bounding sphere in the world, the tree's identity (the same tree has the same one
+* A tree's crown lianas hang from: its envelope in the world (an ellipsoid round centre, radius across and halfHeight up
+* and down: a canopy crown is about three times wider than tall), the tree's identity (the same tree has the same one
 * whichever box planted it: near_trees.h), and whether it hangs lianas of its own here (a neighbour only takes loops).
 */
 struct LianaCrown {
     Vec3 centre;
     float radius = 0.0f;
+    float halfHeight = 0.0f;
     std::uint64_t identity = 0;
     bool carries = true;
 };
+
+// Whether a point lies inside a crown's envelope.
+bool insideLianaCrown(const LianaCrown& crown, const Vec3& point);
+
+/*
+* A hold in a crown's lower part for three random shares: round its centre at a turn, 25-65% of its half-height down,
+* and 30-70% of the way out to the envelope's edge at that depth, so always inside its leaves and below its centre.
+*/
+Vec3 lianaCrownHold(const LianaCrown& crown, float turn, float out, float down);
 
 /*
 * One liana: from a hold in the lower part of crown, to a hold in otherCrown's (a loop) or to the ground (a rope,
@@ -112,20 +119,3 @@ void visit(ForestLianaSettings& settings, SettingsVisitor& visitor);
 */
 std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings, std::uint64_t seed,
                                 const std::function<float(float, float)>& groundHeight, const std::function<float(float, float)>& pathDistance);
-
-// One chunk's lianas: their bark tubes and their ivy, in world space.
-struct LianaMeshes {
-    IndexedMesh bark;
-    IndexedMesh leaves;
-};
-
-/*
-* The lianas' meshes, grouped by the chunkMetres square their first hold stands in, in a fixed order, a job a chunk:
-* each a catenary swept into a tube of 4 sides (6 from lianaThickDiameter across), its bark in tiles of barkTileMetres
-* along it, ivy cards (appendLeafCards) leafSpacing apart on the runs of its points inside a crown it hangs from and
-* sparseLeafSpacing apart along the rest. With anchors (each liana's two: its hold's and its far end's, scene/wind.h),
-* each hangs between them in the wind (hangBetween), its ivy with it.
-*/
-std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings,
-                                     float barkTileMetres, float chunkMetres, JobSystem& jobs,
-                                     const std::vector<std::array<std::uint16_t, 2>>& anchors = {});

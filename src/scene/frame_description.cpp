@@ -70,6 +70,7 @@ DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const
     draw.hidden = renderer.hidden;
     draw.followsGround = renderer.followsGround;
     draw.sway = renderer.sway;
+    draw.lianaShape = renderer.lianaShape;
     return draw;
 }
 
@@ -152,9 +153,11 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             frame.wind = wind;
         }
     });
-    world.each<WindAnchors>([&](Entity, WindAnchors& anchors) {
-        if (!frame.windAnchors) {
-            frame.windAnchors = anchors.anchors;
+    bool lianasTaken = false;
+    world.each<LianaShapes>([&](Entity, LianaShapes& shapes) {
+        if (!lianasTaken) {
+            frame.lianaShapes = shapes;
+            lianasTaken = true;
         }
     });
     world.each<PlantingSource>([&](Entity, PlantingSource& source) {

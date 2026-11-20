@@ -1,5 +1,6 @@
 #include "games/forest/near_trees.h"
 #include "games/forest/forest_planting.h"
+#include "scene/model_renderer.h"
 #include "scene/planting_cells.h"
 
 #include "forest_helpers.h"
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <limits>
 #include <set>
 #include <tuple>
 #include <vector>
@@ -102,12 +104,112 @@ namespace {
         assert(cells == expected);
     }
 
-    // The near trees' settings: the cells' size, start-up only.
+    // The near trees' settings: the cells' size, their radius and how many a frame, all live.
     void testNearTreeSettings() {
         ForestNearTreeSettings settings;
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 1 && counter.live == 0 && settings.cellMetres == 64.0f);
+        assert(counter.fields == 3 && counter.live == 3 && settings.cellMetres == 64.0f && settings.radiusMetres == 200.0f);
+    }
+
+    // A world holding near lianas, with the template and the trees' heights they are made with.
+    struct LianaWorld {
+        World world;
+        AssetManager assets;
+        Entity holder = world.create();
+        NearLianas lianas;
+        ForestLianaSettings lianaSettings;
+        NearTreeSources sources = patchSources(lianaSettings);
+        std::vector<float> heights{30.0f, 32.0f};
+        NearLianaTrees trees{.emergentHeights = heights, .canopyHeights = heights, .bend = 0.25f};
+        NearLianaLook look{.tube = assets.addDrawnMesh(lianaTemplateMesh(4, 3)), .bark = Material{}, .sway = WindSway{}, .shadowCascades = 2};
+        ForestNearTreeSettings settings;
+
+        bool update(const Vec2& place, int most) {
+            return lianas.update(world, holder, place, settings, most, sources, trees, look, 2.0f, testJobs());
+        }
+    };
+
+    // Each held liana's record, by the entity naming it, as numbers to compare.
+    std::vector<LianaKey> heldLianas(const LianaWorld& held) {
+        const LianaShapes& shapes = held.world.get<LianaShapes>(held.holder);
+        std::vector<LianaKey> keys;
+
+        for (const Entity entity : held.lianas.getEntities()) {
+            const std::uint32_t record = held.world.get<ModelRenderer>(entity).lianaShape - 1u;
+            const LianaShape& shape = (*shapes.slots[record / shapes.perSlot])[record % shapes.perSlot];
+            keys.emplace_back(shape.from[0], shape.from[1], shape.from[2], shape.to[0], shape.to[1], shape.to[2], shape.to[3], shape.from[3], 0u);
+        }
+
+        std::sort(keys.begin(), keys.end());
+        return keys;
+    }
+
+    /*
+    * The lianas follow the place (ROADMAP phase 18, d2b): every cell within the radius made at once at the start, an
+    * entity a liana naming its record in its cell's slot (still, the template, its look's cascades, its trees' bend);
+    * moved away from the patch, every one dropped (its entities destroyed, its slot emptied); moved back, the same
+    * lianas again. At most the asked cells a frame.
+    */
+    void testNearLianasFollowThePlace() {
+        LianaWorld held;
+        const Vec2 start{0.0f, -125.0f};
+        assert(held.update(start, std::numeric_limits<int>::max()));
+        assert(held.lianas.getCellCount() > 20 && !held.lianas.getEntities().empty());
+        const std::vector<Entity> first = held.lianas.getEntities();
+        const std::vector<LianaKey> lianas = heldLianas(held);
+        std::size_t records = 0;
+
+        for (const auto& block : held.world.get<LianaShapes>(held.holder).slots) {
+            records += block ? block->size() : 0;
+            assert(!block || block->size() <= NearLianas::lianasASlot);
+        }
+
+        assert(records == first.size());
+
+        for (const Entity entity : first) {
+            const ModelRenderer& renderer = held.world.get<ModelRenderer>(entity);
+            assert(renderer.isStill() && renderer.shadowCascades == 2 && renderer.parts.front().mesh == held.look.tube);
+        }
+
+        assert(!held.update(start, std::numeric_limits<int>::max()));
+
+        // Far from the patch: no trees drawn there, so no lianas, and every earlier one gone.
+        assert(held.update(Vec2{0.0f, 3000.0f}, std::numeric_limits<int>::max()));
+        assert(held.lianas.getEntities().empty());
+
+        for (const Entity entity : first) {
+            assert(!held.world.isAlive(entity));
+        }
+
+        held.update(start, std::numeric_limits<int>::max());
+        assert(heldLianas(held) == lianas);
+
+        // A frame's cells: at most the asked.
+        LianaWorld fresh;
+        fresh.update(start, 1);
+        assert(fresh.lianas.getCellCount() == 1);
+    }
+
+    // The bend given anew reaches every record, each block replaced (so the renderer copies it again).
+    void testNearLianasResway() {
+        LianaWorld held;
+        held.update(Vec2{0.0f, -125.0f}, std::numeric_limits<int>::max());
+        const LianaShapes before = held.world.get<LianaShapes>(held.holder);
+        held.lianas.resway(held.world, held.holder, WindSway{.kind = SwayKind::Hanging, .swing = 0.6f}, 0.4f);
+        const LianaShapes& after = held.world.get<LianaShapes>(held.holder);
+
+        for (std::size_t slot = 0; slot < after.slots.size(); ++slot) {
+            if (after.slots[slot]) {
+                assert(after.slots[slot] != before.slots[slot]);
+
+                for (const LianaShape& shape : *after.slots[slot]) {
+                    assert(shape.trees[2] == 0.4f);
+                }
+            }
+        }
+
+        assert(held.world.get<ModelRenderer>(held.lianas.getEntities().front()).sway.swing == 0.6f);
     }
 }
 
@@ -116,4 +218,6 @@ void testNearTrees() {
     testBigTreesAreTheForests();
     testLianasDoNotDependOnTheCells();
     testNearTreeSettings();
+    testNearLianasFollowThePlace();
+    testNearLianasResway();
 }

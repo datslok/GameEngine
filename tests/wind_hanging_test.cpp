@@ -6,10 +6,12 @@
 #include "games/forest/lianas.h"
 #include "input/input.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/ray_tracing.h"
 #include "render/gpu/wind.h"
 #include "scene/culling.h"
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
+#include "scene/liana_shape.h"
 #include "scene/wind.h"
 
 #include "forest_helpers.h"
@@ -17,6 +19,7 @@
 #include <bit>
 #include <cassert>
 #include <cmath>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -242,16 +245,22 @@ namespace {
     }
 
     /*
-    * An anchor moves exactly as its tree's own vertex at its point does, so what hangs from it stays on: the same
-    * offset windSwayOffset gives that vertex of a tree sway of the same height, scale and bend, no flutter.
+    * A liana's anchor (its hold in its tree's crown, from its record) moves exactly as its tree's own vertex at its
+    * point does, so what hangs from it stays on: the same offset windSwayOffset gives that vertex of a tree sway of the
+    * same height, scale and bend, no flutter. A rope's far end has no tree: its scale 0.
     */
     void testAnchorsMoveWithTheirTree() {
-        const WindAnchor anchor{.foot = Vec3{10.0f, -2.0f, 5.0f}, .height = 20.0f, .scale = 1.5f, .bend = 0.3f, .point = Vec3{14.0f, 22.0f, 6.0f}};
+        const Vec3 foot{10.0f, -2.0f, 5.0f};
+        const Vec3 point{14.0f, 22.0f, 6.0f};
+        const LianaShape shape = makeLianaShape(point, Vec3{16.0f, -2.0f, 6.0f}, 25.0f, 0.02f, 2.0f, LianaTree{foot, 20.0f, 1.5f}, nullptr, 0.3f);
+        const GpuWindAnchor anchor = lianaWindAnchor(shape, false);
+        assert(anchor.foot[3] == 20.0f && anchor.point[0] == 14.0f && anchor.point[3] == 1.5f && anchor.bend[0] == 0.3f);
+        assert(lianaWindAnchor(shape, true).point[3] == 0.0f);
         const Vec2 spring{0.06f, -0.03f};
-        const Vec3 moved = windAnchorOffset(packWindAnchor(anchor), spring, 0.8f, 7.0f);
-        const Vec3 fromFoot = anchor.point - anchor.foot;
+        const Vec3 moved = windAnchorOffset(anchor, spring, 0.8f, 7.0f);
+        const Vec3 fromFoot = point - foot;
         const Vec4 sway = packSway(WindSway{.kind = SwayKind::Tree, .height = 20.0f, .bend = 0.3f, .flutter = 0.0f});
-        const Vec3 vertex = windSwayOffset(fromFoot, fromFoot.y / 1.5f, anchor.point, sway, 1.5f, spring, 0.8f, leafRate, 7.0f);
+        const Vec3 vertex = windSwayOffset(fromFoot, fromFoot.y / 1.5f, point, sway, 1.5f, spring, 0.8f, leafRate, 7.0f);
         assert(moved.length() > 0.0f && (moved - vertex).length() < 1e-6f);
     }
 
@@ -287,7 +296,8 @@ namespace {
         assert((windHangingOffset(first, second, 0.5f, swing) - Vec3{0.5f, 0.5f, 1.0f}).length() < 1e-6f);
     }
 
-    // A draw's mesh's hanging entry and its swing reach its instance; the frame takes the first anchors placed.
+    // A draw's mesh's hanging entry, its swing and its liana's record reach its instance; the frame takes the first lianas
+    // placed; no ray meets a liana.
     void testTheRecordsReachTheGpu() {
         std::vector<DrawItem> draws(2);
         draws[0].mesh = MeshHandle{1};
@@ -299,49 +309,42 @@ namespace {
         const GpuInstance instance = packInstance(draws[0], 0);
         assert(instance.hanging[0] == 17u && instance.hanging[1] == std::bit_cast<std::uint32_t>(0.4f));
 
-        World world;
-        const auto anchors = std::make_shared<const std::vector<WindAnchor>>(std::vector<WindAnchor>{WindAnchor{.height = 3.0f}});
-        world.add(world.create(), WindAnchors{anchors});
-        world.add(world.create(), WindAnchors{std::make_shared<const std::vector<WindAnchor>>()});
-        const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 10.0f};
-        assert(buildFrame(world, camera, 0.0f).windAnchors == anchors);
-        World empty;
-        assert(!buildFrame(empty, camera, 0.0f).windAnchors);
+        draws[1].lianaShape = 9u;
+        assert(packInstance(draws[1], 0).hanging[3] == 9u && instance.hanging[3] == 0u);
+        assert(rayMaskFor(draws[1]) == 0u && rayMaskFor(draws[0]) != 0u);
 
-        const GpuWindAnchor packed = packWindAnchor(WindAnchor{.foot = Vec3{1.0f, 2.0f, 3.0f}, .height = 4.0f, .scale = 5.0f, .bend = 6.0f,
-                                                               .point = Vec3{7.0f, 8.0f, 9.0f}});
-        assert(packed.foot[3] == 4.0f && packed.point[0] == 7.0f && packed.point[3] == 5.0f && packed.bend[0] == 6.0f);
+        World world;
+        const auto block = std::make_shared<const std::vector<LianaShape>>(1);
+        world.add(world.create(), LianaShapes{{block}, 4});
+        world.add(world.create(), LianaShapes{{}, 2});
+        const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 10.0f};
+        const FrameDescription frame = buildFrame(world, camera, 0.0f);
+        assert(frame.lianaShapes.perSlot == 4u && frame.lianaShapes.slots.size() == 1 && frame.lianaShapes.slots.front() == block);
+        World empty;
+        assert(buildFrame(empty, camera, 0.0f).lianaShapes.slots.empty());
     }
 
     /*
-    * The forest: its lianas and the islands' roots, vines and moss hang (Hanging), every vertex with an entry; each
-    * liana's anchors are its trees' (on the air entity, their bend the trees'), or fixed on the ground; the islands'
-    * hang from fixed rock; some climbers' roots hang from their tree in mid air. The swing and flutter apply live.
+    * The forest: its lianas and the islands' roots, vines and moss hang (Hanging); the islands' and moss's every vertex
+    * with an entry, hanging from fixed rock; each liana's record hangs it from its trees (on the air entity, their bend
+    * the trees'), a rope's far end fixed on the ground; some climbers' roots hang from their tree in mid air. The swing,
+    * flutter and bend apply live.
     */
     void testTheForestHangs() {
-        TestForest forest;
+        TestForest forest{testValley(ForestStart::Trees)};
         const ForestSwaySettings defaults;
-        assert(forest.world.has<WindAnchors>(forest.game.getAir()));
-        const std::vector<WindAnchor>& anchors = *forest.world.get<WindAnchors>(forest.game.getAir()).anchors;
-        assert(!anchors.empty());
-
-        for (const WindAnchor& anchor : anchors) {
-            assert(anchor.bend == defaults.trees.bend && anchor.height > 1.0f && anchor.point.y > anchor.foot.y);
-        }
-
+        assert(forest.world.has<LianaShapes>(forest.game.getAir()));
+        const LianaShapes& shapes = forest.world.get<LianaShapes>(forest.game.getAir());
         bool fixedEnd = false;
+        assert(!forest.game.getLianas().empty());
 
         for (const Entity entity : forest.game.getLianas()) {
             const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.sway.kind == SwayKind::Hanging && renderer.sway.swing == defaults.hangingSwing);
-            const IndexedMesh& mesh = forest.assets.getDrawnMesh(renderer.parts.front().mesh);
-            assert(mesh.hanging.size() == mesh.vertices.size());
-
-            for (const HangingVertex& entry : mesh.hanging) {
-                assert(entry.first < anchors.size());
-                assert(entry.second < anchors.size() || entry.second == windAnchorFixed);
-                fixedEnd = fixedEnd || entry.second == windAnchorFixed;
-            }
+            assert(renderer.sway.kind == SwayKind::Hanging && renderer.sway.swing == defaults.hangingSwing && renderer.lianaShape > 0u);
+            const std::size_t record = renderer.lianaShape - 1u;
+            const LianaShape& shape = (*shapes.slots[record / shapes.perSlot])[record % shapes.perSlot];
+            assert(shape.trees[2] == defaults.trees.bend && shape.firstTree[3] > 1.0f && shape.from[1] > shape.firstTree[1]);
+            fixedEnd = fixedEnd || shape.trees[1] == 0.0f;
         }
 
         assert(fixedEnd);
@@ -376,7 +379,12 @@ namespace {
         forest.game.getSwaySettings().trees.bend = 0.2f;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(forest.world.get<ModelRenderer>(forest.game.getLianas().front()).sway.swing == 0.7f);
-        assert(forest.world.get<WindAnchors>(forest.game.getAir()).anchors->front().bend == 0.2f);
+
+        for (const auto& block : forest.world.get<LianaShapes>(forest.game.getAir()).slots) {
+            for (const LianaShape& shape : block ? *block : std::vector<LianaShape>{}) {
+                assert(shape.trees[2] == 0.2f);
+            }
+        }
     }
 }
 

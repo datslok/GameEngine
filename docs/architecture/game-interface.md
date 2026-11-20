@@ -57,7 +57,7 @@ Plain data, no GPU types (`scene/frame_description.h`); the whole frame at once 
 - `deformedMeshes`: each deforming mesh's shape this frame (deforming meshes doc).
 - `staticLevel`, `staticLevelVersion`, `staticAlbedo`: the sky visibility grid's triangles (`engine/static_geometry`, while `skyVisibility.enabled`).
 - `terrainPatches`, `terrainHeights`, `terrainHeightsVersion`: terrain doc.
-- `wind`, `windAnchors`: the first `Wind` and `WindAnchors` placed (wind doc).
+- `wind`, `lianaShapes`: the first `Wind` and `LianaShapes` placed (wind doc).
 
 `DrawItem`: mesh, model matrix, material, `castsShadows`, `isStatic`, plus fields filled later. Meanings per field: the header.
 

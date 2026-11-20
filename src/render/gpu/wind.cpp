@@ -339,10 +339,10 @@ Vec3 windChainShares(float swingLength, const Vec3& bands) {
     return Vec3{0.0f, 1.0f - share, share};
 }
 
-GpuWindAnchor packWindAnchor(const WindAnchor& anchor) {
-    return GpuWindAnchor{{anchor.foot.x, anchor.foot.y, anchor.foot.z, anchor.height},
-                         {anchor.point.x, anchor.point.y, anchor.point.z, anchor.scale},
-                         {anchor.bend, 0.0f, 0.0f, 0.0f}};
+GpuWindAnchor lianaWindAnchor(const LianaShape& shape, bool far) {
+    const float* tree = far ? shape.secondTree : shape.firstTree;
+    const float* point = far ? shape.to : shape.from;
+    return GpuWindAnchor{{tree[0], tree[1], tree[2], tree[3]}, {point[0], point[1], point[2], far ? shape.trees[1] : shape.trees[0]}, {shape.trees[2], 0.0f, 0.0f, 0.0f}};
 }
 
 Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fade, float seconds) {

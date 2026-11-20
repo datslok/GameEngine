@@ -1,10 +1,10 @@
 #include "games/forest/lianas.h"
 #include "games/forest/forest_terrain.h"
+#include "scene/liana_shape.h"
 #include "math/angles.h"
 
 #include <algorithm>
 #include <cmath>
-#include <map>
 #include <utility>
 
 namespace {
@@ -22,20 +22,31 @@ namespace {
         {1.00f, 0.10f, 0.20f},
     };
 
-    // A hold in a crown's lower part: round its centre at a random turn, 30-70% of its radius out and 25-65% down, so
-    // always inside it and below its centre, where its leaves hide the liana's end.
-    Vec3 crownHold(const LianaCrown& crown, float turn, float out, float down) {
-        const float angle = turn * fullTurnRadians;
-        const float outward = (0.3f + 0.4f * out) * crown.radius;
-        const float below = (0.25f + 0.4f * down) * crown.radius;
-        return crown.centre + Vec3{std::cos(angle) * outward, -below, std::sin(angle) * outward};
-    }
 
     // A catenary's length for a sag below its chord of share of its span, from the shallow-sag series
     // L = span (1 + 8/3 share^2), close enough for choosing how much a loop hangs.
     float loopLength(float span, float share) {
         return span * (1.0f + 8.0f / 3.0f * share * share);
     }
+}
+
+bool insideLianaCrown(const LianaCrown& crown, const Vec3& point) {
+    const Vec3 offset = point - crown.centre;
+    const float across = (offset.x * offset.x + offset.z * offset.z) / std::max(crown.radius * crown.radius, 1e-12f);
+    const float up = offset.y * offset.y / std::max(crown.halfHeight * crown.halfHeight, 1e-12f);
+    return across + up <= 1.0f;
+}
+
+/*
+* Measured on the envelope itself, not a sphere round it: a sphere's radius is the crown's width, so holds a share of
+* it down hung metres below a flat crown's underside, in the open (the ends seen floating).
+*/
+Vec3 lianaCrownHold(const LianaCrown& crown, float turn, float out, float down) {
+    const float angle = turn * fullTurnRadians;
+    const float depth = 0.25f + 0.4f * down;
+    const float widthThere = crown.radius * std::sqrt(1.0f - depth * depth);
+    const float outward = (0.3f + 0.4f * out) * widthThere;
+    return crown.centre + Vec3{std::cos(angle) * outward, -depth * crown.halfHeight, std::sin(angle) * outward};
 }
 
 float lianaDiameter(float share) {
@@ -55,11 +66,9 @@ float lianaDiameter(float share) {
 }
 
 /*
-* In the upright plane through the holds, x across (d of it) and y up (h of it): 2 a sinh(d / 2a) = sqrt(L^2 - h^2) fixes
-* the catenary's a (the left side falls from infinity to d as a grows, so halving finds it, in doubles since sinh of
-* d / 2a overflows floats for tight curves), the lowest point x0 = d / 2 - a atanh(h / L), and its length from the first
-* hold s(x) = a (sinh((x - x0) / a) - sinh(-x0 / a)), which inverts in closed form, so the points are spaced evenly
-* along the line itself.
+* In the upright plane through the holds, x across (d of it) and y up (h of it): the catenary's a and lowest point x0
+* (fitCatenary, scene/liana_shape.h), and its length from the first hold s(x) = a (sinh((x - x0) / a) - sinh(-x0 / a)),
+* which inverts in closed form, so the points are spaced evenly along the line itself.
 */
 HangingStrand catenaryStrand(const Vec3& from, const Vec3& to, float length, float radius, float step) {
     const Vec3 offset = to - from;
@@ -82,18 +91,9 @@ HangingStrand catenaryStrand(const Vec3& from, const Vec3& to, float length, flo
     }
 
     const double total = length;
-    const double vertical = std::sqrt(total * total - h * h);
-    double low = std::log(d / 1400.0);
-    double high = std::log(d * 1e6);
-
-    for (int halving = 0; halving < 200; ++halving) {
-        const double middle = 0.5 * (low + high);
-        const double a = std::exp(middle);
-        (2.0 * a * std::sinh(d / (2.0 * a)) > vertical ? low : high) = middle;
-    }
-
-    const double a = std::exp(0.5 * (low + high));
-    const double x0 = 0.5 * d - a * std::atanh(h / total);
+    const CatenaryFit fit = fitCatenary(d, h, total);
+    const double a = fit.a;
+    const double x0 = fit.x0;
     const double startSinh = std::sinh(-x0 / a);
     const double startCosh = std::cosh(-x0 / a);
     const Vec3 direction = across * static_cast<float>(1.0 / d);
@@ -179,7 +179,7 @@ std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const For
             const float turn = next();
             const float out = next();
             const float down = next();
-            hung.from = crownHold(crown, turn, out, down);
+            hung.from = lianaCrownHold(crown, turn, out, down);
             hung.radius = 0.5f * lianaDiameter(next()) * settings.thickness;
             const bool rope = neighbours.empty() || next() < settings.ropeShare;
 
@@ -194,7 +194,7 @@ std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const For
             } else {
                 const int other = neighbours[std::min(neighbours.size() - 1, static_cast<std::size_t>(next() * static_cast<float>(neighbours.size())))];
                 hung.otherCrown = other;
-                hung.to = crownHold(crowns[static_cast<std::size_t>(other)], next(), next(), next());
+                hung.to = lianaCrownHold(crowns[static_cast<std::size_t>(other)], next(), next(), next());
                 const float sag = leastSag + (mostSag - leastSag) * next();
                 hung.length = loopLength((hung.to - hung.from).length(), sag);
             }
@@ -204,93 +204,4 @@ std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const For
     }
 
     return lianas;
-}
-
-namespace {
-    // The runs of a strand's points inside a crown (or, with inside false, outside both), each as a strand of its own
-    // (two points at least).
-    std::vector<HangingStrand> crownRuns(const HangingStrand& strand, const LianaCrown* first, const LianaCrown* second, bool wantInside) {
-        std::vector<HangingStrand> runs;
-        HangingStrand run;
-        const auto inside = [&](const Vec3& point) {
-            return (first != nullptr && (point - first->centre).length() < first->radius) ||
-                   (second != nullptr && (point - second->centre).length() < second->radius);
-        };
-
-        for (std::size_t point = 0; point < strand.points.size(); ++point) {
-            if (inside(strand.points[point]) == wantInside) {
-                run.points.push_back(strand.points[point]);
-                run.radii.push_back(strand.radii[point]);
-
-                if (!strand.hanging.empty()) {
-                    run.hanging.push_back(strand.hanging[point]);
-                }
-
-                continue;
-            }
-
-            if (run.points.size() >= 2) {
-                runs.push_back(std::move(run));
-            }
-
-            run = HangingStrand{};
-        }
-
-        if (run.points.size() >= 2) {
-            runs.push_back(std::move(run));
-        }
-
-        return runs;
-    }
-
-    // Each liana's seed for its leaves.
-    constexpr std::uint32_t lianaLeafSeed = 0x4c49414eu;
-}
-
-std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings,
-                                     float barkTileMetres, float chunkMetres, JobSystem& jobs,
-                                     const std::vector<std::array<std::uint16_t, 2>>& anchors) {
-    // Chunks in the order of their squares, each listing its lianas in their own order.
-    std::map<std::pair<int, int>, std::vector<std::size_t>> squares;
-
-    for (std::size_t index = 0; index < lianas.size(); ++index) {
-        const Vec3& hold = lianas[index].from;
-        squares[{static_cast<int>(std::floor(hold.x / chunkMetres)), static_cast<int>(std::floor(hold.z / chunkMetres))}].push_back(index);
-    }
-
-    std::vector<std::vector<std::size_t>> chunks;
-
-    for (auto& [square, members] : squares) {
-        chunks.push_back(std::move(members));
-    }
-
-    std::vector<LianaMeshes> meshes(chunks.size());
-    jobs.parallelFor(chunks.size(), 1, [&](std::size_t chunk) {
-        LianaMeshes& built = meshes[chunk];
-
-        for (const std::size_t index : chunks[chunk]) {
-            const Liana& liana = lianas[index];
-            HangingStrand strand = catenaryStrand(liana.from, liana.to, liana.length, liana.radius);
-
-            if (index < anchors.size()) {
-                hangBetween(strand, anchors[index][0], anchors[index][1]);
-            }
-
-            appendTube(built.bark, strand, 2.0f * liana.radius >= lianaThickDiameter ? 6 : 4, barkTileMetres);
-
-            const LianaCrown* first = &crowns[static_cast<std::size_t>(liana.crown)];
-            const LianaCrown* second = liana.otherCrown >= 0 ? &crowns[static_cast<std::size_t>(liana.otherCrown)] : nullptr;
-            std::uint32_t run = 0;
-
-            for (const bool inCrown : {true, false}) {
-                const float spacing = inCrown ? settings.leafSpacing : settings.sparseLeafSpacing;
-
-                for (const HangingStrand& leafy : crownRuns(strand, first, second, inCrown)) {
-                    appendLeafCards(built.leaves, leafy, spacing, settings.leafSize, forestShapeSeed(lianaLeafSeed + liana.seed, ++run));
-                }
-            }
-        }
-    });
-
-    return meshes;
 }

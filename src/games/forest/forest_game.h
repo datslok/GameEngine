@@ -334,7 +334,8 @@ private:
     void buildFloorCover(World& world, AssetManager& assets);
 
     // The lianas hanging from the canopy and emergent trees' crowns (docs/research/VINES.md, stage 1), a chunk of ground a mesh.
-    void buildLianas(World& world, AssetManager& assets);
+    void buildLianas(AssetManager& assets);
+    void updateNearLianas(World& world, int most);
 
     // Every tree's trunk as far round as the floor's plants keep from it: the big trees' buttresses, the mid layer's trunk.
 
@@ -383,7 +384,6 @@ private:
     // (scene/wind.h), on the air entity, their bend the trees' (applySway).
     std::vector<float> canopyHeights;
     std::vector<float> emergentHeights;
-    std::vector<WindAnchor> lianaAnchors;
     ForestFloorSettings floorSettings;
     ForestLeafLightSettings leafLightSettings;
     ForestValleySettings valleySettings;
@@ -408,7 +408,8 @@ private:
     std::vector<TreePlacement> midPlacements;
     std::vector<UnderstoreyPlacement> understoreyPlacements;
     std::vector<PalmPlacement> palmPlacements;
-    std::vector<Entity> lianaEntities;
+    NearLianas nearLianas;
+    NearLianaLook lianaLook;
     std::vector<TreePlacement> climbedTrees;
     std::vector<Vec3> climbedFacing; // each one's first climber's way out of the trunk, in the world (forest-climber looks from it)
     std::vector<PlantedKindLook> treeLooks; // each species' variants as the GPU's cells draw the trees (plantTrees)

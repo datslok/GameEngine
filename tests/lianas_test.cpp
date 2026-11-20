@@ -79,7 +79,8 @@ namespace {
         assert(near(polylineLength(taut.points), straight * 1.005f, straight * 0.01f) && (taut.points.back() - low).length() < 1e-3f);
     }
 
-    // Crowns in rows 15 m apart along the path (x = 0) and away from it, 25 m up, 8 m round, over flat ground, each its own identity.
+    // Crowns in rows 15 m apart along the path (x = 0) and away from it, 25 m up, 8 m across and 3 m half-height (flat, as
+    // the canopy's), over flat ground, each its own identity.
     std::vector<LianaCrown> testCrowns() {
         std::vector<LianaCrown> crowns;
 
@@ -87,6 +88,7 @@ namespace {
             for (int column = 0; column < 10; ++column) {
                 crowns.push_back(LianaCrown{.centre = Vec3{static_cast<float>(column) * 15.0f - 30.0f, 25.0f, static_cast<float>(row) * 15.0f},
                                             .radius = 8.0f,
+                                            .halfHeight = 3.0f,
                                             .identity = 1000u + static_cast<std::uint64_t>(row * 10 + column)});
             }
         }
@@ -100,6 +102,25 @@ namespace {
 
     float pathAlongZ(float x, float) {
         return std::abs(x);
+    }
+
+    /*
+    * A hold lies inside its crown's envelope and below its centre for any shares, even in a crown three times wider than
+    * tall (the canopy's): never under its leaves in the open, as a sphere as wide as the crown put them.
+    */
+    void testHoldsStayInTheLeaves() {
+        const LianaCrown flat{.centre = Vec3{4.0f, 25.0f, -3.0f}, .radius = 14.0f, .halfHeight = 5.0f};
+
+        for (int step = 0; step <= 10; ++step) {
+            for (float out : {0.0f, 0.5f, 1.0f}) {
+                for (float down : {0.0f, 0.5f, 1.0f}) {
+                    const Vec3 hold = lianaCrownHold(flat, static_cast<float>(step) / 10.0f, out, down);
+                    assert(insideLianaCrown(flat, hold) && hold.y < flat.centre.y && hold.y > flat.centre.y - flat.halfHeight);
+                }
+            }
+        }
+
+        assert(!insideLianaCrown(flat, Vec3{4.0f, 25.0f - 6.0f, -3.0f}) && insideLianaCrown(flat, Vec3{4.0f + 13.0f, 25.0f, -3.0f}));
     }
 
     /*
@@ -122,7 +143,7 @@ namespace {
             const Liana& liana = lianas[index];
             assert((liana.from - again[index].from).length() == 0.0f && liana.length == again[index].length);
             const LianaCrown& crown = crowns[static_cast<std::size_t>(liana.crown)];
-            assert((liana.from - crown.centre).length() < crown.radius && liana.from.y < crown.centre.y);
+            assert(insideLianaCrown(crown, liana.from) && liana.from.y < crown.centre.y);
             // The census's 1-20 cm across, times the settings' thickness.
             assert(liana.radius >= 0.005f * settings.thickness && liana.radius <= 0.1f * settings.thickness);
             perCrown[static_cast<std::size_t>(liana.crown)] += 1;
@@ -130,7 +151,7 @@ namespace {
 
             if (liana.otherCrown >= 0) {
                 const LianaCrown& other = crowns[static_cast<std::size_t>(liana.otherCrown)];
-                assert(liana.otherCrown != liana.crown && (liana.to - other.centre).length() < other.radius && liana.to.y < other.centre.y);
+                assert(liana.otherCrown != liana.crown && insideLianaCrown(other, liana.to) && liana.to.y < other.centre.y);
                 assert(liana.length > straight * 1.01f && liana.length < straight * 1.6f);
                 loops += 1;
             } else {
@@ -223,83 +244,21 @@ namespace {
         }
     }
 
-    // An ivy card's vertices (appendLeafCards draws whole squares).
-    constexpr std::size_t leafCardVertices = 4;
-
-    // Whether a point is inside any of the crowns.
-    bool insideACrown(const Vec3& point, const std::vector<LianaCrown>& crowns) {
-        return std::any_of(crowns.begin(), crowns.end(), [&](const LianaCrown& crown) {
-            return (point - crown.centre).length() < crown.radius;
-        });
-    }
-
     /*
-    * Ivy all along a liana, sparse outside the crowns and dense inside them: a loop between two crowns carries leaves on
-    * both stretches, and more of them a metre inside.
-    */
-    void testIvyIsDensestInTheCrowns() {
-        const std::vector<LianaCrown> crowns{LianaCrown{Vec3{0.0f, 25.0f, 0.0f}, 8.0f}, LianaCrown{Vec3{30.0f, 25.0f, 0.0f}, 8.0f}};
-        const Liana loop{.from = Vec3{2.0f, 20.0f, 0.0f}, .to = Vec3{28.0f, 20.0f, 0.0f}, .length = 32.0f, .radius = 0.03f, .crown = 0, .otherCrown = 1};
-        const ForestLianaSettings settings;
-        const std::vector<LianaMeshes> chunks = lianaMeshes({loop}, crowns, settings, 2.0f, 1000.0f, testJobs());
-        assert(chunks.size() == 1);
-
-        // Each stretch's length along the line, and the leaves whose stems sit on it (a card's first vertex).
-        const HangingStrand strand = catenaryStrand(loop.from, loop.to, loop.length, loop.radius);
-        float insideLength = 0.0f;
-        float outsideLength = 0.0f;
-
-        for (std::size_t point = 1; point < strand.points.size(); ++point) {
-            const float step = (strand.points[point] - strand.points[point - 1]).length();
-            (insideACrown(strand.points[point], crowns) ? insideLength : outsideLength) += step;
-        }
-
-        int insideCards = 0;
-        int outsideCards = 0;
-        const std::vector<MeshVertex>& leaves = chunks.front().leaves.vertices;
-
-        for (std::size_t vertex = 0; vertex < leaves.size(); vertex += leafCardVertices) {
-            (insideACrown(leaves[vertex].position, crowns) ? insideCards : outsideCards) += 1;
-        }
-
-        assert(insideLength > 0.0f && outsideLength > 0.0f && outsideCards > 0);
-        assert(static_cast<float>(insideCards) / insideLength > 2.0f * static_cast<float>(outsideCards) / outsideLength);
-    }
-
-    // The meshes, a chunk of the ground each: bark tubes round every liana, facing out, the same every run.
-    void testLianaMeshes() {
-        const std::vector<LianaCrown> crowns = testCrowns();
-        const ForestLianaSettings settings;
-        const std::vector<Liana> lianas = chooseLianas(crowns, settings, 7, flatGround, pathAlongZ);
-        const std::vector<LianaMeshes> chunks = lianaMeshes(lianas, crowns, settings, 2.0f, 40.0f, testJobs());
-        assert(chunks.size() > 1);
-        std::size_t barkVertices = 0;
-
-        for (const LianaMeshes& chunk : chunks) {
-            assert(!chunk.bark.vertices.empty() && chunk.bark.indices.size() % 3 == 0 && trianglesFaceTheirNormals(chunk.bark));
-            barkVertices += chunk.bark.vertices.size();
-        }
-
-        assert(barkVertices > 0);
-
-        // The same every run.
-        const std::vector<LianaMeshes> again = lianaMeshes(lianas, crowns, settings, 2.0f, 40.0f, testJobs());
-        assert(again.size() == chunks.size() && again.front().bark.vertices.size() == chunks.front().bark.vertices.size());
-    }
-
-    /*
-    * The forest hangs them from its canopy and emergent trees: still, drawn only, casting shadows into the nearest two
-    * cascades; their settings start-up only.
+    * The forest hangs them from its canopy and emergent trees in the near cells round a start among the trees (none from
+    * the rim, too far from the patch): a still entity a liana,
+    * the template tube (drawn only) naming its record, casting shadows into the nearest two cascades; their settings
+    * start-up only.
     */
     void testTheForestHangsThem() {
-        TestForest forest;
+        TestForest forest{testValley(ForestStart::Trees)};
         const std::vector<Entity>& lianas = forest.game.getLianas();
         assert(!lianas.empty());
 
         for (const Entity entity : lianas) {
             const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.isStill() && renderer.shadowCascades == lianaShadowCascades);
-            assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
+            assert(renderer.isStill() && renderer.shadowCascades == lianaShadowCascades && renderer.lianaShape > 0u);
+            assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh) && renderer.parts.front().mesh == forest.world.get<ModelRenderer>(lianas.front()).parts.front().mesh);
         }
 
         FieldCounter counter;
@@ -311,9 +270,8 @@ namespace {
 void testLianas() {
     testDiametersFollowTheCensus();
     testTheCatenary();
+    testHoldsStayInTheLeaves();
     testChoosingLianas();
     testACrownsLianasAreItsOwn();
-    testLianaMeshes();
-    testIvyIsDensestInTheCrowns();
     testTheForestHangsThem();
 }

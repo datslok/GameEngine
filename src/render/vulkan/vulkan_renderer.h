@@ -391,6 +391,12 @@ private:
     // The bytes the last frame copied into lasting buffers (F4's CELLS line).
     std::size_t lastingCopiedBytes = 0;
 
+    // The lianas' records in GPU memory (binding 41), slot by slot, and the block each slot last copied (by pointer: a
+    // slot's block is replaced whole when it changes) at the slots' size then (writeLianaShapes).
+    std::unique_ptr<VulkanLastingBuffer> lianaShapeRecords;
+    std::vector<std::shared_ptr<const std::vector<LianaShape>>> uploadedLianaSlots;
+    std::size_t uploadedLianaPerSlot = 0;
+
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
     // without and with the light probes (probe_capture.frag), each for cut-outs too, indexed by capturePipelineIndex. On GPUs with ray queries each again
     // tracing the sun's shadow past its cascades (probe_capture_rays.frag), for frames with ray tracing on, in a layout
@@ -739,6 +745,7 @@ private:
     // The lasting instances, last-frame matrices and materials brought up to date (copies recorded in the frame's
     // commands): the still records repacked this frame, then the moving draws' records.
     void writeLastingRecords(const FrameContext& frame, const std::vector<DrawRange>& repacked, const SceneRecords& records);
+    void writeLianaShapes(const FrameContext& frame, const LianaShapes& shapes);
 
     // Whether a frame reads the sky visibility grid: the setting on, a static level, and no light probes (which know the
     // sky's reach themselves).

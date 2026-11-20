@@ -8,6 +8,7 @@
 #include "terrain_data.glsl"
 #include "impostor.glsl"
 #include "wind_data.glsl"
+#include "liana_data.glsl"
 #include "card_thinning_data.glsl"
 #include "level_fade.glsl"
 
@@ -149,6 +150,39 @@ void main() {
         worldTangent = vec4(viewDirection, normal.x * (treeScale.x + treeScale.y + treeScale.z) / 3.0);
 #ifdef MAIN_MOTION
         stillMotion(relativePosition);
+#endif
+        return;
+    }
+
+    /*
+    * A liana (scene/liana_shape.h): the template tube bent onto its record's catenary and swayed as it hangs between its
+    * trees, the same in every view; the instance's matrix only placed the template's box (its bounds and level). Measured
+    * from the camera from its first hold on. Its shape never changes, so only its sway moves it.
+    */
+    if (instance.hanging.w > 0u) {
+        LianaShape shape = lianaShapes[instance.hanging.w - 1u];
+        LianaVertex bent = lianaTemplateVertex(shape, position, uv.x);
+        vec3 hold = shape.from.xyz - cameraOrigin.xyz;
+        vec3 world = shape.from.xyz + bent.offset;
+        float swing = uintBitsToFloat(instance.hanging.y);
+        vec3 lianaSway = lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, world, cameraOrigin.xyz, false);
+        relativePosition = hold + bent.offset + lianaSway;
+        gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
+        gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
+        viewerPosition = captureView ? captureEye.xyz : vec3(0.0);
+        textureUv = bent.uv;
+        frameAxes = mat3(1.0);
+        framePosition = world;
+        worldNormal = bent.normal;
+        worldTangent = vec4(bent.tangent, 1.0);
+#ifdef MAIN_MOTION
+        stillMotion(relativePosition);
+
+        if (motionOptions.x != 0.0 && lianaSway != vec3(0.0)) {
+            vec3 previousRelative = hold + bent.offset + lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, world, cameraOrigin.xyz, true);
+            previousClip = motionPrevious * vec4(previousRelative, 1.0);
+            movement = 1.0;
+        }
 #endif
         return;
     }

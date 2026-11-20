@@ -150,6 +150,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     lastingInstances = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuInstance));
     lastingMaterials = std::make_unique<VulkanLastingBuffer>(device, sizeof(GpuMaterial));
     lastingPreviousModels = std::make_unique<VulkanLastingBuffer>(device, sizeof(std::array<float, 16>));
+    lianaShapeRecords = std::make_unique<VulkanLastingBuffer>(device, sizeof(LianaShape));
     meshPool = std::make_unique<VulkanMeshPool>(device, uploads);
     cullFrameStyles.resize(framesInFlight);
     cullFrameViews.resize(framesInFlight);
@@ -2481,14 +2482,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     updateTerrainHeights(description);
     buffers.wind.write(&frameWind, sizeof(frameWind));
 
-    // The anchors hanging things hang from (at least one record, so the buffer is never empty), and their vertices.
-    std::vector<GpuWindAnchor> anchors(description.windAnchors ? std::max<std::size_t>(description.windAnchors->size(), 1) : 1);
-
-    if (description.windAnchors) {
-        std::transform(description.windAnchors->begin(), description.windAnchors->end(), anchors.begin(), packWindAnchor);
-    }
-
-    buffers.windAnchors.write(anchors);
+    writeLianaShapes(frame, description.lianaShapes);
 
     // The placed parts' instances in the placed table's order (render/gpu/placed_drawing.h; one unused without).
     std::vector<GpuInstance> placedParts;
@@ -2539,6 +2533,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.thinningCards = VkDescriptorBufferInfo{thinningRecords.empty() ? noThinningCards.get() : thinningCards.get(), 0, VK_WHOLE_SIZE};
     views.placedPlants = VkDescriptorBufferInfo{framePlaced ? planting->getPlants() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.placedEntries = framePlaced ? placedDrawing->describeEntries(frame.frameIndex) : VkDescriptorBufferInfo{noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    views.lianaShapes = lianaShapeRecords->describe();
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
 
@@ -2574,6 +2569,35 @@ void VulkanRenderer::writeLastingRecords(const FrameContext& frame, const std::v
     lastingMaterials->write(frame.commands, frame.frameIndex, materialWrites);
 
     lastingCopiedBytes = lastingInstances->getCopiedBytes() + lastingPreviousModels->getCopiedBytes() + lastingMaterials->getCopiedBytes();
+}
+
+/*
+* A slot's block is replaced whole when its cell changes and shared otherwise, so a block other than the one last
+* copied there (or every block, when the buffer was made afresh or the slots' size changed) is all that is copied: the
+* cost grows with the cells made, not with the lianas held.
+*/
+void VulkanRenderer::writeLianaShapes(const FrameContext& frame, const LianaShapes& shapes) {
+    const std::size_t perSlot = shapes.perSlot;
+
+    if (lianaShapeRecords->reserve(std::max<std::size_t>(shapes.slots.size() * perSlot, 1)) || perSlot != uploadedLianaPerSlot) {
+        uploadedLianaSlots.clear();
+        uploadedLianaPerSlot = perSlot;
+    }
+
+    uploadedLianaSlots.resize(shapes.slots.size());
+    std::vector<LastingWrite> writes;
+
+    for (std::size_t slot = 0; slot < shapes.slots.size(); ++slot) {
+        const std::shared_ptr<const std::vector<LianaShape>>& block = shapes.slots[slot];
+
+        if (block && !block->empty() && block != uploadedLianaSlots[slot]) {
+            writes.push_back(LastingWrite{slot * perSlot, reinterpret_cast<const std::byte*>(block->data()), std::min(block->size(), perSlot)});
+        }
+
+        uploadedLianaSlots[slot] = block;
+    }
+
+    lianaShapeRecords->write(frame.commands, frame.frameIndex, writes);
 }
 
 /*

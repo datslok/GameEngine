@@ -108,6 +108,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `card_thinning.glsl` | `scene/card_thinning` | `card_thinning_gpu_test.cpp` |
 | `facet_variation.glsl` | `render/gpu/facet_variation` | `facet_variation_gpu_test.cpp` |
 | `wind.glsl` | `render/gpu/wind` | `wind_gpu_test.cpp` |
+| `liana.glsl` | `scene/liana_shape` | `liana_gpu_test.cpp` |
 | `cloth.glsl`, `deform.glsl` | `src/cloth/` itself, `scene/deforming_mesh` | `cloth_gpu_test.cpp` (and the cloth passes) |
 
 - Without a test shader of their own: `probe_cascades.glsl` (`render/gpu/probe_cascades`; checked through the real cascade passes in `ddgi_gpu_test.cpp`), `ray_scene.glsl` (through `ray_query_test.comp`), and helpers such as `hash.glsl`, `fibonacci.glsl`, `impostor_sampling.glsl` reached through the libraries that include them.

@@ -33,6 +33,7 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     instance.hanging[0] = draw.hangingEntry;
     instance.hanging[1] = std::bit_cast<std::uint32_t>(draw.sway.swing);
     instance.hanging[2] = draw.thinningEntry;
+    instance.hanging[3] = draw.lianaShape;
     const BoundingSphere& choosing = draw.levelBounds.radius >= 0.0f ? draw.levelBounds : draw.bounds;
     instance.levelSphere[0] = choosing.centre.x;
     instance.levelSphere[1] = choosing.centre.y;

@@ -49,7 +49,7 @@ struct GpuInstance {
     float handedness[4];    // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale), for lengths in model units
     std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: its kind (instance_shared.h)
     float sway[4];          // how it sways in the wind (render/gpu/wind.h, packSway): category (-1 still), height, bend, flutter
-    std::uint32_t hanging[4]; // x: one past its mesh's first hanging vertex (DrawItem::hangingEntry, 0 none), y: its swing's bits (WindSway::swing), z: one past its mesh's card thinning header (DrawItem::thinningEntry, 0 none)
+    std::uint32_t hanging[4]; // x: one past its mesh's first hanging vertex (DrawItem::hangingEntry, 0 none), y: its swing's bits (WindSway::swing), z: one past its mesh's card thinning header (DrawItem::thinningEntry, 0 none), w: one past its liana's record (DrawItem::lianaShape, 0 none)
     float levelSphere[4];     // the sphere its level of detail is chosen by, in the world (DrawItem::levelBounds, else its bounds): xyz centre, w radius (below 0 unknown)
 };
 

@@ -10,6 +10,7 @@
 #include "scene/camera.h"
 #include "scene/debug_draw.h"
 #include "scene/deforming_mesh.h"
+#include "scene/liana_shape.h"
 #include "scene/lighting.h"
 #include "scene/material.h"
 #include "scene/mesh_level.h"
@@ -96,6 +97,9 @@ struct DrawItem {
     // One past its mesh's header in the renderer's card thinning records (IndexedMesh::thinning, attachVertexEntries; 0 for
     // a mesh not thinned), so the vertex shaders shrink and grow its cards (scene/card_thinning.h).
     std::uint32_t thinningEntry = 0;
+
+    // One past its liana's record in FrameDescription::lianaShapes (ModelRenderer::lianaShape), 0 for every other draw.
+    std::uint32_t lianaShape = 0;
 };
 
 // Where a mesh's per-vertex records begin in the renderer's buffers, as it gave them when the mesh was uploaded: one past
@@ -225,8 +229,8 @@ struct FrameDescription {
     // none without one.
     std::optional<Wind> wind{};
 
-    // What hanging things hang from (scene/wind.h, the first WindAnchors placed), none without.
-    std::shared_ptr<const std::vector<WindAnchor>> windAnchors{};
+    // The lianas the GPU bends (scene/liana_shape.h, the first LianaShapes placed), none without.
+    LianaShapes lianaShapes{};
 
     // The maps and layers the GPU plants its cells round the camera from (scene/planting_cells.h, the first
     // PlantingSource placed), uploaded again when the field or its version changes; none without one.

@@ -90,7 +90,7 @@ Everything on the air entity, rewritten each frame by `updateDaylight`:
 
 - `ForestSwaySettings` (F5 Forest, Sway, live): a `ForestSwayGroup {bend, flutter}` each for trees (0.1, 0.3), plants (0.3, 0.04), grass (0.5, 0.02) and the floor's cover (0.3, 0.01), plus `hangingSwing` (0.3) and `hangingFlutter` (0.05).
 - Each swaying entity is a `ForestSwayer {entity, part, height, leafy}`: its `ForestSwayPart`, the height its bend is measured against (a tree's for everything on it), and whether it has leaves to flutter.
-- `forestSway(settings, swayer)` → `WindSway`; `applySway` gives every swayer its sway only when the settings change, marking each changed, and writes the lianas' `WindAnchors` (their bend the trees').
+- `forestSway(settings, swayer)` → `WindSway`; `applySway` gives every swayer its sway only when the settings change, marking each changed, and gives the near lianas their sway and their records the trees' bend (`NearLianas::resway`).
 
 ## Settings
 

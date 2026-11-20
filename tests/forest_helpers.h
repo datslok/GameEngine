@@ -96,12 +96,20 @@ inline std::vector<PlantedPlant> plantAlone(const PlantingLayerRecord& layer, co
     return kept;
 }
 
+// The tests' valley: its coarsest ground and fewer shapes; starting among the trees (the lianas are made round the
+// player: the rim is too far from the patch for any).
+inline ForestValleySettings testValley(ForestStart start = ForestStart::Rim) {
+    ForestValleySettings valley{.groundCoarseness = 2, .pillarCount = 40, .islandCount = 8};
+    valley.start = start;
+    return valley;
+}
+
 struct TestForest {
     World world;
     AssetManager assets;
     ForestGame game{ControlMode::FirstPerson, true, "no-such-folder/forest"};
 
-    explicit TestForest(ForestValleySettings valley = ForestValleySettings{.groundCoarseness = 2, .pillarCount = 40, .islandCount = 8}) {
+    explicit TestForest(ForestValleySettings valley = testValley()) {
         game.getValleySettings() = valley;
         game.getTreeSettings().attractors = 300;
         game.getTreeSettings().variants = 2;

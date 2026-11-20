@@ -16,14 +16,10 @@ layout(set = 1, binding = 38) uniform sampler2DArray windSprings;
 layout(set = 1, binding = 39) uniform sampler2DArray windPreviousSprings;
 
 // Every hanging mesh's vertices (render/gpu/wind.h, packHangingVertex), three words each: the anchors (first in the
-// low 16 bits), the share along and the arm as half floats, the swing's length as a half float; and the anchors they
-// hang from.
+// low 16 bits, WIND_ANCHOR_FIXED or WIND_ANCHOR_OWN), the share along and the arm as half floats, the swing's length as
+// a half float.
 layout(std430, set = 1, binding = 40) readonly buffer HangingVertices {
     uint hangingWords[];
-};
-
-layout(std430, set = 1, binding = 41) readonly buffer WindAnchors {
-    WindAnchorRecord windAnchors[];
 };
 
 /*
@@ -62,21 +58,16 @@ vec3 windOwnSway(mat4 model, vec4 sway, float scale, vec3 position, vec3 world, 
     return windSwayOffset(fromFoot, position.y, world, sway, scale, spring, fade, windField.flutters[category].xy, seconds);
 }
 
-// How an anchor of a hanging vertex moves: not at all when fixed, as its own object sways at the vertex (own), else as
-// its tree does there (windAnchorOffset), its spring and fade at the tree's foot.
-vec3 windAnchorMotion(uint anchor, vec3 own, vec3 eye, float seconds, bool previous) {
-    if (anchor == uint(WIND_ANCHOR_FIXED)) {
-        return vec3(0.0);
-    }
-
-    if (anchor == uint(WIND_ANCHOR_OWN)) {
-        return own;
-    }
-
-    WindAnchorRecord record = windAnchors[anchor];
+// How an anchor on a tree moves: as the tree does there (windAnchorOffset), its spring and fade at the tree's foot.
+vec3 windTreeAnchorMotion(WindAnchorRecord record, vec3 eye, float seconds, bool previous) {
     vec2 spring = windSpringAt(record.foot.xz, WIND_CATEGORY_TREES, previous);
     float fade = windSwayFade(distance(record.foot.xyz, eye), windField.sway.y, windField.sway.z);
     return windAnchorOffset(record, spring, fade, seconds);
+}
+
+// How an anchor of a hanging vertex moves: not at all when fixed, else as its own object sways at the vertex (own).
+vec3 windAnchorMotion(uint anchor, vec3 own) {
+    return anchor == uint(WIND_ANCHOR_FIXED) ? vec3(0.0) : own;
 }
 
 // A hanging vertex's spring at a place: the hanging bands' springs blended by its swing's length (windChainShares), so
@@ -124,8 +115,8 @@ vec3 windSwayOfVertex(mat4 model, vec4 sway, float scale, uvec4 hanging, int ver
     float swingLength = unpackHalf2x16(hangingWords[word + 2u]).x;
     bool needsOwn = first == uint(WIND_ANCHOR_OWN) || second == uint(WIND_ANCHOR_OWN);
     vec3 own = needsOwn ? windOwnSway(model, sway, scale, position, world, eye, seconds, previous) : vec3(0.0);
-    vec3 firstMotion = windAnchorMotion(first, own, eye, seconds, previous);
-    vec3 secondMotion = windAnchorMotion(second, own, eye, seconds, previous);
+    vec3 firstMotion = windAnchorMotion(first, own);
+    vec3 secondMotion = windAnchorMotion(second, own);
     vec2 spring = windChainSpringAt(world.xz, swingLength, previous);
     float fade = windSwayFade(distance(world, eye), windField.sway.y, windField.sway.z);
     vec3 swing = windSwingOffset(alongAndArm.y, world, uintBitsToFloat(hanging.y), needsOwn ? 0.0 : sway.w, spring, fade,

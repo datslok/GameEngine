@@ -5,6 +5,7 @@
 #include "math/vec3.h"
 #include "math/vec4.h"
 #include "render/gpu/wind_shared.h"
+#include "scene/liana_shape.h"
 #include "scene/wind.h"
 
 #include <array>
@@ -250,8 +251,8 @@ Vec3 windHangingBands(const WindSettings& settings);
 */
 Vec3 windChainShares(float swingLength, const Vec3& bands);
 
-// An anchor as the shaders read it (binding 41): foot (xyz, w its tree's height in its mesh's units), point (xyz, w the
-// tree's scale) and the tree's bend (x).
+// A point hanging things hang from on a swaying tree, as the shaders build it (lianaWindAnchor): foot (xyz, w its
+// tree's height in its mesh's units), point (xyz, w the tree's scale) and the tree's bend (x).
 struct GpuWindAnchor {
     float foot[4];
     float point[4];
@@ -260,7 +261,9 @@ struct GpuWindAnchor {
 
 static_assert(sizeof(GpuWindAnchor) == 48, "GpuWindAnchor must match wind_data.glsl's WindAnchorRecord");
 
-GpuWindAnchor packWindAnchor(const WindAnchor& anchor);
+// A liana's anchor in its first tree's crown (far false), or in its second's at its far end (lianaWindAnchor in
+// liana.glsl): the tree's foot, height, scale and bend from its record (scene/liana_shape.h).
+GpuWindAnchor lianaWindAnchor(const LianaShape& shape, bool far);
 
 /*
 * How an anchor moves: as its tree's own vertex at its point would (windSwayOffset, the trees' category, no flutter),

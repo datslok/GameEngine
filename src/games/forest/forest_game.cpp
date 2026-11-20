@@ -24,6 +24,7 @@
 #include "scene/terrain.h"
 
 #include <algorithm>
+#include <limits>
 #include <array>
 #include <filesystem>
 #include <utility>
@@ -368,11 +369,12 @@ const char* ForestGame::title() const {
 
 void ForestGame::onInit(World& world, AssetManager& assets) {
     flashlight.create(world, flashlightSettings.on);
+    air = world.create();
     buildGround(world, assets);
     buildShapes(world, assets);
     buildPlantingMaps();
     buildTrees(assets);
-    buildLianas(world, assets);
+    buildLianas(assets);
     buildUnderstorey(assets);
     buildPalms(assets);
     buildGrass(world, assets);
@@ -391,7 +393,6 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     controls.spawnBody(world);
     sun = world.create();
     world.add(sun, DirectionalLight{});
-    air = world.create();
     // The field the GPU plants its cells round the camera from (scene/planting_cells.h), and the trees' looks it draws
     // over the patch (given again whenever the sway changes, applySway).
     world.add(air, PlantingSource{std::make_shared<const PlantingField>(PlantingField{valleyMaps.planting, forestPlantingLayers(plantingSpecies())}), 1,
@@ -402,6 +403,8 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
 
     controls.setControlMode(world, controls.getMode());
     updateDaylight(world);
+    // Every near cell round the start at once, before the first frame.
+    updateNearLianas(world, std::numeric_limits<int>::max());
 }
 
 /*
@@ -1024,9 +1027,22 @@ void ForestGame::buildFloorCover(World& world, AssetManager& assets) {
 }
 
 namespace {
-    // The lianas' own seed, and the squares of ground their meshes are grouped by.
+    // The lianas' own seed.
     constexpr std::uint64_t lianaSeed = 0x4c69616eull;
-    constexpr float lianaChunkMetres = 40.0f;
+
+    /*
+    * The lianas' template tube at its three levels (rings along, sides round), and how far each coarser one strays: 64
+    * rings keep a 30 m liana's rings about half a metre apart as its meshes had them; 4 sides stray a 3 cm tube's radius
+    * by 30% (about a centimetre), 3 sides and 6 rings sag off the curve by up to a few tens of centimetres.
+    */
+    constexpr int lianaNearRings = 64;
+    constexpr int lianaNearSides = 6;
+    constexpr int lianaMiddleRings = 16;
+    constexpr int lianaMiddleSides = 4;
+    constexpr float lianaMiddleError = 0.03f;
+    constexpr int lianaFarRings = 6;
+    constexpr int lianaFarSides = 3;
+    constexpr float lianaFarError = 0.25f;
 
     // A tree variant's climbers' and epiphytes' uses of its seed (forestShapeSeed), apart from its growth's own uses.
     constexpr std::uint32_t climberSeedUse = 17;
@@ -1035,11 +1051,26 @@ namespace {
 
 /*
 * From the canopy and emergent trees' crowns (the mid layer's are too thin for these woody ones), over the valley's
-* ground, more along the path. Bark as the trees', ivy as the islands' vines; still, drawn only, into the nearest
-* cascades only. Hung cell by cell over the patch (near_trees.h), as the cells round the player will hang them: the
-* cells' crowns and lianas joined into one list, each cell's crowns after the last's.
+* ground, more along the path, in the near cells round the player (near_trees.h): drawn by the GPU, one template tube
+* bent onto each liana's record (scene/liana_shape.h) at three levels, bark as the trees', into the nearest cascades
+* only. The cells within the radius of the start made at once; the rest follow the player (updateNearLianas).
 */
-void ForestGame::buildLianas(World& world, AssetManager& assets) {
+void ForestGame::buildLianas(AssetManager& assets) {
+    const MeshHandle tube = assets.addDrawnMesh(lianaTemplateMesh(lianaNearRings, lianaNearSides));
+    const MeshHandle middle = assets.addDrawnMesh(lianaTemplateMesh(lianaMiddleRings, lianaMiddleSides));
+    const MeshHandle far = assets.addDrawnMesh(lianaTemplateMesh(lianaFarRings, lianaFarSides));
+    assets.setMeshLevels(tube, {MeshLevel{middle, lianaMiddleError}, MeshLevel{far, lianaFarError}});
+    lianaLook = NearLianaLook{.tube = tube,
+                              .bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer),
+                              .sway = forestSway(swaySettings, ForestSwayer{Entity{}, ForestSwayPart::Hanging, 1.0f, false}),
+                              .shadowCascades = lianaShadowCascades};
+}
+
+/*
+* The cells round the player: up to most made this frame (all within the radius at the start). Over the patch only,
+* where the GPU draws the trees, until the whole valley is planted (ROADMAP e1).
+*/
+void ForestGame::updateNearLianas(World& world, int most) {
     const ForestSpecies species = plantingSpecies();
     const NearTreeSources sources{.species = species,
                                   .maps = valleyMaps.planting,
@@ -1047,68 +1078,9 @@ void ForestGame::buildLianas(World& world, AssetManager& assets) {
                                   .region = forestPatch,
                                   .lianas = lianaSettings,
                                   .lianaSeed = lianaSeed};
-    std::vector<NearTree> trees;
-    std::vector<LianaCrown> crowns;
-    std::vector<Liana> lianas;
-
-    for (const PlantingCell& cell : nearCellsOver(regionBox(forestPatch), nearTreeSettings.cellMetres)) {
-        NearTreeCell made = makeNearTreeCell(cell, nearTreeSettings.cellMetres, sources, getJobs());
-        const int first = static_cast<int>(crowns.size());
-
-        for (Liana& liana : made.lianas) {
-            liana.crown += first;
-            liana.otherCrown = liana.otherCrown >= 0 ? liana.otherCrown + first : -1;
-            lianas.push_back(liana);
-        }
-
-        trees.insert(trees.end(), made.trees.begin(), made.trees.end());
-        crowns.insert(crowns.end(), made.crowns.begin(), made.crowns.end());
-    }
-
-    if (lianas.empty()) {
-        return;
-    }
-
-    /*
-    * Each liana hangs in the wind between two anchors (scene/wind.h): its hold in its crown, moving as that tree's crown
-    * does there, and its far end, in another crown or fixed on the ground.
-    */
-    const auto anchorAt = [&](int crown, const Vec3& point) {
-        if (lianaAnchors.size() >= static_cast<std::size_t>(windAnchorOwn)) {
-            return windAnchorFixed;
-        }
-
-        const NearTree& tree = trees[static_cast<std::size_t>(crown)];
-        const std::vector<float>& heights = tree.layer == ForestLayer::Emergent ? emergentHeights : canopyHeights;
-        const std::size_t variant = static_cast<std::size_t>(tree.placement.variant);
-        const float height = variant < heights.size() ? heights[variant] : 1.0f;
-        lianaAnchors.push_back(WindAnchor{.foot = tree.placement.foot, .height = height, .scale = tree.placement.scale, .bend = swaySettings.trees.bend,
-                                          .point = point});
-        return static_cast<std::uint16_t>(lianaAnchors.size() - 1);
-    };
-    std::vector<std::array<std::uint16_t, 2>> anchors;
-    lianaAnchors.clear();
-
-    for (const Liana& liana : lianas) {
-        const std::uint16_t first = anchorAt(liana.crown, liana.from);
-        anchors.push_back({first, liana.otherCrown >= 0 ? anchorAt(liana.otherCrown, liana.to) : windAnchorFixed});
-    }
-
-    std::vector<LianaMeshes> chunks = lianaMeshes(lianas, crowns, lianaSettings, forestTreeBarkLayer.tileMetres, lianaChunkMetres, getJobs(), anchors);
-    const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
-    const Material leaf = withLeafLight(forestLeafMaterial(assets, assetFolder), leafLightSettings);
-    const auto add = [&](IndexedMesh mesh, const Material& material, bool leafy) {
-        if (!mesh.vertices.empty()) {
-            lianaEntities.push_back(addShape(world, assets.addDrawnMesh(std::move(mesh)), material, Transform{}));
-            world.get<ModelRenderer>(lianaEntities.back()).shadowCascades = lianaShadowCascades;
-            swayers.push_back(ForestSwayer{lianaEntities.back(), ForestSwayPart::Hanging, 1.0f, leafy});
-        }
-    };
-
-    for (LianaMeshes& chunk : chunks) {
-        add(std::move(chunk.bark), bark, false);
-        add(std::move(chunk.leaves), leaf, true);
-    }
+    const NearLianaTrees trees{.emergentHeights = emergentHeights, .canopyHeights = canopyHeights, .bend = swaySettings.trees.bend};
+    const Vec3 place = controls.getCamera().getPosition();
+    nearLianas.update(world, air, Vec2{place.x, place.z}, nearTreeSettings, most, sources, trees, lianaLook, forestTreeBarkLayer.tileMetres, getJobs());
 }
 
 std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
@@ -1367,6 +1339,7 @@ void ForestGame::onUpdate(World& world, const Input& input, float frameSeconds, 
     }
 
     updateDaylight(world);
+    updateNearLianas(world, nearTreeSettings.cellsAFrame);
     flashlight.place(world, flashlightInHand(controls.getCamera(), flashlightSettings));
 
     if (flashlight.isOn(world) != flashlightSettings.on) {
@@ -1503,18 +1476,9 @@ void ForestGame::applySway(World& world) {
 
     world.get<PlantingSource>(air).looks = plantedLooks();
 
-    // The lianas' anchors bend as their trees do, on the air entity.
-    for (WindAnchor& anchor : lianaAnchors) {
-        anchor.bend = swaySettings.trees.bend;
-    }
-
-    const WindAnchors anchors{std::make_shared<const std::vector<WindAnchor>>(lianaAnchors)};
-
-    if (world.has<WindAnchors>(air)) {
-        world.get<WindAnchors>(air) = anchors;
-    } else {
-        world.add(air, anchors);
-    }
+    // The lianas sway as hanging things, their ends bending as their trees do (their records' bend).
+    lianaLook.sway = forestSway(swaySettings, ForestSwayer{Entity{}, ForestSwayPart::Hanging, 1.0f, false});
+    nearLianas.resway(world, air, lianaLook.sway, swaySettings.trees.bend);
 
     appliedSwaySettings = swaySettings;
 }
@@ -1957,7 +1921,7 @@ ForestLianaSettings& ForestGame::getLianaSettings() {
 }
 
 const std::vector<Entity>& ForestGame::getLianas() const {
-    return lianaEntities;
+    return nearLianas.getEntities();
 }
 
 ForestClimberSettings& ForestGame::getClimberSettings() {
