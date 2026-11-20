@@ -124,6 +124,57 @@ void visit(ForestLianaSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Leaf spacing", settings.leafSpacing, {.min = 0.05f, .max = 5.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Sparse leaf spacing", settings.sparseLeafSpacing, {.min = 0.05f, .max = 20.0f, .sliderMax = 5.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leaf size", settings.leafSize, {.min = 0.02f, .max = 2.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Ivy thinning distance", settings.ivyThinDistance, {.min = 0.0f, .max = 1000.0f, .sliderMax = 300.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Ivy distance", settings.ivyDistance, {.min = 0.0f, .max = 1000.0f, .sliderMax = 300.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+}
+
+/*
+* A step can jump over a thin slice of crown only where the liana grazes its edge, which the leaves there hardly show;
+* a liana enters a crown only at its hold, so walking from the hold finds the first crossing.
+*/
+float lianaRunInCrown(const LianaShape& shape, const LianaCrown& crown, bool fromFarEnd) {
+    const Vec3 from{shape.from[0], shape.from[1], shape.from[2]};
+    const float length = shape.to[3];
+    const auto pointAt = [&](float metres) {
+        const float share = std::clamp(fromFarEnd ? 1.0f - metres / length : metres / length, 0.0f, 1.0f);
+        return from + lianaCentre(shape, share).offset;
+    };
+
+    if (length <= 0.0f || !insideLianaCrown(crown, pointAt(0.0f))) {
+        return 0.0f;
+    }
+
+    float inside = 0.0f;
+
+    while (inside < length) {
+        const float next = std::min(inside + lianaStepMetres, length);
+
+        if (!insideLianaCrown(crown, pointAt(next))) {
+            float outside = next;
+
+            while (outside - inside > 0.001f) {
+                const float middle = 0.5f * (inside + outside);
+                (insideLianaCrown(crown, pointAt(middle)) ? inside : outside) = middle;
+            }
+
+            return 0.5f * (inside + outside);
+        }
+
+        inside = next;
+    }
+
+    return length;
+}
+
+LianaLeaves lianaIvy(const LianaShape& shape, const LianaCrown& first, const LianaCrown* second, const ForestLianaSettings& settings, std::uint32_t seed) {
+    return LianaLeaves{.firstCrownMetres = lianaRunInCrown(shape, first, false),
+                       .lastCrownMetres = second != nullptr ? lianaRunInCrown(shape, *second, true) : 0.0f,
+                       .spacing = settings.leafSpacing,
+                       .sparseSpacing = settings.sparseLeafSpacing,
+                       .size = settings.leafSize,
+                       .thinFrom = settings.ivyThinDistance,
+                       .goneBy = settings.ivyDistance,
+                       .seed = seed};
 }
 
 /*

@@ -516,6 +516,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     // The roots and vines in the islands' own frames, placed and turned as their rock (none when the settings give none).
     const Material bark = forestLayerMaterial(assets, assetFolder, forestBarkLayer);
     const Material leaf = withLeafLight(forestLeafMaterial(assets, assetFolder), leafLightSettings);
+    lianaLook.leaf = leaf;
 
     const Material mossMaterial = forestMossMaterial(assets, assetFolder);
 
@@ -1053,17 +1054,22 @@ namespace {
 * From the canopy and emergent trees' crowns (the mid layer's are too thin for these woody ones), over the valley's
 * ground, more along the path, in the near cells round the player (near_trees.h): drawn by the GPU, one template tube
 * bent onto each liana's record (scene/liana_shape.h) at three levels, bark as the trees', into the nearest cascades
-* only. The cells within the radius of the start made at once; the rest follow the player (updateNearLianas).
+* only; its ivy one of the leaf templates, the islands' ivy leaf (buildShapes made it). The cells within the radius of
+* the start made at once; the rest follow the player (updateNearLianas).
 */
 void ForestGame::buildLianas(AssetManager& assets) {
     const MeshHandle tube = assets.addDrawnMesh(lianaTemplateMesh(lianaNearRings, lianaNearSides));
     const MeshHandle middle = assets.addDrawnMesh(lianaTemplateMesh(lianaMiddleRings, lianaMiddleSides));
     const MeshHandle far = assets.addDrawnMesh(lianaTemplateMesh(lianaFarRings, lianaFarSides));
     assets.setMeshLevels(tube, {MeshLevel{middle, lianaMiddleError}, MeshLevel{far, lianaFarError}});
-    lianaLook = NearLianaLook{.tube = tube,
-                              .bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer),
-                              .sway = forestSway(swaySettings, ForestSwayer{Entity{}, ForestSwayPart::Hanging, 1.0f, false}),
-                              .shadowCascades = lianaShadowCascades};
+    lianaLook.tube = tube;
+    lianaLook.bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
+    lianaLook.sway = forestSway(swaySettings, ForestSwayer{Entity{}, ForestSwayPart::Hanging, 1.0f, false});
+    lianaLook.shadowCascades = lianaShadowCascades;
+
+    for (std::size_t size = 0; size < lianaLook.ivy.size(); ++size) {
+        lianaLook.ivy[size] = assets.addDrawnMesh(lianaLeafTemplateMesh(lianaLeafTemplateCards[size]));
+    }
 }
 
 /*

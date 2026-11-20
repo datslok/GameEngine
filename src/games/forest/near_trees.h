@@ -13,6 +13,7 @@
 #include "scene/planting_maps.h"
 #include "scene/terrain_heights.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -78,12 +79,15 @@ struct NearTreeCell {
 
 NearTreeCell makeNearTreeCell(const PlantingCell& cell, float cellMetres, const NearTreeSources& sources, JobSystem& jobs);
 
-// How the near lianas are drawn: the template tube (its levels named), the bark, the sway, the cascades they cast into.
+// How the near lianas are drawn: the template tube (its levels named), the bark, the sway, the cascades they cast into;
+// the ivy's templates (one a size of lianaLeafTemplateCards) and its leaf, a cut-out.
 struct NearLianaLook {
     MeshHandle tube;
     Material bark;
     WindSway sway{};
     int shadowCascades = 0;
+    std::array<MeshHandle, lianaLeafTemplateCards.size()> ivy{};
+    Material leaf;
 };
 
 // What a liana's records take from the trees: each tree layer's variants' heights (their meshes' units), and the bend.
@@ -93,14 +97,19 @@ struct NearLianaTrees {
     float bend = 1.0f;
 };
 
-// A cell's lianas as records (makeLianaShape): from each liana's trees, its far end fixed for a rope; at most most.
-std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLianaTrees& trees, float barkTileMetres, std::size_t most);
+/*
+* A cell's lianas as records (makeLianaShape): from each liana's trees, its far end fixed for a rope, with its ivy
+* (lianaIvy) as the settings give it; at most most.
+*/
+std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLianaTrees& trees, const ForestLianaSettings& settings, float barkTileMetres,
+                                        std::size_t most);
 
 /*
-* The lianas round the player the GPU draws (ROADMAP phase 18, d2b): the near cells held round a place (the GPU cells'
-* ring, scene/planting_cells.h), each cell's lianas a block of records in its slot (LianaShapes) and a still entity
-* each, the template tube placed round it (lianaPose) naming its record. A dropped cell's entities are destroyed and its
-* block emptied; a cell made fills its slot's block anew. The cost grows with the cells made, not with those held.
+* The lianas round the player the GPU draws (ROADMAP phase 18, d2b, d2c): the near cells held round a place (the GPU
+* cells' ring, scene/planting_cells.h), each cell's lianas a block of records in its slot (LianaShapes) and two still
+* entities each naming its record: the template tube placed round it (lianaPose), then its ivy, the smallest template
+* holding its cards (lianaLeafPose). A dropped cell's entities are destroyed and its block emptied; a cell made fills
+* its slot's block anew. The cost grows with the cells made, not with those held.
 */
 class NearLianas {
 public:

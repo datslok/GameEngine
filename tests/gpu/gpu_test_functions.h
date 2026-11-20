@@ -295,6 +295,7 @@
 // liana_test.comp
 #define GPU_TEST_LIANA_CENTRE 0
 #define GPU_TEST_LIANA_VERTEX 1
+#define GPU_TEST_LIANA_LEAF 2
 
 // placed_drawing_test.comp
 #define GPU_TEST_PLACED_PLANT_MODEL 0

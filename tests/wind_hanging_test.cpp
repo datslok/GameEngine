@@ -341,7 +341,7 @@ namespace {
         for (const Entity entity : forest.game.getLianas()) {
             const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
             assert(renderer.sway.kind == SwayKind::Hanging && renderer.sway.swing == defaults.hangingSwing && renderer.lianaShape > 0u);
-            const std::size_t record = renderer.lianaShape - 1u;
+            const std::size_t record = lianaRecordOf(renderer.lianaShape);
             const LianaShape& shape = (*shapes.slots[record / shapes.perSlot])[record % shapes.perSlot];
             assert(shape.trees[2] == defaults.trees.bend && shape.firstTree[3] > 1.0f && shape.from[1] > shape.firstTree[1]);
             fixedEnd = fixedEnd || shape.trees[1] == 0.0f;

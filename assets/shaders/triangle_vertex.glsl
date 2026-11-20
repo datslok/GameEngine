@@ -155,17 +155,19 @@ void main() {
     }
 
     /*
-    * A liana (scene/liana_shape.h): the template tube bent onto its record's catenary and swayed as it hangs between its
-    * trees, the same in every view; the instance's matrix only placed the template's box (its bounds and level). Measured
-    * from the camera from its first hold on. Its shape never changes, so only its sway moves it.
+    * A liana (scene/liana_shape.h): the template tube bent onto its record's catenary, or its ivy's cards placed along
+    * it, swayed as it hangs between its trees, the same in every view; the instance's matrix only placed the template's
+    * box (its bounds and level). Measured from the camera from its first hold on. Its shape never changes, so only its
+    * sway moves it (an ivy card grows and shrinks with the camera's distance, too slowly to need motion vectors).
     */
     if (instance.hanging.w > 0u) {
-        LianaShape shape = lianaShapes[instance.hanging.w - 1u];
-        LianaVertex bent = lianaTemplateVertex(shape, position, uv.x);
+        LianaDrawnVertex bent = lianaDrawnVertex(instance.hanging.w, position, uv, cameraOrigin.xyz);
+        LianaShape shape = bent.shape;
         vec3 hold = shape.from.xyz - cameraOrigin.xyz;
         vec3 world = shape.from.xyz + bent.offset;
+        vec3 swaysAt = shape.from.xyz + bent.swaysAt;
         float swing = uintBitsToFloat(instance.hanging.y);
-        vec3 lianaSway = lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, world, cameraOrigin.xyz, false);
+        vec3 lianaSway = lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, swaysAt, cameraOrigin.xyz, false);
         relativePosition = hold + bent.offset + lianaSway;
         gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
         gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
@@ -179,7 +181,7 @@ void main() {
         stillMotion(relativePosition);
 
         if (motionOptions.x != 0.0 && lianaSway != vec3(0.0)) {
-            vec3 previousRelative = hold + bent.offset + lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, world, cameraOrigin.xyz, true);
+            vec3 previousRelative = hold + bent.offset + lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, swaysAt, cameraOrigin.xyz, true);
             previousClip = motionPrevious * vec4(previousRelative, 1.0);
             movement = 1.0;
         }

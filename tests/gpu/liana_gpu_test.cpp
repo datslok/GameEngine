@@ -24,14 +24,19 @@ namespace {
         };
     }
 
-    // A case: the record's six rows, then share, u round, cos and sin round.
-    void appendCase(std::vector<GpuVec4>& inputs, const LianaShape& shape, float share, float around) {
-        for (const float* row : {shape.from, shape.to, shape.curve, shape.firstTree, shape.secondTree, shape.trees}) {
+    // A case's record: its eight rows.
+    void appendRecord(std::vector<GpuVec4>& inputs, const LianaShape& shape) {
+        for (const float* row : {shape.from, shape.to, shape.curve, shape.firstTree, shape.secondTree, shape.trees, shape.leaves, shape.leafLook}) {
             inputs.push_back(gpuVec4(row[0], row[1], row[2], row[3]));
         }
+    }
 
+    // A case: the record, then share, u round, cos and sin round, then an unused eye.
+    void appendCase(std::vector<GpuVec4>& inputs, const LianaShape& shape, float share, float around) {
+        appendRecord(inputs, shape);
         const float angle = around * 6.2831853f;
         inputs.push_back(gpuVec4(share, around, std::cos(angle), std::sin(angle)));
+        inputs.push_back(gpuVec4(0.0f, 0.0f, 0.0f, 0.0f));
     }
 
     /*
@@ -54,8 +59,8 @@ namespace {
 
         const FloatTolerance place{.absolute = 1e-4f, .relative = 1e-5f};
         const FloatTolerance direction{.absolute = 1e-5f, .relative = 1e-5f};
-        const std::vector<GpuVec4> centres = runner.run(shader, GPU_TEST_LIANA_CENTRE, inputs, 7, 4);
-        const std::vector<GpuVec4> vertices = runner.run(shader, GPU_TEST_LIANA_VERTEX, inputs, 7, 4);
+        const std::vector<GpuVec4> centres = runner.run(shader, GPU_TEST_LIANA_CENTRE, inputs, 10, 4);
+        const std::vector<GpuVec4> vertices = runner.run(shader, GPU_TEST_LIANA_VERTEX, inputs, 10, 4);
 
         for (std::size_t index = 0; index < cases.size(); ++index) {
             const LianaShape& shape = shapes[cases[index].first];
@@ -92,7 +97,75 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Every liana with ivy (5 m and 3 m in its crowns, the forest's spacing), each card's corners near and in the
+    * thinning band: the count, place, growth and every corner alike. The card and its leaf come from the same hash bits
+    * both sides; positions as the tube's, the count and growth to rounding.
+    */
+    void checkLeaves(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        struct LeafCase {
+            LianaShape shape;
+            float card = 0.0f;
+            float across = 0.0f;
+            float up = 0.0f;
+            Vec3 eye;
+        };
+
+        std::vector<GpuVec4> inputs;
+        std::vector<LeafCase> cases;
+
+        for (LianaShape shape : lianas()) {
+            setLianaLeaves(shape, LianaLeaves{.firstCrownMetres = 5.0f, .lastCrownMetres = 3.0f, .spacing = 0.35f, .sparseSpacing = 1.2f, .size = 0.3f,
+                                              .thinFrom = 80.0f, .goneBy = 150.0f, .seed = 0x2468aceu});
+            const int cards = static_cast<int>(std::ceil(lianaLeafCount(shape)));
+
+            for (int card = 0; card <= cards; card += 5) {
+                for (const Vec3& eye : {Vec3{0.0f, 20.0f, 0.0f}, Vec3{0.0f, 20.0f, -95.0f}}) {
+                    const float across = static_cast<float>(card % 3) * 0.5f;
+                    const float up = static_cast<float>(card % 2);
+                    appendRecord(inputs, shape);
+                    inputs.push_back(gpuVec4(static_cast<float>(card), across, up, 0.0f));
+                    inputs.push_back(gpuVec4(eye.x, eye.y, eye.z, (eye - Vec3{shape.from[0], shape.from[1], shape.from[2]}).length()));
+                    cases.push_back(LeafCase{shape, static_cast<float>(card), across, up, eye});
+                }
+            }
+        }
+
+        const FloatTolerance place{.absolute = 1e-4f, .relative = 1e-5f};
+        const FloatTolerance direction{.absolute = 1e-5f, .relative = 1e-5f};
+        const std::vector<GpuVec4> leaves = runner.run(shader, GPU_TEST_LIANA_LEAF, inputs, 10, 5);
+
+        for (std::size_t index = 0; index < cases.size(); ++index) {
+            const LeafCase& leafCase = cases[index];
+            const LianaLeafVertex leaf = lianaLeafVertex(leafCase.shape, leafCase.card, leafCase.across, leafCase.up, leafCase.eye);
+            const float distance = (leafCase.eye - Vec3{leafCase.shape.from[0], leafCase.shape.from[1], leafCase.shape.from[2]}).length();
+            const GpuVec4* gpu = &leaves[index * 5];
+            const float offset[3] = {leaf.offset.x, leaf.offset.y, leaf.offset.z};
+            const float stem[3] = {leaf.stem.x, leaf.stem.y, leaf.stem.z};
+            const float normal[3] = {leaf.normal.x, leaf.normal.y, leaf.normal.z};
+            const float tangent[3] = {leaf.tangent.x, leaf.tangent.y, leaf.tangent.z};
+
+            for (int axis = 0; axis < 3; ++axis) {
+                report.check("lianaLeafVertex offset", place, offset[axis], gpu[0][axis]);
+                report.check("lianaLeafVertex stem", place, stem[axis], gpu[1][axis]);
+                report.check("lianaLeafVertex normal", direction, normal[axis], gpu[2][axis]);
+                report.check("lianaLeafVertex tangent", direction, tangent[axis], gpu[3][axis]);
+            }
+
+            report.check("lianaLeafCount", place, lianaLeafCount(leafCase.shape), gpu[0][3]);
+            report.check("lianaLeafGrowth", place, lianaLeafGrowth(leafCase.shape, leafCase.card, distance), gpu[1][3]);
+            report.check("lianaLeafVertex along", place, leaf.along, gpu[2][3]);
+            report.check("lianaLeafVertex arm", place, leaf.arm, gpu[3][3]);
+            report.check("lianaLeafVertex u", exactTolerance, leaf.uv.x, gpu[4][0]);
+            report.check("lianaLeafVertex v", exactTolerance, leaf.uv.y, gpu[4][1]);
+            report.check("lianaLeafPlace", place, lianaLeafPlace(leafCase.shape, leafCase.card, 0.25f), gpu[4][2]);
+        }
+    }
+}
+
 void gpuTestLiana(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("liana.glsl");
     checkLianas(runner, report);
+    checkLeaves(runner, report);
 }

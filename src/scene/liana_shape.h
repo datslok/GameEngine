@@ -4,8 +4,11 @@
 #include "math/vec2.h"
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
+#include "scene/liana_shared.h"
 #include "math/transform.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -17,10 +20,10 @@
 */
 
 /*
-* One liana as the shaders read it (liana.glsl's LianaShape, std430, 96 bytes). The catenary in the upright plane
+* One liana as the shaders read it (liana.glsl's LianaShape, std430, 128 bytes). The catenary in the upright plane
 * through its holds, by its a and u0, the slope (sinh) at the first hold; a = 0 a straight line. The trees it hangs from,
 * each moving as that tree's crown does there (WIND_CATEGORY_TREES); a second scale of 0 leaves the far end fixed (a
-* rope's foot in the ground).
+* rope's foot in the ground). Its ivy (ROADMAP d2c): dense where it runs through either crown, sparse between.
 */
 struct LianaShape {
     float from[4]{};       // xyz the first hold, w the radius
@@ -29,9 +32,11 @@ struct LianaShape {
     float firstTree[4]{};  // xyz the first tree's foot, w its height in its mesh's units
     float secondTree[4]{}; // xyz the second tree's foot, w its height
     float trees[4]{};      // x the first tree's scale, y the second's (0: fixed), z the trees' bend
+    float leaves[4]{};     // x the metres from the first hold inside its crown, y from the far end inside the second's, z the ivy's spacing there, w along the rest
+    float leafLook[4]{};   // x a leaf's length (0: no ivy), y the distance its cards start thinning, z the distance they are gone by, w its seed (below 2^24, exact)
 };
 
-static_assert(sizeof(LianaShape) == 96, "LianaShape must match liana.glsl's LianaShape");
+static_assert(sizeof(LianaShape) == 128, "LianaShape must match liana.glsl's LianaShape");
 
 // A tree a liana hangs from: its foot, its mesh's height and its scale (as its WindSway and placement).
 struct LianaTree {
@@ -111,9 +116,86 @@ IndexedMesh lianaTemplateMesh(int rings, int sides);
 Transform lianaPose(const LianaShape& shape);
 
 /*
+* A liana's ivy (setLianaLeaves): the metres from each end that run through its crown, the spacing of the leaves there
+* and along the rest, a leaf's length, the distances from the eye its cards thin from and are gone by (0: never), and
+* its seed.
+*/
+struct LianaLeaves {
+    float firstCrownMetres = 0.0f;
+    float lastCrownMetres = 0.0f;
+    float spacing = 0.0f;
+    float sparseSpacing = 0.0f;
+    float size = 0.0f;
+    float thinFrom = 0.0f;
+    float goneBy = 0.0f;
+    std::uint32_t seed = 0;
+};
+
+// A record's ivy: the crowns' runs clamped to its length (the far one to what the first leaves), the seed's low 24 bits.
+void setLianaLeaves(LianaShape& shape, const LianaLeaves& leaves);
+
+/*
+* The leaves its ivy holds (lianaLeafCount in liana.glsl): N = the crowns' metres / spacing + the rest / sparse spacing,
+* the integral of the leaves' density along it; 0 without ivy. Its cards are the template's first ceil(N).
+*/
+float lianaLeafCount(const LianaShape& shape);
+
+/*
+* The metres along it of card (0 to ceil(N) - 1), jitter (0..1) its random stray: the count C(s) of leaves up to s
+* metres along is a line in three pieces (steep in the crowns, shallow between), so the card the count reaches at
+* t = (card + 1/2 + stray) N / ceil(N) stands at C^-1(t): every card used, dense in the crowns.
+*/
+float lianaLeafPlace(const LianaShape& shape, float card, float jitter);
+
+/*
+* How much of its length a card shows with its stem distance metres from the eye: 1 near; past the thinning distance
+* every other card shrinks away over LIANA_LEAF_FADE_BAND of it while the rest grow by sqrt 2 (the same leaf area); all
+* shrink away over the band before the last distance; 0 for cards past the ivy's ceil(N).
+*/
+float lianaLeafGrowth(const LianaShape& shape, float card, float distance);
+
+// A corner of an ivy card: its offset from the first hold, its stem's (where it sways), its normal, its tangent across
+// (+u, w +1), its texture place in the atlas, its share along and arm below the chord at its stem.
+struct LianaLeafVertex {
+    Vec3 offset;
+    Vec3 stem;
+    Vec3 normal;
+    Vec3 tangent;
+    Vec2 uv;
+    float along = 0.0f;
+    float arm = 0.0f;
+};
+
+/*
+* A corner of an ivy card placed (lianaLeafVertex in liana.glsl): across (0..1, from its left edge) and up (0..1, stem
+* to tip) the card, as appendLeafCard places it. Its stem on the tube's surface at its place, pointing out at a random
+* turn round it and drooping (LIANA_LEAF_DROOP), its leaf one of the atlas's six at random; grown by lianaLeafGrowth at
+* its stem's distance from eye (a world point), so a card grown to nothing collapses onto its stem and draws nothing.
+*/
+LianaLeafVertex lianaLeafVertex(const LianaShape& shape, float card, float across, float up, const Vec3& eye);
+
+/*
+* The ivy's template: cards cards of 4 corners and 2 triangles each; a corner's uv is (across + 2 card, up), so the
+* card and its corner reach the shadow passes too, and its position is spread over the template's box ([0, 1] along,
+* [-1, 1] round) for the template's bounds.
+*/
+IndexedMesh lianaLeafTemplateMesh(int cards);
+
+// The ivy templates' sizes, and the smallest holding count cards (the largest when none does).
+inline constexpr std::array<int, 5> lianaLeafTemplateCards{16, 32, 64, 128, 256};
+std::size_t lianaLeafTemplate(float count);
+
+// Where a liana's ivy template stands: lianaPose's box grown by the farthest a grown card reaches out from the tube.
+Transform lianaLeafPose(const LianaShape& shape);
+
+// A draw's liana name (ModelRenderer::lianaShape): its record's index, and whether it draws the ivy (LIANA_IVY_BIT).
+std::uint32_t lianaRecordOf(std::uint32_t named);
+bool lianaDrawsIvy(std::uint32_t named);
+
+/*
 * Component: the lianas the GPU draws (FrameDescription::lianaShapes; the first placed counts). Slots of perSlot
 * records each, replaced whole when their cell changes, so the renderer copies only the slots whose pointer changed. A
-* ModelRenderer's lianaShape names one: slot * perSlot + its place, plus 1.
+* ModelRenderer's lianaShape names one: slot * perSlot + its place, plus 1, with LIANA_IVY_BIT for its ivy.
 */
 struct LianaShapes {
     std::vector<std::shared_ptr<const std::vector<LianaShape>>> slots;
