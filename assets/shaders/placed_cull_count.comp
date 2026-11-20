@@ -37,7 +37,8 @@ void main() {
     PlacedPlant plant;
 
     if (placedBlockPlant(block, view, local, number, plant)) {
-        PlacedKind kind = placedKinds[block.firstKind + plant.kind];
+        PlacedKind own = placedKinds[block.firstKind + plant.kind];
+        PlacedKind kind = placedKinds[block.firstKind + placedKindSlot(plant.kind, own.variants, own.variantSlot, plant.pick)];
 
         for (uint each = 0u; each < kind.parts; ++each) {
             PlacedPartDraws draws = placedPartEntries(placedParts[kind.part[each]], plant, number, view.camera);

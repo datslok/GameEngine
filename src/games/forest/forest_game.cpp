@@ -373,8 +373,8 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildPlantingMaps();
     buildTrees(assets);
     buildLianas(world, assets);
-    buildUnderstorey(world, assets);
-    buildPalms(world, assets);
+    buildUnderstorey(assets);
+    buildPalms(assets);
     buildGrass(world, assets);
     buildFloorCover(world, assets);
 
@@ -395,7 +395,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     // The field the GPU plants its cells round the camera from (scene/planting_cells.h), and the trees' looks it draws
     // over the patch (given again whenever the sway changes, applySway).
     world.add(air, PlantingSource{std::make_shared<const PlantingField>(PlantingField{valleyMaps.planting, forestPlantingLayers(plantingSpecies())}), 1,
-                                  std::make_shared<const PlantingLooks>(PlantingLooks{forestPatch, treeLooks})});
+                                  plantedLooks()});
     floorMist = world.create();
     probes = world.create();
     world.add(probes, ProbeCascades{});
@@ -798,25 +798,37 @@ namespace {
     }
 
     /*
-    * A plant placed: its seen mesh, casting no shadow; its shadow's stand-in, drawn into the nearest shadowCascades only;
-    * and its card, drawn only far away, casting none (the stand-in keeps its shadow). The first two go to plants, the
-    * card to cards. The first two sway as plants (swayers); the card, far off, does not.
+    * A plant's variant as a look of the GPU's cells (scene/planting_cells.h): its seen mesh, casting no shadow; its
+    * shadow's stand-in, drawn into the nearest shadowCascades only; and its card, drawn only far away, casting none (the
+    * stand-in keeps its shadow). The first two sway as plants by sway from the start (and swayers, by their look's place
+    * in looks, for applySway); the card, far off, does not.
     */
-    void addPlant(World& world, const PlantVariant& variant, const Transform& pose, int shadowCascades, std::vector<Entity>& plants,
-                  std::vector<Entity>& cards, std::vector<ForestSwayer>& swayers) {
-        plants.push_back(addShape(world, variant.leaves, variant.material, pose));
-        world.get<ModelRenderer>(plants.back()).castsShadows = false;
-        swayers.push_back(ForestSwayer{plants.back(), ForestSwayPart::Plants, variant.height, true});
-        plants.push_back(addShape(world, variant.shadow, variant.material, pose));
-        swayers.push_back(ForestSwayer{plants.back(), ForestSwayPart::Plants, variant.height, true});
-        world.get<ModelRenderer>(plants.back()).shadowOnly = true;
-        world.get<ModelRenderer>(plants.back()).shadowCascades = shadowCascades;
-        cards.push_back(addShape(world, variant.card, variant.cardMaterial, pose));
-        world.get<ModelRenderer>(cards.back()).castsShadows = false;
+    template <typename LookSwayer>
+    void addPlantLook(const PlantVariant& variant, int layer, int kind, int variantNumber, int shadowCascades, const ForestSwaySettings& sway,
+                      std::vector<PlantedKindLook>& looks, std::vector<LookSwayer>& swayers) {
+        PlantedKindLook look{.layer = layer, .kind = kind, .variant = variantNumber, .models = {}};
+        ModelRenderer seen = makeMeshRenderer(variant.leaves, variant.material);
+        seen.castsShadows = false;
+        ModelRenderer shadow = makeMeshRenderer(variant.shadow, variant.material);
+        shadow.shadowOnly = true;
+        shadow.shadowCascades = shadowCascades;
+        ModelRenderer card = makeMeshRenderer(variant.card, variant.cardMaterial);
+        card.castsShadows = false;
+
+        const ForestSwayer swayer{Entity{}, ForestSwayPart::Plants, variant.height, true};
+        seen.sway = forestSway(sway, swayer);
+        shadow.sway = seen.sway;
+
+        for (std::size_t model = 0; model < 2; ++model) {
+            swayers.push_back(LookSwayer{looks.size(), model, swayer});
+        }
+
+        look.models = {std::move(seen), std::move(shadow), std::move(card)};
+        looks.push_back(std::move(look));
     }
 }
 
-void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
+void ForestGame::buildUnderstorey(AssetManager& assets) {
     if (understoreyPlacements.empty()) {
         return;
     }
@@ -868,15 +880,14 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
         }
     }
 
-    understorey.reserve(2 * understoreyPlacements.size());
-    understoreyImpostors.reserve(understoreyPlacements.size());
+    // Each kind's variants in order: the GPU draws the one a plant's pick chooses, as an entity chose (placedKindSlot).
+    for (int kind = 0; kind < understoreyKindCount; ++kind) {
+        const std::vector<PlantVariant>& each = variants[static_cast<std::size_t>(kind)];
 
-    for (const UnderstoreyPlacement& plant : understoreyPlacements) {
-        const std::vector<PlantVariant>& kind = variants[static_cast<std::size_t>(plant.kind)];
-        const PlantVariant& variant = kind[std::min(static_cast<std::size_t>(plant.variantPick * static_cast<float>(kind.size())), kind.size() - 1)];
-        const Transform pose{.position = plant.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, plant.turnRadians),
-                             .scale = Vec3{plant.scale, plant.scale, plant.scale}};
-        addPlant(world, variant, pose, understoreySettings.shadowCascades, understorey, understoreyImpostors, swayers);
+        for (std::size_t variant = 0; variant < each.size(); ++variant) {
+            addPlantLook(each[variant], static_cast<int>(ForestLayer::Understorey), kind, static_cast<int>(variant), understoreySettings.shadowCascades,
+                         swaySettings, plantLooks, plantLookSwayers);
+        }
     }
 }
 
@@ -884,7 +895,7 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
 * The variants grown on every core, each into its own slot, then made drawable in order (their cards baked, their
 * meshes added) and placed; every palm of a variant shares its meshes, so each is one instanced draw.
 */
-void ForestGame::buildPalms(World& world, AssetManager& assets) {
+void ForestGame::buildPalms(AssetManager& assets) {
     if (palmPlacements.empty()) {
         return;
     }
@@ -903,13 +914,10 @@ void ForestGame::buildPalms(World& world, AssetManager& assets) {
                                             palmSettings.impostorTexels, false));
     }
 
-    palms.reserve(2 * palmPlacements.size());
-    palmImpostors.reserve(palmPlacements.size());
-
-    for (const PalmPlacement& palm : palmPlacements) {
-        const Transform pose{.position = palm.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, palm.turnRadians),
-                             .scale = Vec3{palm.scale, palm.scale, palm.scale}};
-        addPlant(world, variants[static_cast<std::size_t>(palm.variant)], pose, palmSettings.shadowCascades, palms, palmImpostors, swayers);
+    // A palm's variant is its kind in the layer.
+    for (std::size_t variant = 0; variant < variants.size(); ++variant) {
+        addPlantLook(variants[variant], static_cast<int>(ForestLayer::Palms), static_cast<int>(variant), 0, palmSettings.shadowCascades, swaySettings,
+                     plantLooks, plantLookSwayers);
     }
 }
 
@@ -1479,7 +1487,11 @@ void ForestGame::applySway(World& world) {
         treeLooks[swaying.look].models[swaying.model].sway = forestSway(swaySettings, swaying.swayer);
     }
 
-    world.get<PlantingSource>(air).looks = std::make_shared<const PlantingLooks>(PlantingLooks{forestPatch, treeLooks});
+    for (const LookSwayer& swaying : plantLookSwayers) {
+        plantLooks[swaying.look].models[swaying.model].sway = forestSway(swaySettings, swaying.swayer);
+    }
+
+    world.get<PlantingSource>(air).looks = plantedLooks();
 
     // The lianas' anchors bend as their trees do, on the air entity.
     for (WindAnchor& anchor : lianaAnchors) {
@@ -1892,14 +1904,6 @@ const std::vector<UnderstoreyPlacement>& ForestGame::getUnderstoreyPlacements() 
     return understoreyPlacements;
 }
 
-const std::vector<Entity>& ForestGame::getUnderstorey() const {
-    return understorey;
-}
-
-const std::vector<Entity>& ForestGame::getUnderstoreyImpostors() const {
-    return understoreyImpostors;
-}
-
 const std::vector<PlantedKindLook>& ForestGame::getTreeLooks() const {
     return treeLooks;
 }
@@ -1924,12 +1928,15 @@ const std::vector<PalmPlacement>& ForestGame::getPalmPlacements() const {
     return palmPlacements;
 }
 
-const std::vector<Entity>& ForestGame::getPalms() const {
-    return palms;
+const std::vector<PlantedKindLook>& ForestGame::getPlantLooks() const {
+    return plantLooks;
 }
 
-const std::vector<Entity>& ForestGame::getPalmImpostors() const {
-    return palmImpostors;
+// One list for the field: the trees' looks, then the plants' (applySway gives it anew when the sway changes).
+std::shared_ptr<const PlantingLooks> ForestGame::plantedLooks() const {
+    PlantingLooks looks{forestPatch, treeLooks};
+    looks.kinds.insert(looks.kinds.end(), plantLooks.begin(), plantLooks.end());
+    return std::make_shared<const PlantingLooks>(std::move(looks));
 }
 
 ForestLianaSettings& ForestGame::getLianaSettings() {

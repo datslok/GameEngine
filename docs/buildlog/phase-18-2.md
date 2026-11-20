@@ -1,6 +1,6 @@
-# Build log: Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 2 of 3)
+# Build log: Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 2 of 4)
 
-## Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 2 of 3)
+## Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 2 of 4)
 - `tree-growth` (Nov 14 2026): the forest item's first stage, a dozen jungle emergents round the clearing. Explained the choices before building; the user: "sounds good, as you recommend".
   - **Space colonisation over grammars:** Weber-Penn's parametric trees (Blender's Sapling) or L-systems describe a branch by rules; space colonisation (Runions et al. 2007) grows branches towards the room left in a crown's envelope, so they compete for space and fill it without crossing, and the crown's shape is the only thing to choose. An umbrella crown, an oblate ellipsoid 28 m across and 10 m deep, 32 m up, is the jungle emergent's.
   - **A flat skeleton:** nodes in a vector, each naming its parent, parents first; the radii by Leonardo's rule (area kept, n = 2) are then one pass backwards, and the trunk's thickness follows from the twigs (2 cm times the square root of the tips).

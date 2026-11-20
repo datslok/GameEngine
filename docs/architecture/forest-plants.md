@@ -39,7 +39,7 @@ Every layer (trees, palms, understorey) is planted from maps, not darts (Horizon
 
 ## Plant variants (`forest_game`)
 
-`makePlantVariant` turns one grown or scanned plant into what is drawn (`PlantVariant`); `addPlant` places it. Shared by the understorey and the palms.
+`makePlantVariant` turns one grown or scanned plant into what is drawn (`PlantVariant`); `addPlantLook` makes it a look of the GPU's cells (`PlantedKindLook`, `planting.md`): no entity a plant, as the trees have none. Shared by the understorey (a look each kind's variant, the plant's pick choosing among them) and the palms (a look a variant, the layer's kinds); `getPlantLooks`.
 
 | Part | Drawn | Levels |
 |---|---|---|
@@ -47,7 +47,7 @@ Every layer (trees, palms, understorey) is planted from maps, not darts (Horizon
 | Shadow's stand-in | `shadowOnly`, in the nearest `shadowCascades` (0: all; the nearest two ended them about 20 m away, popping in) | |
 | Card | far only (`hiddenBelowError`), casting none | baked by `bakeImpostor` from the seen mesh with its texture, tint and cutoff, letting light through as the plant does |
 
-All choose by the seen mesh's box, so exactly one of plant and card is drawn. Seen mesh and stand-in sway as plants at the variant's height; the card does not. With `fades` (the understorey's, not the palms', which thin card by card) and a cut-out material, the seen mesh and the card cross-fade by a dither over the camera's fade band instead of swapping (`fadesLevels`; level-of-detail.md, Level fades).
+All choose by the seen mesh's box, so exactly one of plant and card is drawn. Seen mesh and stand-in sway as plants at the variant's height (`plantLookSwayers`, `applySway`); the card does not. With `fades` (the understorey's, not the palms', which thin card by card) and a cut-out material, the seen mesh and the card cross-fade by a dither over the camera's fade band instead of swapping (`fadesLevels`; level-of-detail.md, Level fades).
 
 ## Understorey (`understorey`)
 

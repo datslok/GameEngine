@@ -393,23 +393,29 @@ namespace {
     }
 
     /*
-    * The game plants them: each palm its seen mesh (casting no shadow) and its shadow's stand-in (shadows only, in the
-    * cascades its settings name), with levels ending where its card begins; an opaque, double-sided leaf letting light through,
-    * placed, turned and scaled as its placement says.
+    * The game draws them on the GPU: a look a variant (the layer's kinds), each its seen mesh (casting no shadow,
+    * swaying), its shadow's stand-in (shadows only, in the cascades its settings name) and its card, with levels ending
+    * where the card begins; an opaque, double-sided leaf letting light through; no entity a palm.
     */
     void testTheGamePlantsThePalms() {
         TestForest forest;
-        World& world = forest.world;
         ForestGame& game = forest.game;
-        const std::vector<PalmPlacement>& placed = game.getPalmPlacements();
-        const std::vector<Entity>& palms = game.getPalms();
-        assert(!placed.empty() && palms.size() == 2 * placed.size() && game.getPalmImpostors().size() == placed.size());
+        assert(!game.getPalmPlacements().empty());
+        int looks = 0;
 
-        for (std::size_t palm = 0; palm < placed.size(); palm += 23) {
-            const ModelRenderer& seen = world.get<ModelRenderer>(palms[2 * palm]);
-            const ModelRenderer& shadow = world.get<ModelRenderer>(palms[2 * palm + 1]);
+        for (const PlantedKindLook& look : game.getPlantLooks()) {
+            if (look.layer != static_cast<int>(ForestLayer::Palms)) {
+                continue;
+            }
+
+            assert(look.kind == looks && look.variant == 0 && look.models.size() == 3);
+            ++looks;
+            const ModelRenderer& seen = look.models[0];
+            const ModelRenderer& shadow = look.models[1];
+            const ModelRenderer& card = look.models[2];
             assert(!seen.castsShadows && !seen.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
             assert(shadow.shadowCascades == ForestPalmSettings{}.shadowCascades);
+            assert(seen.sway.kind != SwayKind::Still && shadow.sway.kind == seen.sway.kind && card.sway.kind == SwayKind::Still);
 
             const Material& leaf = seen.parts.front().material;
             assert(!isCutOut(leaf) && leaf.doubleSided && leaf.texture.isValid() && leaf.normalTexture.isValid());
@@ -421,15 +427,12 @@ namespace {
             assert(levels.size() == 2 && levels[0].sharesVertices && levels[0].mesh != shadow.parts.front().mesh);
             assert(!levels[1].mesh.isValid() && levels[1].errorMetres >= ForestPalmSettings{}.impostorErrorMetres && levels[1].errorMetres >= levels[0].errorMetres);
 
-            const ModelRenderer& card = world.get<ModelRenderer>(game.getPalmImpostors()[palm]);
             const MeshLevelOptions& cardOptions = forest.assets.getMeshLevelOptions().at(card.parts.front().mesh.index);
             assert(cardOptions.hiddenBelowError == levels[1].errorMetres && !card.castsShadows && isCutOut(card.parts.front().material));
             assert(card.parts.front().material.diffuseTransmission == leaf.diffuseTransmission);
-
-            const Transform& pose = world.get<Transform>(palms[2 * palm]);
-            assert(pose.position.x == placed[palm].foot.x && pose.position.z == placed[palm].foot.z && pose.scale.y == placed[palm].scale);
-            assert(world.get<Transform>(game.getPalmImpostors()[palm]).position.x == placed[palm].foot.x);
         }
+
+        assert(looks == ForestPalmSettings{}.variants);
     }
 }
 

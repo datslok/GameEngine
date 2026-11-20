@@ -1130,10 +1130,19 @@ namespace {
         assert(looks);
         assert(looks->region.northmost == forestPatch.northmost && looks->region.southmost == forestPatch.southmost &&
                looks->region.spread == forestPatch.spread);
-        assert(looks->kinds.size() == game.getTreeLooks().size());
+        // The trees' looks, then the understorey's and the palms'.
+        assert(looks->kinds.size() == game.getTreeLooks().size() + game.getPlantLooks().size());
 
-        for (const PlantedKindLook& kind : looks->kinds) {
+        for (std::size_t each = 0; each < looks->kinds.size(); ++each) {
+            const PlantedKindLook& kind = looks->kinds[each];
             const bool big = kind.layer == static_cast<int>(ForestLayer::Emergent) || kind.layer == static_cast<int>(ForestLayer::Canopy);
+
+            if (each >= game.getTreeLooks().size()) {
+                assert(kind.layer == static_cast<int>(ForestLayer::Understorey) || kind.layer == static_cast<int>(ForestLayer::Palms));
+                assert(kind.models[0].sway.kind == SwayKind::Plant);
+                continue;
+            }
+
             assert(big || kind.layer == static_cast<int>(ForestLayer::Mid));
 
             // Bark, leaves, stand-ins, climbers and epiphytes sway as trees, all by the tree's one height; the card holds still.
@@ -1169,6 +1178,13 @@ namespace {
         });
         assert(swayedLook->models[0].sway.bend != look->models[0].sway.bend);
         game.getSwaySettings().trees.bend = bend;
+
+        // The plants' looks sway by the plants' settings.
+        const float plantBend = game.getSwaySettings().plants.bend;
+        game.getSwaySettings().plants.bend = plantBend * 2.0f;
+        frame();
+        assert(plantingSourceOf(world).looks->kinds.back().models[0].sway.bend != swayed->kinds.back().models[0].sway.bend);
+        game.getSwaySettings().plants.bend = plantBend;
         frame();
         assert(plantingSourceOf(world).looks->kinds.front().models[0].sway.bend == looks->kinds.front().models[0].sway.bend);
     }

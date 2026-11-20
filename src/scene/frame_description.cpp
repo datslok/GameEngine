@@ -82,7 +82,7 @@ void appendPlantedParts(FrameDescription& frame, const PlantingLooks& looks) {
     frame.plantedRegion = looks.region;
 
     for (const PlantedKindLook& kind : looks.kinds) {
-        PlantedKindParts run{.layer = kind.layer, .kind = kind.kind, .first = frame.plantedParts.size()};
+        PlantedKindParts run{.layer = kind.layer, .kind = kind.kind, .first = frame.plantedParts.size(), .variant = kind.variant};
 
         for (const ModelRenderer& model : kind.models) {
             for (std::size_t part = 0; part < model.parts.size(); ++part) {

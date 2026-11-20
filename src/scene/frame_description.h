@@ -149,6 +149,7 @@ struct PlantedKindParts {
     int kind = 0;
     std::size_t first = 0;
     std::size_t count = 0;
+    int variant = 0; // one of its kind's looks, chosen by the plant's pick (PlantedKindLook::variant)
 };
 
 // Draws first to first + count of a frame's list.

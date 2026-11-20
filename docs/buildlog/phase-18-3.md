@@ -1,6 +1,6 @@
-# Build log: Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 3 of 3)
+# Build log: Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 3 of 4)
 
-## Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 3 of 3)
+## Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 3 of 4)
 
 - `plant-fades` (Nov 18 2026): the scanned understorey plants' levels and cards cross-faded by a dither over a band of distance instead of swapped (research `docs/research/LOD.md`, Hiding the switches, item 2)
   - **Distance-based, not time-based (the user's choice):** a pure function of the view and the draw, so it slots into the GPU's candidates (both slots of a fading draw are already candidates) and the CPU's reference; Unreal's 0.5 s timed fade needs per-draw state kept between frames, reset whenever the still draws rebuild, which `cull-compare` could not follow. Its known cost: a plant standing in the band stays dithered, left to TAA and DLSS to blend.
