@@ -98,6 +98,19 @@ Each branch's and leaf's pivot, parent and direction baked into textures; the sh
 
 **Shadows only near:** the nearest cascades redraw swaying casters each frame; the far ones keep still shadows, too coarse to show the sway.
 
+### Where the motion vectors are written (Nov 2026)
+
+Measured in the meadow at the forest's edge (the laptop's RTX 4070, a hidden window, 67 % render scale): the separate velocity pass cost 2.8 ms of a 21.5 ms frame, all of it swaying draws (sway off: 0.01 ms). Grass and plants stopped at 2 m saved only 0.5 ms; the trees' leaves within about 100 m were the rest (trees stopped at 100 m: 1.5 ms, at 50 m: 0.9 ms).
+
+| Choice | Who | Cost |
+|---|---|---|
+| A velocity pass after the main pass, drawing the movers again | this engine until now; Unreal's `r.VelocityOutputPass` 2 | every swaying vertex and triangle a third time |
+| Velocity written by the depth prepass | Unreal's `r.VelocityOutputPass` 0 | every prepass draw needs a fragment shader; overdrawn fragments write too |
+| Velocity written by the main pass, a second colour target | Unreal's default since 5.1 (`r.VelocityOutputPass` 1, "write during base pass") ([AMD GPUOpen](https://gpuopen.com/learn/fsr-2-1-unreal-engine-plugin-part1/)) | one write a pixel after the prepass (depth equal); last frame's position worked out only for movers |
+| Stopping the sway at a distance | Unreal's World Position Offset disable distance on foliage ([forum](https://forums.unrealengine.com/t/grass-optimisation-in-unreal-engine-5/1152397/4)) | a look choice: far trees stand still |
+
+The user's choice: velocity in the main pass (`velocity-in-main-pass`); per-category sway distances were built, measured to save nothing at their defaults, and dropped.
+
 ### Lamps' shadows over swaying plants (Nov 2026)
 
 Found when the forest's flashlight blackened leaves near it: its tile drew them still while they swayed, so each leaf sat in front of its own shadow (proved: wind off, or the lamp's shadow off, lit them; 3.3 to 13.9 of 255).

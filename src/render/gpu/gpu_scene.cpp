@@ -111,6 +111,14 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
     return frame;
 }
 
+// Column-major as every matrix the shaders read; the camera and jitter are packed even while off, so the record is whole.
+void packFrameMotion(GpuFrameData& frame, const Mat4& previous, Vec2 jitter, bool writes) {
+    writeColumnMajor(previous, frame.motionPrevious);
+    frame.motionOptions[0] = writes ? 1.0f : 0.0f;
+    frame.motionOptions[1] = jitter.x;
+    frame.motionOptions[2] = jitter.y;
+}
+
 /*
 * GpuMaterial is all 4-byte fields with no padding (its size is checked), so its bytes can be hashed and compared as one
 * block. Two materials pack the same exactly when they shade the same.

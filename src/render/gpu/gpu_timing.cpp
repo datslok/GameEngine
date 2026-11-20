@@ -46,8 +46,6 @@ const char* gpuPassName(GpuPass pass) {
         return "BALLS";
     case GpuPass::RayDebug:
         return "RAYS";
-    case GpuPass::Motion:
-        return "MOTION";
     case GpuPass::DepthRange:
         return "DEPTHS";
     case GpuPass::ReflectionProbe:

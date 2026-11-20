@@ -4,4 +4,5 @@
 #extension GL_KHR_shader_subgroup_arithmetic : require
 
 // The shading itself (scene_surface.glsl), shared with the reflection probe's ray-traced capture.
+#define MAIN_MOTION
 #include "scene_surface.glsl"

@@ -3,9 +3,6 @@
 #include "render/vulkan/vulkan_device.h"
 
 namespace {
-    // Motion in NDC per pixel: two 16-bit floats are plenty (and hold TAA_NO_MOTION, under the half-float limit).
-    constexpr VkFormat velocityFormat = VK_FORMAT_R16G16_SFLOAT;
-
     // The history keeps the scene's own format, so smoothing loses none of its range.
     constexpr VkFormat historyFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 }
@@ -37,7 +34,7 @@ VulkanTaa::VulkanTaa(const VulkanDevice& device, VkSampler nearest, VkSampler fi
 void VulkanTaa::ensureSize(std::uint32_t newWidth, std::uint32_t newHeight, RenderSize render) {
     if (velocitySize != render) {
         ImageDescription velocityDescription;
-        velocityDescription.format = velocityFormat;
+        velocityDescription.format = taaVelocityFormat;
         velocityDescription.width = render.width;
         velocityDescription.height = render.height;
         // Storage: the camera motion pass fills it in place.

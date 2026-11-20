@@ -1,6 +1,6 @@
 # Anti-aliasing and upscaling
 
-Covers: `src/render/gpu/taa`, `src/render/gpu/upscaling`, `src/render/vulkan/vulkan_taa`, `src/render/vulkan/vulkan_fsr`, `src/render/vulkan/vulkan_dlss`, `assets/shaders/taa.glsl`, `assets/shaders/taa.comp`, `assets/shaders/motion.vert`, `assets/shaders/motion.frag`, `assets/shaders/motion_fill.comp`
+Covers: `src/render/gpu/taa`, `src/render/gpu/upscaling`, `src/render/vulkan/vulkan_taa`, `src/render/vulkan/vulkan_fsr`, `src/render/vulkan/vulkan_dlss`, `assets/shaders/taa.glsl`, `assets/shaders/taa.comp`, `assets/shaders/triangle_motion.vert`, `assets/shaders/motion_fill.comp`
 
 Each pixel averages what it saw over many frames while the projection shifts by a different sub-pixel offset each frame, so edges and thin things get many samples for the price of one. The same machinery upscales: the scene may be drawn smaller than the output. Shader maths rules: `.claude/rules/shader-mirror.md`.
 
@@ -10,12 +10,12 @@ Each pixel averages what it saw over many frames while the projection shifts by 
 
 | Value | What builds the finished picture |
 |---|---|
-| `Off` | nothing: no jitter, no velocity pass, no history; the scene image is the finished picture |
+| `Off` | nothing: no jitter, no motion vectors, no history; the scene image is the finished picture |
 | `Taa` | the engine's own resolve (`taa.comp`) |
 | `Fsr` | AMD FSR 3.1 (`VulkanFsr`), settings-file name "FSR 3.1" |
 | `Dlss` (default) | NVIDIA DLSS through Streamline (`VulkanDlss`), in its Quality mode by default; at render scale 1 this is DLAA |
 
-- `temporalAntiAliasing(settings)`: anything but Off. FSR and DLSS replace only the resolve; they still use the jitter and the velocity pass.
+- `temporalAntiAliasing(settings)`: anything but Off. FSR and DLSS replace only the resolve; they still use the jitter and the motion vectors.
 - `activeUpscaler(settings, UpscalerSupport)`: FSR or DLSS only where their library loaded and the GPU can run it, else TAA. A failed dispatch also makes that upscaler unavailable and the frame falls back to the resolve.
 - Each path drops the others' history (`taa->forgetHistory()`, `fsrHistory`, `dlssHistory`), so switching starts afresh.
 - The F4 exposure line ends with the upscaler in use and the scale (`upscalerText`, e.g. `FSR 3.1 AT 0.67`).
@@ -43,8 +43,11 @@ Each pixel averages what it saw over many frames while the projection shifts by 
 **Moving objects** get motion vectors:
 
 - `DrawItem::previousModel` comes from `MotionHistory` (`scene/frame_description`, owned by `Application`, render-only): records by entity slot with a frame stamp in two alternating sets, so nothing is cleared or allocated per frame. None on an entity's first drawn frame.
-- `drawScene` batches the visible draws whose `previousModel` differs from `model` after the shadow tiles' entries in the draw list; set 1 binding 21 (`PreviousModelsBinding`) holds each instance's previous model (its current one when unknown).
-- Velocity pass (`drawMotion`, `GpuPass::Motion`, MOTION): an `R16G16_SFLOAT` image at the render size cleared to `TAA_NO_MOTION` (1000); `motion.vert`/`motion.frag` draw the movers over the main pass's depth (test `GREATER_OR_EQUAL`, no write; back faces culled except double-sided batches; `motionCutOutPipeline` discards cut-out holes). Output `objectMotion`: this frame's unjittered NDC minus last frame's, none when either w ≤ 0. Push constants `GpuMotionView` (128 bytes).
+- Set 1 binding 21 (`PreviousModelsBinding`) holds each instance's previous model (its current one when unknown).
+- **Written by the main pass** (no pass of its own; research in `docs/research/WIND.md`): the velocity image (`taaVelocityFormat`, `R16G16_SFLOAT`, render size) is its second target, cleared to `TAA_NO_MOTION` (1000), before the reflection surfaces. Its vertex shader is `triangle_motion.vert` (`triangle_vertex.glsl` with `MAIN_MOTION`; the prepass keeps `triangle.vert`, `invariant gl_Position` keeping their depths equal), reading last frame's shapes at vertex binding 1 (`BatchPipelines::previousShapes`).
+- Per vertex: last frame's clip place through `GpuFrameData::motionPrevious`; worked out from last frame's matrix, shape and springs only where the instance moved, the wind offsets the vertex now, or its shape changed, else the camera's alone. A `movement` flag (location 13) marks triangles with a moving vertex.
+- Per fragment (`scene_surface.glsl`, the main pass's four variants): `pixelMotion(gl_FragCoord.xy, jitter, size, previousClip)` (this frame's unjittered NDC from the pixel, `motionOptions.yz` jitter, minus last frame's; none when w ≤ 0) where `movement` > 0, else no motion. `motionOptions.x` 0 (not temporal) writes none everywhere.
+- Measured in the forest's meadow (laptop, hidden window): 21.5 to 20.1 ms; the old velocity pass cost 2.8 ms, the main pass gained 1.4.
 - `previousPixelFromMotion` turns a motion back into last frame's pixel; a value above `TAA_NO_MOTION_TEST` means "use the camera's".
 - Camera motion pass (`motion_fill.comp`, `VulkanTaa::fillCameraMotion`, `GpuMotionFillPass`), before FSR or DLSS only: each pixel still at no-motion gets `cameraMotion(reprojection, pixel, depth, size)`, since they need a motion everywhere. The engine's resolve reprojects such pixels itself.
 
@@ -78,7 +81,7 @@ Glass and blended surfaces change a pixel in ways motion vectors cannot follow. 
 
 - `renderScale` (Quality's 0.67, `upscalingModeScale`; `minRenderScale` 0.33 to 1) applies only while anti-aliasing is on (`appliedRenderScale`), since it is what upscales.
 - `renderSize(width, height, scale)`: each side rounded, 1 to the output's. `ensureFrameTextures` keeps the scene image, depth, velocity image and cluster lists at it (`sceneSize`) and remakes them on change.
-- At the render size: prepass, main pass, sky, stars, probe balls, ray debug view, velocity pass, clusters, depth measurement, ambient occlusion. At the output's: histories, everything after anti-aliasing, debug lines and UI. Shadows, probes and sky tables are screen-independent.
+- At the render size: prepass, main pass, sky, stars, probe balls, ray debug view, clusters, depth measurement, ambient occlusion. At the output's: histories, everything after anti-aliasing, debug lines and UI. Shadows, probes and sky tables are screen-independent.
 - **Modes** (`UpscalingMode`: Native, Quality, Balanced, Performance, Ultra performance = scales 1, 1/1.5, 1/1.7, 1/2, 1/3, `upscalingModeScale`): not stored. F5's combo sets the scale; `matchingUpscalingMode` reads it back within 0.005, else Custom. Presets leave the scale alone.
 - **Mip bias** `textureLodBias(render, outputWidth, upscaler)` into `GpuFrameData::textureOptions.x`: log2(render / output width) for TAA; one level more (log2(scale) − 1) for FSR and DLSS, the vendors' advice. Mips are thus chosen for output pixels, and the history averages the extra detail.
 

@@ -3,7 +3,8 @@
 // REFLECTION_SURFACES), their copies tinting shadowed lights through glass by rays (triangle_rays.frag,
 // triangle_surfaces_rays.frag: GLASS_SHADOW_RAYS), the reflection probe's capture, probe_capture.frag and
 // probe_capture_rays.frag (with the sun's shadow traced past its cascades and glass's tint: PROBE_CAPTURE,
-// PROBE_CAPTURE_RAYS, GLASS_SHADOW_RAYS), and glass itself (triangle_transparent.frag: TRANSPARENT).
+// PROBE_CAPTURE_RAYS, GLASS_SHADOW_RAYS), and glass itself (triangle_transparent.frag: TRANSPARENT). The main pass's
+// four also write the motion vectors (MAIN_MOTION, from triangle_motion.vert).
 
 // Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
 #include "render/gpu/shader_shared.h"
@@ -49,6 +50,13 @@ layout(location = 7) in vec3 framePosition;
 layout(location = 8) flat in mat3 frameAxes;
 // The level fade (level_fade.glsl): the depth prepass keeps its share of the pixels, and the main pass shades only those.
 layout(location = 11) flat in uint levelFade;
+
+#ifdef MAIN_MOTION
+// Where the fragment was last frame, and above 0 where a vertex of its triangle moved (triangle_motion.vert).
+#include "taa.glsl"
+layout(location = 12) in vec4 previousClip;
+layout(location = 13) in float movement;
+#endif
 
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"
@@ -293,9 +301,15 @@ layout(location = 0) out vec4 outputColour;
 // reflection this pixel added (the probes' or the flat ambient's light in the mirror direction, times the specular
 // albedo), which the reflection pass swaps out. Only in the variant that has those targets.
 #ifdef REFLECTION_SURFACES
-layout(location = 1) out vec2 reflectionNormal;
-layout(location = 2) out vec4 reflectionSurface;
-layout(location = 3) out vec3 reflectionStandIn;
+layout(location = 2) out vec2 reflectionNormal;
+layout(location = 3) out vec4 reflectionSurface;
+layout(location = 4) out vec3 reflectionStandIn;
+#endif
+
+// The main pass's motion vectors, the velocity image (render/gpu/taa.h): the surface's motion since last frame in NDC
+// where its instance moved, else none (TAA_NO_MOTION: the camera's, which the depth gives).
+#ifdef MAIN_MOTION
+layout(location = 1) out vec2 motion;
 #endif
 
 // How the surface position changes from this pixel to the next one right and down. Soft shadows use it to follow the
@@ -803,6 +817,12 @@ vec4 surfaceTexture(uint slot, vec2 uv, bool shifted, vec2 gradientAcross, vec2 
 }
 
 void main() {
+#ifdef MAIN_MOTION
+    // First, so every path that keeps the fragment has written it. Where it is now: its pixel, the jitter taken off
+    // (motionOptions.yz), on the render screen (clusterScreen.xy).
+    motion = movement > 0.0 ? pixelMotion(gl_FragCoord.xy, motionOptions.yz, clusterScreen.xy, previousClip) : vec2(TAA_NO_MOTION);
+#endif
+
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
     // Projected layers' steps to the next pixel, in the object's frame, taken before any branch like the others.
