@@ -239,10 +239,11 @@ struct FrameDescription {
 
     // What the planted plants are drawn with (the field's PlantingLooks): every kind's parts as draws in the plant's
     // own frame (model the part's own, mostly the identity), attached as the frame's draws are; each kind's run of them;
-    // and the region drawn. None when the field's plants are not drawn.
+    // the region drawn, and how each layer is drawn. None when the field's plants are not drawn.
     std::vector<DrawItem> plantedParts{};
     std::vector<PlantedKindParts> plantedKinds{};
     PlantedRegion plantedRegion{};
+    std::vector<PlantedLayerDrawing> plantedLayers{};
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.

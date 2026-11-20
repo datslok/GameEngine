@@ -86,14 +86,20 @@ namespace {
         return draws;
     }
 
-    // Whether a block's thread has a plant to cull (placedBlockPlant): within its slot's count and in the region.
-    bool blockPlant(const GpuPlacedBlock& block, std::uint32_t thread, std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts,
-                    const PlantingMaps& maps, const GpuPlacedView& view) {
+    // Whether a block's thread has a plant to cull (placedBlockPlant): within its slot's count and in the region, unless
+    // its layer is unbounded.
+    bool blockPlant(const PlacedTable& table, const GpuPlacedBlock& block, std::uint32_t thread, std::span<const GpuPlacedPlant> plants,
+                    std::span<const std::uint32_t> counts, const PlantingMaps& maps, const GpuPlacedView& view) {
         if (block.firstInLayer + thread >= counts[block.countPlace]) {
             return false;
         }
 
         const GpuPlacedPlant& plant = plants[block.firstPlant + thread];
+
+        if (table.kinds[block.firstKind + plant.kind].unbounded != 0u) {
+            return true;
+        }
+
         const PlantedRegion region{view.region[0], view.region[1], view.region[2]};
         return insidePlantedRegion(maps, region, Vec3{plant.foot[0], plant.foot[1], plant.foot[2]});
     }
@@ -133,12 +139,16 @@ namespace {
 * multi-draw (the drawing order is the groups' own).
 */
 PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const PlantedKindParts> kinds, std::size_t layerCount,
-                             const std::function<MeshPlacement(MeshHandle)>& placement) {
+                             const std::function<MeshPlacement(MeshHandle)>& placement, std::span<const PlantedLayerDrawing> layers) {
     PlacedTable table;
     table.kinds.resize(layerCount * static_cast<std::size_t>(plantingMostKinds));
     table.drawnLayers.assign(layerCount, false);
     table.layerReach.assign(layerCount, PlacedLayerReach{});
     std::vector<std::size_t> order;
+    std::vector<float> reliefOf(parts.size(), 0.0f);
+    const auto drawingOf = [&](int layer) {
+        return static_cast<std::size_t>(layer) < layers.size() ? layers[static_cast<std::size_t>(layer)] : PlantedLayerDrawing{};
+    };
 
     for (const PlantedKindParts& kind : kinds) {
         if (kind.layer < 0 || static_cast<std::size_t>(kind.layer) >= layerCount || kind.kind < 0 || kind.kind >= plantingMostKinds) {
@@ -162,6 +172,7 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
 
             order.push_back(part);
             reachFor(table.layerReach[static_cast<std::size_t>(kind.layer)], draw);
+            reliefOf[part] = draw.followsGround ? drawingOf(kind.layer).groundRelief : 0.0f;
         }
 
         PlacedLayerReach& reach = table.layerReach[static_cast<std::size_t>(kind.layer)];
@@ -179,6 +190,12 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
         const DrawItem& draw = parts[part];
         GpuPlacedPart placed;
         placed.record = packCullRecord(draw);
+
+        // A ground-following part's vertices lie up to its layer's relief above or below where its plant stands.
+        if (placed.record.bounds[3] >= 0.0f) {
+            placed.record.bounds[3] += reliefOf[part];
+        }
+
         placed.levels = packMeshLevels(draw.mesh, draw.levels);
         placed.firstGroup = static_cast<std::uint32_t>(table.groups.size());
         const bool cutOut = isCutOut(draw.material);
@@ -258,6 +275,14 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
 
         for (std::size_t part = 0; part < kind.count; ++part) {
             placed.part[part] = placeOf[kind.first + part];
+        }
+    }
+
+    for (std::size_t layer = 0; layer < layerCount; ++layer) {
+        if (drawingOf(static_cast<int>(layer)).unbounded) {
+            for (int slot = 0; slot < plantingMostKinds; ++slot) {
+                table.kinds[layer * static_cast<std::size_t>(plantingMostKinds) + static_cast<std::size_t>(slot)].unbounded = 1u;
+            }
         }
     }
 
@@ -514,7 +539,7 @@ PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPl
         const GpuPlacedBlock& block = blocks[item.block];
 
         for (std::uint32_t thread = 0; thread < placedGroupSize; ++thread) {
-            if (!blockPlant(block, thread, plants, counts, maps, view)) {
+            if (!blockPlant(table, block, thread, plants, counts, maps, view)) {
                 continue;
             }
 

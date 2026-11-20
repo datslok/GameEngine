@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace {
@@ -107,24 +108,36 @@ namespace {
     }
 
     /*
-    * The forest grows its floor's cover under the trees: cells between the Ring and the clearing, each following the
-    * ground, casting no shadow, still, drawn only; its settings start-up only.
+    * The forest grows its floor's cover under the trees: cells between the Ring and the clearing, drawn by the GPU's
+    * cells from the floor layer's map (ROADMAP d3), as many as the cells; each kind a look following the ground, casting
+    * no shadow, drawn only; the layer drawn past the patch. Its settings start-up only.
     */
     void testTheForestGrowsIt() {
         TestForest forest;
-        const std::vector<Entity>& cover = forest.game.getFloorCover();
-        assert(!cover.empty());
+        const std::vector<GroundCell>& cells = forest.game.getFloorCells();
+        assert(!cells.empty());
         bool underTrees = false;
 
-        for (const Entity entity : cover) {
-            const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.followsGround && !renderer.castsShadows && renderer.isStill());
-            assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
-            const Vec3& place = forest.world.get<Transform>(entity).position;
-            underTrees = underTrees || (place.z > treeNorthmost && place.z < treeSouthmost);
+        for (const GroundCell& cell : cells) {
+            underTrees = underTrees || (cell.centre.y > treeNorthmost && cell.centre.y < treeSouthmost);
         }
 
         assert(underTrees);
+        const PlantingField& field = forest.game.getPlantingField(forest.world);
+        assert(field.layers.at(static_cast<std::size_t>(forestFloorPlanting)).coverMap == 1);
+        const std::vector<std::uint8_t>& values = field.maps.coverMaps.at(1).values;
+        assert(static_cast<std::size_t>(std::count_if(values.begin(), values.end(), [](std::uint8_t value) { return value != 0; })) == cells.size());
+        std::size_t looks = 0;
+
+        for (const PlantedKindLook& look : forest.game.getCoverLooks()) {
+            if (look.layer == forestFloorPlanting) {
+                ++looks;
+                const ModelRenderer& renderer = look.models.front();
+                assert(renderer.followsGround && !renderer.castsShadows && forest.assets.isDrawnOnly(renderer.parts.front().mesh));
+            }
+        }
+
+        assert(looks > 0 && forest.world.get<PlantingSource>(forest.game.getAir()).looks->layers.at(static_cast<std::size_t>(forestFloorPlanting)).unbounded);
 
         FieldCounter counter;
         visit(forest.game.getFloorSettings(), counter);

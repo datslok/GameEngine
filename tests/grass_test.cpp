@@ -7,10 +7,14 @@
 
 #include "forest_helpers.h"
 
+#include "test_jobs.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -180,30 +184,105 @@ namespace {
     }
 
     /*
-    * The forest grows grass in the open: on the meadow at the start, none on the path's mud; each cell following the
-    * ground, casting no shadow, still, drawn only; its settings start-up only.
+    * The forest grows grass in the open: cells on the meadow at the start, none on the path's mud. The GPU's cells draw
+    * them (ROADMAP d3): the grass layer's map names each cell's patch kind and quarter turns and nothing else; each kind a
+    * look following the ground, casting no shadow, drawn only; the layer drawn past the patch, its culling grown by the
+    * land's relief (at least the land's rise anywhere in a cell). Its settings start-up only.
     */
     void testTheForestGrowsIt() {
         TestForest forest;
-        const std::vector<Entity>& grass = forest.game.getGrass();
-        assert(!grass.empty());
+        const std::vector<GrassCell>& cells = forest.game.getGrassCells();
+        const ForestGrassSettings& settings = forest.game.getGrassSettings();
+        assert(!cells.empty());
         bool onMeadow = false;
 
-        for (const Entity entity : grass) {
-            const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.followsGround && !renderer.castsShadows && renderer.isStill());
-            assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
-            const Vec3& place = forest.world.get<Transform>(entity).position;
-            assert(place.y == 0.0f);
-            onMeadow = onMeadow || (Vec2{place.x, place.z} - forestStartPlace).length() < 20.0f;
-            assert(forestPathDistance(place.x, place.z) > 0.0f);
+        for (const GrassCell& cell : cells) {
+            onMeadow = onMeadow || (cell.centre - forestStartPlace).length() < 20.0f;
+            assert(forestPathDistance(cell.centre.x, cell.centre.y) > 0.0f);
         }
 
         assert(onMeadow);
 
+        const PlantingField& field = forest.game.getPlantingField(forest.world);
+        const PlantingLayerRecord& layer = field.layers.at(static_cast<std::size_t>(forestGrassPlanting));
+        assert(layer.coverMap == 0 && layer.footprint == settings.cellMetres && layer.kinds == settings.variants * settings.densitySteps);
+        const PlantingCoverMap& map = field.maps.coverMaps.at(0);
+        std::size_t named = 0;
+
+        for (const std::uint8_t value : map.values) {
+            named += value != 0 ? 1 : 0;
+        }
+
+        assert(named == cells.size());
+
+        for (const GrassCell& cell : cells) {
+            const int column = static_cast<int>(std::floor(cell.centre.x / settings.cellMetres));
+            const int row = static_cast<int>(std::floor(cell.centre.y / settings.cellMetres));
+            assert(plantingCoverAt(map, column, row) == plantingCoverValue(forestCoverKind(cell, settings.densitySteps), cell.quarterTurns));
+        }
+
+        std::size_t looks = 0;
+
+        for (const PlantedKindLook& look : forest.game.getCoverLooks()) {
+            if (look.layer != forestGrassPlanting) {
+                continue;
+            }
+
+            ++looks;
+            assert(look.kind >= 0 && look.kind < layer.kinds && look.models.size() == 1);
+            const ModelRenderer& renderer = look.models.front();
+            assert(renderer.followsGround && !renderer.castsShadows && forest.assets.isDrawnOnly(renderer.parts.front().mesh));
+        }
+
+        assert(looks > 0);
+        const PlantingLooks& drawn = *forest.world.get<PlantingSource>(forest.game.getAir()).looks;
+        assert(drawn.layers.at(static_cast<std::size_t>(forestGrassPlanting)).unbounded);
+        assert(drawn.layers.at(static_cast<std::size_t>(forestGrassPlanting)).groundRelief > 0.0f);
+        assert(!drawn.layers.at(0).unbounded);
+
+        // The relief is at least the land's rise anywhere in a cell (some cells, read every metre).
+        const std::vector<GrassCell>& grass = forest.game.getGrassCells();
+        const std::vector<GrassCell> some(grass.begin(), grass.begin() + static_cast<std::ptrdiff_t>(std::min<std::size_t>(grass.size(), 40)));
+        const float relief = forestCoverRelief(some, 8.0f, forest.game.getGroundHeights(), testJobs());
+
+        for (const GrassCell& cell : some) {
+            const float foot = terrainSurfaceHeight(forest.game.getGroundHeights(), cell.centre.x, cell.centre.y);
+
+            for (float x = -4.0f; x <= 4.0f; x += 1.0f) {
+                for (float z = -4.0f; z <= 4.0f; z += 1.0f) {
+                    assert(std::abs(terrainSurfaceHeight(forest.game.getGroundHeights(), cell.centre.x + x, cell.centre.y + z) - foot) <= relief + 1e-4f);
+                }
+            }
+        }
+
         FieldCounter counter;
         visit(forest.game.getGrassSettings(), counter);
         assert(counter.fields == 14 && counter.live == 0);
+    }
+
+    /*
+    * A cover map holds exactly its cells, each its kind (its variant's run of steps) and turns; a layer as many kinds as
+    * variants times steps, refusing more than a layer holds.
+    */
+    void testTheCoverLayer() {
+        const std::vector<GroundCell> cells{GroundCell{Vec2{4.0f, -12.0f}, 2, 1, 3}, GroundCell{Vec2{-20.0f, 20.0f}, 4, 3, 0}};
+        const PlantingCoverMap map = forestCoverMap(cells, 8.0f, 4);
+        assert(map.firstColumn == -3 && map.firstRow == -2 && map.columns == 4 && map.rows == 5);
+        assert(plantingCoverAt(map, 0, -2) == plantingCoverValue(1 * 4 + 2 - 1, 3) && plantingCoverAt(map, -3, 2) == plantingCoverValue(15, 0));
+        assert(std::count(map.values.begin(), map.values.end(), std::uint8_t{0}) == static_cast<std::ptrdiff_t>(map.values.size() - 2));
+        assert(forestCoverMap({}, 8.0f, 4).values.empty());
+
+        const PlantingLayerRecord layer = forestCoverLayer(8.0f, 4, 4, 1, 99u);
+        assert(layer.kinds == 16 && layer.coverMap == 1 && layer.footprint == 8.0f && layer.scaleRange == 0.0f && layer.leastScale == 1.0f);
+        bool refused = false;
+
+        try {
+            forestCoverLayer(8.0f, 9, 4, 0, 1u);
+        } catch (const std::invalid_argument&) {
+            refused = true;
+        }
+
+        assert(refused);
     }
 }
 
@@ -215,4 +294,5 @@ void testGrass() {
     testTheBladesPicture();
     testTheBackKeepsItsNormal();
     testTheForestGrowsIt();
+    testTheCoverLayer();
 }

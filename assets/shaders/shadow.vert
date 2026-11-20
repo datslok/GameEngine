@@ -52,7 +52,7 @@ void main() {
     vec4 world = terrainPatchNumber > 0u
                      ? vec4(terrainVertex(terrainPatches[terrainPatchNumber - 1u], position.xz, cameraOrigin.xyz).position, 1.0)
                      : instance.model * vec4(position, 1.0);
-    world.y += groundLift(instance.material.w, world.xyz);
+    world.y += groundLift(instance.material.w, world.xyz, instance.model[3].y);
 
     // In the sun's nearest cascades, the wind's sway as the camera's views draw it; the rest keep still shadows.
     if (tileOptions.x != 0.0) {

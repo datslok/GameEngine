@@ -81,6 +81,16 @@ float plantingTurn(float draw) {
     return turn;
 }
 
+// A cover layer's kind and turn from its cell's map byte (1 and above), as plantingCoverKind and plantingCoverTurn.
+int plantingCoverKind(int value) {
+    return (value - 1) / PLANTING_COVER_TURNS;
+}
+
+float plantingCoverTurn(int value) {
+    precise float turn = float((value - 1) % PLANTING_COVER_TURNS) * float(PLANTING_QUARTER_TURN);
+    return turn;
+}
+
 int plantingUniformKind(float draw, int count) {
     precise float scaled = draw * float(count);
     return min(int(scaled), count - 1);

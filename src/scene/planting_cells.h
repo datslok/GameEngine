@@ -36,10 +36,23 @@ struct PlantedKindLook {
     std::vector<ModelRenderer> models;
 };
 
-// The kinds drawn from the cells, and the region their plants are drawn in (the rest are planted but not drawn).
+/*
+* How a layer's plants are drawn beyond their kinds' looks: unbounded, wherever planted (past the looks' region: the
+* ground cover covers more than the trees' patch); groundRelief, the most metres the land under any of its plants lies
+* above or below its foot, by which its ground-following parts' culling spheres grow (their vertices lifted onto the
+* land: terrain_data.glsl's groundLift).
+*/
+struct PlantedLayerDrawing {
+    bool unbounded = false;
+    float groundRelief = 0.0f;
+};
+
+// The kinds drawn from the cells, the region their plants are drawn in (the rest are planted but not drawn), and how
+// each layer is drawn (by layer; none past the end: bounded, no relief).
 struct PlantingLooks {
     PlantedRegion region;
     std::vector<PlantedKindLook> kinds;
+    std::vector<PlantedLayerDrawing> layers;
 };
 
 /*

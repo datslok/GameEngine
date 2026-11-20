@@ -81,7 +81,7 @@ Plain data, no GPU types (`scene/frame_description.h`); the whole frame at once 
 | (TERRAIN, part 1) | `selectTerrainNodes` per `Terrain` first, so `buildFrame` reserves room (`laterDraws`) and appending patches never moves the list |
 | BUILD | `buildFrame(world, camera, alpha, &motionHistory, jobs, laterDraws, still)`; `lightFocus` from the game; `clearProbeEvents`, `clearRenderChanged` (one-frame components) |
 | DEFORM | Each `DeformingMesh` shaped, a job each (`deformMesh`, or `gpuClothDeformedMesh`: bounds only, grown for points `framesInFlight + 1` frames late); `boundsByMesh` updated; `attachShapes` on built draws |
-| ATTACH | On `builtStillDraws` ranges and the moving draws only: bounding spheres, flat faces, vertex entries, mesh levels, `liftGroundDraws` (last terrain's heights) |
+| ATTACH | On `builtStillDraws` ranges, the moving draws and the planted parts: bounding spheres, flat faces, vertex entries, mesh levels, `liftGroundDraws` (last terrain's heights; not the planted parts, whose spheres are in their plant's frame) |
 | TERRAIN | `appendTerrainDraws`; the frame takes the terrain's heights and version |
 | STATIC | `StaticGeometry::update` (a hash of the static draws) |
 | DEBUG | The debug views below and `onDebugDraw` |

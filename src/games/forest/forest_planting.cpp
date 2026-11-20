@@ -1,7 +1,10 @@
 #include "games/forest/forest_planting.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
+#include <stdexcept>
+#include <utility>
 
 namespace {
     constexpr int layerOf(ForestLayer layer) {
@@ -57,6 +60,79 @@ std::vector<PlantingLayerRecord> forestPlantingLayers(const ForestSpecies& speci
     at(ForestLayer::Palms) = palmPlantingLayer(species.palms);
     at(ForestLayer::Palms).keepAway = clearOfTrunks(species.palms.trunkClearance);
     return layers;
+}
+
+PlantingLayerRecord forestCoverLayer(float cellMetres, int variants, int steps, int coverMap, std::uint64_t seed) {
+    const int kinds = std::max(variants, 1) * std::max(steps, 1);
+
+    if (kinds > plantingMostKinds) {
+        throw std::invalid_argument("forestCoverLayer: more patch kinds than a layer holds");
+    }
+
+    PlantingLayerRecord layer;
+    layer.footprint = cellMetres;
+    layer.seed = seed;
+    layer.kinds = kinds;
+    layer.reachPerScale = {cellMetres * static_cast<float>(PLANTING_RING_DIAGONAL)};
+    layer.centrePerScale = {0.0f};
+    layer.coverMap = coverMap;
+    return layer;
+}
+
+int forestCoverKind(const GroundCell& cell, int steps) {
+    return cell.variant * std::max(steps, 1) + cell.step - 1;
+}
+
+PlantingCoverMap forestCoverMap(const std::vector<GroundCell>& cells, float cellMetres, int steps) {
+    PlantingCoverMap map;
+
+    if (cells.empty()) {
+        return map;
+    }
+
+    const auto latticeOf = [&](const GroundCell& cell) {
+        return std::pair<int, int>{static_cast<int>(std::floor(cell.centre.x / cellMetres)), static_cast<int>(std::floor(cell.centre.y / cellMetres))};
+    };
+    int firstColumn = latticeOf(cells.front()).first;
+    int lastColumn = firstColumn;
+    int firstRow = latticeOf(cells.front()).second;
+    int lastRow = firstRow;
+
+    for (const GroundCell& cell : cells) {
+        const auto [column, row] = latticeOf(cell);
+        firstColumn = std::min(firstColumn, column);
+        lastColumn = std::max(lastColumn, column);
+        firstRow = std::min(firstRow, row);
+        lastRow = std::max(lastRow, row);
+    }
+
+    map.firstColumn = firstColumn;
+    map.firstRow = firstRow;
+    map.columns = lastColumn - firstColumn + 1;
+    map.rows = lastRow - firstRow + 1;
+    map.values.assign(static_cast<std::size_t>(map.columns) * static_cast<std::size_t>(map.rows), 0);
+
+    for (const GroundCell& cell : cells) {
+        const auto [column, row] = latticeOf(cell);
+        const std::size_t at = static_cast<std::size_t>(row - firstRow) * static_cast<std::size_t>(map.columns) + static_cast<std::size_t>(column - firstColumn);
+        map.values[at] = static_cast<std::uint8_t>(plantingCoverValue(forestCoverKind(cell, steps), cell.quarterTurns));
+    }
+
+    return map;
+}
+
+float forestCoverRelief(const std::vector<GroundCell>& cells, float cellMetres, const TerrainHeights& heights, JobSystem& jobs) {
+    // How far past its square a patch's blades and leaves may lean (the tallest grass leans under half a metre).
+    constexpr float leanMargin = 1.0f;
+    const float half = 0.5f * cellMetres + leanMargin;
+    std::vector<float> reliefs(cells.size(), 0.0f);
+    jobs.parallelFor(cells.size(), 64, [&](std::size_t index) {
+        const Vec2& centre = cells[index].centre;
+        const float foot = terrainSurfaceHeight(heights, centre.x, centre.y);
+        const TerrainHeightRange range = terrainHeightRange(heights, centre.x - half, centre.x + half, centre.y - half, centre.y + half);
+        reliefs[index] = std::max(range.highest - foot, foot - range.lowest);
+    });
+    return reliefs.empty() ? 0.0f : *std::max_element(reliefs.begin(), reliefs.end());
 }
 
 ForestPlanting plantTheForest(const ForestSpecies& species, const ValleyMaps& maps, const TerrainHeights& heights, const PlantingBox& box,

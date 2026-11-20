@@ -1027,7 +1027,70 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * How each layer is drawn (ROADMAP d3): an unbounded layer's every kind slot marked, so its plants draw wherever planted
+    * while the rest keep to the region; a layer's ground-following parts' culling spheres grown by its relief, the rest
+    * not; both in the table's signature; the frame carries the looks' layers.
+    */
+    void testTheLayersDrawing() {
+        std::mt19937 random{29};
+        const TestSlots slots = testSlots(random);
+        TestKinds kinds = testKinds();
+        std::vector<int> layerOfPart(kinds.parts.size(), -1);
+
+        for (const PlantedKindParts& kind : kinds.kinds) {
+            for (std::size_t part = kind.first; part < kind.first + kind.count; ++part) {
+                layerOfPart[part] = kind.layer;
+            }
+        }
+
+        const std::size_t following = static_cast<std::size_t>(std::find(layerOfPart.begin(), layerOfPart.end(), 0) - layerOfPart.begin());
+        kinds.parts[following].followsGround = true;
+        const std::vector<PlantedLayerDrawing> layers{PlantedLayerDrawing{.unbounded = false, .groundRelief = 2.5f},
+                                                      PlantedLayerDrawing{.unbounded = true, .groundRelief = 7.0f}};
+        const PlacedTable plain = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
+        const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement, layers);
+
+        for (std::size_t slot = 0; slot < table.kinds.size(); ++slot) {
+            assert(table.kinds[slot].unbounded == (slot / static_cast<std::size_t>(plantingMostKinds) == 1 ? 1u : 0u));
+            assert(plain.kinds[slot].unbounded == 0u);
+        }
+
+        for (std::size_t place = 0; place < table.parts.size(); ++place) {
+            const std::size_t part = table.draws[place];
+            const float grown = part == following ? 2.5f : 0.0f;
+            assert(table.parts[place].record.bounds[3] == plain.parts[place].record.bounds[3] + grown);
+        }
+
+        assert(placedTableSignature(table, testRegion) != placedTableSignature(plain, testRegion));
+
+        // A region holding no plant: only the unbounded layer's plants draw.
+        const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
+        PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(slots.held, slots.layout, table), table);
+        GpuPlacedView view = views.views.front();
+        view.region[0] = 5000.0f;
+        view.region[1] = 5001.0f;
+        const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
+        const PlacedCullResult bounded = cullPlacedOnCpu(plain, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
+        assert(!result.entries.empty() && bounded.entries.empty());
+
+        for (const GpuPlacedEntry& entry : result.entries) {
+            assert(layerOfPart[table.draws[entry.part]] == 1);
+        }
+
+        World world;
+        auto looks = std::make_shared<PlantingLooks>();
+        looks->layers = layers;
+        world.add(world.create(), PlantingSource{std::make_shared<const PlantingField>(), 1, looks});
+        const Camera camera{Vec3{0.0f, 1.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f};
+        const FrameDescription frame = buildFrame(world, camera, 1.0f);
+        assert(frame.plantedLayers.size() == 2 && frame.plantedLayers[1].unbounded && frame.plantedLayers[0].groundRelief == 2.5f);
+    }
+}
+
 void testPlacedDrawing() {
+    testTheLayersDrawing();
     testTheModelIsTheEntitys();
     testThePartsAreTheEntitys();
     testTheRegion();

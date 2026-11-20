@@ -158,7 +158,8 @@ namespace {
             const float first = random.between(0.0f, 0.5f);
             const GpuVec4 cumulative = gpuVec4(first, first + random.between(0.0f, 0.3f), 0.85f, 0.95f);
             const float draw = i % 3 == 0 ? whole(random, 0.0f, count) / count : (i % 3 == 1 ? cumulative[i % 4] : random.between(0.0f, 1.0f));
-            inputs.push_back(gpuVec4(draw, count, shared));
+            const float cover = static_cast<float>(plantingCoverValue(i % plantingMostKinds, (i / 7) % 4));
+            inputs.push_back(gpuVec4(draw, count, shared, cover));
             inputs.push_back(cumulative);
         }
 
@@ -170,6 +171,8 @@ namespace {
             report.check("plantingUniformKind", exactTolerance, static_cast<float>(plantingUniformKind(a[0], static_cast<int>(a[1]))), outputs[i][0]);
             const std::array<float, plantingMostSharedKinds - 1> cumulative{b[0], b[1], b[2], b[3]};
             report.check("plantingSharedKind", exactTolerance, static_cast<float>(plantingSharedKind(a[0], cumulative, static_cast<int>(a[2]))), outputs[i][1]);
+            report.check("plantingCoverKind", exactTolerance, static_cast<float>(plantingCoverKind(static_cast<int>(a[3]))), outputs[i][2]);
+            report.check("plantingCoverTurn", exactTolerance, plantingCoverTurn(static_cast<int>(a[3])), outputs[i][3]);
         }
     }
 

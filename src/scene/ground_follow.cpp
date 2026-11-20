@@ -51,12 +51,12 @@ namespace {
     }
 }
 
-Vec3 liftedOntoGround(const TerrainHeights& heights, const Vec3& placed) {
-    const float lift = heights.grids.empty() ? 0.0f : terrainSurfaceHeight(heights, placed.x, placed.z);
+Vec3 liftedOntoGround(const TerrainHeights& heights, const Vec3& placed, float standing) {
+    const float lift = heights.grids.empty() ? 0.0f : terrainSurfaceHeight(heights, placed.x, placed.z) - standing;
     return Vec3{placed.x, placed.y + lift, placed.z};
 }
 
-BoundingSphere liftedSphere(const BoundingSphere& sphere, const TerrainHeights& heights) {
+BoundingSphere liftedSphere(const BoundingSphere& sphere, const TerrainHeights& heights, float standing) {
     if (sphere.radius < 0.0f || heights.grids.empty()) {
         return sphere;
     }
@@ -104,7 +104,7 @@ BoundingSphere liftedSphere(const BoundingSphere& sphere, const TerrainHeights& 
         }
     }
 
-    return BoundingSphere{Vec3{centre.x, centre.y + 0.5f * (lowest + highest), centre.z}, sphere.radius + 0.5f * (highest - lowest)};
+    return BoundingSphere{Vec3{centre.x, centre.y + 0.5f * (lowest + highest) - standing, centre.z}, sphere.radius + 0.5f * (highest - lowest)};
 }
 
 void liftGroundDraws(std::span<DrawItem> draws, const TerrainHeights* heights) {
@@ -114,8 +114,9 @@ void liftGroundDraws(std::span<DrawItem> draws, const TerrainHeights* heights) {
 
     for (DrawItem& draw : draws) {
         if (draw.followsGround) {
-            draw.bounds = liftedSphere(draw.bounds, *heights);
-            draw.levelBounds = liftedSphere(draw.levelBounds, *heights);
+            const float standing = draw.model.values[1][3];
+            draw.bounds = liftedSphere(draw.bounds, *heights, standing);
+            draw.levelBounds = liftedSphere(draw.levelBounds, *heights, standing);
         }
     }
 }

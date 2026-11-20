@@ -20,6 +20,10 @@
 // A cap's record in the maps' words: reach, origin x and z, columns, rows, its heights' first word, two unused.
 #define PLANTING_CAP_WORDS 8
 
+// A cover map's record in the maps' words: first column, first row, columns, rows, its bytes' first word (four a word,
+// the first low), three unused.
+#define PLANTING_COVER_MAP_WORDS 8
+
 // The pass's own set: the maps, the layers, the ground's heights, the frame's jobs, the candidates, the slots' plants,
 // their counts, and the problems seen.
 #define PLANTING_MAPS_BINDING 0

@@ -24,6 +24,8 @@ namespace {
         maps.caps.push_back(PlantingCap{.reach = 80.0f, .origin = Vec2{-30.0f, -40.0f}, .columns = 3, .rows = 3,
                                         .heights = {1, 2, 3, 4, plantingNoCap, 6, 7, 8, 9}});
         maps.axis[7] = 1.5f;
+        coverLayer(maps);
+        maps.coverMaps.push_back(PlantingCoverMap{.firstColumn = 3, .firstRow = -5, .columns = 3, .rows = 1, .values = {5, 0, 9}});
         return maps;
     }
 
@@ -56,6 +58,15 @@ namespace {
             assert(back.caps[cap].rows == maps.caps[cap].rows && back.caps[cap].heights == maps.caps[cap].heights);
         }
 
+        assert(header.coverMapCount == 2 && back.coverMaps.size() == 2);
+
+        for (std::size_t cover = 0; cover < maps.coverMaps.size(); ++cover) {
+            const PlantingCoverMap& each = maps.coverMaps[cover];
+            const PlantingCoverMap& returned = back.coverMaps[cover];
+            assert(returned.firstColumn == each.firstColumn && returned.firstRow == each.firstRow && returned.columns == each.columns);
+            assert(returned.rows == each.rows && returned.values == each.values);
+        }
+
         // Empty maps read as outside: their flags off.
         PlantingMaps bare = maps;
         bare.gaps.clear();
@@ -66,9 +77,11 @@ namespace {
 
     // Each layer as the passes read it: the shares, seed, kinds' tables, the keep-aways' reaches and the spacing's rings.
     void testTheLayersPack() {
-        const std::vector<PlantingLayerRecord> layers = threeLayers();
+        std::vector<PlantingLayerRecord> layers = threeLayers();
+        PlantingMaps maps = straightMaps();
+        layers.push_back(coverLayer(maps));
         const std::vector<GpuPlantingLayer> packed = packPlantingLayers(layers);
-        assert(packed.size() == layers.size());
+        assert(packed.size() == layers.size() && packed[0].coverMap == -1 && packed[3].coverMap == 0);
 
         for (std::size_t which = 0; which < layers.size(); ++which) {
             const PlantingLayerRecord& layer = layers[which];

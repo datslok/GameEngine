@@ -194,7 +194,7 @@ void main() {
     vec3 shaped = thinnedVertex(instance, entry, gl_VertexIndex - gl_BaseVertexARB, position, captureView ? captureEye.xyz : vec3(0.0), cameraOrigin.xyz,
                                 captureView ? captureEye.w : levelOptions.x);
     relativePosition = (model * vec4(shaped, 1.0)).xyz;
-    relativePosition.y += groundLift(instance.material.w, relativePosition + cameraOrigin.xyz);
+    relativePosition.y += groundLift(instance.material.w, relativePosition + cameraOrigin.xyz, instance.model[3].y);
     // The wind (render/gpu/wind.h): the same sway in every view, so the prepass and the main pass agree to the bit.
     vec3 swayOffset = windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, gl_VertexIndex - gl_BaseVertexARB, shaped, relativePosition + cameraOrigin.xyz, cameraOrigin.xyz, false);
     relativePosition += swayOffset;
@@ -220,7 +220,7 @@ void main() {
         mat4 beforeRelative = before;
         beforeRelative[3].xyz -= cameraOrigin.xyz;
         vec3 previousRelative = (beforeRelative * vec4(previousShaped, 1.0)).xyz;
-        previousRelative.y += groundLift(instance.material.w, previousRelative + cameraOrigin.xyz);
+        previousRelative.y += groundLift(instance.material.w, previousRelative + cameraOrigin.xyz, before[3].y);
         previousRelative += windSwayOfVertex(before, instance.sway, handedness.y, instance.hanging, gl_VertexIndex - gl_BaseVertexARB, previousShaped,
                                              previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
         previousClip = motionPrevious * vec4(previousRelative, 1.0);

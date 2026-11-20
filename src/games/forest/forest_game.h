@@ -195,6 +195,8 @@ public:
     // The planting maps' settings (read at start-up) and the maps every plant is planted from.
     ForestPlantingSettings& getPlantingSettings();
     const ValleyMaps& getValleyMaps() const;
+    // The land as drawn, which everything stands on.
+    const TerrainHeights& getGroundHeights() const;
     Entity getSun() const;
     Entity getAir() const;
     PlayerControls& getControls();
@@ -259,18 +261,21 @@ public:
     std::vector<ModelRenderer> getEpiphyteModels() const;
     // Each tree carrying rosettes' first rosette in the world, in the order forest-epiphyte numbers them.
     const std::vector<Vec3>& getEpiphyteViews() const;
-    // The grass's settings, its cells and their entities (a patch each, following the ground), in the cells' order.
+    // The grass's settings and its cells (baked into its layer's map: the GPU's cells draw a patch each).
     ForestGrassSettings& getGrassSettings();
     const std::vector<GrassCell>& getGrassCells() const;
-    const std::vector<Entity>& getGrass() const;
-    // The forest floor's cover's settings, its cells and their entities (a patch each, following the ground).
+    // The forest floor's cover's settings and its cells, as the grass's.
     ForestFloorSettings& getFloorSettings();
     // The wind over the valley, on the air entity (scene/wind.h).
     Wind& getWindSettings();
     // How the forest sways in it (games/forest/forest_sway.h), applied live to everything swaying.
     ForestSwaySettings& getSwaySettings();
     const std::vector<GroundCell>& getFloorCells() const;
-    const std::vector<Entity>& getFloorCover() const;
+    // The ground cover's patches as the GPU's cells draw them (no entity a cell): the grass's kinds, then the floor's,
+    // each a look of its layer (forestGrassPlanting, forestFloorPlanting), its kind its patch's (forestCoverKind).
+    const std::vector<PlantedKindLook>& getCoverLooks() const;
+    // The field the GPU's cells plant from (on the air entity): the valley's maps with the ground cover's, every layer.
+    const PlantingField& getPlantingField(const World& world) const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -323,15 +328,19 @@ private:
     // The understorey palms (docs/research/JUNGLE.md, Palms): a few variants grown on every core, a look each.
     void buildPalms(AssetManager& assets);
 
-    // What the GPU's cells draw: the trees' looks, then the plants', over the patch.
+    // What the GPU's cells draw: the trees' looks, then the plants', over the patch; the ground cover's wherever planted.
     std::shared_ptr<const PlantingLooks> plantedLooks() const;
 
-    // The grass in the open (docs/research/GROUNDCOVER.md): a few patches grown on every core, a cell of land each.
-    void buildGrass(World& world, AssetManager& assets);
+    // What the GPU's cells plant: the valley's maps and the forest's layers, the ground cover's maps and layers after.
+    PlantingField plantingField() const;
 
-    // The forest floor's cover under the canopy (docs/research/GROUNDCOVER.md): fallen leaves, seedlings and small ferns, as the
-    // grass is, a cell of the leaf litter's land each.
-    void buildFloorCover(World& world, AssetManager& assets);
+    // The grass in the open (docs/research/GROUNDCOVER.md): a few patches grown on every core, a look each, the GPU's
+    // cells drawing one a cell of land its map names.
+    void buildGrass(AssetManager& assets);
+
+    // The forest floor's cover under the canopy (docs/research/GROUNDCOVER.md): fallen leaves, seedlings and small ferns,
+    // as the grass is, on the leaf litter's land.
+    void buildFloorCover(AssetManager& assets);
 
     // The lianas hanging from the canopy and emergent trees' crowns (docs/research/VINES.md, stage 1), a chunk of ground a mesh.
     void buildLianas(AssetManager& assets);
@@ -424,6 +433,8 @@ private:
 
     std::vector<LookSwayer> treeLookSwayers;
     std::vector<LookSwayer> plantLookSwayers;
+    std::vector<PlantedKindLook> coverLooks; // the grass's and the floor's patches as the GPU's cells draw them
+    std::vector<LookSwayer> coverLookSwayers;
 
     // A model of a look: the climbers' and the epiphytes' (getClimberModels, getEpiphyteModels).
     struct LookModel {
@@ -435,9 +446,11 @@ private:
     std::vector<LookModel> epiphyteModels;
     std::vector<ModelRenderer> lookModels(const std::vector<LookModel>& listed) const;
     std::vector<GrassCell> grassCells;
-    std::vector<Entity> grassEntities;
     std::vector<GroundCell> floorCells;
-    std::vector<Entity> floorEntities;
+    PlantingCoverMap grassMap; // the cells baked for the GPU's cells (forestCoverMap)
+    PlantingCoverMap floorMap;
+    float grassRelief = 0.0f; // the land's relief under the cells (forestCoverRelief)
+    float floorRelief = 0.0f;
     std::vector<Vec3> epiphyteViews;   // each tree carrying rosettes' first rosette, in the world
     std::vector<Vec3> epiphyteOutward; // the level way from its trunk to it (forest-epiphyte looks from there)
     Entity ring;

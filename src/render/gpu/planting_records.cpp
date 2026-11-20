@@ -144,6 +144,22 @@ std::vector<std::uint32_t> packPlantingMaps(const PlantingMaps& maps) {
         appendPacked(words, each.heights, 16);
     }
 
+    header.coverMapsFirst = wordCount(words);
+    header.coverMapCount = static_cast<std::uint32_t>(maps.coverMaps.size());
+    const std::size_t coverRecords = words.size();
+    words.resize(words.size() + maps.coverMaps.size() * PLANTING_COVER_MAP_WORDS, 0);
+
+    for (std::size_t cover = 0; cover < maps.coverMaps.size(); ++cover) {
+        const PlantingCoverMap& each = maps.coverMaps[cover];
+        std::uint32_t* record = &words[coverRecords + cover * PLANTING_COVER_MAP_WORDS];
+        record[0] = static_cast<std::uint32_t>(each.firstColumn);
+        record[1] = static_cast<std::uint32_t>(each.firstRow);
+        record[2] = static_cast<std::uint32_t>(each.columns);
+        record[3] = static_cast<std::uint32_t>(each.rows);
+        record[4] = wordCount(words);
+        appendPacked(words, each.values, 8);
+    }
+
     header.flags = (maps.ecotopes.empty() ? 0u : PLANTING_HAS_ECOTOPES) | (maps.gaps.empty() ? 0u : PLANTING_HAS_GAPS) |
                    (maps.path.empty() ? 0u : PLANTING_HAS_PATH) | (maps.clearance.empty() ? 0u : PLANTING_HAS_CLEARANCE);
     std::memcpy(words.data(), &header, sizeof(header));
@@ -210,6 +226,17 @@ PlantingMaps unpackPlantingMaps(std::span<const std::uint32_t> words) {
         maps.caps.push_back(std::move(each));
     }
 
+    for (std::uint32_t cover = 0; cover < header.coverMapCount; ++cover) {
+        const std::uint32_t at = header.coverMapsFirst + cover * PLANTING_COVER_MAP_WORDS;
+        PlantingCoverMap each;
+        each.firstColumn = static_cast<std::int32_t>(body[at]);
+        each.firstRow = static_cast<std::int32_t>(body[at + 1]);
+        each.columns = static_cast<int>(body[at + 2]);
+        each.rows = static_cast<int>(body[at + 3]);
+        each.values = readPacked<std::uint8_t>(body, body[at + 4], static_cast<std::size_t>(each.columns) * static_cast<std::size_t>(each.rows), 8);
+        maps.coverMaps.push_back(std::move(each));
+    }
+
     return maps;
 }
 
@@ -257,6 +284,7 @@ std::vector<GpuPlantingLayer> packPlantingLayers(const std::vector<PlantingLayer
 
         std::copy(layer.reachPerScale.begin(), layer.reachPerScale.end(), gpu.reachPerScale);
         std::copy(layer.centrePerScale.begin(), layer.centrePerScale.end(), gpu.centrePerScale);
+        gpu.coverMap = layer.coverMap;
         packed.push_back(gpu);
     }
 

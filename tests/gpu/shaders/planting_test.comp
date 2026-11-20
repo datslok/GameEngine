@@ -41,7 +41,8 @@ void main() {
         vec2 place = plantingJitteredPlace(int(a.x), int(a.y), a.z, a.w, b.x, b.y);
         testOutput(0, vec4(place, plantingScale(b.z, b.w, c.x), plantingTurn(c.y)));
     } else if (function == GPU_TEST_PLANTING_KIND) {
-        testOutput(0, vec4(float(plantingUniformKind(a.x, int(a.y))), float(plantingSharedKind(a.x, testInput(1), int(a.z))), 0.0, 0.0));
+        testOutput(0, vec4(float(plantingUniformKind(a.x, int(a.y))), float(plantingSharedKind(a.x, testInput(1), int(a.z))),
+                           float(plantingCoverKind(int(a.w))), plantingCoverTurn(int(a.w))));
     } else if (function == GPU_TEST_PLANTING_TESTS) {
         vec4 b = testInput(1);
         vec4 c = testInput(2);

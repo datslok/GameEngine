@@ -55,7 +55,7 @@ struct GpuPlacedKind {
     std::uint32_t parts = 0;
     std::uint32_t variants = 0;    // its looks (0 or 1: itself alone), chosen by the plant's pick (placedKindSlot)
     std::uint32_t variantSlot = 0; // the slot of its variant 1, the rest after it
-    std::uint32_t unused = 0;
+    std::uint32_t unbounded = 0;   // 1: its layer drawn wherever planted, past the looks' region (PlantedLayerDrawing)
     std::uint32_t part[PLACED_MOST_PARTS] = {};
 };
 
@@ -163,9 +163,11 @@ std::uint32_t placedKindSlot(std::uint32_t kind, std::uint32_t variants, std::ui
 * past PLANTING_MOST_KINDS or a layer past layerCount, more than placedMostParts parts in a kind, glass, a mesh not in
 * the pools, more than three levels, or more than placedMostGroups groups; a kind's variants missing one below another,
 * given twice, or reaching a slot a look's kind holds (they take the layer's top slots, its last variant in the last).
+* layers (by layer, none past the end: bounded, no relief): an unbounded layer's every kind slot marked so; a layer's
+* ground-following parts' culling spheres grown by its groundRelief.
 */
 PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const PlantedKindParts> kinds, std::size_t layerCount,
-                             const std::function<MeshPlacement(MeshHandle)>& placement);
+                             const std::function<MeshPlacement(MeshHandle)>& placement, std::span<const PlantedLayerDrawing> layers = {});
 
 // The blocks over every held slot's drawn layers, slot by slot (in the held map's order) and layer by layer, each layer
 // cut into blocks of placedGroupSize of its room in the slot.

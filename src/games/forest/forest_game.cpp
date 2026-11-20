@@ -377,8 +377,8 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildLianas(assets);
     buildUnderstorey(assets);
     buildPalms(assets);
-    buildGrass(world, assets);
-    buildFloorCover(world, assets);
+    buildGrass(assets);
+    buildFloorCover(assets);
 
     // The planet beyond the land is forest too, so the ground seen past the edge, and its light scattered back up into
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
@@ -393,10 +393,9 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     controls.spawnBody(world);
     sun = world.create();
     world.add(sun, DirectionalLight{});
-    // The field the GPU plants its cells round the camera from (scene/planting_cells.h), and the trees' looks it draws
-    // over the patch (given again whenever the sway changes, applySway).
-    world.add(air, PlantingSource{std::make_shared<const PlantingField>(PlantingField{valleyMaps.planting, forestPlantingLayers(plantingSpecies())}), 1,
-                                  plantedLooks()});
+    // The field the GPU plants its cells round the camera from (scene/planting_cells.h), and the looks it draws: the
+    // plants over the patch, the ground cover wherever its maps name (given again whenever the sway changes, applySway).
+    world.add(air, PlantingSource{std::make_shared<const PlantingField>(plantingField()), 1, plantedLooks()});
     floorMist = world.create();
     probes = world.create();
     world.add(probes, ProbeCascades{});
@@ -934,22 +933,23 @@ namespace {
     };
 
     /*
-    * A kind of ground cover placed (docs/research/GROUNDCOVER.md): every variant at every density step grown on every core
-    * (grow(variant seed, density); a sparser step the first of the same pieces), then made drawable, each with its half
-    * and quarter levels and nothing past the farthest. Each cell then draws its patch, turned its quarter turns about
-    * its middle, lifted onto the land by the vertex shaders; casting no shadow (contact shadows and ambient occlusion
-    * ground it), still. The patch type has mesh, level and farLevel. Each swaying as part (swayers), bending against its
-    * patch's tallest plant.
+    * A kind of ground cover as the GPU's cells draw it (docs/research/GROUNDCOVER.md; ROADMAP d3): every variant at every
+    * density step grown on every core (grow(variant seed, density); a sparser step the first of the same pieces), then
+    * made drawable, each with its half and quarter levels and nothing past the farthest. Each patch is a look of its
+    * layer, its kind variant * steps + step - 1 (forestCoverKind, as its cells' map names it): lifted onto the land by
+    * the vertex shaders, casting no shadow (contact shadows and ambient occlusion ground it), swaying as part from the
+    * start (and by swayers for applySway), bending against its patch's tallest plant. The patch type has mesh, level and
+    * farLevel. Nothing without cells.
     */
     // The least height ground cover bends against (m): a patch of fallen leaves alone, a centimetre high, would otherwise
     // bend and flutter as a whole plant does.
     constexpr float groundCoverLeastSwayHeight = 0.3f;
 
-    template <typename Patch, typename Grow>
-    void placeGroundCover(World& world, AssetManager& assets, JobSystem& jobs, const std::vector<GroundCell>& cells, int variantCount,
-                          int stepCount, std::uint32_t seed, Grow grow, const Material& material, const CoverDistances& distances,
-                          std::vector<Entity>& entities, std::vector<ForestSwayer>& swayers, ForestSwayPart part) {
-        if (cells.empty()) {
+    template <typename Patch, typename Grow, typename LookSwayer>
+    void addGroundCoverLooks(AssetManager& assets, JobSystem& jobs, bool anyCells, int layer, int variantCount, int stepCount, std::uint32_t seed, Grow grow,
+                             const Material& material, const CoverDistances& distances, const ForestSwaySettings& sway, ForestSwayPart part,
+                             std::vector<PlantedKindLook>& looks, std::vector<LookSwayer>& swayers) {
+        if (!anyCells) {
             return;
         }
 
@@ -982,49 +982,69 @@ namespace {
             assets.setMeshLevels(meshes.back(), {MeshLevel{level, halfError}, MeshLevel{farLevel, quarterError}, MeshLevel{MeshHandle{}, farError}});
         }
 
-        entities.reserve(entities.size() + cells.size());
-
-        for (const GroundCell& cell : cells) {
-            const std::size_t patch = static_cast<std::size_t>(cell.variant * steps + cell.step - 1);
-            const MeshHandle mesh = meshes[patch];
-
-            if (!mesh.isValid()) {
+        for (std::size_t patch = 0; patch < meshes.size(); ++patch) {
+            if (!meshes[patch].isValid()) {
                 continue;
             }
 
-            const Transform pose{.position = Vec3{cell.centre.x, 0.0f, cell.centre.y},
-                                 .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.25f * fullTurnRadians * static_cast<float>(cell.quarterTurns))};
-            entities.push_back(addShape(world, mesh, material, pose));
-            ModelRenderer& renderer = world.get<ModelRenderer>(entities.back());
+            ModelRenderer renderer = makeMeshRenderer(meshes[patch], material);
             renderer.castsShadows = false;
             renderer.followsGround = true;
-            swayers.push_back(ForestSwayer{entities.back(), part, heights[patch], true});
+            const ForestSwayer swayer{Entity{}, part, heights[patch], true};
+            renderer.sway = forestSway(sway, swayer);
+            swayers.push_back(LookSwayer{looks.size(), 0, swayer});
+            looks.push_back(PlantedKindLook{.layer = layer, .kind = static_cast<int>(patch), .variant = 0, .models = {std::move(renderer)}});
         }
     }
 }
 
-void ForestGame::buildGrass(World& world, AssetManager& assets) {
+/*
+* The grass's cells (its paint's means over 8 m squares near the path) baked into its layer's map, and the land's
+* relief under them, for the GPU's cells (plantingField); its patches as their looks.
+*/
+void ForestGame::buildGrass(AssetManager& assets) {
     constexpr std::uint32_t grassPatchSeed = 0x50415443u;
     grassCells = forestGrassCells(grassSettings, getJobs());
-    placeGroundCover<GrassPatch>(
-        world, assets, getJobs(), grassCells, grassSettings.variants, grassSettings.densitySteps, grassPatchSeed,
+    grassMap = forestCoverMap(grassCells, grassSettings.cellMetres, grassSettings.densitySteps);
+    grassRelief = forestCoverRelief(grassCells, grassSettings.cellMetres, *groundHeights, getJobs());
+    addGroundCoverLooks<GrassPatch>(
+        assets, getJobs(), !grassCells.empty(), forestGrassPlanting, grassSettings.variants, grassSettings.densitySteps, grassPatchSeed,
         [&](std::uint32_t seed, float density) {
             return growGrassPatch(grassSettings, density, seed);
         },
         withLeafLight(forestGrassMaterial(assets, assetFolder), leafLightSettings),
-        CoverDistances{grassSettings.halfDistance, grassSettings.quarterDistance, grassSettings.farthest}, grassEntities, swayers, ForestSwayPart::Grass);
+        CoverDistances{grassSettings.halfDistance, grassSettings.quarterDistance, grassSettings.farthest}, swaySettings, ForestSwayPart::Grass, coverLooks,
+        coverLookSwayers);
 }
 
-void ForestGame::buildFloorCover(World& world, AssetManager& assets) {
+// The floor's cover as the grass is, on the leaf litter's paint.
+void ForestGame::buildFloorCover(AssetManager& assets) {
     constexpr std::uint32_t floorPatchSeed = 0x464c5054u;
     floorCells = forestFloorCells(floorSettings, getJobs());
-    placeGroundCover<FloorPatch>(
-        world, assets, getJobs(), floorCells, floorSettings.variants, floorSettings.densitySteps, floorPatchSeed,
+    floorMap = forestCoverMap(floorCells, floorSettings.cellMetres, floorSettings.densitySteps);
+    floorRelief = forestCoverRelief(floorCells, floorSettings.cellMetres, *groundHeights, getJobs());
+    addGroundCoverLooks<FloorPatch>(
+        assets, getJobs(), !floorCells.empty(), forestFloorPlanting, floorSettings.variants, floorSettings.densitySteps, floorPatchSeed,
         [&](std::uint32_t seed, float density) {
             return growFloorPatch(floorSettings, density, seed);
         },
         withLeafLight(forestFloorCoverMaterial(assets, assetFolder), leafLightSettings),
-        CoverDistances{floorSettings.halfDistance, floorSettings.quarterDistance, floorSettings.farthest}, floorEntities, swayers, ForestSwayPart::Floor);
+        CoverDistances{floorSettings.halfDistance, floorSettings.quarterDistance, floorSettings.farthest}, swaySettings, ForestSwayPart::Floor, coverLooks,
+        coverLookSwayers);
+}
+
+/*
+* The field the GPU plants its cells from: the valley's maps with the ground cover's two maps, the plants' layers and
+* then the grass's and the floor's (forestGrassPlanting, forestFloorPlanting).
+*/
+PlantingField ForestGame::plantingField() const {
+    constexpr std::uint64_t grassPlaceSeed = 0x47525353ull;
+    constexpr std::uint64_t floorPlaceSeed = 0x464c4f52ull;
+    PlantingField field{valleyMaps.planting, forestPlantingLayers(plantingSpecies())};
+    field.maps.coverMaps = {grassMap, floorMap};
+    field.layers.push_back(forestCoverLayer(grassSettings.cellMetres, grassSettings.variants, grassSettings.densitySteps, 0, grassPlaceSeed));
+    field.layers.push_back(forestCoverLayer(floorSettings.cellMetres, floorSettings.variants, floorSettings.densitySteps, 1, floorPlaceSeed));
+    return field;
 }
 
 namespace {
@@ -1480,6 +1500,10 @@ void ForestGame::applySway(World& world) {
         plantLooks[swaying.look].models[swaying.model].sway = forestSway(swaySettings, swaying.swayer);
     }
 
+    for (const LookSwayer& swaying : coverLookSwayers) {
+        coverLooks[swaying.look].models[swaying.model].sway = forestSway(swaySettings, swaying.swayer);
+    }
+
     world.get<PlantingSource>(air).looks = plantedLooks();
 
     // The lianas sway as hanging things, their ends bending as their trees do (their records' bend).
@@ -1771,6 +1795,10 @@ Entity ForestGame::getAir() const {
     return air;
 }
 
+const TerrainHeights& ForestGame::getGroundHeights() const {
+    return *groundHeights;
+}
+
 PlayerControls& ForestGame::getControls() {
     return controls;
 }
@@ -1915,11 +1943,26 @@ const std::vector<PlantedKindLook>& ForestGame::getPlantLooks() const {
     return plantLooks;
 }
 
-// One list for the field: the trees' looks, then the plants' (applySway gives it anew when the sway changes).
+/*
+* One list for the field: the trees' looks, then the plants', then the ground cover's (applySway gives it anew when the
+* sway changes). The ground cover is drawn wherever its maps name, past the patch, its patches' culling grown by the
+* land's relief under its cells.
+*/
 std::shared_ptr<const PlantingLooks> ForestGame::plantedLooks() const {
-    PlantingLooks looks{forestPatch, treeLooks};
+    PlantingLooks looks{forestPatch, treeLooks, std::vector<PlantedLayerDrawing>(forestFloorPlanting + 1)};
     looks.kinds.insert(looks.kinds.end(), plantLooks.begin(), plantLooks.end());
+    looks.kinds.insert(looks.kinds.end(), coverLooks.begin(), coverLooks.end());
+    looks.layers[forestGrassPlanting] = PlantedLayerDrawing{.unbounded = true, .groundRelief = grassRelief};
+    looks.layers[forestFloorPlanting] = PlantedLayerDrawing{.unbounded = true, .groundRelief = floorRelief};
     return std::make_shared<const PlantingLooks>(std::move(looks));
+}
+
+const std::vector<PlantedKindLook>& ForestGame::getCoverLooks() const {
+    return coverLooks;
+}
+
+const PlantingField& ForestGame::getPlantingField(const World& world) const {
+    return *world.get<PlantingSource>(air).field;
 }
 
 ForestLianaSettings& ForestGame::getLianaSettings() {
@@ -1966,10 +2009,6 @@ const std::vector<GrassCell>& ForestGame::getGrassCells() const {
     return grassCells;
 }
 
-const std::vector<Entity>& ForestGame::getGrass() const {
-    return grassEntities;
-}
-
 ForestFloorSettings& ForestGame::getFloorSettings() {
     return floorSettings;
 }
@@ -1984,8 +2023,4 @@ ForestSwaySettings& ForestGame::getSwaySettings() {
 
 const std::vector<GroundCell>& ForestGame::getFloorCells() const {
     return floorCells;
-}
-
-const std::vector<Entity>& ForestGame::getFloorCover() const {
-    return floorEntities;
 }

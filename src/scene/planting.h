@@ -73,6 +73,17 @@ float plantingTurn(float draw);
 int plantingUniformKind(float draw, int count);
 int plantingSharedKind(float draw, const std::array<float, plantingMostSharedKinds - 1>& cumulative, int count);
 
+/*
+* A cover layer's plant from its cell's map byte (1 and above: 0 plants nothing), as the game baked it: its kind
+* ((value - 1) / PLANTING_COVER_TURNS) and its turn (the rest, in quarter turns), so square patches tile the ground.
+* Whole numbers and a product with the quarter turn: exact both sides.
+*/
+int plantingCoverKind(int value);
+float plantingCoverTurn(int value);
+
+// The byte a game bakes for a kind and its quarter turns (0..3).
+int plantingCoverValue(int kind, int quarterTurns);
+
 // Whether two places on the ground are closer than radius.
 bool plantingWithin(const Vec2& place, const Vec2& other, float radius);
 

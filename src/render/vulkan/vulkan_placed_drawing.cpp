@@ -85,7 +85,8 @@ bool VulkanPlacedDrawing::prepare(const FrameDescription& description, const Vul
     bool draws = !description.plantedParts.empty() && frame.field && !planting.getHeld().empty();
 
     if (draws) {
-        frame.table = buildPlacedTable(description.plantedParts, description.plantedKinds, frame.field->layers.size(), placement);
+        frame.table = buildPlacedTable(description.plantedParts, description.plantedKinds, frame.field->layers.size(), placement,
+                                       description.plantedLayers);
         frame.blocks = placedBlocks(planting.getHeld(), planting.getLayout(), frame.table);
         frame.region = description.plantedRegion;
         draws = !frame.blocks.empty() && !frame.table.groups.empty();

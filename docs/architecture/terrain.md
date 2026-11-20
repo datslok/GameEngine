@@ -80,14 +80,14 @@ A game places one on an entity without a `Transform` (heights are where they are
 Grass and ground cover built flat on y = 0 of their own frame, lifted onto the land per vertex, so a few shared patches serve every lumpy spot instead of a mesh each.
 
 - **The flag:** `ModelRenderer::followsGround` → `DrawItem::followsGround` → `INSTANCE_KIND_FOLLOWS_GROUND` in `GpuInstance::material[3]` (an impostor stays an impostor).
-- **Shaders:** every instance-reading vertex shader (`triangle.vert`, `shadow.vert`, `shadow_cut_out.vert`, `glass_shadow.vert`, `triangle_motion.vert` for both frames) adds `groundLift(kind, world)`: `terrainSurfaceHeight` at the vertex's own world place, after card thinning and before wind sway.
+- **Shaders:** every instance-reading vertex shader (`triangle.vert`, `shadow.vert`, `shadow_cut_out.vert`, `glass_shadow.vert`, `triangle_motion.vert` for both frames) adds `groundLift(kind, world, standing)`: `terrainSurfaceHeight` at the vertex's own world place less the height its object stands at (its matrix's origin: 0 for an entity's patch, the land under a placed patch's foot, so placed patches stand on the land as everything planted does), after card thinning and before wind sway.
 - Why the drawn triangles, not the bilinear height: on lumpy land the two differ by centimetres, enough to bury fallen leaves. Over a blade's lean the lift is its root's height. Normals stay the mesh's own.
 
 **On the CPU**, which never moves vertices, only what it reasons with:
 
-- `liftedOntoGround(heights, point)`: the shaders' lift.
-- `liftedSphere(sphere, heights)`: the drawn land's lowest and highest under the sphere's square, read at its corners, at every finest-grid point inside it, and along its edges wherever they cross a grid line or a square's diagonal (the triangles' extremes lie there; at most 129 lines each way, evenly spaced past that). Moves the sphere up by their middle, grows it by half their range; unknown radius stays unknown.
-- `liftGroundDraws(draws, heights)`: lifts `bounds` and `levelBounds` of following draws, once, in the ATTACH step (kept still draws lifted once when built). No heights: nothing moves.
+- `liftedOntoGround(heights, point, standing)`: the shaders' lift.
+- `liftedSphere(sphere, heights)`: the drawn land's lowest and highest under the sphere's square, read at its corners, at every finest-grid point inside it, and along its edges wherever they cross a grid line or a square's diagonal (the triangles' extremes lie there; at most 129 lines each way, evenly spaced past that). Moves the sphere up by their middle less `standing`, grows it by half their range; unknown radius stays unknown.
+- `liftGroundDraws(draws, heights)`: lifts `bounds` and `levelBounds` of following draws, standing at their matrix's origin, once, in the ATTACH step (kept still draws lifted once when built). No heights: nothing moves. Planted parts are not lifted (their spheres are in the plant's frame): their layer's `groundRelief` grows them instead ([planting.md](planting.md)).
 - No ray meets them (`rayMaskFor`): a ray would meet the unlifted mesh.
 
 ## Hidden ground
