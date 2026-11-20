@@ -34,7 +34,7 @@ The shader skips a light, and its shadow lookups, for pixels beyond its range.
 
 - `ModelRenderer::castsShadows` (default true, on each `DrawItem`) decides what blocks light; a light's own `castsShadows` decides whether it casts.
 - `shadowOnly`: drawn into shadow maps only, skipped by every camera view (`visibleDraws`) and met by no ray (`rayMaskFor` gives mask 0, keeping its instance slot), so a cheap stand-in can cast for something whose own `castsShadows` is off (the forest's leaves).
-- `shadowCascades`: limits a caster to the sun's nearest N cascades (0 all); `castersForCascade` filters by `ShadowTile::sunCascade` (`sun-shadows.md`).
+- `shadowCascades`: limits a caster to the sun's nearest N cascades (0 all); `castersForCascade` filters by `ShadowTile::sunCascade`, and such casters thin out across their last cascade (`sun-shadows.md`).
 
 ## The atlas (`shadow_atlas`)
 

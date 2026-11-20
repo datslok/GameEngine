@@ -70,14 +70,13 @@ void testGpuTiming() {
         assert(static_cast<int>(GpuPass::RayDebug) < static_cast<int>(GpuPass::Bloom));
     }
 
-    // Anti-aliasing (TAA, FSR or DLSS, so its timing is named AA, not TAA): the velocity pass draws over the finished
-    // picture's depth, and the resolve reads the picture before anything that uses it (eye adaptation, bloom), after the
-    // depth measurement, which reads the same depth. The reflections come between: the probe's capture, then the pass
+    // Anti-aliasing (TAA, FSR or DLSS, so its timing is named AA, not TAA): the main pass writes the velocity image (no
+    // pass of its own), and the resolve reads the picture before anything that uses it (eye adaptation, bloom), after
+    // the depth measurement, which reads the same depth. The reflections come between: the probe's capture, then the pass
     // that reads it with the velocity image and the depth and changes the picture the resolve smooths. Glass is blended
     // over that picture last, so the anti-aliasing smooths it too.
     {
-        assert(static_cast<int>(GpuPass::RayDebug) + 1 == static_cast<int>(GpuPass::Motion));
-        assert(static_cast<int>(GpuPass::Motion) + 1 == static_cast<int>(GpuPass::DepthRange));
+        assert(static_cast<int>(GpuPass::RayDebug) + 1 == static_cast<int>(GpuPass::DepthRange));
         assert(static_cast<int>(GpuPass::DepthRange) + 1 == static_cast<int>(GpuPass::ReflectionProbe));
         assert(static_cast<int>(GpuPass::ReflectionProbe) + 1 == static_cast<int>(GpuPass::PlanarReflection));
         assert(static_cast<int>(GpuPass::PlanarReflection) + 1 == static_cast<int>(GpuPass::Reflections));
@@ -98,7 +97,7 @@ void testGpuTiming() {
         assert(std::string(gpuPassName(GpuPass::DepthOfField)) == "DOF");
         assert(static_cast<int>(GpuPass::MotionBlur) + 1 == static_cast<int>(GpuPass::EyeAdaptation));
         assert(std::string(gpuPassName(GpuPass::MotionBlur)) == "BLUR");
-        assert(std::string(gpuPassName(GpuPass::Motion)) == "MOTION" && std::string(gpuPassName(GpuPass::AntiAliasing)) == "AA");
+        assert(std::string(gpuPassName(GpuPass::AntiAliasing)) == "AA");
     }
 
     // The fog's grid is lit right after the shadows, whose atlas it reads, before the depth prepass; the depth prepass is
@@ -150,7 +149,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 11, 8, 4, 1, 8, 0, 2, 40, 17, 25, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 11, 8, 4, 1, 8, 0, 2, 40, 17, 25, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -166,7 +165,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1393 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1381 * nanosecondsPerTick * 1e-9));
         // Ambient occlusion's parts, each between its own stamps, add up to what its one line used to read.
         assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid), 4 * nanosecondsPerTick * 1e-9));
         assert(nearlyEqual(timings.seconds(GpuPass::AmbientOcclusion), 16 * nanosecondsPerTick * 1e-9));

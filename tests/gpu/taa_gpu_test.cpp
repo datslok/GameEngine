@@ -96,8 +96,8 @@ namespace {
 
     /*
     * Reprojections between cameras that moved and turned, pixels all over the screen at depths from the near plane to
-    * the far one; and objects' motion from clip positions, some behind the camera. Inputs per case: the reprojection's
-    * four columns, (pixel, depth, 0), (size, 0, 0), (current clip), (previous clip).
+    * the far one; and objects' motion from clip positions, some behind the camera, and from the pixel and the jitter.
+    * Inputs per case: the reprojection's four columns, (pixel, depth, 0), (size, jitter), (current clip), (previous clip).
     */
     void checkReprojection(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{79};
@@ -118,7 +118,7 @@ namespace {
             }
 
             inputs.push_back(GpuVec4{random.between(0.0f, size.x), random.between(0.0f, size.y), random.between(0.0f, 1.0f), 0.0f});
-            inputs.push_back(GpuVec4{size.x, size.y, 0.0f, 0.0f});
+            inputs.push_back(GpuVec4{size.x, size.y, random.between(-0.5f, 0.5f), random.between(-0.5f, 0.5f)});
             inputs.push_back(GpuVec4{random.between(-5.0f, 5.0f), random.between(-5.0f, 5.0f), random.between(0.0f, 5.0f), random.between(0.1f, 5.0f)});
             inputs.push_back(GpuVec4{random.between(-5.0f, 5.0f), random.between(-5.0f, 5.0f), random.between(0.0f, 5.0f), random.between(-1.0f, 5.0f)});
         }
@@ -139,6 +139,8 @@ namespace {
             }
 
             report.check("objectMotion", transcendentalTolerance, Vec3{motion.x, motion.y, 0.0f}, Vec3{out[1][0], out[1][1], 0.0f});
+            const Vec2 fromPixel = pixelMotion(Vec2{in[4][0], in[4][1]}, Vec2{in[5][2], in[5][3]}, Vec2{in[5][0], in[5][1]}, Vec4{in[7][0], in[7][1], in[7][2], in[7][3]});
+            report.check("pixelMotion", transcendentalTolerance, Vec3{fromPixel.x, fromPixel.y, 0.0f}, Vec3{out[1][2], out[1][3], 0.0f});
 
             if (found.valid && out[0][2] > 0.5f) {
                 const Vec2 camera = cameraMotion(reprojections[i], Vec2{in[4][0], in[4][1]}, in[4][2], Vec2{in[5][0], in[5][1]});

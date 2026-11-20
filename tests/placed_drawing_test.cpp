@@ -74,7 +74,7 @@ namespace {
         return part;
     }
 
-    // Leaves swaying as the forest's trees do (render/gpu/wind.h): the velocity list redraws them near the camera.
+    // Leaves swaying as the forest's trees do (render/gpu/wind.h): a moving list (CAMERA_CULL_MOVING) takes them near the camera.
     DrawItem swayingLeaves() {
         DrawItem leaves = treePart(MeshHandle{20}, &leafLevels(), true, true, 0.0f, 5);
         leaves.sway = WindSway{.kind = SwayKind::Tree, .height = 18.0f, .bend = 0.1f, .flutter = 0.3f};
@@ -656,8 +656,8 @@ namespace {
 
     /*
     * Culling by the cells' boxes first drops nothing: every view's lists over its own items equal its lists over every
-    * block (the camera, its velocity list and sun tiles), entry for entry; tiles take only casters, the velocity list
-    * only swaying parts the camera draws.
+    * block (the camera, a moving list and sun tiles), entry for entry; tiles take only casters, the moving list only
+    * swaying parts the camera draws.
     */
     void testTheBoxesHideNothing() {
         std::mt19937 random{29};
@@ -696,7 +696,7 @@ namespace {
                 results.push_back(mine);
             }
 
-            // The tiles' entries are casters (the stand-in alone); the velocity list's are the camera's swaying leaves.
+            // The tiles' entries are casters (the stand-in alone); the moving list's are the camera's swaying leaves.
             for (std::size_t tile = 2; tile < 4; ++tile) {
                 for (const GpuPlacedEntry& entry : results[tile].entries) {
                     assert((table.parts[entry.part].record.flags & CULL_CASTS_SHADOWS) != 0u);

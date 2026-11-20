@@ -80,7 +80,7 @@ A game places one on an entity without a `Transform` (heights are where they are
 Grass and ground cover built flat on y = 0 of their own frame, lifted onto the land per vertex, so a few shared patches serve every lumpy spot instead of a mesh each.
 
 - **The flag:** `ModelRenderer::followsGround` → `DrawItem::followsGround` → `INSTANCE_KIND_FOLLOWS_GROUND` in `GpuInstance::material[3]` (an impostor stays an impostor).
-- **Shaders:** every instance-reading vertex shader (`triangle.vert`, `shadow.vert`, `shadow_cut_out.vert`, `glass_shadow.vert`, `motion.vert` for both frames) adds `groundLift(kind, world)`: `terrainSurfaceHeight` at the vertex's own world place, after card thinning and before wind sway.
+- **Shaders:** every instance-reading vertex shader (`triangle.vert`, `shadow.vert`, `shadow_cut_out.vert`, `glass_shadow.vert`, `triangle_motion.vert` for both frames) adds `groundLift(kind, world)`: `terrainSurfaceHeight` at the vertex's own world place, after card thinning and before wind sway.
 - Why the drawn triangles, not the bilinear height: on lumpy land the two differ by centimetres, enough to bury fallen leaves. Over a blade's lean the lift is its root's height. Normals stay the mesh's own.
 
 **On the CPU**, which never moves vertices, only what it reasons with:

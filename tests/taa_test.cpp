@@ -156,6 +156,25 @@ namespace {
         const Vec2 motion = objectMotion(Vec4{1.0f, 0.5f, 0.2f, 2.0f}, Vec4{0.2f, 0.5f, 0.1f, 1.0f});
         assert(near(motion.x, 0.3f, 1e-6f) && near(motion.y, -0.25f, 1e-6f));
         assert(objectMotion(Vec4{1.0f, 0.5f, 0.2f, 2.0f}, Vec4{0.2f, 0.5f, 0.1f, -1.0f}).x > static_cast<float>(TAA_NO_MOTION_TEST));
+
+        // From the pixel instead of this frame's clip position: a point drawn with the jitter lands on a pixel whose
+        // place, the jitter taken back off, is the point's unjittered NDC, so the motion equals objectMotion's.
+        const Vec2 screen{1280.0f, 720.0f};
+        const Mat4 lens = Mat4::perspective(1.1f, screen.x / screen.y, 0.1f, 500.0f) * Mat4::rotationY(0.3f);
+        const Vec2 jitter{0.31f, -0.27f};
+        const Mat4 jittered = jitteredClip(lens, jitter, screen.x, screen.y);
+        const Vec4 lastFrame{0.4f, -0.2f, 0.3f, 6.0f};
+
+        for (const Vec4 point : {Vec4{1.0f, 0.5f, -6.0f, 1.0f}, Vec4{-3.0f, 2.0f, -40.0f, 1.0f}, Vec4{0.2f, -1.5f, -2.0f, 1.0f}}) {
+            const Vec4 unjitteredClip = lens * point;
+            const Vec4 jitteredPoint = jittered * point;
+            const Vec2 pixel = ndcToPixel(Vec2{jitteredPoint.x / jitteredPoint.w, jitteredPoint.y / jitteredPoint.w}, screen);
+            const Vec2 expected = objectMotion(unjitteredClip, lastFrame);
+            const Vec2 found = pixelMotion(pixel, jitter, screen, lastFrame);
+            assert(near(found.x, expected.x, 1e-5f) && near(found.y, expected.y, 1e-5f));
+        }
+
+        assert(pixelMotion(Vec2{4.0f, 5.0f}, jitter, screen, Vec4{0.2f, 0.5f, 0.1f, -1.0f}).x > static_cast<float>(TAA_NO_MOTION_TEST));
     }
 
     /*
@@ -312,9 +331,6 @@ namespace {
         assert(pass.options[0] == settings.currentWeight && pass.options[1] == settings.clipSigma);
         assert(pass.options[2] == 1.0f && pass.options[3] == 1.0f);
         assert(packTaaPass(reprojection, 640, 360, RenderSize{640, 360}, Vec2{}, TaaSettings{}, false).options[2] == 0.0f);
-
-        const GpuMotionView view = packMotionView(Mat4::translation(4.0f, 0.0f, 0.0f), Mat4::translation(0.0f, 5.0f, 0.0f));
-        assert(view.current[12] == 4.0f && view.previous[13] == 5.0f);
 
         // The camera motion pass: the reprojection and the render screen it walks.
         const GpuMotionFillPass fill = packMotionFillPass(reprojection, RenderSize{320, 180});

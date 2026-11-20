@@ -5,4 +5,5 @@
 
 // The main pass writing the reflection surfaces too (render/gpu/screen_reflections.h), for frames with reflections.
 #define REFLECTION_SURFACES
+#define MAIN_MOTION
 #include "scene_surface.glsl"

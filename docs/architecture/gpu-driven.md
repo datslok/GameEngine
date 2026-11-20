@@ -6,7 +6,7 @@ The GPU choosing what each view draws (culling, levels, batching), the CPU only 
 
 ## The records and the maths (`cull-records`)
 
-Read by the camera's culling (below); `CULL_MOVED`, `CULL_SWAYS` and `GpuMeshLevels::changesShape` added for its velocity list.
+Read by the camera's culling (below); `CULL_MOVED`, `CULL_SWAYS` and `GpuMeshLevels::changesShape` added for a view's moving list (shadow tiles keeping movers apart; the camera builds none since the main pass writes its own motion, `anti-aliasing.md`).
 
 | Record | Bytes | One per | Holds |
 |---|---|---|---|
@@ -43,7 +43,7 @@ Every view's lists are built by compute (the only way since `cpu-culling-removed
 | Group (`GpuCullGroup`, 32 B; `CullGroupStyle`) | its run of segments (each group's in chunk order), groups in `batchByMesh`'s order: within a group, candidates in draw order (`buildCullGroups` for moving draws) |
 | `CameraCullTable` | still records, chunks, level tables, glass and flat-faced lists kept; candidates kept a chunk at a time (each chunk's sorted by group then draw, in a run with a quarter spare from `SlotBlocks`); built ranges repack their records and chunks, and the candidates of chunks where a draw's mesh, style, glass or flat faces changed (`getChunkBuilds`), then the segment table and still groups (`buildSegments`, growing with the segments); a mesh's level meshes changed or a frame not following builds everything (`getStillBuilds`); the moving draws' groups made each frame after the still ones |
 | Kept tables | records, chunks, candidates and segments in lasting buffers (`gpu-scene.md`): when the generation follows the one held, records, chunks and candidates by the repacked ranges (`stillRepacked`, `chunksRepacked`, `candidatesRepacked`), segments whole when they changed; all otherwise; the moving ones every frame; levels, groups, views and drawing order in each frame's upload memory |
-| `GpuCameraCull` (256 B, one a view) | frustum, level view, sway fade end, motion and sway flags, counts, the lists' bases, its number, slices (`placeCullView`) and segment slices |
+| `GpuCameraCull` (256 B, one a view) | frustum, level view, sway fade end, motion and sway flags, counts, the lists' bases, its number, slices (`placeCullView`), segment slices and a sun cascade's thinning band |
 | `GpuCullViewWork` (16 B, one a view) | written by the segment scan: visible candidates, visible segments, their workgroups |
 
 Seven passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers are written, each one dispatch over every view (below). Chunk culling (stage 7b, research `docs/research/GPUDRIVEN.md`) runs first, so the per-candidate passes see only visible chunks' candidates:
@@ -68,11 +68,11 @@ Seven passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers a
 
 - **Same order as the CPU:** the places are prefix sums over a fixed order (segments, then candidates within them), so the lists equal `batchByMesh`'s entry for entry (`cullCameraOnCpu` runs the passes' steps, chunk tests included; tested on random scenes as flat groups and as a chunked table). No atomics in the lists; the dispatch sizes' `atomicMax` decides only how many workgroups run.
 - **Chunks never hide a drawn draw:** a chunk's box holds its members' spheres plus a margin past rounding, and its flags cover every view kind (`testChunksNeverHideADrawnDraw`); `cull-compare` in the forest: every list equal at the rim, Ring and wall.
-- **Draw list (`DrawListLayout`):** the camera's region (room for every draw) first, then each drawn shadow tile's (and its glass), then the velocity region, then a region for each capture drawn (faces, then the mirror), then glass. The CPU writes only its own runs (`UploadArray::writeRuns`); the GPU's regions are left for the culling, nothing reading them before.
-- **Drawing (`PassDraws`, a view's commands from `commandFirst`):** prepass, main, velocity and capture passes bind the pools once and draw each style's packed commands with one `vkCmdDrawIndexedIndirectCount` (`drawIndirectCount`); groups of deforming meshes after, one by one from their own commands.
+- **Draw list (`DrawListLayout`):** the camera's region (room for every draw) first, then each drawn shadow tile's (and its glass), then a region for each capture drawn (faces, then the mirror), then glass. The CPU writes only its own runs (`UploadArray::writeRuns`); the GPU's regions are left for the culling, nothing reading them before.
+- **Drawing (`PassDraws`, a view's commands from `commandFirst`):** prepass, main and capture passes bind the pools once and draw each style's packed commands with one `vkCmdDrawIndexedIndirectCount` (`drawIndirectCount`); groups of deforming meshes after, one by one from their own commands.
 - **Stays on the CPU:** glass (its cached list tested against the frustum and sorted), the mirror's choice (flat-faced draws only), which shadow tiles to draw (below).
 - **F4:** DRAWN, levels, triangles and the probe faces' triangles from the counts and commands read back a frame or two late.
-- **`cull-compare`:** asks for the next frame's CPU lists too (`cpuReferenceLists`), reads the GPU's back and reports each list's (camera, velocity, each probe face drawn, mirror, shadow tiles) matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.
+- **`cull-compare`:** asks for the next frame's CPU lists too (`cpuReferenceLists`), reads the GPU's back and reports each list's (camera, each probe face drawn, mirror, shadow tiles) matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.
 - Tests: `camera_culling_test` (lists, capture views, slices, groups, kept table, chunks, changed chunks alone, comparison, edges, no setting, command); `shadow_culling_test` (tiles, both forms); `gpu_scene_test` (the draw list's layout); `cull_records_gpu_test` (`chunkInView`, `boxInFrustum`, cases within 1 cm of a plane or the reach left out).
 
 ## Shadow tiles (`gpu-cull-shadows`)

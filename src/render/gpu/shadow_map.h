@@ -81,6 +81,12 @@ struct ShadowSettings {
     // How wide the band near a cascade's edge is where it hands over to the next, as a share of its radius.
     float cascadeBlendBand = 0.1f;
 
+    // Casters limited to the nearest cascades (DrawItem::shadowCascades: the forest's small plants) thin out across
+    // their last cascade instead of stopping at its edge: from this far from its side (a share of its radius) a growing
+    // share of them, chosen by a fixed random number each, is left out, until none is left at the blend band. At or
+    // below the blend band nothing thins.
+    float limitedCasterThinStart = 0.5f;
+
     // How the handover looks (see CascadeTransition).
     CascadeTransition cascadeTransition = CascadeTransition::Blend;
 
@@ -247,6 +253,12 @@ struct ShadowTile {
     // A sun tile's cascade, nearest 0 (a mirror's row its own), the far shadow map one past the last; -1 for other
     // lights' tiles. Casters limited to the nearest cascades (DrawItem::shadowCascades) stay out of the others.
     int sunCascade = -1;
+
+    // A sun cascade's band (distances from its sides, in radii) where the casters it is the last cascade of thin out:
+    // all kept from thinStart in, none from thinEnd out (ShadowSettings::limitedCasterThinStart, cascadeBlendBand;
+    // shadowThinKeeps). thinStart at or below thinEnd thins nothing.
+    float thinStart = 0.0f;
+    float thinEnd = 0.0f;
 };
 
 // A tile's square in the coloured shadow map: its place and size in the atlas, halved.

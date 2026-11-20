@@ -483,28 +483,6 @@ void VulkanRenderer::createPipelines() {
         glassShadowPipeline = std::make_unique<VulkanPipeline>(device, layouts, glass);
     }
 
-    // The velocity pass: the objects that moved, drawn again over the main pass's depth (tested, not written; GREATER
-    // OR EQUAL, so their own surfaces pass), their positions (and texture coordinates, for cut-outs' holes) into the
-    // velocity image. Its cut-out variant throws away the holes.
-    PipelineDescription motion;
-    motion.vertexShader = "assets/shaders/motion.vert.spv";
-    motion.fragmentShader = "assets/shaders/motion.frag.spv";
-    motion.sharedLayout = sceneLayout->getPipelineLayout();
-    motion.vertices = shadowCutOut.vertices;
-    motion.vertices.attributes.push_back({4, 1, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(MeshVertex, position))});
-    motion.cullMode = VK_CULL_MODE_BACK_BIT;
-    motion.dynamicCullMode = true;
-    motion.colourFormat = VK_FORMAT_R16G16_SFLOAT;
-    motion.depthFormat = depthFormat;
-    motion.depthTest = true;
-    motion.depthWrite = false;
-    motion.depthCompare = VK_COMPARE_OP_GREATER_OR_EQUAL;
-    motionPipeline = std::make_unique<VulkanPipeline>(device, layouts, motion);
-
-    PipelineDescription motionCutOut = motion;
-    motionCutOut.fragmentConstants = {0u, 1u}; // MATERIAL_CUT_OUT_CONSTANT
-    motionCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, motionCutOut);
-
     /*
     * Glass and blended surfaces: the main pass's vertex shader and shading (triangle_transparent.frag), its depth tested
     * (GREATER, reversed-Z) but not written, blended over the picture: picture = light added + transmittance x picture,
@@ -558,13 +536,20 @@ void VulkanRenderer::createMainPipelines(bool glassRays, VkPipelineLayout layout
                     PipelineDescription variant = main;
                     setDepthState(variant, mainPassDepthState(afterPrepass));
 
+                    // The motion vectors (triangle_motion.vert): last frame's shapes at vertex binding 1, the velocity
+                    // image the first target after the scene image, before the reflection surfaces.
+                    variant.vertexShader = "assets/shaders/triangle_motion.vert.spv";
+                    variant.vertices.attributes.push_back({4, 1, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(MeshVertex, position))});
+                    variant.extraColourFormats = {taaVelocityFormat};
+
                     if (glassRays) {
                         variant.fragmentShader = "assets/shaders/triangle_rays.frag.spv";
                     }
 
                     if (surfaces) {
                         variant.fragmentShader = glassRays ? "assets/shaders/triangle_surfaces_rays.frag.spv" : "assets/shaders/triangle_surfaces.frag.spv";
-                        variant.extraColourFormats = reflections->surfaceFormats();
+                        const std::vector<VkFormat> surfaceFormats = reflections->surfaceFormats();
+                        variant.extraColourFormats.insert(variant.extraColourFormats.end(), surfaceFormats.begin(), surfaceFormats.end());
                     }
 
                     if (probes || cutOut) {
@@ -1270,33 +1255,18 @@ void VulkanRenderer::takeCameraCull(const VulkanCameraCulling::Collected& culled
 }
 
 /*
-* cull-compare's reference, from the CPU's culling functions: the camera's opaque draws in view batched by mesh, the
-* velocity pass's (those that moved, sway within reach or changed shape), each capture's in its own view, and each
-* drawn shadow tile's casters (shadowTileCasters, split where it keeps its movers apart) without thinned marks, since
-* shadow shaders thin nothing. Lists are numbered by their views as culled.
+* cull-compare's reference, from the CPU's culling functions: the camera's opaque draws in view batched by mesh, each
+* capture's in its own view, and each drawn shadow tile's casters (shadowTileCasters, split where it keeps its movers
+* apart) without thinned marks, since shadow shaders thin nothing. Lists are numbered by their views as culled.
 */
 VulkanRenderer::CullCompare VulkanRenderer::cpuReferenceLists(const FrameDescription& description, const CameraCullFrame& table,
                                                               const std::vector<GpuCameraCull>& views, const Frustum& cameraFrustum, const LevelView& cameraLevels,
-                                                              bool motion, const WindSettings* sway, const std::vector<CaptureCull>& captures,
-                                                              const ShadowDraws& shadowDraws, const LevelOfDetailSettings& levelSettings) const {
+                                                              const std::vector<CaptureCull>& captures, const ShadowDraws& shadowDraws,
+                                                              const LevelOfDetailSettings& levelSettings) const {
     const std::vector<DrawItem>& draws = description.draws;
     const std::vector<std::size_t> visible = opaqueDraws(draws, visibleDraws(draws, cameraFrustum));
-    std::vector<std::size_t> moving;
-
-    if (motion) {
-        for (std::size_t index : visible) {
-            const DrawItem& draw = draws[index];
-            const bool moved = draw.previousModel && *draw.previousModel != draw.model;
-            const bool swaying = sway != nullptr && drawSways(draw.sway, draw.bounds.centre, draw.bounds.radius, cameraOrigin, *sway);
-
-            if (moved || swaying || meshes.at(draw.mesh.index)->changedShape()) {
-                moving.push_back(index);
-            }
-        }
-    }
-
-    CullCompare compare{{{0, false, "Camera", batchByMesh(draws, visible, 0, &cameraLevels)}, {0, true, "Velocity", batchByMesh(draws, moving, 0, &cameraLevels)}},
-                        views, {table.stillRecords.begin(), table.stillRecords.end()}, table.meshLevels};
+    CullCompare compare{{{0, false, "Camera", batchByMesh(draws, visible, 0, &cameraLevels)}}, views,
+                        {table.stillRecords.begin(), table.stillRecords.end()}, table.meshLevels};
     compare.records.insert(compare.records.end(), table.movingRecords.begin(), table.movingRecords.end());
 
     for (std::size_t view = 0; view < captures.size(); ++view) {
@@ -1539,11 +1509,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const std::uint32_t jitterPhases = vendorUpscales ? jitterPhaseCount(sceneSize, frameWidth) : taaJitterFrames;
     motionViewProjection = relativeViewProjection;
     const Vec2 jitter = temporal && antiAliasing.jitter ? taaJitter(taaFrame, jitterPhases) : Vec2{};
+    frameJitter = jitter;
     relativeViewProjection = jitteredClip(relativeViewProjection, jitter, static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
 
     const Mat4 previousViewProjection = previousCamera.known
                                             ? previousRelativeViewProjection(previousCamera.viewProjection, previousCamera.origin, cameraOrigin)
                                             : motionViewProjection;
+    previousMotionViewProjection = previousViewProjection;
 
     // From this frame's clip space (without the jitter) to last frame's, for bounce light, reflections and anti-aliasing.
     const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
@@ -1652,8 +1624,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // What every view draws is laid out before anything is recorded (the frame's draw list: the GPU's regions and the
     // CPU's glass entries), so the scene buffers can be written once and the passes only draw. Each view draws the levels
-    // of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass redraws the camera's with the
-    // same levels, so its depths match the main pass's. The camera's are chosen by the output's height, not the render's:
+    // of detail its distances and pixels allow (scene/level_of_detail.h). The camera's are chosen by the output's height, not the render's:
     // the upscalers rebuild the output's detail from jittered frames, and chosen by the render's, DLSS Quality pulled
     // every switch a third closer (docs/research/LOD.md, Hiding the switches).
     validateLevelOfDetail(settings.levelOfDetail);
@@ -1680,7 +1651,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                     frame.frameIndex);
     framePlaced = drawsPlaced ? std::optional{frame.frameIndex} : std::nullopt;
 
-    // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway and the velocity pass.
+    // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway.
     validateWind(settings.wind);
     const WindSettings* sway = description.wind && settings.wind.enabled && settings.wind.sway ? &settings.wind : nullptr;
     ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
@@ -1695,12 +1666,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     cpuClock.lap(CpuStage::Shadows, profilerSeconds());
 
-    // The velocity pass's list (the visible objects that moved, swayed or changed shape) follows the shadow tiles'.
-    const std::uint32_t motionBase = drawList.reserve(listEntries);
-
     // The probe round the camera is captured while reflections run, a few faces a frame (probeCaptureStep), each from the
-    // place its cycle started. Each face drawn draws what its own view holds, those entries following the velocity
-    // pass's in the draw list.
+    // place its cycle started. Each face drawn draws what its own view holds, those entries following the shadow
+    // tiles' in the draw list.
     const bool captureProbe = screenReflections && settings.reflections.probe;
     ProbeCaptureStep probeStep{};
     const float probeFar = settings.reflections.probeFar;
@@ -1873,9 +1841,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     frameWind = wind->prepare(description.wind ? &*description.wind : nullptr, settings.wind, cameraOrigin, description.frameSeconds);
 
     // The camera's culling view, and the placed plants' views (render/vulkan/vulkan_placed_drawing.h) before the scene set
-    // points at their entries: the camera, its velocity list while there is one, the probe faces captured this frame and
-    // the shadow tiles drawing their casters. The mirror draws only flat-faced draws, which plants are not.
-    const GpuCameraCull cameraCull = packCameraCull(cameraFrustum, cameraLevels, temporal, sway != nullptr, settings.wind.swayFadeEnd);
+    // points at their entries: the camera, the probe faces captured this frame and the shadow tiles drawing their casters.
+    // The mirror draws only flat-faced draws, which plants are not. The camera builds no velocity list: the main pass
+    // writes the motion vectors itself (triangle_motion.vert).
+    const GpuCameraCull cameraCull = packCameraCull(cameraFrustum, cameraLevels, false, false, 0.0f);
     placedViewNumbers = PlacedViewNumbers{};
 
     if (drawsPlaced) {
@@ -1889,7 +1858,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             }
         }
 
-        setPlacedViews(cameraCull, temporal, faces, faceNumbers, shadowDraws, frame.frameIndex);
+        setPlacedViews(cameraCull, faces, faceNumbers, shadowDraws, frame.frameIndex);
     }
 
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
@@ -1921,7 +1890,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     beginGpuPass(frame, GpuPass::CameraCull);
     std::vector<GpuCameraCull> cullViews{cameraCull};
     cullViews[0].mainBase = 0;
-    cullViews[0].motionBase = motionBase;
+    cullViews[0].motionBase = 0;
     std::vector<CullViewKind>& kinds = cullFrameViews[frame.frameIndex];
     kinds.clear();
 
@@ -1952,11 +1921,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (comparing) {
         cullCompares[frame.frameIndex] =
-            cpuReferenceLists(description, cullFrame, cullViews, cameraFrustum, cameraLevels, temporal, sway, captureViews, shadowDraws, settings.levelOfDetail);
+            cpuReferenceLists(description, cullFrame, cullViews, cameraFrustum, cameraLevels, captureViews, shadowDraws, settings.levelOfDetail);
     }
 
     const PassDraws mainPass = cameraCulling->mainDraws(frame.frameIndex, cullFrame, 0);
-    const PassDraws motionPass = cameraCulling->motionDraws(frame.frameIndex, cullFrame, 0);
 
     for (std::size_t view = 0; view < captureViews.size(); ++view) {
         capturePasses[static_cast<std::size_t>(captureViews[view].capture)] = cameraCulling->mainDraws(frame.frameIndex, cullFrame, static_cast<std::uint32_t>(view + 1));
@@ -2133,12 +2101,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::RayDebug);
         drawRayDebugView(frame, sceneSet, camera, settings.rayDebugView);
         endGpuPass(frame, GpuPass::RayDebug);
-    }
-
-    if (temporal) {
-        beginGpuPass(frame, GpuPass::Motion);
-        drawMotion(frame, motionPass, sceneSet, packMotionView(motionViewProjection, previousViewProjection));
-        endGpuPass(frame, GpuPass::Motion);
     }
 
     // The surfaces this frame shows, for fitting a later frame's cascades: the CPU reads them once this frame is done.
@@ -2473,6 +2435,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.levelOptions[0] = cameraThinning;
     // The frame, turning the level fades' dither (level_fade.glsl) for temporal anti-aliasing to blend; held without it.
     frameData.levelOptions[1] = temporalAntiAliasing(settings.upscaling) ? static_cast<float>(taaFrame % noiseCycleFrames) : 0.0f;
+    frameData.levelOptions[2] = settings.levelOfDetail.impostorSelfShadow ? 1.0f : 0.0f;
+    frameData.levelOptions[3] = settings.levelOfDetail.impostorShadowBias;
+    // The main pass's motion vectors, worked out while anti-aliasing is temporal (it alone reads them, with motion blur).
+    packFrameMotion(frameData, previousMotionViewProjection, frameJitter, temporalAntiAliasing(settings.upscaling));
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
     // (kept small: the shaders turn it into a float offset of the noise).
@@ -3010,18 +2976,24 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const PassDraws& mainDraw
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
+    VulkanImage& velocity = taa->getVelocity();
+    velocity.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
 
-    // The scene image first, then the reflection surfaces when they are written.
+    // The scene image first, then the velocity image (cleared to no motion: the sky's and every still surface's is the
+    // camera's, from depth), then the reflection surfaces when they are written.
+    const float none = static_cast<float>(TAA_NO_MOTION);
     std::vector<ColourAttachment> colours{
-        ColourAttachment{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {background.x, background.y, background.z, 1.0f}}};
+        ColourAttachment{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {background.x, background.y, background.z, 1.0f}},
+        ColourAttachment{velocity.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {none, none, 0.0f, 0.0f}}};
 
     if (reflectionSurfaces) {
         const std::array<ColourAttachment, 3> surfaces = reflections->beginSurfaces(commands);
         colours.insert(colours.end(), surfaces.begin(), surfaces.end());
     }
 
-    // The sky drawn in a pass of its own afterwards tests the depths, so they are kept for it.
-    const bool skyAfter = reflectionSurfaces && sky != nullptr;
+    // The sky drawn in a pass of its own afterwards (its pipelines draw into the scene image alone) tests the depths, so
+    // they are kept for it.
+    const bool skyAfter = sky != nullptr;
     const VkAttachmentLoadOp depthLoad = afterPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
     const VkAttachmentStoreOp depthStore = keepDepth || skyAfter ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     const DepthAttachment depthTarget{depth.getView(), depthLoad, depthStore, gpuFarDepth};
@@ -3042,13 +3014,13 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const PassDraws& mainDraw
         bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     }
     pushUnusedView(commands, pipeline.getLayout());
-    stats.drawCalls += drawPassDraws(commands, mainDraws, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
-    stats.drawCalls += drawPlacedDraws(commands, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT}, 0u);
+    stats.drawCalls += drawPassDraws(commands, mainDraws, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT, true});
+    stats.drawCalls += drawPlacedDraws(commands, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT, true}, 0u);
 
     /*
-    * With the reflection surfaces, the sky's and the stars' pipelines (which draw into the scene image alone) need a
-    * pass of their own: the barriers between make the main pass's colour and depth writes visible to it, which keeps
-    * both, and the depth stored only when it is read later.
+    * The sky's and the stars' pipelines draw into the scene image alone, so they need a pass of their own: the barriers
+    * between make the main pass's colour and depth writes visible to it, which keeps both, and the depth stored only when
+    * it is read later.
     */
     if (skyAfter) {
         vkCmdEndRendering(commands);
@@ -3125,44 +3097,6 @@ void VulkanRenderer::drawRayDebugView(FrameContext& frame, VkDescriptorSet scene
 }
 
 /*
-* The velocity pass: the velocity image starts cleared to "no motion" (so everything it does not draw is reprojected by
-* the camera alone), and the moving objects are drawn over the main pass's depth, which is tested and kept, with the two
-* frames' cameras as push constants. The image is left for the resolve, which reads it.
-*/
-void VulkanRenderer::drawMotion(FrameContext& frame, const PassDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view) {
-    const VkCommandBuffer commands = frame.commands;
-    VulkanImage& velocity = taa->getVelocity();
-    velocity.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
-    depth.transition(commands, ImageState::DepthTarget);
-
-    const float none = static_cast<float>(TAA_NO_MOTION);
-    const ColourAttachment colour{velocity.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {none, none, 0.0f, 0.0f}};
-    const DepthAttachment depthTest{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTest);
-    renderingOpen = true;
-
-    // The placed plants' velocity list (their swaying parts), drawn the same way.
-    const bool placed = framePlaced && placedViewNumbers.velocity;
-    const bool anything = placed || (motionDraws.groups != nullptr ? !motionDraws.groups->groups.empty() : !motionDraws.batches->empty());
-
-    if (anything) {
-        const BatchPipelines moving{motionPipeline->get(), motionCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT, true};
-        bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
-        vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-        stats.drawCalls += drawPassDraws(commands, motionDraws, moving);
-        stats.drawCalls += drawPlacedDraws(commands, moving, placedViewNumbers.velocity);
-    }
-
-    vkCmdEndRendering(commands);
-    renderingOpen = false;
-}
-
-/*
-* Glass and blended surfaces, far to near, into the scene image over the opaque picture, its depth tested and not
-* written. Set 2 holds the reflection probe's light and the picture before the glass (VulkanOpaquePicture, kept just
-* before: refracting glass reads it).
-*/
-/*
 * The beacons added to the picture in a block of their own, its depth tested and kept; the picture left readable after,
 * as the main pass leaves it.
 */
@@ -3182,6 +3116,11 @@ void VulkanRenderer::drawBeacons(FrameContext& frame, std::span<const PlacedBeac
     sceneColour.transition(commands, ImageState::SurfaceRead);
 }
 
+/*
+* Glass and blended surfaces, far to near, into the scene image over the opaque picture, its depth tested and not
+* written. Set 2 holds the reflection probe's light and the picture before the glass (VulkanOpaquePicture, kept just
+* before: refracting glass reads it).
+*/
 void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes,
                                      bool readsProbe, const TransparentRefraction& refraction) {
     const VkCommandBuffer commands = frame.commands;
@@ -3479,7 +3418,7 @@ std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const Batc
     return calls;
 }
 
-void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, bool velocity, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
+void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
                                     ShadowDraws& shadowDraws, std::uint32_t frameIndex) {
     std::vector<PlacedViewAsked> asked{PlacedViewAsked{camera, CAMERA_CULL_DRAWN}};
     std::vector<std::string> names{"Camera"};
@@ -3488,10 +3427,6 @@ void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, bool velocity, 
         names.push_back(std::move(name));
         return static_cast<std::uint32_t>(asked.size() - 1);
     };
-
-    if (velocity) {
-        placedViewNumbers.velocity = add(camera, CAMERA_CULL_MOVING, "Velocity");
-    }
 
     for (std::size_t face = 0; face < faces.size(); ++face) {
         placedViewNumbers.faces.at(static_cast<std::size_t>(faceNumbers[face])) = add(faces[face], CAMERA_CULL_DRAWN, "Probe face " + std::to_string(faceNumbers[face]));

@@ -19,8 +19,9 @@
 * Grown into each tree variant in its own frame, so they repeat with it, as the tree does.
 */
 
-// The sun's cascades climbers cast into (ModelRenderer::shadowCascades).
-inline constexpr int climberShadowCascades = 2;
+// The sun's cascades climbers cast into (ModelRenderer::shadowCascades; 0 all): all, so their shadows on the trunks do
+// not pop in as one walks up (ForestUnderstoreySettings::shadowCascades).
+inline constexpr int climberShadowCascades = 0;
 
 // How many climbers and how they grow (F5 Forest, Climbers; start-up: the meshes are built once).
 struct ForestClimberSettings {

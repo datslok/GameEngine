@@ -3,7 +3,8 @@
 // REFLECTION_SURFACES), their copies tinting shadowed lights through glass by rays (triangle_rays.frag,
 // triangle_surfaces_rays.frag: GLASS_SHADOW_RAYS), the reflection probe's capture, probe_capture.frag and
 // probe_capture_rays.frag (with the sun's shadow traced past its cascades and glass's tint: PROBE_CAPTURE,
-// PROBE_CAPTURE_RAYS, GLASS_SHADOW_RAYS), and glass itself (triangle_transparent.frag: TRANSPARENT).
+// PROBE_CAPTURE_RAYS, GLASS_SHADOW_RAYS), and glass itself (triangle_transparent.frag: TRANSPARENT). The main pass's
+// four also write the motion vectors (MAIN_MOTION, from triangle_motion.vert).
 
 // Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
 #include "render/gpu/shader_shared.h"
@@ -49,6 +50,13 @@ layout(location = 7) in vec3 framePosition;
 layout(location = 8) flat in mat3 frameAxes;
 // The level fade (level_fade.glsl): the depth prepass keeps its share of the pixels, and the main pass shades only those.
 layout(location = 11) flat in uint levelFade;
+
+#ifdef MAIN_MOTION
+// Where the fragment was last frame, and above 0 where a vertex of its triangle moved (triangle_motion.vert).
+#include "taa.glsl"
+layout(location = 12) in vec4 previousClip;
+layout(location = 13) in float movement;
+#endif
 
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"
@@ -293,9 +301,15 @@ layout(location = 0) out vec4 outputColour;
 // reflection this pixel added (the probes' or the flat ambient's light in the mirror direction, times the specular
 // albedo), which the reflection pass swaps out. Only in the variant that has those targets.
 #ifdef REFLECTION_SURFACES
-layout(location = 1) out vec2 reflectionNormal;
-layout(location = 2) out vec4 reflectionSurface;
-layout(location = 3) out vec3 reflectionStandIn;
+layout(location = 2) out vec2 reflectionNormal;
+layout(location = 3) out vec4 reflectionSurface;
+layout(location = 4) out vec3 reflectionStandIn;
+#endif
+
+// The main pass's motion vectors, the velocity image (render/gpu/taa.h): the surface's motion since last frame in NDC
+// where its instance moved, else none (TAA_NO_MOTION: the camera's, which the depth gives).
+#ifdef MAIN_MOTION
+layout(location = 1) out vec2 motion;
 #endif
 
 // How the surface position changes from this pixel to the next one right and down. Soft shadows use it to follow the
@@ -303,6 +317,10 @@ layout(location = 3) out vec3 reflectionStandIn;
 // (screen-space derivatives are only defined there, not inside the per-light loops some pixels leave early).
 vec3 positionStepRight;
 vec3 positionStepDown;
+
+// Where the sun's shadow is looked up: the fragment's position, or on an impostor's card the leaf seen behind it
+// (impostor_sampling.glsl, ImpostorSample::point), so a sun fleck's edge crosses the plant rather than its flat card.
+vec3 sunShadowPoint;
 
 // Texel i holds the value at i / (size - 1); a linear sampler places it at (i + 0.5) / size.
 vec2 sampleBrdfTable(float nDotV, float roughness) {
@@ -504,7 +522,7 @@ vec3 sunTileShadow(int tile, vec3 position, float tanAngularRadius, vec3 toLight
         return own;
     }
 
-    vec3 distant = softShadowFromTileLifted(farTile, distantOccluderPoint(relativePosition, toLight, distantReach), tanAngularRadius, distantReach);
+    vec3 distant = softShadowFromTileLifted(farTile, distantOccluderPoint(sunShadowPoint, toLight, distantReach), tanAngularRadius, distantReach);
     return withDistantOccluders(own, distant);
 }
 
@@ -526,7 +544,7 @@ vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float
 
     for (int cascade = 0; cascade < cascades; ++cascade) {
         int tile = firstTile + cascade;
-        vec3 position = relativePosition + toLight * sunShadowBias(shadowTiles[tile].offset.y, nDotL);
+        vec3 position = sunShadowPoint + toLight * sunShadowBias(shadowTiles[tile].offset.y, nDotL);
         float edge = sunCascadeEdge(tile, position);
 
         if (edge <= 0.0) {
@@ -546,7 +564,7 @@ vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float
         vec3 nextPosition = position;
 
         if (!last) {
-            nextPosition = relativePosition + toLight * sunShadowBias(shadowTiles[nextTile].offset.y, nDotL);
+            nextPosition = sunShadowPoint + toLight * sunShadowBias(shadowTiles[nextTile].offset.y, nDotL);
 
             if (sunCascadeEdge(nextTile, nextPosition) <= 0.0) {
                 return sunTileShadow(tile, position, tanAngularRadius, toLight, farTile, distantReach);
@@ -803,8 +821,15 @@ vec4 surfaceTexture(uint slot, vec2 uv, bool shifted, vec2 gradientAcross, vec2 
 }
 
 void main() {
+#ifdef MAIN_MOTION
+    // First, so every path that keeps the fragment has written it. Where it is now: its pixel, the jitter taken off
+    // (motionOptions.yz), on the render screen (clusterScreen.xy).
+    motion = movement > 0.0 ? pixelMotion(gl_FragCoord.xy, motionOptions.yz, clusterScreen.xy, previousClip) : vec2(TAA_NO_MOTION);
+#endif
+
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
+    sunShadowPoint = relativePosition;
     // Projected layers' steps to the next pixel, in the object's frame, taken before any branch like the others.
     vec3 frameStepAcross = dFdx(framePosition);
     vec3 frameStepDown = dFdy(framePosition);
@@ -910,6 +935,8 @@ void main() {
     */
     bool impostor = (material.extra.y & MATERIAL_IMPOSTOR) != 0u;
     vec3 impostorNormal = vec3(0.0);
+    vec3 impostorPoint = vec3(0.0);
+    vec3 impostorFrameNormal = vec3(0.0);
 
     if (impostor) {
         ImpostorSample tree = sampleImpostor(material.textureSlots.x, material.textureSlots.z, material.attenuation.w, framePosition, worldTangent.xyz,
@@ -917,6 +944,13 @@ void main() {
         albedo = tree.colour * material.baseColour;
         normalTexel = vec3(0.5, 0.5, 1.0);
         impostorNormal = frameAxes * tree.normal;
+        impostorPoint = tree.point;
+        impostorFrameNormal = tree.normal;
+
+        // The leaf seen, in the world: the card point's offset to it, scaled by the card's metres a unit (worldTangent.w).
+        if (levelOptions.z > 0.5) {
+            sunShadowPoint = relativePosition + frameAxes * ((tree.point - framePosition) * worldTangent.w);
+        }
     }
 
     /*
@@ -1282,6 +1316,13 @@ void main() {
             // Dimmed by the fog above, as the fog's own light is (the forward-scattered share still arriving).
             vec3 radiance = directional[i].radiance.rgb * fogSunThrough(relativePosition.y + cameraOrigin.y, directional[i].toLight.xyz);
             int tile = directional[i].shadowTile;
+
+            // An impostor's card shadowed by its own leaves (impostor_sampling.glsl, impostorSunLight): the frames round the
+            // light read as the plant's shadow map, before the light splits into reflected and let through.
+            if (impostor && levelOptions.z > 0.5) {
+                radiance *= impostorSunLight(material.textureSlots.x, material.textureSlots.z, material.attenuation.w, impostorPoint,
+                                             impostorFrameNormal, normalize(transpose(frameAxes) * directional[i].toLight.xyz), levelOptions.w);
+            }
 
             if (tile >= 0) {
                 // Lifted towards the light for light coming through a leaf (shadowLiftNormal), not into its own shadow.

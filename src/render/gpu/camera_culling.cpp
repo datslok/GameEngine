@@ -1,4 +1,5 @@
 #include "render/gpu/camera_culling.h"
+#include "core/hash.h"
 #include "math/angles.h"
 #include "render/gpu/level_fade.h"
 #include "render/gpu/reflection_probe.h"
@@ -6,6 +7,8 @@
 #include "scene/material.h"
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <map>
 #include <set>
@@ -298,7 +301,50 @@ bool shadowTakes(const GpuCullRecord& record, const GpuCameraCull& view) {
         return false;
     }
 
-    return view.cascade < 0 || record.shadowCascades <= 0 || view.cascade < record.shadowCascades;
+    if (view.cascade >= 0 && record.shadowCascades > 0 && view.cascade >= record.shadowCascades) {
+        return false;
+    }
+
+    return shadowThinKeeps(record, view);
+}
+
+/*
+* A sun cascade's box is a parallel projection, so its left and right planes' distances add up to its width wherever the
+* point is: the nearer one over half of it is 1 at the middle and 0 on that side, as the shader's cascade edge is.
+*/
+float shadowThinShare(const GpuCullRecord& record, const GpuCameraCull& view) {
+    const float start = view.thinning[0];
+    const float end = view.thinning[1];
+
+    if (view.cascade < 0 || record.shadowCascades <= 0 || view.cascade != record.shadowCascades - 1 || record.bounds[3] < 0.0f || start <= end) {
+        return 1.0f;
+    }
+
+    float edge = 1.0f;
+
+    for (int axis = 0; axis < 2; ++axis) {
+        const float* low = view.frustum.planes[2 * axis];
+        const float* high = view.frustum.planes[2 * axis + 1];
+        const float fromLow = low[0] * record.bounds[0] + low[1] * record.bounds[1] + low[2] * record.bounds[2] + low[3];
+        const float fromHigh = high[0] * record.bounds[0] + high[1] * record.bounds[1] + high[2] * record.bounds[2] + high[3];
+        const float width = fromLow + fromHigh;
+
+        if (width > 0.0f) {
+            edge = std::min(edge, 2.0f * std::min(fromLow, fromHigh) / width);
+        }
+    }
+
+    return std::clamp((edge - end) / (start - end), 0.0f, 1.0f);
+}
+
+float shadowThinNumber(const GpuCullRecord& record) {
+    const std::array<std::uint32_t, 3> hashed = pcg3d({std::bit_cast<std::uint32_t>(record.bounds[0]), std::bit_cast<std::uint32_t>(record.bounds[1]),
+                                                       std::bit_cast<std::uint32_t>(record.bounds[2])});
+    return static_cast<float>(hashed[0] >> 8u) * (1.0f / 16777216.0f);
+}
+
+bool shadowThinKeeps(const GpuCullRecord& record, const GpuCameraCull& view) {
+    return shadowThinNumber(record) < shadowThinShare(record, view);
 }
 
 std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view, std::uint32_t slot) {
@@ -439,11 +485,14 @@ bool nearACameraEdge(const GpuCullRecord& record, const GpuMeshLevels& levels, c
         return true;
     }
 
-    // A shadow tile's own edges: the sphere touching the reach within a millimetre, or the smallest caster's size.
+    // A shadow tile's own edges: the sphere touching the reach within a millimetre, the smallest caster's size, or the
+    // thinning's number at its share.
     if ((view.flags & CAMERA_CULL_SHADOW) != 0u) {
         const Vec3 offset{record.bounds[0] - view.reach[0], record.bounds[1] - view.reach[1], record.bounds[2] - view.reach[2]};
         const bool atReach = view.reach[3] >= 0.0f && record.bounds[3] >= 0.0f && std::abs(offset.length() - view.reach[3] - record.bounds[3]) < 1e-3f;
-        return atReach || std::abs(record.bounds[3] - view.smallestCaster) < 1e-4f;
+        const float share = shadowThinShare(record, view);
+        const bool atThinning = share > 0.0f && share < 1.0f && std::abs(shadowThinNumber(record) - share) < 1e-4f;
+        return atReach || atThinning || std::abs(record.bounds[3] - view.smallestCaster) < 1e-4f;
     }
 
     if ((view.flags & CAMERA_CULL_SWAY) == 0u || (record.flags & CULL_SWAYS) == 0u) {

@@ -54,9 +54,10 @@ struct ForestUnderstoreySettings {
     float levelKeepShare = 0.12f;
     float shadowKeepShare = 0.05f;
 
-    // How many of the sun's cascades its shadows are drawn into, nearest first (ModelRenderer::shadowCascades): a plant's
-    // shadow is a few metres long; the 10,000 plants in every cascade cost most of 22 ms of shadows while turning.
-    int shadowCascades = 2;
+    // How many of the sun's cascades its shadows are drawn into, nearest first (ModelRenderer::shadowCascades; 0 all).
+    // All: the nearest two ended the plants' shadows about 20 m away, where they popped in plant by plant as one walked
+    // up; with the shadows culled and cached on the GPU, all four cost about 0.2 ms more of the shadow pass walking or turning.
+    int shadowCascades = 0;
 
     // The card past the levels (scene/impostor.h, docs/research/LOD.md), as the trees': the error, in metres, from which a plant is
     // drawn as its card (a plant a twentieth of a tree's height, so about that share of the trees' 1.5 m: a 1.5 m plant

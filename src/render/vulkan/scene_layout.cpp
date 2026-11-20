@@ -89,9 +89,9 @@ SceneLayout::SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout) 
 
     const std::array<VkDescriptorSetLayout, 2> setLayouts{bindlessLayout, createdLayout};
 
-    // Only the shadow pass, the velocity pass and the reflection probe's capture push anything: each tile's view, the two
-    // frames' cameras, or each cube face's view, for their vertex shaders.
-    const VkPushConstantRange shadowView{VK_SHADER_STAGE_VERTEX_BIT, 0, static_cast<std::uint32_t>(std::max(sizeof(GpuShadowView), sizeof(GpuMotionView)))};
+    // Only the shadow pass and the captures push anything: each tile's view, or each cube face's or mirror's view, for
+    // their vertex shaders.
+    const VkPushConstantRange shadowView{VK_SHADER_STAGE_VERTEX_BIT, 0, static_cast<std::uint32_t>(std::max(sizeof(GpuShadowView), sizeof(GpuCaptureView)))};
 
     VkPipelineLayoutCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

@@ -22,7 +22,7 @@ class VulkanPlanting;
 /*
 * The placed plants drawn in every view (ROADMAP phase 18, the valley's stages 2b2 and 2c1; render/gpu/placed_drawing.h):
 * each frame the table of the frame's planted parts, the blocks of the planting's held slots and each held cell's drawn
-* layer's box made on the CPU; then the views (the camera, its velocity list, the probe faces and shadow tiles drawn),
+* layer's box made on the CPU; then the views (the camera, the probe faces and shadow tiles drawn),
 * each taking the blocks of the boxes it may see; then four passes over every view's items (placed_cull_count,
 * placed_cull_scan, placed_cull_commands, placed_cull_write) write each view's entries and one indirect command a group,
 * which the passes drawing that view draw style by style (draws()). The cells made and dropped since the frame before,

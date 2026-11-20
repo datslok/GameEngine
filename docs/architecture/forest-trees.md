@@ -88,7 +88,7 @@ Root climbers (philodendrons, monsteras) up the canopy and emergent trunks, grow
 - **How many** (`climbersOnTree`): `treeShare` (0.8) of variants, 1 to `mostPerTree` (4) each, from the variant's seed.
 - **A climber** (`growClimber`): from 0.1 m up between the buttresses, winding `twist` (0.3) turns above 2.5 m, up `leastHeightShare` to `mostHeightShare` (0.5-1) of the trunk; a stem `stemDiameter` (3 cm) tapering to 60%, 5 mm off the bark. Below `shingleHeight` (4 m) shingle leaves (`shingleLeafLength` 0.2 m every `shingleSpacing` 0.12 m) flat on the bark; above, big leaves (`bigLeafLength` 0.8 m every `bigLeafSpacing` 0.4 m) hanging from stalks, as outlined cards. Feeder roots every `rootSpacing` (1.5 m) from 2.5 m up, pushed out until clear of trunk and buttresses, to the ground or, for `midAirShare` (0.3), part way, swinging from their own object (`windAnchorOwn`).
 - **Leaf** (`aroidLeafImages`, `forestAroidLeafMaterial`): drawn at start-up, glossy and dark, a paler midrib and curving veins, a normal map; opaque, double-sided, roughness 0.4, light through leaves. Stems and roots in the islands' brown bark.
-- **Drawn** until the tree's card takes over (a level drawing nothing at its error, chosen by the tree's box), and baked into the card; shadows in the nearest `climberShadowCascades` (2).
+- **Drawn** until the tree's card takes over (a level drawing nothing at its error, chosen by the tree's box), and baked into the card; shadows in every cascade (`climberShadowCascades` 0).
 - **`forest-climber [n]`**: the camera 7 m from the n-th tree carrying climbers, on its first climber's side (`getClimbedTrees`, `getClimbedFacing`), looking at the trunk 4 m up.
 - `ForestClimberSettings` (F5 Forest, Climbers; start-up).
 
@@ -101,6 +101,6 @@ Rosettes and moss on the limbs at the crown's base, grown into each variant of e
 - **A rosette** (`rosetteShape` → `RosetteShape`, `appendRosette`): strap leaves round by the golden angle, youngest steepest, oldest drooping, each the palms' folded leaflet (`appendStrapLeaf`, `StrapFold`). Bird's-nest ferns (`fernShare` 0.5 of a big tree's): `fernFronds` (12) of `fernLength` (1 m, 50-150% a rosette), a funnel arching over. Bromeliads (all of a mid tree's): `bromeliadLeaves` (16) of `bromeliadLength` (0.4 m), stiffer, channelled.
 - **Atlas** (`epiphyteLeafImages`, `forestEpiphyteLeafMaterial`): twice as wide as tall, the fern's frond on the left (`fernColour`), the palms' leaflet picture on the right (`bromeliadColour`); opaque, double-sided, roughness 0.45, light through leaves.
 - **Moss** (`limbMoss`, `moss` on): over runs of two segments or more at least `mossLimbShare` (0.15) of the trunk's radius and no steeper than `mossSteepestDegrees` (50), a shell `mossArcDegrees` (140) round the limb's top, 1 cm off the bark, narrowing to nothing at the ends; the `Moss001` scan as a surface (`forestLimbMossLayer`, 0.5 m tiles).
-- **Drawn** as the climbers are; shadows in the nearest `epiphyteShadowCascades` (2).
+- **Drawn** as the climbers are; shadows in every cascade (`epiphyteShadowCascades` 0).
 - **`forest-epiphyte [n]`**: the camera 8 m out from the n-th tree carrying rosettes' first rosette (away from its trunk) and 3 m above it, looking at it (`getEpiphyteViews`).
 - `ForestEpiphyteSettings` (F5 Forest, Epiphytes; start-up).

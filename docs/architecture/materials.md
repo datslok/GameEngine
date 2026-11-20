@@ -105,7 +105,7 @@ Plain averaging mixes a wire with the holes beside it, so a few levels down ever
 | Main pass after the prepass | as usual | same pipeline: the holes have no depth for its `EQUAL` test to match |
 | Main pass without the prepass, probe capture | as usual | specialization constant `MATERIAL_CUT_OUT_CONSTANT` adds the discard |
 | Shadow pass | `shadow.vert` alone | `shadow_cut_out.vert` with UVs, `cut_out.frag` |
-| Velocity pass | `motion.frag` | its cut-out constant, so motion behind the holes survives; a fading level's dither as the prepass |
+| Motion vectors | the main pass's own fragment shader | written with the colour, so holes and fading levels keep what the main pass keeps |
 
 - Double-sided batches cull nothing (`vkCmdSetCullMode`); others keep the pass's culling (front faces in the mirror-image probe capture, whose shading flips `gl_FrontFacing` back).
 - **Rays:** a cut-out's ray instance is not opaque (`rayInstanceNotOpaque`, `FORCE_NO_OPAQUE`). `traceRayQuery` (`ray_scene.glsl`) confirms a candidate only where its full-size texel is solid (`candidateIsSolid`; rays have no footprint). `committedHitFacesRay` counts either side of a double-sided surface as front, so no ray takes a leaf for a wall's inside. Needs sets 0 and 1 bound (`RAY_SCENE_MATERIALS`).

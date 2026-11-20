@@ -57,7 +57,7 @@ struct PlacedView {
     uint firstItem; // its items, from here
     uint items;
     uint groups;
-    uint wanted;    // the flag a part's slot needs to draw: CAMERA_CULL_DRAWN, or CAMERA_CULL_MOVING (the velocity list)
+    uint wanted;    // the flag a part's slot needs to draw: CAMERA_CULL_DRAWN, or CAMERA_CULL_MOVING (a moving list)
     uint entryBase; // its entries, from here
     uint entryRoom;
     uint viewCount; // every view's

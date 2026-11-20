@@ -1214,20 +1214,30 @@ namespace {
     * The sun's record names its far tile and the reach its cascades take casters from, for the far map's tap inside the
     * cascades (distant occluders), and the shader gets both; none with the switch off or without a far map.
     */
-    // Each sun tile knows its cascade, nearest first, the far map one past the last; a lamp's tiles none (-1).
+    /*
+    * Each sun tile knows its cascade, nearest first, the far map one past the last; a lamp's tiles none (-1). The
+    * cascades carry the band their limited casters thin out over (limitedCasterThinStart down to the blend band); the far
+    * map and the lamps none.
+    */
     void testTilesKnowTheirCascade() {
-        const ShadowSettings settings;
+        ShadowSettings settings;
+        settings.limitedCasterThinStart = 0.6f;
+        settings.cascadeBlendBand = 0.15f;
         FrameLighting lighting = sunOnly();
         lighting.pointLights.push_back(pointLightAt(Vec3{10.0f, 2.0f, 15.0f}, true, 10.0f));
         const ShadowPlan plan = planShadows(lighting, makeFarCamera(Vec3{10.0f, 2.0f, 20.0f}), settings);
         const LightShadow& sun = plan.directional[0];
 
         for (int cascade = 0; cascade < settings.cascadeCount; ++cascade) {
-            assert(plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)].sunCascade == cascade);
+            const ShadowTile& tile = plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)];
+            assert(tile.sunCascade == cascade);
+            assert(tile.thinStart == 0.6f && tile.thinEnd == 0.15f);
         }
 
-        assert(plan.tiles[static_cast<std::size_t>(sun.farTile)].sunCascade == settings.cascadeCount);
-        assert(plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)].sunCascade == -1);
+        const ShadowTile& far = plan.tiles[static_cast<std::size_t>(sun.farTile)];
+        const ShadowTile& lamp = plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)];
+        assert(far.sunCascade == settings.cascadeCount && far.thinStart == 0.0f && far.thinEnd == 0.0f);
+        assert(lamp.sunCascade == -1 && lamp.thinStart == 0.0f && lamp.thinEnd == 0.0f);
     }
 
     void testTheSunNamesItsFarTileForDistantOccluders() {

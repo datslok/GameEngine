@@ -364,6 +364,9 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] Still entities announced, not searched for (`still-announced`)
 - [x] Cheaper forest shadows (`understorey-shadow-cascades`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
+- [x] Small plants' shadows thinned out across their last cascade, not cut at its edge about 20 m away (`shadow-thin-out`)
+- [x] Small plants', climbers' and epiphytes' shadows in every cascade, so they no longer pop in about 20 m away (`small-plant-shadow-reach`)
+- [x] Motion vectors written by the main pass, the separate velocity pass retired (research in `docs/research/WIND.md`, "Where the motion vectors are written") (`velocity-in-main-pass`)
 - [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`): ground-following patches (`ground-cover-patches`), meadow grass (`meadow-grass`), the forest floor (`forest-floor-cover`)
 - [ ] The structures: a military brutalist megatower over the jungle, the terraced Bastion (the user's pick, Nov 19 2026), the Ring kept as the alien relic (research, concept sheets and plan in `docs/research/STRUCTURES.md`)
   - [x] 1. Faceted slabs in the stealth-alien look, kept for the Ring (`structure-slabs`)
@@ -393,6 +396,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [x] The flashlight held close to the eye, its hand's offset in its settings, so near shadows land behind things as seen (`flashlight-hand`)
 - [ ] Level of detail (research in `docs/research/LOD.md`): by error in pixels (`tree-lod`), shadows from the same levels (`shadow-lod`), the terrain's CDLOD (`terrain-lod`)
 - [x] Impostors (`tree-impostors`, `impostor-switch`, `plant-impostors`)
+  - [x] Cards shadowed by their own leaves: a depth atlas baked beside the normals, the sun's frames read as the plant's own shadow map, the scene's sun shadow read at the leaf seen rather than on the card, so small plants no longer glow in sun flecks (research in `docs/research/LOD.md`, "Self-shadowed impostors") (`impostor-self-shadow`)
 - [ ] Pop-in: done for the trees' and palms' cards (`lod-pop-in`, `palm-thinning`); left: the trees' bark if it shows
   - [x] The scanned plants' levels cross-faded by a dither over a band of distance (`plant-fades`)
 - [x] Leaf shimmer: the trees' flutter slower and in step (`tree-flutter`)

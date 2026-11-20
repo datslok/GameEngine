@@ -322,6 +322,24 @@ namespace {
         const GpuFrameData ultra = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true, false, shadows);
         assert(ultra.atlasTexel[0] == 1.0f / 8192.0f && ultra.atlasTexel[1] == 1.0f / 12288.0f);
     }
+
+    /*
+    * The main pass writes the motion vectors (motion_fill and the resolve read them): the frame's block carries last
+    * frame's camera-relative view-projection without the jitter, column-major, this frame's jitter (pixels), and whether
+    * to work the motion out at all (off: every pixel left at no motion). None until packed.
+    */
+    void testFrameDataCarriesTheMotionCameras() {
+        const Camera camera{Vec3{1.0f, 2.0f, 3.0f}, Vec3{-4.0f, 0.0f, -2.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.1f, 1.6f, 0.1f, 100.0f};
+        GpuFrameData frame = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), makeClusterGrid(camera, 1280, 800), true, false);
+        assert(frame.motionOptions[0] == 0.0f);
+
+        packFrameMotion(frame, Mat4::translation(0.0f, 5.0f, 0.0f), Vec2{0.25f, -0.375f}, true);
+        assert(frame.motionPrevious[13] == 5.0f && frame.motionPrevious[0] == 1.0f);
+        assert(frame.motionOptions[0] == 1.0f && frame.motionOptions[1] == 0.25f && frame.motionOptions[2] == -0.375f);
+
+        packFrameMotion(frame, Mat4::identity(), Vec2{}, false);
+        assert(frame.motionOptions[0] == 0.0f && frame.motionPrevious[13] == 0.0f);
+    }
 }
 
 namespace {
@@ -488,6 +506,7 @@ void testGpuScene() {
     testPackingOnManyCoresIsTheSame();
     testGroundRunsPackAsOneByOne();
     testFrameDataCarriesTheCascadeTransition();
+    testFrameDataCarriesTheMotionCameras();
     testDrawsAreBatchedByMesh();
     testOnlyChosenDrawsAreBatchedInTheirOrder();
     testBatchesStartAtTheFirstInstance();

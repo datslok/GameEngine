@@ -1,5 +1,6 @@
 // Impostors' pure maths (scene/impostor.h mirrors every function and is tested against it): the hemi-octahedral fold,
-// each frame's direction and plane, where a card point falls in a frame and in the atlas. No texture reads here;
+// each frame's direction and plane, where a card point falls in a frame and in the atlas, the surface behind it and the
+// sun's test against a frame's depths (the plant's own shadow). No texture reads here;
 // impostor_sampling.glsl reads the atlases with these.
 #ifndef IMPOSTOR_GLSL
 #define IMPOSTOR_GLSL
@@ -47,6 +48,39 @@ vec2 impostorFrameUv(vec3 cardPoint, vec3 frameDirection) {
 // A frame's texture coordinates in the atlas.
 vec2 impostorAtlasUv(vec2 frameUv, vec2 frame, float frames) {
     return (frame + frameUv) / frames;
+}
+
+// A frame's depth (over the radius, along its direction from the middle) from the normal atlas's alpha, 0..1.
+float impostorDepthDecode(float stored) {
+    return stored * 2.0 - 1.0;
+}
+
+// The surface a frame sees behind a card point: the point moved along the frame's direction to the depth there.
+vec3 impostorSurfacePoint(vec3 cardPoint, vec3 frameDirection, float depth) {
+    return cardPoint + frameDirection * (depth - dot(cardPoint, frameDirection));
+}
+
+// The sun's share at a point pointDepth along a sun frame, from a 2 x 2 of texels in textureGather's order ((0, 1), (1, 1),
+// (1, 0), (0, 0)): each lit where empty (covered below 0.5) or no nearer the sun than the point plus the bias; bilinear.
+float impostorGatherLit(vec4 storedDepths, vec4 covered, vec2 fraction, float pointDepth, float bias) {
+    vec4 weights = vec4((1.0 - fraction.x) * fraction.y, fraction.x * fraction.y, fraction.x * (1.0 - fraction.y),
+                        (1.0 - fraction.x) * (1.0 - fraction.y));
+    vec4 depths = storedDepths * 2.0 - 1.0;
+    vec4 lit = vec4(lessThan(covered, vec4(0.5))) + vec4(lessThanEqual(depths, vec4(pointDepth + bias)));
+    return dot(weights, min(lit, vec4(1.0)));
+}
+
+// The bias in depth of biasTexels of a frame frameTexels a side (two radii across).
+float impostorShadowBias(float biasTexels, float frameTexels) {
+    return biasTexels * 2.0 / frameTexels;
+}
+
+// The sun's test's point (normal offset): moved off its leaf to the side facing the sun by the bias times the sine of
+// the angle between them, so a leaf the sun grazes is not shadowed by its own texels.
+vec3 impostorShadowPoint(vec3 point, vec3 normal, vec3 sunDirection, float bias) {
+    float facing = dot(normal, sunDirection);
+    float sine = sqrt(max(1.0 - facing * facing, 0.0));
+    return point + normal * ((facing < 0.0 ? -bias : bias) * sine);
 }
 
 #endif

@@ -22,7 +22,7 @@
 
 /*
 * The plants the GPU placed (render/gpu/planting_records.h) drawn in every view (ROADMAP phase 18, the valley's stages
-* 2b2 and 2c1; docs/architecture/planting.md): the camera, its velocity list, the probe faces and the shadow tiles drawn.
+* 2b2 and 2c1; docs/architecture/planting.md): the camera, the probe faces and the shadow tiles drawn.
 * A table of each kind's parts, each part's instance and cull record in the plant's own frame. Each frame each view
 * takes the blocks of the cells whose box it may see (tested on the CPU: a box a held cell's drawn layer), and its
 * passes cull each of those plants in the region, its parts choosing their levels as the views' own draws do
@@ -90,8 +90,9 @@ static_assert(sizeof(GpuPlacedItem) == 8, "GpuPlacedItem must match placed_drawi
 
 /*
 * A view's culling: the view, the region drawn (north, south, spread), its items (from firstItem), the groups, the list
-* it makes (a part drawn where cameraCandidateFlags gives this bit: CAMERA_CULL_DRAWN, or CAMERA_CULL_MOVING for the
-* camera's velocity list), its entries' place and room, and every view's count of views and items.
+* it makes (a part drawn where cameraCandidateFlags gives this bit: CAMERA_CULL_DRAWN, or CAMERA_CULL_MOVING for a
+* view's moving list, which no view asks for since the main pass writes the motion vectors), its entries' place and
+* room, and every view's count of views and items.
 */
 struct GpuPlacedView {
     GpuCameraCull camera{};

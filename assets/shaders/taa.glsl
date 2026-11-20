@@ -74,6 +74,14 @@ vec2 objectMotion(vec4 currentClip, vec4 previousClip) {
     return currentClip.xy / currentClip.w - previousClip.xy / previousClip.w;
 }
 
+vec2 pixelMotion(vec2 pixel, vec2 jitter, vec2 size, vec4 previousClip) {
+    if (!(previousClip.w > 0.0)) {
+        return vec2(TAA_NO_MOTION);
+    }
+
+    return pixelToNdc(pixel - jitter, size) - previousClip.xy / previousClip.w;
+}
+
 vec2 sampleOutputPixel(vec2 renderPixel, vec2 jitter, vec2 outputPerRender) {
     return (renderPixel - jitter) * outputPerRender;
 }

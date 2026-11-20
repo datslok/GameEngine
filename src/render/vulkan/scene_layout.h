@@ -22,8 +22,8 @@
 * materials, lights, shadow tiles, the draw list, the clusters' light masks and the lights probe rays' hits may need,
 * and the shadow atlas, the BRDF table and the light probes' three atlases.
 * Nothing is bound per draw; each shadow tile pushes its view (GpuShadowView) as a push constant, a few bytes recorded
-* straight into the command buffer, and the velocity pass its two cameras (GpuMotionView), reading each instance's model
-* matrix from last frame (binding 21).
+* straight into the command buffer; the main pass's motion vectors read each instance's model matrix from last frame
+* (binding 21).
 */
 inline constexpr std::uint32_t bindlessTextureSet = 0;
 inline constexpr std::uint32_t sceneFrameSet = 1;
