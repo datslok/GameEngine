@@ -165,6 +165,113 @@ namespace {
     }
 
     /*
+    * Depth over the radius goes into a byte (-1 to 0, 1 to 255) and comes back from the texture's 0..1 within half a step;
+    * the surface behind a card point lies at its depth along the frame's direction, at the same place on the frame's plane.
+    */
+    void testDepthAndTheSurfaceBehindACardPoint() {
+        assert(impostorDepthEncode(-1.0f) == 0 && impostorDepthEncode(1.0f) == 255 && impostorDepthEncode(5.0f) == 255);
+
+        for (float depth : {-0.9f, -0.3f, 0.0f, 0.41f, 0.97f}) {
+            // Half a step is 1 / 255 of depth (a step spans 2 / 255), and float rounding may add a hair.
+            assert(near(impostorDepthDecode(static_cast<float>(impostorDepthEncode(depth)) / 255.0f), depth, 1.01f / 255.0f));
+        }
+
+        const Vec3 direction = impostorFrameDirection(Vec2{5.0f, 2.0f}, 8);
+        const Vec3 cardPoint{0.3f, -0.2f, 0.5f};
+        const Vec3 surface = impostorSurfacePoint(cardPoint, direction, -0.4f);
+        assert(near(surface.dot(direction), -0.4f, 1e-5f));
+        const Vec2 onCard = impostorFrameUv(cardPoint, direction);
+        const Vec2 onSurface = impostorFrameUv(surface, direction);
+        assert(near(onCard.x, onSurface.x, 1e-5f) && near(onCard.y, onSurface.y, 1e-5f));
+    }
+
+    /*
+    * The sun's test over a 2 x 2 of texels: empty texels and texels no nearer the sun than the point (plus the bias) are
+    * lit, filtered bilinearly in textureGather's order ((0, 1), (1, 1), (1, 0), (0, 0)).
+    */
+    void testTheSunsTestFiltersFourTexels() {
+        const std::array<float, 4> nearer{0.9f, 0.9f, 0.9f, 0.9f};
+        const std::array<float, 4> full{1.0f, 1.0f, 1.0f, 1.0f};
+        const std::array<float, 4> empty{0.0f, 0.0f, 0.0f, 0.0f};
+        // Stored 0.9 decodes to depth 0.8; the point at 0 lies behind it.
+        assert(impostorGatherLit(nearer, full, Vec2{0.3f, 0.6f}, 0.0f, 0.05f) == 0.0f);
+        assert(impostorGatherLit(nearer, empty, Vec2{0.3f, 0.6f}, 0.0f, 0.05f) == 1.0f);
+        // Within the bias it is the surface itself.
+        assert(impostorGatherLit(nearer, full, Vec2{0.3f, 0.6f}, 0.77f, 0.05f) == 1.0f);
+        // Only the (0, 0) texel blocks: its weight (1 - 0.25) (1 - 0.5) is taken off.
+        const std::array<float, 4> oneBlocks{0.5f, 0.5f, 0.5f, 0.9f};
+        assert(near(impostorGatherLit(oneBlocks, full, Vec2{0.25f, 0.5f}, 0.0f, 0.05f), 1.0f - 0.75f * 0.5f, 1e-6f));
+        assert(near(impostorShadowBias(1.5f, 32.0f), 1.5f * 2.0f / 32.0f, 1e-7f));
+    }
+
+    /*
+    * The normal offset: a leaf facing the sun is not moved, one it grazes moves the whole bias off it towards the sun's
+    * side (whichever side of the leaf that is), one at 60 degrees by the bias times sin 60.
+    */
+    void testTheSunsTestStartsOffTheLeaf() {
+        const Vec3 normal{0.0f, 0.0f, 1.0f};
+        const Vec3 point{0.1f, 0.2f, 0.3f};
+        assert(nearVec(impostorShadowPoint(point, normal, normal, 0.1f), point, 1e-7f));
+        assert(nearVec(impostorShadowPoint(point, normal, Vec3{0.0f, 1.0f, 0.0f}, 0.1f), Vec3{0.1f, 0.2f, 0.4f}, 1e-6f));
+        const Vec3 fromBehind = Vec3{0.0f, std::sqrt(3.0f) * 0.5f, -0.5f};
+        assert(nearVec(impostorShadowPoint(point, normal, fromBehind, 0.1f), Vec3{0.1f, 0.2f, 0.3f - 0.1f * std::sqrt(3.0f) * 0.5f}, 1e-6f));
+    }
+
+    // A quad facing +z at height z, x from -half to half, y from bottom to bottom + 2 half.
+    IndexedMesh facingQuad(float half, float bottom, float z) {
+        IndexedMesh mesh;
+
+        for (const Vec2& corner : {Vec2{-1.0f, 0.0f}, Vec2{1.0f, 0.0f}, Vec2{1.0f, 2.0f}, Vec2{-1.0f, 2.0f}}) {
+            MeshVertex vertex{};
+            vertex.position = Vec3{corner.x * half, bottom + corner.y * half, z};
+            vertex.normal = Vec3{0.0f, 0.0f, 1.0f};
+            mesh.vertices.push_back(vertex);
+        }
+
+        mesh.indices = {0, 1, 2, 0, 2, 3};
+        return mesh;
+    }
+
+    /*
+    * A plant shading itself: a small quad 1 m in front of a large one. With the sun in front (+z, a frame's direction, or
+    * tilted between frames), the large quad is dark behind the small one and lit beside it, the small one lit; with the
+    * sun behind, the other way round. The front frame's depth behind the middle is the small quad's.
+    */
+    void testCardsShadowThemselves() {
+        // The small quad 1.4 m wide: the frames round a tilted sun lie up to about 25 degrees from it, and each must still
+        // see the middle behind it (the grid's spacing softens the plant's own shadow by that much).
+        const IndexedMesh front = facingQuad(0.7f, 0.3f, 0.5f);
+        const IndexedMesh back = facingQuad(1.0f, 0.0f, -0.5f);
+        const ImpostorBake bake = bakeImpostor({ImpostorPart{.mesh = &front}, ImpostorPart{.mesh = &back}}, 8, 32, testJobs());
+        assert(bake.normal.storage == TextureStorage::Exact);
+        assert(nearVec(bake.centre, Vec3{0.0f, 1.0f, 0.0f}, 1e-5f) && near(bake.radius, 1.5f, 1e-5f));
+        const auto inCard = [&](const Vec3& world) { return (world - bake.centre) / bake.radius; };
+
+        const Vec3 behindFront = inCard(Vec3{0.0f, 1.0f, -0.5f});
+        const Vec3 besideFront = inCard(Vec3{0.9f, 0.1f, -0.5f});
+        const Vec3 onFront = inCard(Vec3{0.0f, 1.0f, 0.5f});
+        const Vec3 ahead = impostorFrameDirection(Vec2{7.0f, 0.0f}, 8);
+        assert(nearVec(ahead, Vec3{0.0f, 0.0f, 1.0f}, 1e-6f));
+
+        const Vec3 facing{0.0f, 0.0f, 1.0f};
+
+        for (const Vec3& sun : {ahead, Vec3{0.2f, 0.3f, 0.93f}.normalized()}) {
+            assert(impostorSunLight(bake, 8, behindFront, facing, sun, 1.5f) < 0.05f);
+            assert(impostorSunLight(bake, 8, besideFront, facing, sun, 1.5f) > 0.95f);
+            assert(impostorSunLight(bake, 8, onFront, facing, sun, 1.5f) > 0.95f);
+        }
+
+        // From behind: the large quad's back is lit, the small quad in its shadow.
+        const Vec3 behind = Vec3{0.0f, 0.3f, -0.95f}.normalized();
+        assert(impostorSunLight(bake, 8, behindFront, facing, behind, 1.5f) > 0.95f);
+        assert(impostorSunLight(bake, 8, onFront, facing, behind, 1.5f) < 0.05f);
+
+        // The front frame (7, 0), its middle texel: the small quad, 0.5 m ahead of the middle.
+        const std::size_t texel = (static_cast<std::size_t>(16) * bake.normal.width + 7 * 32 + 16) * 4 + 3;
+        assert(near(impostorDepthDecode(static_cast<float>(bake.normal.pixels[texel]) / 255.0f), 0.5f / 1.5f, 1.0f / 255.0f));
+    }
+
+    /*
     * The card: four corners round the tree's middle, a radius out along x and y (so its bounds hold the sphere the shader
     * turns it in), its texture coordinates the corners (-1..1), its normal's x the radius, which the vertex shader reads.
     */
@@ -203,6 +310,10 @@ void testImpostors() {
     testAViewBlendsTheFourNearestFrames();
     testAPointIsReadOnEachFramesPlane();
     testTheBakeDrawsEachFrame();
+    testDepthAndTheSurfaceBehindACardPoint();
+    testTheSunsTestFiltersFourTexels();
+    testTheSunsTestStartsOffTheLeaf();
+    testCardsShadowThemselves();
     testTheCardCarriesItsMiddleAndRadius();
     testAnImpostorMaterialReachesTheGpu();
 }

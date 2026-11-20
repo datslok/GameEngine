@@ -19,5 +19,16 @@ void main() {
     } else if (function == GPU_TEST_IMPOSTOR_FRAME_UV) {
         vec4 b = testInput(1);
         testOutput(0, vec4(impostorFrameUv(a.xyz, impostorFrameDirection(b.xy, b.z)), 0.0, 0.0));
+    } else if (function == GPU_TEST_IMPOSTOR_SURFACE_POINT) {
+        vec4 b = testInput(1);
+        testOutput(0, vec4(impostorSurfacePoint(a.xyz, impostorFrameDirection(b.xy, b.z), impostorDepthDecode(b.w)), 0.0));
+    } else if (function == GPU_TEST_IMPOSTOR_GATHER_LIT) {
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        testOutput(0, vec4(impostorGatherLit(a, b, c.xy, c.z, impostorShadowBias(c.w, 32.0)), 0.0, 0.0, 0.0));
+    } else if (function == GPU_TEST_IMPOSTOR_SHADOW_POINT) {
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        testOutput(0, vec4(impostorShadowPoint(a.xyz, b.xyz, c.xyz, a.w), 0.0));
     }
 }

@@ -27,7 +27,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 contactShadowOptions;   // x: 1 when the main pass reads the sun's contact shadows (contact_shadows.comp), y: 1 when it reads the local lights'
     ivec4 contactLightSlots;     // the local lights with a contact shadow channel, by channel: a point light's slot, a spotlight's CONTACT_SPOT_SLOT_BASE past its slot, -1 none
     vec4 materialOptions;        // parallax occlusion mapping: x 1 draws it, y 1 self-shadows from the sun, z the most steps; w 1 lets light through leaves
-    vec4 levelOptions;           // x: the camera's error allowed a metre away, for card thinning (0 thins nothing), y: the frame turning the level fades' dither
+    vec4 levelOptions;           // x: the camera's error allowed a metre away, for card thinning (0 thins nothing), y: the frame turning the level fades' dither, z: 1 shadows impostor cards by their own leaves, w: that shadow's bias in texels
     mat4 motionPrevious;         // the main pass's motion vectors (taa.glsl, pixelMotion): last frame's view-projection without the jitter, taking points measured from this frame's camera
     vec4 motionOptions;          // x: 1 while the motion is worked out, else every pixel has none; yz: this frame's jitter (pixels)
 };

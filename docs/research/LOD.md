@@ -99,6 +99,24 @@ Measured in a hidden copy at the trees' start (the RTX 4070 Laptop, TAA, render 
 - Three frames blended, one depth read of parallax; no depth offset, which would also break the main pass's EQUAL test against the prepass unless both write it.
 - The jungle patch is a few hundred metres across, so impostors matter for the valley's far trees later (kilometres), less for the patch itself.
 
+## Self-shadowed impostors
+
+Researched on Nov 20, 2026, after small plants' cards 15-20 m away glowed yellow-green in sun flecks (gone with impostors off; dimmer with light through leaves off). The card casts no shadow and reads the scene's sun shadow once on its flat plane, so in a fleck every texel gets full sun plus light through the leaf.
+
+| Source | What its impostors carry |
+|---|---|
+| [Unigine](https://developer.unigine.com/en/docs/latest/editor2/tools/impostors_creator/impostor_material) | depth and ambient occlusion textures; depth offset for shadows, or shadows and the image |
+| [Pixyz for Unity](https://docs.unity3d.com/Packages/com.unity.pixyz.unity-sdk@4.0/manual/features/impostors.html) | depth captured to give impostors shadows |
+| Amplify Impostors ([1.0 notes](https://reddit.birdcat.cafe/r/Unity3D/comments/1jui5td/major_update_for_amplify_impostors_long_time)) | occlusion and emission textures, an optional position output |
+| [three.js](https://discourse.threejs.org/t/a-forest-of-octahedral-impostors/85735), [Meep](https://unpkg.com/@woosh/meep-engine@2.124.2/src/engine/graphics/impostors/octahedral/README.md) | depth beside colour and normal, for relighting and compositing |
+| SpeedTree ([ambient lighting](https://docs.unity3d.com/speedtree-modeler/manual/ambient-lighting.html), [GPU Gems 3 ch. 4](https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch04.html)) | ambient occlusion baked; billboards lit live, no baked lighting |
+
+- No shipped write-up found of a card shadowing itself from the sun's direction; a [forum thread](https://redlib.hackliberty.org/r/GraphicsProgramming/comments/1l84vii/self_shadow_inpostor/mx2fexe/?context=3) advises the baked depth, not the card's, and 8 bits of it **(informal)**.
+- **The idea used here:** the atlas already holds the plant seen from every direction over the upper hemisphere, so the frames round the sun's direction, with depth, are its own shadow map. The point seen is the card point moved along each view frame's direction to its baked depth; it is lit where no baked surface in the sun's frames lies nearer the sun, filtered over 2 x 2 texels, after a normal offset (Holbein, "Normal Offset Shadows", 2011) against acne where the sun grazes a leaf.
+- The same point is where the scene's sun shadow is read, so a fleck's edge crosses the plant instead of switching the whole card.
+- Rejected: baked occlusion alone (does not follow the sun; dims sun-facing leaves); a fixed dimmer (a tuning fudge).
+- 8 bits of depth over the sphere's diameter is a step of 1/127 radius, below a frame texel (1/32 radius at 64 texels). It lives in the normal atlas's alpha, kept uncompressed (BC7 would blur it at silhouettes): 4 instead of 1 byte a texel.
+
 ## Small triangles and cut-outs
 
 - GPUs shade 2 x 2 pixel quads: a one-pixel triangle pays four lanes. Merging quads cut shading of pixel-sized triangles 8 times (Fatahalian et al., SIGGRAPH 2010), the waste ordinary hardware pays.

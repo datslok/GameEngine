@@ -59,6 +59,44 @@ Vec2 impostorAtlasUv(const Vec2& frameUv, const Vec2& frame, int frames) {
     return (frame + frameUv) / static_cast<float>(frames);
 }
 
+std::uint8_t impostorDepthEncode(float depth) {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(depth * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f));
+}
+
+float impostorDepthDecode(float stored) {
+    return stored * 2.0f - 1.0f;
+}
+
+// The card point's own depth along the frame swapped for the surface's; its place on the frame's plane kept.
+Vec3 impostorSurfacePoint(const Vec3& cardPoint, const Vec3& frameDirection, float depth) {
+    return cardPoint + frameDirection * (depth - cardPoint.dot(frameDirection));
+}
+
+float impostorGatherLit(const std::array<float, 4>& storedDepths, const std::array<float, 4>& covered, const Vec2& fraction, float pointDepth,
+                        float bias) {
+    const std::array<float, 4> weights{(1.0f - fraction.x) * fraction.y, fraction.x * fraction.y, fraction.x * (1.0f - fraction.y),
+                                       (1.0f - fraction.x) * (1.0f - fraction.y)};
+    float lit = 0.0f;
+
+    for (std::size_t texel = 0; texel < 4; ++texel) {
+        if (covered[texel] < 0.5f || impostorDepthDecode(storedDepths[texel]) <= pointDepth + bias) {
+            lit += weights[texel];
+        }
+    }
+
+    return lit;
+}
+
+float impostorShadowBias(float biasTexels, float frameTexels) {
+    return biasTexels * 2.0f / frameTexels;
+}
+
+Vec3 impostorShadowPoint(const Vec3& point, const Vec3& normal, const Vec3& sunDirection, float bias) {
+    const float facing = normal.dot(sunDirection);
+    const float sine = std::sqrt(std::max(1.0f - facing * facing, 0.0f));
+    return point + normal * ((facing < 0.0f ? -bias : bias) * sine);
+}
+
 namespace {
     // Bilinear, wrapping (bark tiles), each channel 0..1 as stored.
     std::array<float, 4> sampleTexture(const ImageData& image, const Vec2& uv) {
@@ -186,14 +224,17 @@ namespace {
                         target.normal.pixels[texel] = toByte(normal.x * 0.5f + 0.5f);
                         target.normal.pixels[texel + 1] = toByte(normal.y * 0.5f + 0.5f);
                         target.normal.pixels[texel + 2] = toByte(normal.z * 0.5f + 0.5f);
-                        target.normal.pixels[texel + 3] = 255;
+                        target.normal.pixels[texel + 3] = impostorDepthEncode(depth / radius);
                     }
                 }
             }
         }
     }
 
-    // Empty texels take the mean of their filled neighbours, ring by ring (alpha stays 0), within the frame.
+    /*
+    * Empty texels take the mean of their filled neighbours, ring by ring, within the frame: the colour's alpha stays 0 (the
+    * coverage), the normal's alpha (the depth) spreads with it, so a view's filtered depth near an edge is the edge's.
+    */
     void spreadIntoEmpty(const FrameTarget& target, int rings) {
         const int size = target.texels;
         std::vector<bool> filled(static_cast<std::size_t>(size) * static_cast<std::size_t>(size));
@@ -216,7 +257,7 @@ namespace {
                         continue;
                     }
 
-                    float sums[2][3] = {};
+                    float sums[2][4] = {};
                     int count = 0;
 
                     for (int dy = -1; dy <= 1; ++dy) {
@@ -228,7 +269,7 @@ namespace {
                                 continue;
                             }
 
-                            for (int channel = 0; channel < 3; ++channel) {
+                            for (int channel = 0; channel < 4; ++channel) {
                                 sums[0][channel] += target.colour.pixels[at(nx, ny) + static_cast<std::size_t>(channel)];
                                 sums[1][channel] += target.normal.pixels[at(nx, ny) + static_cast<std::size_t>(channel)];
                             }
@@ -242,6 +283,8 @@ namespace {
                             target.colour.pixels[at(x, y) + static_cast<std::size_t>(channel)] = static_cast<std::uint8_t>(sums[0][channel] / static_cast<float>(count));
                             target.normal.pixels[at(x, y) + static_cast<std::size_t>(channel)] = static_cast<std::uint8_t>(sums[1][channel] / static_cast<float>(count));
                         }
+
+                        target.normal.pixels[at(x, y) + 3] = static_cast<std::uint8_t>(sums[1][3] / static_cast<float>(count));
 
                         next[static_cast<std::size_t>(y * size + x)] = true;
                     }
@@ -288,6 +331,8 @@ ImpostorBake bakeImpostor(const std::vector<ImpostorPart>& parts, int frames, in
 
     bake.colour.encoding = TextureEncoding::Srgb;
     bake.normal.encoding = TextureEncoding::Linear;
+    // Its alpha is the depth the sun's test compares exactly: BC7 would smear it across a block at the silhouettes.
+    bake.normal.storage = TextureStorage::Exact;
 
     jobs.parallelFor(static_cast<std::size_t>(frames) * static_cast<std::size_t>(frames), 1, [&](std::size_t index) {
         const int column = static_cast<int>(index) % frames;
@@ -298,6 +343,50 @@ ImpostorBake bakeImpostor(const std::vector<ImpostorPart>& parts, int frames, in
     });
 
     return bake;
+}
+
+/*
+* As impostor_sampling.glsl's impostorSunLight: from the leaf moved off by the normal offset, per frame round the sun,
+* the 2 x 2 texels round the point's place (kept
+* inside the frame) gathered from the depth (the normal's alpha) and the coverage (the colour's alpha), tested, filtered.
+*/
+float impostorSunLight(const ImpostorBake& bake, int frames, const Vec3& leaf, const Vec3& normal, const Vec3& sunDirection, float biasTexels) {
+    const ImpostorBlend blend = impostorFrameBlend(sunDirection, frames);
+    const int frameTexels = static_cast<int>(bake.normal.width) / frames;
+    const float bias = impostorShadowBias(biasTexels, static_cast<float>(frameTexels));
+    const Vec3 point = impostorShadowPoint(leaf, normal, sunDirection, bias);
+    float lit = 0.0f;
+
+    for (std::size_t corner = 0; corner < 4; ++corner) {
+        const Vec3 direction = impostorFrameDirection(blend.frames[corner], frames);
+        const Vec2 frameUv = impostorFrameUv(point, direction);
+
+        if (frameUv.x < 0.0f || frameUv.y < 0.0f || frameUv.x > 1.0f || frameUv.y > 1.0f) {
+            lit += blend.weights[corner];
+            continue;
+        }
+
+        const Vec2 place = impostorAtlasUv(frameUv, blend.frames[corner], frames) * static_cast<float>(bake.normal.width) - Vec2{0.5f, 0.5f};
+        const int frameLeft = static_cast<int>(blend.frames[corner].x) * frameTexels;
+        const int frameTop = static_cast<int>(blend.frames[corner].y) * frameTexels;
+        const int left = std::clamp(static_cast<int>(std::floor(place.x)), frameLeft, frameLeft + frameTexels - 2);
+        const int top = std::clamp(static_cast<int>(std::floor(place.y)), frameTop, frameTop + frameTexels - 2);
+        const Vec2 fraction{std::clamp(place.x - static_cast<float>(left), 0.0f, 1.0f), std::clamp(place.y - static_cast<float>(top), 0.0f, 1.0f)};
+        // textureGather's order: (0, 1), (1, 1), (1, 0), (0, 0).
+        const int offsets[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+        std::array<float, 4> depths{};
+        std::array<float, 4> covered{};
+
+        for (std::size_t texel = 0; texel < 4; ++texel) {
+            const std::size_t at = (static_cast<std::size_t>(top + offsets[texel][1]) * bake.normal.width + static_cast<std::size_t>(left + offsets[texel][0])) * 4 + 3;
+            depths[texel] = static_cast<float>(bake.normal.pixels[at]) / 255.0f;
+            covered[texel] = static_cast<float>(bake.colour.pixels[at]) / 255.0f;
+        }
+
+        lit += blend.weights[corner] * impostorGatherLit(depths, covered, fraction, point.dot(direction), bias);
+    }
+
+    return lit;
 }
 
 IndexedMesh impostorCardMesh(const Vec3& centre, float radius) {
