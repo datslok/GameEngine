@@ -360,8 +360,8 @@ namespace {
 
         bool rootInMidAir = false;
 
-        for (const Entity entity : forest.game.getClimbers()) {
-            const IndexedMesh& mesh = forest.assets.getDrawnMesh(forest.world.get<ModelRenderer>(entity).parts.front().mesh);
+        for (const ModelRenderer& climber : forest.game.getClimberModels()) {
+            const IndexedMesh& mesh = forest.assets.getDrawnMesh(climber.parts.front().mesh);
 
             for (const HangingVertex& entry : mesh.hanging) {
                 assert(entry.first == windAnchorOwn);

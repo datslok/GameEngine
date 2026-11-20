@@ -181,7 +181,7 @@ const PlantedShadowChanges& VulkanPlacedDrawing::getShadowChanges() const {
     return shadowChanges;
 }
 
-void VulkanPlacedDrawing::setViews(std::span<const PlacedViewAsked> views, std::vector<std::string> names, std::uint32_t frameIndex) {
+void VulkanPlacedDrawing::setViews(std::span<const GpuCameraCull> views, std::vector<std::string> names, std::uint32_t frameIndex) {
     PerFrame& frame = frames.at(frameIndex);
     frame.views = placedViews(views, frame.runs, frame.chunks, frame.region, frame.table);
     frame.names = std::move(names);

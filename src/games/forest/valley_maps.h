@@ -49,7 +49,7 @@ inline constexpr int ecotopeCount = 4;
 using EcotopeWeights = std::array<float, ecotopeCount>;
 
 /*
-* The maps (F5 Forest, Planting; read at start-up but placedTrees). Their extent: within halfWidth of the valley's axis,
+* The maps (F5 Forest, Planting; read at start-up). Their extent: within halfWidth of the valley's axis,
 * from northmost to southmost, the floor, walls and rim (not the mountains beyond); texelMetres a texel.
 */
 struct ForestPlantingSettings {
@@ -75,10 +75,6 @@ struct ForestPlantingSettings {
 
     // How far under a sight line every crown stays.
     float corridorClearance = 2.0f;
-
-    // The patch's trees drawn from the GPU's cells (render/gpu/placed_drawing.h) in place of their entities, all but
-    // the shadows' stand-ins, which stay entities (ROADMAP phase 18, stage 2b2; live).
-    bool placedTrees = false;
 };
 
 void visit(ForestPlantingSettings& settings, SettingsVisitor& visitor);

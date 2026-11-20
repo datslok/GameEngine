@@ -32,14 +32,36 @@ namespace {
         return PlacedTurn{1.0f - 2.0f * (sine * sine + 0.0f), 2.0f * (0.0f + cosine * sine)};
     }
 
+    // Transform::getMatrix's steps with the quaternion's zero parts left out where they change nothing, from the turn
+    // already made (placed_drawing.glsl's placedTurnedModel: a vertex makes the sine and cosine once).
+    Mat4 placedTurnedModel(const GpuPlacedPlant& plant, const PlacedTurn& turn) {
+        Mat4 model = Mat4::identity();
+        model.values[0][0] = turn.diagonal * plant.scale;
+        model.values[0][2] = turn.corner * plant.scale;
+        model.values[1][1] = plant.scale;
+        model.values[2][0] = -turn.corner * plant.scale;
+        model.values[2][2] = turn.diagonal * plant.scale;
+        model.values[0][3] = plant.foot[0];
+        model.values[1][3] = plant.foot[1];
+        model.values[2][3] = plant.foot[2];
+        return model;
+    }
+
+    // A sphere placed by the plant's matrix already made (placedSphereBy), its radius by the plant's scale.
+    std::array<float, 4> placedSphereBy(const float sphere[4], const Mat4& model, float scale) {
+        const float x = model.values[0][0] * sphere[0] + model.values[0][2] * sphere[2] + model.values[0][3];
+        const float y = model.values[1][1] * sphere[1] + model.values[1][3];
+        const float z = model.values[2][0] * sphere[0] + model.values[2][2] * sphere[2] + model.values[2][3];
+        return {x, y, z, sphere[3] < 0.0f ? sphere[3] : sphere[3] * scale};
+    }
+
     // The part's draws as the passes make them (placedPartEntries): up to two slots, each a group and an entry.
     struct PartDraws {
         std::uint32_t groups[2] = {placedMostGroups, placedMostGroups};
         std::uint32_t entries[2] = {0, 0};
     };
 
-    PartDraws placedPartEntries(const GpuPlacedPart& part, const GpuPlacedPlant& plant, std::uint32_t number, const GpuCameraCull& view,
-                                std::uint32_t wanted) {
+    PartDraws placedPartEntries(const GpuPlacedPart& part, const GpuPlacedPlant& plant, std::uint32_t number, const GpuCameraCull& view) {
         const GpuCullRecord record = placedCullRecord(part.record, plant);
         PartDraws draws;
         std::uint32_t found = 0;
@@ -51,7 +73,7 @@ namespace {
 
             const std::uint32_t flags = cameraCandidateFlags(record, part.levels, view, slot);
 
-            if ((flags & wanted) == 0u || found >= 2) {
+            if ((flags & CAMERA_CULL_DRAWN) == 0u || found >= 2) {
                 continue;
             }
 
@@ -280,25 +302,24 @@ GpuCullChunk placedCellChunk(const PlantingBox& cell, const TerrainHeightRange& 
 * A view's items in run order, so its blocks keep placedBlocks' order (the entries' order within a group); its room by
 * its own items' layers. A shadow tile's parts never fade, so one entry a part there.
 */
-PlacedViews placedViews(std::span<const PlacedViewAsked> asked, std::span<const PlacedBlockRun> runs, std::span<const GpuCullChunk> chunks,
+PlacedViews placedViews(std::span<const GpuCameraCull> asked, std::span<const PlacedBlockRun> runs, std::span<const GpuCullChunk> chunks,
                         const PlantedRegion& region, const PlacedTable& table) {
     PlacedViews made;
 
     for (std::size_t index = 0; index < asked.size(); ++index) {
-        const PlacedViewAsked& wanted = asked[index];
-        const std::uint32_t entriesAPart = (wanted.camera.flags & CAMERA_CULL_SHADOW) != 0u ? 1u : 2u;
+        const GpuCameraCull& camera = asked[index];
+        const std::uint32_t entriesAPart = (camera.flags & CAMERA_CULL_SHADOW) != 0u ? 1u : 2u;
         GpuPlacedView view;
-        view.camera = wanted.camera;
+        view.camera = camera;
         view.region[0] = region.northmost;
         view.region[1] = region.southmost;
         view.region[2] = region.spread;
         view.firstItem = static_cast<std::uint32_t>(made.items.size());
         view.groups = static_cast<std::uint32_t>(table.groups.size());
-        view.wanted = wanted.wanted;
         view.entryBase = made.entries;
 
         for (std::size_t run = 0; run < runs.size(); ++run) {
-            if (!chunkInView(chunks[run], wanted.camera)) {
+            if (!chunkInView(chunks[run], camera)) {
                 continue;
             }
 
@@ -379,39 +400,27 @@ std::uint64_t placedTableSignature(const PlacedTable& table, const PlantedRegion
     return mixSpan(hash, std::span<const float>{regionNumbers});
 }
 
-// Transform::getMatrix's steps with the quaternion's zero parts left out where they change nothing.
+// Transform::getMatrix's steps from the plant's turn (placedTurnedModel).
 Mat4 placedPlantModel(const GpuPlacedPlant& plant) {
-    const PlacedTurn turn = placedTurn(plant.turnRadians);
-    Mat4 model = Mat4::identity();
-    model.values[0][0] = turn.diagonal * plant.scale;
-    model.values[0][2] = turn.corner * plant.scale;
-    model.values[1][1] = plant.scale;
-    model.values[2][0] = -turn.corner * plant.scale;
-    model.values[2][2] = turn.diagonal * plant.scale;
-    model.values[0][3] = plant.foot[0];
-    model.values[1][3] = plant.foot[1];
-    model.values[2][3] = plant.foot[2];
-    return model;
+    return placedTurnedModel(plant, placedTurn(plant.turnRadians));
 }
 
 std::array<float, 4> placedSphere(const float sphere[4], const GpuPlacedPlant& plant) {
-    const Mat4 model = placedPlantModel(plant);
-    const float x = model.values[0][0] * sphere[0] + model.values[0][2] * sphere[2] + model.values[0][3];
-    const float y = model.values[1][1] * sphere[1] + model.values[1][3];
-    const float z = model.values[2][0] * sphere[0] + model.values[2][2] * sphere[2] + model.values[2][3];
-    return {x, y, z, sphere[3] < 0.0f ? sphere[3] : sphere[3] * plant.scale};
+    return placedSphereBy(sphere, placedPlantModel(plant), plant.scale);
 }
 
+// The plant's matrix made once for both spheres.
 GpuCullRecord placedCullRecord(const GpuCullRecord& part, const GpuPlacedPlant& plant) {
     GpuCullRecord record = part;
-    const std::array<float, 4> bounds = placedSphere(part.bounds, plant);
-    const std::array<float, 4> levelSphere = placedSphere(part.levelSphere, plant);
+    const Mat4 model = placedPlantModel(plant);
+    const std::array<float, 4> bounds = placedSphereBy(part.bounds, model, plant.scale);
+    const std::array<float, 4> levelSphere = placedSphereBy(part.levelSphere, model, plant.scale);
     std::copy(bounds.begin(), bounds.end(), record.bounds);
     std::copy(levelSphere.begin(), levelSphere.end(), record.levelSphere);
     return record;
 }
 
-// Column-major in and out, as the shaders hold them.
+// Column-major in and out, as the shaders hold them. The turn made once for the matrix, the normals and the sphere.
 GpuInstance placedInstance(const GpuInstance& part, const GpuPlacedPlant& plant) {
     const auto read = [](const float* columns) {
         Mat4 matrix;
@@ -431,11 +440,12 @@ GpuInstance placedInstance(const GpuInstance& part, const GpuPlacedPlant& plant)
     rotation.values[2][0] = -turn.corner;
     rotation.values[2][2] = turn.diagonal;
 
+    const Mat4 model = placedTurnedModel(plant, turn);
     GpuInstance instance = part;
-    writeColumnMajor(placedPlantModel(plant) * read(part.model), instance.model);
+    writeColumnMajor(model * read(part.model), instance.model);
     writeColumnMajor(rotation * read(part.normalMatrix), instance.normalMatrix);
     instance.handedness[1] = part.handedness[1] * plant.scale;
-    const std::array<float, 4> levelSphere = placedSphere(part.levelSphere, plant);
+    const std::array<float, 4> levelSphere = placedSphereBy(part.levelSphere, model, plant.scale);
     std::copy(levelSphere.begin(), levelSphere.end(), instance.levelSphere);
     return instance;
 }
@@ -462,7 +472,7 @@ PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPl
             const GpuPlacedKind& kind = table.kinds.at(block.firstKind + plant.kind);
 
             for (std::uint32_t each = 0; each < kind.parts; ++each) {
-                const PartDraws draws = placedPartEntries(table.parts[kind.part[each]], plant, number, view.camera, view.wanted);
+                const PartDraws draws = placedPartEntries(table.parts[kind.part[each]], plant, number, view.camera);
 
                 for (int drawn = 0; drawn < 2; ++drawn) {
                     if (draws.groups[drawn] < placedMostGroups) {

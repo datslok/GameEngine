@@ -3420,16 +3420,16 @@ std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const Batc
 
 void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
                                     ShadowDraws& shadowDraws, std::uint32_t frameIndex) {
-    std::vector<PlacedViewAsked> asked{PlacedViewAsked{camera, CAMERA_CULL_DRAWN}};
+    std::vector<GpuCameraCull> asked{camera};
     std::vector<std::string> names{"Camera"};
-    const auto add = [&](const GpuCameraCull& view, std::uint32_t wanted, std::string name) {
-        asked.push_back(PlacedViewAsked{view, wanted});
+    const auto add = [&](const GpuCameraCull& view, std::string name) {
+        asked.push_back(view);
         names.push_back(std::move(name));
         return static_cast<std::uint32_t>(asked.size() - 1);
     };
 
     for (std::size_t face = 0; face < faces.size(); ++face) {
-        placedViewNumbers.faces.at(static_cast<std::size_t>(faceNumbers[face])) = add(faces[face], CAMERA_CULL_DRAWN, "Probe face " + std::to_string(faceNumbers[face]));
+        placedViewNumbers.faces.at(static_cast<std::size_t>(faceNumbers[face])) = add(faces[face], "Probe face " + std::to_string(faceNumbers[face]));
     }
 
     // A tile keeping its movers apart draws its casters only when its still copy is redrawn; placed plants never move.
@@ -3437,7 +3437,7 @@ void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, const std::vect
         ShadowTileDraw& drawing = shadowDraws.tiles[tile];
 
         if (!drawing.tile->separateMovers || drawing.still) {
-            drawing.placedView = add(shadowDraws.views[tile], CAMERA_CULL_DRAWN, "Shadow tile " + std::to_string(tile));
+            drawing.placedView = add(shadowDraws.views[tile], "Shadow tile " + std::to_string(tile));
         }
     }
 

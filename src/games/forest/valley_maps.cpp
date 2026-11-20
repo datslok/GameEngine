@@ -282,7 +282,6 @@ void visit(ForestPlantingSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Gap from", settings.gapFrom, {.min = -1.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Gap to", settings.gapTo, {.min = -1.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Corridor clearance", settings.corridorClearance, {.min = 0.0f, .max = 50.0f, .sliderMax = 10.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Placed trees", settings.placedTrees);
 }
 
 void visit(PlantingLayer& layer, SettingsVisitor& visitor) {

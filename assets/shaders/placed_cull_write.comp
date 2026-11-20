@@ -47,7 +47,7 @@ void main() {
 
         if (partRound < parts) {
             part = placedKinds[block.firstKind + plant.kind].part[partRound];
-            draws = placedPartEntries(placedParts[part], plant, number, view.camera, view.wanted);
+            draws = placedPartEntries(placedParts[part], plant, number, view.camera);
         }
 
         threadGroups[local] = draws.groups;

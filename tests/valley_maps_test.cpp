@@ -33,13 +33,12 @@ namespace {
         return settings;
     }
 
-    // The planting settings and every layer's fields, each named once, all read at start-up but the placed trees' switch
-    // (live, off by default).
+    // The planting settings and every layer's fields, each named once, all read at start-up.
     void testTheSettings() {
         ForestPlantingSettings settings;
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 13 && counter.live == 1 && !settings.placedTrees);
+        assert(counter.fields == 12 && counter.live == 0);
 
         PlantingLayer layer;
         FieldCounter layerCounter;

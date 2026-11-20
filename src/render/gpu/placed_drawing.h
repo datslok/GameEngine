@@ -89,10 +89,9 @@ struct GpuPlacedItem {
 static_assert(sizeof(GpuPlacedItem) == 8, "GpuPlacedItem must match placed_drawing.glsl's PlacedItem");
 
 /*
-* A view's culling: the view, the region drawn (north, south, spread), its items (from firstItem), the groups, the list
-* it makes (a part drawn where cameraCandidateFlags gives this bit: CAMERA_CULL_DRAWN, or CAMERA_CULL_MOVING for a
-* view's moving list, which no view asks for since the main pass writes the motion vectors), its entries' place and
-* room, and every view's count of views and items.
+* A view's culling: the view, the region drawn (north, south, spread), its items (from firstItem), the groups, its
+* entries' place and room, and every view's count of views and items; a part is drawn where cameraCandidateFlags gives
+* CAMERA_CULL_DRAWN. Rounded to 16 bytes, as std430 lays out an array of it.
 */
 struct GpuPlacedView {
     GpuCameraCull camera{};
@@ -100,11 +99,11 @@ struct GpuPlacedView {
     std::uint32_t firstItem = 0;
     std::uint32_t items = 0;
     std::uint32_t groups = 0;
-    std::uint32_t wanted = CAMERA_CULL_DRAWN;
     std::uint32_t entryBase = 0;
     std::uint32_t entryRoom = 0;
     std::uint32_t viewCount = 0;
     std::uint32_t itemCount = 0;
+    std::uint32_t padding = 0;
 };
 
 static_assert(sizeof(GpuPlacedView) == 304, "GpuPlacedView must match placed_drawing.glsl's PlacedView");
@@ -182,12 +181,6 @@ std::vector<PlacedBlockRun> placedBlockRuns(const std::map<PlantingCell, int>& h
 */
 GpuCullChunk placedCellChunk(const PlantingBox& cell, const TerrainHeightRange& ground, const PlantingLayerRecord& layer, const PlacedLayerReach& reach);
 
-// A view asked for: its culling view and the list it makes (GpuPlacedView::wanted).
-struct PlacedViewAsked {
-    GpuCameraCull camera{};
-    std::uint32_t wanted = CAMERA_CULL_DRAWN;
-};
-
 /*
 * The views' records and items: each view the blocks of each run whose box (chunks, a run each) it may see, in run
 * order; its entries after the view before's, room for two a part of its layer's most-parted kind a plant (a part
@@ -199,7 +192,7 @@ struct PlacedViews {
     std::uint32_t entries = 0;
 };
 
-PlacedViews placedViews(std::span<const PlacedViewAsked> asked, std::span<const PlacedBlockRun> runs, std::span<const GpuCullChunk> chunks,
+PlacedViews placedViews(std::span<const GpuCameraCull> asked, std::span<const PlacedBlockRun> runs, std::span<const GpuCullChunk> chunks,
                         const PlantedRegion& region, const PlacedTable& table);
 
 /*

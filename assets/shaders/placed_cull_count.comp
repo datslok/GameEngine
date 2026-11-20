@@ -40,7 +40,7 @@ void main() {
         PlacedKind kind = placedKinds[block.firstKind + plant.kind];
 
         for (uint each = 0u; each < kind.parts; ++each) {
-            PlacedPartDraws draws = placedPartEntries(placedParts[kind.part[each]], plant, number, view.camera, view.wanted);
+            PlacedPartDraws draws = placedPartEntries(placedParts[kind.part[each]], plant, number, view.camera);
 
             for (uint drawn = 0u; drawn < 2u; ++drawn) {
                 if (draws.groups[drawn] < PLACED_MOST_GROUPS) {

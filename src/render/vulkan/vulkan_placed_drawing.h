@@ -53,7 +53,7 @@ public:
     * The frame's views (after prepare returned true, before the scene set is written, which points at the entries),
     * each named for placement-compare's report: their items and the entries' and commands' room.
     */
-    void setViews(std::span<const PlacedViewAsked> views, std::vector<std::string> names, std::uint32_t frameIndex);
+    void setViews(std::span<const GpuCameraCull> views, std::vector<std::string> names, std::uint32_t frameIndex);
 
     // The frame's table (after prepare returned true): its parts' draws, to pack their instances in its order.
     const PlacedTable& getTable(std::uint32_t frameIndex) const;

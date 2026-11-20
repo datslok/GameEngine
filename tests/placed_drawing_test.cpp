@@ -74,7 +74,7 @@ namespace {
         return part;
     }
 
-    // Leaves swaying as the forest's trees do (render/gpu/wind.h): a moving list (CAMERA_CULL_MOVING) takes them near the camera.
+    // Leaves swaying as the forest's trees do (render/gpu/wind.h).
     DrawItem swayingLeaves() {
         DrawItem leaves = treePart(MeshHandle{20}, &leafLevels(), true, true, 0.0f, 5);
         leaves.sway = WindSway{.kind = SwayKind::Tree, .height = 18.0f, .bend = 0.1f, .flutter = 0.3f};
@@ -244,7 +244,7 @@ namespace {
     }
 
     // The views over every block (boxes no view skips): each view's passes over every plant held.
-    PlacedViews everyBlock(std::span<const PlacedViewAsked> asked, const std::vector<PlacedBlockRun>& runs, const PlacedTable& table) {
+    PlacedViews everyBlock(std::span<const GpuCameraCull> asked, const std::vector<PlacedBlockRun>& runs, const PlacedTable& table) {
         std::vector<GpuCullChunk> chunks(runs.size());
 
         for (GpuCullChunk& chunk : chunks) {
@@ -256,7 +256,7 @@ namespace {
 
     // The camera alone over every block.
     PlacedViews cameraOverEveryBlock(const GpuCameraCull& camera, const std::vector<PlacedBlockRun>& runs, const PlacedTable& table) {
-        const std::array<PlacedViewAsked, 1> asked{PlacedViewAsked{camera, CAMERA_CULL_DRAWN}};
+        const std::array<GpuCameraCull, 1> asked{camera};
         return everyBlock(asked, runs, table);
     }
 
@@ -578,7 +578,7 @@ namespace {
     /*
     * Each view's items are the blocks of the runs whose box it may see (chunkInView), in block order; the views follow
     * one another in the items and the entries: each its room, two entries a part of its layer's most-parted kind a plant
-    * (one in a shadow tile, where nothing fades); every view's count of views and items, its groups, the list it wants.
+    * (one in a shadow tile, where nothing fades); every view's count of views and items, its groups.
     */
     void testTheViewsLayout() {
         std::mt19937 random{23};
@@ -589,8 +589,7 @@ namespace {
         const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
         const std::vector<GpuCullChunk> chunks = runChunks(runs, table);
         const TestCamera camera = randomCamera(random, 0);
-        const std::array<PlacedViewAsked, 4> asked{PlacedViewAsked{narrowCamera(), CAMERA_CULL_DRAWN}, PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN},
-                                                   PlacedViewAsked{camera.packed, CAMERA_CULL_MOVING}, PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN}};
+        const std::array<GpuCameraCull, 4> asked{narrowCamera(), randomSunTile(random), camera.packed, randomSunTile(random)};
         const PlacedViews views = placedViews(asked, runs, chunks, testRegion, table);
         assert(views.views.size() == asked.size());
         std::vector<std::uint32_t> layerOfBlock(blocks.size());
@@ -604,15 +603,15 @@ namespace {
 
         for (std::size_t index = 0; index < views.views.size(); ++index) {
             const GpuPlacedView& view = views.views[index];
-            const bool shadow = (asked[index].camera.flags & CAMERA_CULL_SHADOW) != 0u;
-            assert(view.firstItem == nextItem && view.entryBase == nextEntry && view.wanted == asked[index].wanted);
+            const bool shadow = (asked[index].flags & CAMERA_CULL_SHADOW) != 0u;
+            assert(view.firstItem == nextItem && view.entryBase == nextEntry);
             assert(view.viewCount == views.views.size() && view.itemCount == views.items.size() && view.groups == table.groups.size());
-            assert(view.camera.flags == asked[index].camera.flags && view.region[2] == testRegion.spread && view.region[0] == testRegion.northmost);
+            assert(view.camera.flags == asked[index].flags && view.region[2] == testRegion.spread && view.region[0] == testRegion.northmost);
             std::uint32_t room = 0;
             std::vector<std::uint32_t> expected;
 
             for (std::size_t run = 0; run < runs.size(); ++run) {
-                if (chunkInView(chunks[run], asked[index].camera)) {
+                if (chunkInView(chunks[run], asked[index])) {
                     for (std::uint32_t block = runs[run].firstBlock; block < runs[run].firstBlock + runs[run].blocks; ++block) {
                         expected.push_back(block);
                     }
@@ -656,15 +655,13 @@ namespace {
 
     /*
     * Culling by the cells' boxes first drops nothing: every view's lists over its own items equal its lists over every
-    * block (the camera, a moving list and sun tiles), entry for entry; tiles take only casters, the moving list only
-    * swaying parts the camera draws.
+    * block (the camera and sun tiles), entry for entry; tiles take only casters.
     */
     void testTheBoxesHideNothing() {
         std::mt19937 random{29};
         const PlantingMaps maps = straightMaps();
         std::size_t skipped = 0;
         std::size_t shadowEntries = 0;
-        std::size_t movingEntries = 0;
 
         for (int test = 0; test < 30; ++test) {
             const TestSlots slots = testSlots(random);
@@ -672,12 +669,8 @@ namespace {
             const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
             const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
             const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
-            GpuCameraCull camera = test % 3 == 0 ? overheadCamera() : randomCamera(random, test).packed;
-            camera.flags |= CAMERA_CULL_MOTION | CAMERA_CULL_SWAY;
-            camera.swayFadeEnd = 150.0f;
-            const std::array<PlacedViewAsked, 4> asked{PlacedViewAsked{camera, CAMERA_CULL_DRAWN}, PlacedViewAsked{camera, CAMERA_CULL_MOVING},
-                                                       PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN},
-                                                       PlacedViewAsked{randomSunTile(random), CAMERA_CULL_DRAWN}};
+            const GpuCameraCull camera = test % 3 == 0 ? overheadCamera() : randomCamera(random, test).packed;
+            const std::array<GpuCameraCull, 3> asked{camera, randomSunTile(random), randomSunTile(random)};
             const PlacedViews culled = placedViews(asked, runs, runChunks(runs, table), testRegion, table);
             const PlacedViews every = everyBlock(asked, runs, table);
             std::vector<PlacedCullResult> results;
@@ -696,8 +689,8 @@ namespace {
                 results.push_back(mine);
             }
 
-            // The tiles' entries are casters (the stand-in alone); the moving list's are the camera's swaying leaves.
-            for (std::size_t tile = 2; tile < 4; ++tile) {
+            // The tiles' entries are casters (the stand-in alone).
+            for (std::size_t tile = 1; tile < 3; ++tile) {
                 for (const GpuPlacedEntry& entry : results[tile].entries) {
                     assert((table.parts[entry.part].record.flags & CULL_CASTS_SHADOWS) != 0u);
                 }
@@ -705,15 +698,9 @@ namespace {
                 shadowEntries += results[tile].entries.size();
             }
 
-            for (const GpuPlacedEntry& entry : results[1].entries) {
-                assert((table.parts[entry.part].record.flags & CULL_SWAYS) != 0u);
-                assert(std::find(results[0].entries.begin(), results[0].entries.end(), entry) != results[0].entries.end());
-            }
-
-            movingEntries += results[1].entries.size();
         }
 
-        assert(skipped > 1000 && shadowEntries > 100 && movingEntries > 100);
+        assert(skipped > 1000 && shadowEntries > 100);
     }
 
     /*

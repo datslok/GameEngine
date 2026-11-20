@@ -372,20 +372,20 @@ namespace {
         TestForest forest;
         const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 10.0f};
         const FrameDescription frame = buildFrame(forest.world, camera, 0.0f);
-        std::map<std::pair<float, float>, float> treeHeights;
-        std::size_t trees = 0;
-
         for (const DrawItem& draw : frame.draws) {
             if (draw.material.impostorFrames > 0) {
                 assert(draw.sway.kind == SwayKind::Still);
             }
+        }
 
-            if (draw.sway.kind == SwayKind::Tree) {
-                ++trees;
-                assert(draw.sway.height > 1.0f);
-                const std::pair<float, float> foot{draw.model.values[0][3], draw.model.values[2][3]};
-                const auto [known, added] = treeHeights.emplace(foot, draw.sway.height);
-                assert(added || known->second == draw.sway.height);
+        // The trees are the placed trees' looks (scene/planting_cells.h): every model but the card by one height.
+        std::size_t trees = 0;
+
+        for (const PlantedKindLook& look : forest.game.getTreeLooks()) {
+            for (std::size_t model = 0; model < look.models.size(); ++model) {
+                const WindSway& sway = look.models[model].sway;
+                assert(model == 2 ? sway.kind == SwayKind::Still : sway.kind == SwayKind::Tree && sway.height == look.models[0].sway.height);
+                trees += sway.kind == SwayKind::Tree ? 1 : 0;
             }
         }
 
@@ -405,12 +405,12 @@ namespace {
             assert(forest.world.get<ModelRenderer>(entity).sway.kind == SwayKind::Hanging);
         }
 
-        for (const Entity entity : forest.game.getClimbers()) {
-            assert(forest.world.get<ModelRenderer>(entity).sway.kind == SwayKind::Tree);
+        for (const ModelRenderer& climber : forest.game.getClimberModels()) {
+            assert(climber.sway.kind == SwayKind::Tree);
         }
 
-        for (const Entity entity : forest.game.getEpiphytes()) {
-            assert(forest.world.get<ModelRenderer>(entity).sway.kind == SwayKind::Tree);
+        for (const ModelRenderer& epiphyte : forest.game.getEpiphyteModels()) {
+            assert(epiphyte.sway.kind == SwayKind::Tree);
         }
 
         bool plants = false;

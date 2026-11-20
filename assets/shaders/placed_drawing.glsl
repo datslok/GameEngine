@@ -57,11 +57,11 @@ struct PlacedView {
     uint firstItem; // its items, from here
     uint items;
     uint groups;
-    uint wanted;    // the flag a part's slot needs to draw: CAMERA_CULL_DRAWN, or CAMERA_CULL_MOVING (a moving list)
     uint entryBase; // its entries, from here
     uint entryRoom;
     uint viewCount; // every view's
     uint itemCount;
+    uint padding;
 };
 
 // The turn's two numbers the matrix is made of, as Quat::fromAxisAngle about up and toMatrix make them: the diagonal's
@@ -75,47 +75,58 @@ vec2 placedTurn(float turnRadians) {
     return vec2(diagonal, corner);
 }
 
-// The plant's model matrix (placedPlantModel): Transform{foot, turn about up, scale}.getMatrix().
-mat4 placedPlantModel(PlacedPlant plant) {
-    vec2 turn = placedTurn(plant.turnRadians);
+// The plant's model matrix from its turn already made (placedTurnedModel), so a vertex makes the sine and cosine once.
+mat4 placedTurnedModel(PlacedPlant plant, vec2 turn) {
     precise float across = turn.x * plant.scale;
     precise float corner = turn.y * plant.scale;
     precise float backCorner = -turn.y * plant.scale;
     return mat4(vec4(across, 0.0, backCorner, 0.0), vec4(0.0, plant.scale, 0.0, 0.0), vec4(corner, 0.0, across, 0.0), vec4(plant.foot, 1.0));
 }
 
-// A sphere in the plant's frame placed in the world (placedSphere): its centre through the matrix, its radius scaled.
-vec4 placedSphere(vec4 sphere, PlacedPlant plant) {
-    mat4 model = placedPlantModel(plant);
+// The plant's model matrix (placedPlantModel): Transform{foot, turn about up, scale}.getMatrix().
+mat4 placedPlantModel(PlacedPlant plant) {
+    return placedTurnedModel(plant, placedTurn(plant.turnRadians));
+}
+
+// A sphere placed by the plant's matrix already made (placedSphereBy): its centre through it, its radius scaled.
+vec4 placedSphereBy(vec4 sphere, mat4 model, float scale) {
     precise float x = model[0][0] * sphere.x + model[2][0] * sphere.z + model[3][0];
     precise float y = model[1][1] * sphere.y + model[3][1];
     precise float z = model[0][2] * sphere.x + model[2][2] * sphere.z + model[3][2];
-    precise float radius = sphere.w < 0.0 ? sphere.w : sphere.w * plant.scale;
+    precise float radius = sphere.w < 0.0 ? sphere.w : sphere.w * scale;
     return vec4(x, y, z, radius);
 }
 
-// A part's record placed in the world (placedCullRecord).
+// A sphere in the plant's frame placed in the world (placedSphere).
+vec4 placedSphere(vec4 sphere, PlacedPlant plant) {
+    return placedSphereBy(sphere, placedPlantModel(plant), plant.scale);
+}
+
+// A part's record placed in the world (placedCullRecord), the plant's matrix made once for both spheres.
 CullRecord placedCullRecord(CullRecord part, PlacedPlant plant) {
+    mat4 model = placedPlantModel(plant);
     CullRecord record = part;
-    record.bounds = placedSphere(part.bounds, plant);
-    record.levelSphere = placedSphere(part.levelSphere, plant);
+    record.bounds = placedSphereBy(part.bounds, model, plant.scale);
+    record.levelSphere = placedSphereBy(part.levelSphere, model, plant.scale);
     return record;
 }
 
 // A part's instance placed in the world (placedInstance): the plant's matrix after the part's own, the plant's turn
-// before the part's normals (normalised later), its scale on the part's, its level sphere placed.
+// before the part's normals (normalised later), its scale on the part's, its level sphere placed. Run for every
+// vertex, so the turn's sine and cosine are made once, and the plant's matrix once.
 InstanceData placedInstance(InstanceData part, PlacedPlant plant) {
     vec2 turn = placedTurn(plant.turnRadians);
     mat4 rotation = mat4(vec4(turn.x, 0.0, -turn.y, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(turn.y, 0.0, turn.x, 0.0), vec4(0.0, 0.0, 0.0, 1.0));
+    mat4 model = placedTurnedModel(plant, turn);
     InstanceData instance = part;
-    instance.model = placedPlantModel(plant) * part.model;
+    instance.model = model * part.model;
     instance.normalMatrix = rotation * part.normalMatrix;
     instance.handedness.y = part.handedness.y * plant.scale;
-    instance.levelSphere = placedSphere(part.levelSphere, plant);
+    instance.levelSphere = placedSphereBy(part.levelSphere, model, plant.scale);
     return instance;
 }
 
-// What a part of a plant draws in a view: up to two level slots (two only while fading) whose flags hold the wanted bit,
+// What a part of a plant draws in a view: up to two level slots (two only while fading) whose flags say drawn,
 // each its group and entry (the plant's number and the draw list's bits: cameraCandidateEntry), or a group of
 // PLACED_MOST_GROUPS for none (placedPartEntries).
 struct PlacedPartDraws {
@@ -123,7 +134,7 @@ struct PlacedPartDraws {
     uvec2 entries;
 };
 
-PlacedPartDraws placedPartEntries(PlacedPart part, PlacedPlant plant, uint plantNumber, CameraCull view, uint wanted) {
+PlacedPartDraws placedPartEntries(PlacedPart part, PlacedPlant plant, uint plantNumber, CameraCull view) {
     CullRecord record = placedCullRecord(part.record, plant);
     PlacedPartDraws draws;
     draws.groups = uvec2(PLACED_MOST_GROUPS);
@@ -137,7 +148,7 @@ PlacedPartDraws placedPartEntries(PlacedPart part, PlacedPlant plant, uint plant
 
         uint flags = cameraCandidateFlags(record, part.levels, view, slot);
 
-        if ((flags & wanted) == 0u || found >= 2u) {
+        if ((flags & CAMERA_CULL_DRAWN) == 0u || found >= 2u) {
             continue;
         }
 
