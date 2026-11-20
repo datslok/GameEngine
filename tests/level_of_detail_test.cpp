@@ -432,6 +432,16 @@ namespace {
             assert(refused);
         }
 
+        // An impostor shadow bias of 0 or more only.
+        bool refusedBias = false;
+
+        try {
+            validateLevelOfDetail(LevelOfDetailSettings{.impostorShadowBias = -0.5f});
+        } catch (const std::invalid_argument&) {
+            refusedBias = true;
+        }
+
+        assert(refusedBias);
         assert(threw);
 
         // Settable by its settings.cfg key, as every setting is (the command line's set and get).
@@ -443,6 +453,9 @@ namespace {
         assert(setSetting(walk, "levelOfDetail.enabled", "false").outcome == SettingOutcome::Set);
         assert(setSetting(walk, "levelOfDetail.impostors", "false").outcome == SettingOutcome::Set);
         assert(setSetting(walk, "levelOfDetail.fadeBand", "0.3").outcome == SettingOutcome::Set && settings.levelOfDetail.fadeBand == 0.3f);
+        assert(setSetting(walk, "levelOfDetail.impostorSelfShadow", "false").outcome == SettingOutcome::Set && !settings.levelOfDetail.impostorSelfShadow);
+        assert(setSetting(walk, "levelOfDetail.impostorShadowBias", "2.5").outcome == SettingOutcome::Set && settings.levelOfDetail.impostorShadowBias == 2.5f);
+        assert(LevelOfDetailSettings{}.impostorSelfShadow);
         assert(!settings.levelOfDetail.impostors && LevelOfDetailSettings{}.impostors);
         assert(!settings.levelOfDetail.enabled);
         assert(settings.levelOfDetail.pixelError == 6.0f);

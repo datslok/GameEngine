@@ -116,7 +116,7 @@ struct GpuFrameData {
     float contactShadowOptions[4]; // x: 1 when the main pass reads the sun's contact shadows (render/gpu/contact_shadows.h), y: 1 when it reads the local lights'
     std::int32_t contactLightSlots[4]; // the local lights with a contact shadow channel, by channel: a point light's slot, a spotlight's CONTACT_SPOT_SLOT_BASE past its slot, -1 none
     float materialOptions[4]; // parallax occlusion mapping (render/gpu/parallax.h): x 1 draws it, y 1 self-shadows from the sun, z the most steps; w 1 lets light through leaves (brdf.h, addDiffuseTransmission)
-    float levelOptions[4];    // x: the camera's error allowed a metre away, for card thinning (scene/card_thinning.h, thinningErrorPerMetre; 0 thins nothing), y: the frame turning the level fades' dither (render/gpu/level_fade.h)
+    float levelOptions[4];    // x: the camera's error allowed a metre away, for card thinning (scene/card_thinning.h, thinningErrorPerMetre; 0 thins nothing), y: the frame turning the level fades' dither (render/gpu/level_fade.h), z: 1 shadows impostor cards by their own leaves, w: that shadow's bias in texels (scene/impostor.h)
     // The motion vectors the main pass writes (render/gpu/taa.h, pixelMotion; packFrameMotion): last frame's
     // camera-relative view-projection without the jitter, taking points measured from this frame's camera.
     float motionPrevious[16];

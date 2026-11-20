@@ -2373,6 +2373,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.levelOptions[0] = cameraThinning;
     // The frame, turning the level fades' dither (level_fade.glsl) for temporal anti-aliasing to blend; held without it.
     frameData.levelOptions[1] = temporalAntiAliasing(settings.upscaling) ? static_cast<float>(taaFrame % noiseCycleFrames) : 0.0f;
+    frameData.levelOptions[2] = settings.levelOfDetail.impostorSelfShadow ? 1.0f : 0.0f;
+    frameData.levelOptions[3] = settings.levelOfDetail.impostorShadowBias;
     // The main pass's motion vectors, worked out while anti-aliasing is temporal (it alone reads them, with motion blur).
     packFrameMotion(frameData, previousMotionViewProjection, frameJitter, temporalAntiAliasing(settings.upscaling));
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;

@@ -10,6 +10,7 @@
 #include "scene/material.h"
 
 #include <array>
+#include <cstdint>
 #include <vector>
 
 /*
@@ -57,8 +58,38 @@ struct ImpostorPart {
     float alphaCutoff = 0.0f;
 };
 
+/*
+* Depth in a frame (docs/research/LOD.md, Self-shadowed impostors): how far the surface seen lies along the frame's direction
+* from the tree's middle, over the radius (-1..1), stored in the normal atlas's alpha as depth * 0.5 + 0.5.
+*/
+std::uint8_t impostorDepthEncode(float depth);
+float impostorDepthDecode(float stored);
+
+// The surface a frame sees behind a card point: the point moved along the frame's direction to the depth there (both
+// over the radius, in the tree's frame).
+Vec3 impostorSurfacePoint(const Vec3& cardPoint, const Vec3& frameDirection, float depth);
+
+/*
+* How much of the sun reaches a point at pointDepth along a sun frame's direction, from the four texels round it
+* (textureGather's order: (0, 1), (1, 1), (1, 0), (0, 0) of the 2 x 2), each lit where it is empty (covered below 0.5) or
+* its stored depth lies no nearer the sun than the point plus the bias; filtered bilinearly by fraction.
+*/
+float impostorGatherLit(const std::array<float, 4>& storedDepths, const std::array<float, 4>& covered, const Vec2& fraction, float pointDepth,
+                        float bias);
+
+// The bias in depth (over the radius) of biasTexels of a frame frameTexels a side, which spans two radii.
+float impostorShadowBias(float biasTexels, float frameTexels);
+
+/*
+* The point the sun's test is made from (normal offset, Holbein 2011): moved off its leaf (normal, unit, either side) to
+* the side facing the sun by the bias times the sine of the angle between them, so a leaf the sun grazes is not
+* shadowed by its own texels, whose depths spread most there.
+*/
+Vec3 impostorShadowPoint(const Vec3& point, const Vec3& normal, const Vec3& sunDirection, float bias);
+
 // The baked atlases (frames x frames frames of frameTexels a side): colour (sRGB, alpha 255 where something was) and
-// the normals in the tree's frame (linear bytes, n * 0.5 + 0.5), and the sphere they fill.
+// the normals in the tree's frame (linear bytes, n * 0.5 + 0.5) with the depth in alpha (impostorDepthEncode; kept
+// uncompressed, TextureStorage::Exact), and the sphere they fill.
 struct ImpostorBake {
     ImageData colour;
     ImageData normal;
@@ -72,6 +103,14 @@ struct ImpostorBake {
 * from their neighbours (alpha left 0), so the mips do not darken the edges. A row of frames a job.
 */
 ImpostorBake bakeImpostor(const std::vector<ImpostorPart>& parts, int frames, int frameTexels, JobSystem& jobs);
+
+/*
+* The plant's own shadow at a point on a leaf (over the radius, in the tree's frame; its normal, unit, zero for none) from
+* the sun (towards it, unit, tree's frame), 1 lit: from impostorShadowPoint, the four frames round the sun's direction
+* read as shadow maps (impostorGatherLit), blended bilinearly as a view blends them. A point off a frame's square is lit
+* in it. impostorSunLight in impostor_sampling.glsl reads the GPU's atlases the same way; this reads the bake's, for tests.
+*/
+float impostorSunLight(const ImpostorBake& bake, int frames, const Vec3& point, const Vec3& normal, const Vec3& sunDirection, float biasTexels);
 
 // The card: four corners a radius round the middle along x and y, texture coordinates the corners (-1..1), the normal's
 // x the radius (the vertex shader turns it to face the viewer); two triangles.

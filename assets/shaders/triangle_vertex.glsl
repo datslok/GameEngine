@@ -122,7 +122,7 @@ void main() {
     * An impostor's card (scene/impostor.h): its corners carry the tree's middle and radius (the normal's x); turned here
     * to face the viewer (a capture's own eye), its axes the frame plane's for the way the viewer looks, so the bake's
     * frames and the card agree. The fragment shader gets the card point (offset from the middle over the radius) and the
-    * view direction in the tree's frame, and the tree's axes to turn the baked normals into the world.
+    * view direction in the tree's frame (the tangent's xyz), and the tree's axes to turn the baked normals into the world.
     */
     if (instance.material.w == uint(INSTANCE_KIND_IMPOSTOR)) {
         vec3 treeScale = projectionScale(mat3(instance.model));
@@ -142,7 +142,9 @@ void main() {
         frameAxes = treeAxes;
         framePosition = cardPoint;
         worldNormal = toViewer;
-        worldTangent = vec4(viewDirection, 1.0);
+        // w: the card's metres a unit of card point (the radius times the plant's scale, taken as even: plants are placed
+        // scaled alike along every axis), to move shadow lookups to the leaf seen behind the card.
+        worldTangent = vec4(viewDirection, normal.x * (treeScale.x + treeScale.y + treeScale.z) / 3.0);
 #ifdef MAIN_MOTION
         stillMotion(relativePosition);
 #endif
