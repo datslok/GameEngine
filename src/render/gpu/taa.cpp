@@ -133,6 +133,14 @@ Vec2 objectMotion(const Vec4& currentClip, const Vec4& previousClip) {
     return Vec2{currentClip.x / currentClip.w - previousClip.x / previousClip.w, currentClip.y / currentClip.w - previousClip.y / previousClip.w};
 }
 
+Vec2 pixelMotion(Vec2 pixel, Vec2 jitter, Vec2 size, const Vec4& previousClip) {
+    if (!(previousClip.w > 0.0f)) {
+        return Vec2{static_cast<float>(TAA_NO_MOTION), static_cast<float>(TAA_NO_MOTION)};
+    }
+
+    return pixelToNdc(pixel - jitter, size) - Vec2{previousClip.x / previousClip.w, previousClip.y / previousClip.w};
+}
+
 Vec2 sampleOutputPixel(Vec2 renderPixel, Vec2 jitter, Vec2 outputPerRender) {
     return Vec2{(renderPixel.x - jitter.x) * outputPerRender.x, (renderPixel.y - jitter.y) * outputPerRender.y};
 }
@@ -230,9 +238,3 @@ GpuMotionFillPass packMotionFillPass(const Mat4& reprojection, RenderSize render
     return pass;
 }
 
-GpuMotionView packMotionView(const Mat4& current, const Mat4& previous) {
-    GpuMotionView view{};
-    writeColumnMajor(current, view.current);
-    writeColumnMajor(previous, view.previous);
-    return view;
-}

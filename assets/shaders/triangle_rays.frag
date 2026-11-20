@@ -6,4 +6,5 @@
 // The main pass on GPUs with ray queries while glass is in the world: its shadowed lights tinted by the glass between
 // each point and the light, found by rays (render/gpu/transparency.h).
 #define GLASS_SHADOW_RAYS
+#define MAIN_MOTION
 #include "scene_surface.glsl"

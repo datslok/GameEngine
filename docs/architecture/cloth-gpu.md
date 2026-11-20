@@ -89,7 +89,7 @@ One cloth on the GPU (`render/vulkan/vulkan_cloth`).
 `cloth_shape.comp` with `deform.glsl`, mirrored by `deformVertexAt` (`scene/deforming_mesh`).
 
 - One invocation per render vertex: its point blended by alpha between the points before the last tick and now; normals summed over its `Mesh` vertex's triangles and tangents over its own (`DeformingAdjacency`, compressed rows in triangle order, as `deformVertices` adds them), so the result is `deformVertices`' to the bit.
-- Writes `MESH_VERTEX_FLOATS` floats a vertex into the mesh's slot; one barrier makes it readable by drawing, the velocity pass, acceleration structure builds and ray hits.
+- Writes `MESH_VERTEX_FLOATS` floats a vertex into the mesh's slot; one barrier makes it readable by drawing (the main pass's motion vectors too), acceleration structure builds and ray hits.
 
 ## Timing
 

@@ -310,7 +310,7 @@ CullListComparison compareCullList(std::span<const CullGroupStyle> styles, std::
                                    std::span<const std::uint32_t> entries, std::uint32_t base, const BatchedDraws& cpu,
                                    const std::function<bool(std::uint32_t)>& nearEdge);
 
-// A list compared, with its name in the reply ("Camera", "Velocity", "Probe face 2", "Mirror").
+// A list compared, with its name in the reply ("Camera", "Probe face 2", "Mirror", "Shadow tile 3").
 struct NamedCullComparison {
     std::string name;
     CullListComparison list;

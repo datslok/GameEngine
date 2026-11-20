@@ -43,11 +43,11 @@ Everything every view draws is settled before any command is recorded, so the sc
 3. Directional lights dimmed by the air when there is an `Atmosphere` (so the brightest *arriving* light gets the cascades), then `prioritizeLights`.
 4. `CameraCullTable::update`; only the glass and the flat-faced draws (the mirror's candidates) tested on the CPU. The flat mirror chosen; image lights added without ray-traced mirror search.
 5. `packLighting`, `planShadows`, `holdStaggeredCascades`, `attachShadows`; coloured shadow maps made if glass needs them.
-6. The frame's draw list laid out (`DrawListLayout`): the camera's region, `prepareShadowDraws` (which tiles to draw, their regions), the velocity pass's region, the reflection probe's faces' and the mirror's, then transparent draws sorted far to near.
+6. The frame's draw list laid out (`DrawListLayout`): the camera's region, `prepareShadowDraws` (which tiles to draw, their regions), the reflection probe's faces' and the mirror's, then transparent draws sorted far to near.
 7. Probe cascades, mirrored light pairs, ambient occlusion, contact shadows, fog, wind and sky visibility readied before the scene set is written.
 8. `writeScene`, debug line vertices and shadow tile data straight into upload memory; the lasting records (instances, materials, last-frame matrices) copied into GPU memory where they changed (`gpu-scene.md`).
 
-Draw list order (one buffer): main pass, shadow tiles, velocity pass, probe faces, mirror view, transparent. The main and velocity regions, each probe face's and the mirror's, and each drawn shadow tile's hold every draw, written by the CULL pass (`gpu-driven.md`); the CPU writes only glass's entries.
+Draw list order (one buffer): main pass, shadow tiles, probe faces, mirror view, transparent. The main region, each probe face's and the mirror's, and each drawn shadow tile's hold every draw, written by the CULL pass (`gpu-driven.md`); the CPU writes only glass's entries.
 
 ## Pass order
 
@@ -57,7 +57,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 |---|---|---|---|
 | 1 | Cloth [CLOTH] | GPU cloths ticked | `cloth-gpu.md` |
 | 2 | Debug UI [UI] | F5 open: the UI into its own overlay image | `settings-and-commands.md` |
-| 3 | Culling [CULL] | always: the camera's, velocity pass's, probe faces', mirror's and drawn shadow tiles' lists and commands | `gpu-driven.md` |
+| 3 | Culling [CULL] | always: the camera's, probe faces', mirror's and drawn shadow tiles' lists and commands | `gpu-driven.md` |
 | 4 | Ray scene [TLAS] | anything traces rays (probes, ray debug, probe capture, reflections, mirrored lights, glass shadows) | `ray-tracing.md` |
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
 | 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
@@ -70,20 +70,19 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 13-16 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
 | 17 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
 | 18 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
-| 19 | Main [MAIN] | always; sky and stars drawn in it or in a block of their own after | here |
+| 19 | Main [MAIN] | always; also writes the velocity image (`anti-aliasing.md`); sky and stars in a block of their own after | here |
 | 20 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
-| 21 | Motion [MOTION] | temporal AA: moved or swaying draws into the velocity image | `anti-aliasing.md` |
-| 22 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
-| 23 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
-| 24 | Reflections [SSR] | reflections on | `reflections.md` |
-| 25 | Fog apply [FOGMIX] | fog | `fog.md` |
-| 26 | Beacons [BEACONS] | lit beacons in the frame | `lights.md` |
-| 27 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
-| 28 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
-| 29 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
-| 30 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
-| 31 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
-| 32 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
+| 21 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
+| 22 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
+| 23 | Reflections [SSR] | reflections on | `reflections.md` |
+| 24 | Fog apply [FOGMIX] | fog | `fog.md` |
+| 25 | Beacons [BEACONS] | lit beacons in the frame | `lights.md` |
+| 26 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
+| 27 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
+| 28 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
+| 29 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
+| 30 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
+| 31 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
 
 The F4 readout groups them: setup to the prepass; lighting from `firstLightingPass` (PYRAMID) to MAIN; picture from `firstPicturePass` (BALLS) on (`engine/debug_views.h`).
 
@@ -98,12 +97,12 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 
 **Main pass** (`drawMainPass`):
 
-- Scene colour `ColourTarget`, discarded and cleared to the sky background colour.
+- Scene colour `ColourTarget`, discarded and cleared to the sky background colour; then the velocity image, cleared to no motion (`anti-aliasing.md`).
 - After the prepass: depth kept and loaded, `EQUAL`, not written (`mainPassDepthState(true)`), so each pixel is shaded once whatever the draw order. Without it: cleared, `GREATER`, written.
-- `EQUAL` needs bit-identical depths: both passes use `triangle.vert`, whose `gl_Position` is `invariant`.
-- `mainPipelines` indexed by `mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays)`: probes and cut-outs as fragment specialization constants (frames without them draw as plain); reflection surfaces add three targets (`triangle_surfaces.frag`); glass rays use `triangle_rays.frag` / `triangle_surfaces_rays.frag` in a layout with the ray tracing set. After the prepass a cut-out needs no discard (its holes have no depth to match), so no cut-out variant exists there.
+- `EQUAL` needs bit-identical depths: the prepass's `triangle.vert` and the main pass's `triangle_motion.vert` are one body (`triangle_vertex.glsl`), `gl_Position` `invariant`.
+- `mainPipelines` indexed by `mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays)`: probes and cut-outs as fragment specialization constants (frames without them draw as plain); reflection surfaces add three targets after the velocity image (`triangle_surfaces.frag`); glass rays use `triangle_rays.frag` / `triangle_surfaces_rays.frag` in a layout with the ray tracing set. After the prepass a cut-out needs no discard (its holes have no depth to match), so no cut-out variant exists there.
 - Shading itself is `scene_surface.glsl` (`triangle.frag` only includes it); a light is skipped before its shadow lookups when `facesLight` says the surface faces away (same test as the shading, so no change to the picture).
-- With reflection surfaces the sky and stars need a block of their own (they write the scene image alone); depth stored only when read later.
+- The sky and stars draw in a block of their own after (they write the scene image alone); depth stored only when read later.
 - Ends with the scene image in `SurfaceRead`.
 
 ## Frames in flight

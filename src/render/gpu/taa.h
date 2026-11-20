@@ -103,6 +103,13 @@ Vec2 previousPixelFromMotion(Vec2 pixel, Vec2 motion, Vec2 size);
 Vec2 objectMotion(const Vec4& currentClip, const Vec4& previousClip);
 
 /*
+* The same from the pixel the surface was drawn at (its centre, as gl_FragCoord) and this frame's jitter (pixels, as
+* jitteredClip takes it): the jitter taken back off the pixel gives this frame's unjittered NDC exactly, so the main
+* pass needs only last frame's clip position from its vertices.
+*/
+Vec2 pixelMotion(Vec2 pixel, Vec2 jitter, Vec2 size, const Vec4& previousClip);
+
+/*
 * Where a render pixel's sample lies on the output screen: the jitter moved the picture by jitter render pixels, so the
 * point seen at renderPixel is the unjittered picture's point at renderPixel - jitter, then scaled to output pixels.
 */
@@ -152,17 +159,6 @@ static_assert(sizeof(GpuTaaPass) == 112, "GpuTaaPass must match taa.comp's push 
 
 GpuTaaPass packTaaPass(const Mat4& reprojection, std::uint32_t width, std::uint32_t height, RenderSize render, Vec2 jitter,
                        const TaaSettings& settings, bool historyValid);
-
-// The velocity pass's push constants (motion.vert): this frame's and last frame's camera-relative view-projections,
-// without the jitter, both taking points measured from this frame's camera.
-struct GpuMotionView {
-    float current[16];
-    float previous[16];
-};
-
-static_assert(sizeof(GpuMotionView) == 128, "GpuMotionView must fit the 128 bytes of push constants every GPU has");
-
-GpuMotionView packMotionView(const Mat4& current, const Mat4& previous);
 
 // The camera motion pass's push constants (motion_fill.comp): the reprojection (column-major) and the render screen it
 // walks (width, height).

@@ -90,7 +90,7 @@ struct BatchPipelines {
     VkPipeline cutOut = VK_NULL_HANDLE;
     VkCullModeFlags cull = VK_CULL_MODE_BACK_BIT;
 
-    // The pipelines also read each mesh's last shape, at vertex binding 1 (the velocity pass).
+    // The pipelines also read each mesh's last shape, at vertex binding 1 (the main pass's motion vectors).
     bool previousShapes = false;
 };
 
@@ -502,8 +502,6 @@ private:
     // The picture before the glass, with its blurred levels and distances (render/gpu/transparency.h): refracting glass
     // reads it, and the reactive mask compares the picture after with it.
     std::unique_ptr<VulkanOpaquePicture> opaquePicture;
-    std::unique_ptr<VulkanPipeline> motionPipeline;
-    std::unique_ptr<VulkanPipeline> motionCutOutPipeline;
 
     // Glass and blended surfaces (render/gpu/transparency.h): drawn after the opaque scene and its reflections, before
     // anti-aliasing, without and with the light probes. Their layout keeps the scene's sets and adds the reflection
@@ -513,6 +511,11 @@ private:
     std::array<std::unique_ptr<VulkanPipeline>, 2> transparentPipelines;
     std::uint64_t taaFrame = 0;
     Mat4 motionViewProjection = Mat4::identity();
+    // Last frame's, taking this frame's camera-relative points (or this frame's when there is none), for the main pass's
+    // motion vectors (packFrameMotion).
+    Mat4 previousMotionViewProjection = Mat4::identity();
+    // This frame's jitter (pixels), which the main pass takes off its pixels for their motion (pixelMotion).
+    Vec2 frameJitter;
 
     struct PreviousCamera {
         Mat4 viewProjection = Mat4::identity();
@@ -745,8 +748,8 @@ private:
     // For cull-compare, the CPU's own lists of every view culled this frame (views as culled: the camera, the captures,
     // then the shadow tiles drawn), from the CPU's culling functions.
     CullCompare cpuReferenceLists(const FrameDescription& description, const CameraCullFrame& table, const std::vector<GpuCameraCull>& views,
-                                  const Frustum& cameraFrustum, const LevelView& cameraLevels, bool motion, const WindSettings* sway,
-                                  const std::vector<CaptureCull>& captures, const ShadowDraws& shadowDraws, const LevelOfDetailSettings& levelSettings) const;
+                                  const Frustum& cameraFrustum, const LevelView& cameraLevels, const std::vector<CaptureCull>& captures,
+                                  const ShadowDraws& shadowDraws, const LevelOfDetailSettings& levelSettings) const;
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawGlassShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
 
@@ -769,7 +772,6 @@ private:
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
-    void drawMotion(FrameContext& frame, const PassDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
     // The frame's lit beacons added over the fogged picture (render/gpu/beacon_splat.h), its depth tested, not written.
     void drawBeacons(FrameContext& frame, std::span<const PlacedBeacon> beacons, VkDescriptorSet sceneSet);
     // The transparent draws, far to near, blended over the scene image (its depth tested, not written), sampling the

@@ -74,7 +74,7 @@ A mesh of cards (leaf clusters, palm leaflets) fades into its coarser level one 
 
 - `uploadMesh` packs a thinned mesh's header (card size, growth, least share) and a record a vertex (`packCardThinning`, `GpuThinningRecord`, 16 bytes) into scene set 1 binding 42, copied whole when new ones arrive (`updateVertexRecords`), and returns the entry in `VertexEntries`; `attachVertexEntries` sets `DrawItem::thinningEntry`, packed into `GpuInstance::hanging[2]`.
 - `batchByMesh` marks a draw drawn with the mesh itself or a vertex-sharing level of a thinned mesh (`BatchedDraws::marks`); `appendDrawList` sets `DRAW_LIST_THINNED_BIT` in its draw list entry (`drawnInstance` strips it).
-- `thinnedVertex` (`card_thinning_data.glsl`) shapes marked instances' vertices in `triangle.vert` (allowance `GpuFrameData::levelOptions.x` for the camera, `GpuCaptureView::eye.w` for a probe face or the mirror) and `motion.vert` (this frame's and last frame's position).
+- `thinnedVertex` (`card_thinning_data.glsl`) shapes marked instances' vertices in `triangle.vert` (allowance `GpuFrameData::levelOptions.x` for the camera, `GpuCaptureView::eye.w` for a probe face or the mirror) and `triangle_motion.vert` (the main pass, last frame's position too).
 - Shadow tiles never mark entries: a thinned mesh must cast no shadow (its shadow stand-in does).
 
 ## Level fades
@@ -86,7 +86,7 @@ A mesh whose levels and card would swap in one frame (the scanned plants' simpli
 - **The band** (`levelFade`): the levels chosen under the budget (the finer) and under pixelError / (1 - band) (the coarser: the draw as if 1 - band times as far). Where they differ both are drawn; either may be none (a plant fading into its card has no coarser mesh, its card no finer one, by the same error and box). Share = (pixelError / pixels - (1 - band)) / band, pixels the coarser's error on screen: 0 at the band's start, 1 at the switch.
 - **The field** (`level_fade`, mirrored in `level_fade.glsl`): `levelFadeField(share, coarse)`, 7 bits of the draw list entry above its 24-bit instance (`DRAW_LIST_FADE_*`; `drawListInstances` 16.7 M, past which `CameraCullTable::update` throws): the coarse bit and the share's step plus 1 (63 steps; 0 no fade). `levelFadeThreshold` is the step's middle; `levelFadeKeeps(field, noise)` keeps the coarser below it, the finer from it, so the two split every pixel.
 - **The noise** (`levelFadeNoise`): interleaved gradient noise of the pixel, offset from the cascades' dither and turned by 5.588238 x the frame (`GpuFrameData::levelOptions.y`, 0 without temporal anti-aliasing), which TAA and the upscalers average into a blend.
-- **Drawing:** `triangle.vert` passes `drawListFade(entry)` on (location 11); `cut_out_prepass.frag` discards what its level does not keep, after its texture reads; the main pass shades only what the prepass kept (EQUAL); `motion.vert` and `motion.frag` do the same in the velocity pass. `batchByMesh` (the CPU's reference) lists a fading draw twice, its marks carrying the fields; `levelsChosen` counts both levels.
+- **Drawing:** `triangle.vert` passes `drawListFade(entry)` on (location 11); `cut_out_prepass.frag` discards what its level does not keep, after its texture reads; the main pass shades, and writes motion for, only what the prepass kept (EQUAL). `batchByMesh` (the CPU's reference) lists a fading draw twice, its marks carrying the fields; `levelsChosen` counts both levels.
 - **Cost:** a draw in a band is drawn twice there, at its cheaper levels; grows with the fading draws in view.
 
 ## Tests

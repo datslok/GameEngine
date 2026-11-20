@@ -139,7 +139,7 @@ Each view draws the coarsest of a mesh's levels whose error covers at most `pixe
 - **`chosenMesh`:** the drawn mesh, or an invalid handle where it draws nothing (an impostor too near, levels or impostors off; a tree past its last level). Batching skips those.
 - **`levelsChosen`:** counts per level for the readout's LEVELS (fading: both levels).
 - **`thinningErrorPerMetre`:** pixelError / pixelsPerMetre, card thinning's allowance (0 orthographic or off).
-- The camera chooses by its **output** height (`RenderStats::outputHeight`), not the render height, so upscaling does not pull switches closer. Other views' choices (velocity pass, probe faces, mirror, shadow tiles by their texels): renderer.md.
+- The camera chooses by its **output** height (`RenderStats::outputHeight`), not the render height, so upscaling does not pull switches closer. Other views' choices (probe faces, mirror, shadow tiles by their texels): renderer.md.
 - **Switching** is instant (TAA softens it) but for fading draws (`levelFade`, level-of-detail.md).
 - **Settings:** `LevelOfDetailSettings` (`RenderSettings::levelOfDetail`, F5 Level of detail): `enabled`, `pixelError` (2), `impostors`, `fadeBand` (0.2); live. `validateLevelOfDetail` rejects a budget not above 0, a band outside 0-0.9.
 

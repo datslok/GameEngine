@@ -105,8 +105,8 @@ In `Application::describeFrame`, one mesh a job (`parallelFor`):
 
 ### Motion vectors
 
-- A draw joins the velocity pass when its matrix moved, it sways, or its mesh `changedShape()`.
-- The motion pipelines (`BatchPipelines::previousShapes`) read a second vertex stream (`VertexLayout` attributes naming binding 1) bound to last frame's slot, at location 4 of `motion.vert`, placed with last frame's matrix. Other meshes bind their one buffer twice.
+- The main pass works out a vertex's motion when its matrix moved, the wind offsets it, or its shape changed (`anti-aliasing.md`).
+- The motion pipelines (`BatchPipelines::previousShapes`) read a second vertex stream (`VertexLayout` attributes naming binding 1) bound to last frame's slot, at location 4 of `triangle_motion.vert`, placed with last frame's matrix. Other meshes bind their one buffer twice.
 
 ### Ray tracing
 

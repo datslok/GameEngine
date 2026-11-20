@@ -20,7 +20,7 @@ Every texture lives in one big array set up once. A draw then says only "draw me
 
 With nothing per object left to bind, two draws differ only in their mesh (and in their drawing style: whether both sides show, whether holes are cut). So the renderer groups the visible objects by those, and each run of one mesh becomes a single **instanced draw**: `vkCmdDrawIndexed(indices, instanceCount, ..., firstInstance)` draws the mesh `instanceCount` times, and in the shader `gl_InstanceIndex` counts up from `firstInstance`.
 
-That number indexes the **draw list**, a buffer of instance numbers holding every view's entries one after another: the camera's visible objects in batch order, then each redrawn shadow tile's casters, then the other views (the velocity pass, the reflection probe's faces, a mirror, glass). The grouping keeps a fixed order, so the same frame always gives the same list, which the determinism and golden image tests rely on.
+That number indexes the **draw list**, a buffer of instance numbers holding every view's entries one after another: the camera's visible objects in batch order, then each redrawn shadow tile's casters, then the other views (the reflection probe's faces, a mirror, glass). The grouping keeps a fixed order, so the same frame always gives the same list, which the determinism and golden image tests rely on.
 
 ### One record, many views
 

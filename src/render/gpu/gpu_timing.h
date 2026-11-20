@@ -33,7 +33,6 @@ enum class GpuPass {
     Main,
     ProbeBalls,
     RayDebug,
-    Motion,
     DepthRange,
     ReflectionProbe, // the reflection probe's capture: its six faces, their mips, distances and prefiltered levels
     PlanarReflection, // a flat mirror's picture: the scene drawn again through it, and its blurrier levels

@@ -59,7 +59,7 @@ Springs, not the wind, are what things sample: they lag a gust, overshoot and se
 - Bob and flutter grow with the height share, so a foot never moves. Phases come smoothly from the world place, so nothing tears. Normals are not turned (small angles).
 - Impostor cards do not sway, so the fade should end before a tree turns into its card (the forest's: about 1 km).
 
-**Every view the same:** `triangle.vert` (prepass, main pass, captures) and `motion.vert` add `windSwayOfVertex` after ground following ([terrain.md](terrain.md)). The velocity pass redraws every draw that `drawSways` (has a sway, partly within the fade's end) every frame, its last position from last frame's springs, windows and time (`GpuWindField::sway`: on, fade start and end, last time), so TAA, FSR and DLSS see the motion. Ray tracing sees the still shapes.
+**Every view the same:** `triangle.vert` (prepass, captures) and `triangle_motion.vert` (main pass) add `windSwayOfVertex` after ground following ([terrain.md](terrain.md)). The main pass works out a vertex's last position from last frame's springs, windows and time (`GpuWindField::sway`: on, fade start and end, last time) wherever the wind offsets it now, so TAA, FSR and DLSS see the motion ([anti-aliasing.md](anti-aliasing.md)). Ray tracing sees the still shapes.
 
 ## Swaying shadows
 

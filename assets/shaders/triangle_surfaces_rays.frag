@@ -6,4 +6,5 @@
 // The main pass writing the reflection surfaces too, its shadowed lights tinted by glass (triangle_rays.frag).
 #define REFLECTION_SURFACES
 #define GLASS_SHADOW_RAYS
+#define MAIN_MOTION
 #include "scene_surface.glsl"

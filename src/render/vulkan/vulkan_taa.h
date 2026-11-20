@@ -12,8 +12,11 @@
 
 class VulkanDevice;
 
+// Motion in NDC per pixel: two 16-bit floats are plenty (and hold TAA_NO_MOTION, under the half-float limit).
+inline constexpr VkFormat taaVelocityFormat = VK_FORMAT_R16G16_SFLOAT;
+
 /*
-* Temporal anti-aliasing's images and its resolve pass (render/gpu/taa.h): the velocity image the velocity pass draws
+* Temporal anti-aliasing's images and its resolve pass (render/gpu/taa.h): the velocity image the main pass writes
 * moving objects' motion into, at the render size like the scene image, and two history images at the output size that
 * take turns (one read as last frame's result while the other is written as this frame's). The resolve (taa.comp)
 * blends the scene image, upscaling it, into the history, and that result is the finished picture everything after it
@@ -44,7 +47,7 @@ public:
                  const GpuTaaPass& pass);
 
     /*
-    * Record the camera motion pass (motion_fill.comp): every velocity pixel the velocity pass left at "no motion" gets
+    * Record the camera motion pass (motion_fill.comp): every velocity pixel the main pass left at "no motion" gets
     * the camera's motion from its depth, so the image holds a motion everywhere, as FSR needs. The depth (readable by
     * compute) and the velocity image (drawn this frame) in, the velocity image left as a storage image.
     */
