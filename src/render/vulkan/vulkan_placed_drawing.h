@@ -40,7 +40,7 @@ public:
     /*
     * The frame's table, blocks and boxes, after the planting's prepare: none (returns false) without planted parts, a
     * field or a held cell. placement says where a mesh's indices are. Then the shadow changes (getShadowChanges): every
-    * tile when the table, region or field changed or the placed plants start or stop, else the cells made or dropped.
+    * tile when the table or field changed or the placed plants start or stop, else the cells made or dropped.
     * Throws std::invalid_argument for parts the passes cannot draw (buildPlacedTable).
     */
     bool prepare(const FrameDescription& frame, const VulkanPlanting& planting, const std::function<MeshPlacement(MeshHandle)>& placement,
@@ -103,7 +103,6 @@ private:
         std::vector<GpuCullChunk> chunks;
         PlacedViews views;
         std::vector<std::string> names;
-        PlantedRegion region;
         std::shared_ptr<const PlantingField> field;
 
         // Upload memory: the parts, kinds, blocks, views, groups and items.
@@ -135,11 +134,14 @@ private:
     bool compareAsked = false;
     std::string report;
 
+    // A held cell: its set's place among the planting's sets, and the cell.
+    using HeldCell = std::pair<int, PlantingCell>;
+
     // The ground's range under each held cell (for the ground it was taken from), and each held cell's change record
     // with what it stood for when last drawn: the table's signature and field (0 and none while nothing is drawn).
-    std::map<PlantingCell, TerrainHeightRange> groundRanges;
+    std::map<HeldCell, TerrainHeightRange> groundRanges;
     std::shared_ptr<const TerrainHeights> rangedGround;
-    std::map<PlantingCell, GpuCullRecord> drawnCells;
+    std::map<HeldCell, GpuCullRecord> drawnCells;
     std::uint64_t drawnSignature = 0;
     const PlantingField* drawnField = nullptr;
     PlantedShadowChanges shadowChanges;

@@ -59,6 +59,8 @@ std::vector<PlantingLayerRecord> forestPlantingLayers(const ForestSpecies& speci
     at(ForestLayer::Understorey).keepAway = clearOfTrunks(species.understorey.trunkClearance);
     at(ForestLayer::Palms) = palmPlantingLayer(species.palms);
     at(ForestLayer::Palms).keepAway = clearOfTrunks(species.palms.trunkClearance);
+    at(ForestLayer::Understorey).cellSet = plantingMiddleCells;
+    at(ForestLayer::Palms).cellSet = plantingMiddleCells;
     return layers;
 }
 
@@ -76,6 +78,7 @@ PlantingLayerRecord forestCoverLayer(float cellMetres, int variants, int steps, 
     layer.reachPerScale = {cellMetres * static_cast<float>(PLANTING_RING_DIAGONAL)};
     layer.centrePerScale = {0.0f};
     layer.coverMap = coverMap;
+    layer.cellSet = plantingFineCells;
     return layer;
 }
 

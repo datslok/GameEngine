@@ -24,8 +24,8 @@
 * The plants the GPU placed (render/gpu/planting_records.h) drawn in every view (ROADMAP phase 18, the valley's stages
 * 2b2 and 2c1; docs/architecture/planting.md): the camera, the probe faces and the shadow tiles drawn.
 * A table of each kind's parts, each part's instance and cull record in the plant's own frame. Each frame each view
-* takes the blocks of the cells whose box it may see (tested on the CPU: a box a held cell's drawn layer), and its
-* passes cull each of those plants in the region, its parts choosing their levels as the views' own draws do
+* takes the blocks of the cells whose box it may see (tested on the CPU: a box a held cell's drawn layer, every set of
+* cells' alike), and its passes cull each of those plants, its parts choosing their levels as the views' own draws do
 * (cameraCandidateFlags on the part's record moved to the plant), count by group (a part's level slot), sum the counts,
 * write each group's indirect command and each plant's entries at their places (placed_cull_*.comp). The vertex shaders
 * build each drawn part's instance from its plant (placedInstance), for draws from PLACED_INSTANCE_BASE. Render-only and
@@ -55,7 +55,7 @@ struct GpuPlacedKind {
     std::uint32_t parts = 0;
     std::uint32_t variants = 0;    // its looks (0 or 1: itself alone), chosen by the plant's pick (placedKindSlot)
     std::uint32_t variantSlot = 0; // the slot of its variant 1, the rest after it
-    std::uint32_t unbounded = 0;   // 1: its layer drawn wherever planted, past the looks' region (PlantedLayerDrawing)
+    std::uint32_t unused = 0;
     std::uint32_t part[PLACED_MOST_PARTS] = {};
 };
 
@@ -91,13 +91,13 @@ struct GpuPlacedItem {
 static_assert(sizeof(GpuPlacedItem) == 8, "GpuPlacedItem must match placed_drawing.glsl's PlacedItem");
 
 /*
-* A view's culling: the view, the region drawn (north, south, spread), its items (from firstItem), the groups, its
-* entries' place and room, and every view's count of views and items; a part is drawn where cameraCandidateFlags gives
-* CAMERA_CULL_DRAWN. Rounded to 16 bytes, as std430 lays out an array of it.
+* A view's culling: the view, its items (from firstItem), the groups, its entries' place and room, and every view's
+* count of views and items; a part is drawn where cameraCandidateFlags gives CAMERA_CULL_DRAWN. Rounded to 16 bytes, as
+* std430 lays out an array of it.
 */
 struct GpuPlacedView {
     GpuCameraCull camera{};
-    float region[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float unused[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     std::uint32_t firstItem = 0;
     std::uint32_t items = 0;
     std::uint32_t groups = 0;
@@ -163,25 +163,26 @@ std::uint32_t placedKindSlot(std::uint32_t kind, std::uint32_t variants, std::ui
 * past PLANTING_MOST_KINDS or a layer past layerCount, more than placedMostParts parts in a kind, glass, a mesh not in
 * the pools, more than three levels, or more than placedMostGroups groups; a kind's variants missing one below another,
 * given twice, or reaching a slot a look's kind holds (they take the layer's top slots, its last variant in the last).
-* layers (by layer, none past the end: bounded, no relief): an unbounded layer's every kind slot marked so; a layer's
-* ground-following parts' culling spheres grown by its groundRelief.
+* layers (by layer, none past the end: no relief): a layer's ground-following parts' culling spheres grown by its
+* groundRelief.
 */
 PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const PlantedKindParts> kinds, std::size_t layerCount,
                              const std::function<MeshPlacement(MeshHandle)>& placement, std::span<const PlantedLayerDrawing> layers = {});
 
-// The blocks over every held slot's drawn layers, slot by slot (in the held map's order) and layer by layer, each layer
-// cut into blocks of placedGroupSize of its room in the slot.
-std::vector<GpuPlacedBlock> placedBlocks(const std::map<PlantingCell, int>& held, const PlantingSlotLayout& layout, const PlacedTable& table);
+// The blocks over every held slot's drawn layers, set by set, slot by slot (in the held map's order) and layer by layer,
+// each layer cut into blocks of placedGroupSize of its room in the slot (none for a layer its set only reads).
+std::vector<GpuPlacedBlock> placedBlocks(std::span<const PlantingSetSlots> sets, const PlacedTable& table);
 
-// A held cell's drawn layer's blocks, one run each, in placedBlocks' order.
+// A held cell's drawn layer's blocks, one run each, in placedBlocks' order: its set, its cell, the field's layer.
 struct PlacedBlockRun {
+    int set = 0;
     PlantingCell cell;
     std::uint32_t layer = 0;
     std::uint32_t firstBlock = 0;
     std::uint32_t blocks = 0;
 };
 
-std::vector<PlacedBlockRun> placedBlockRuns(const std::map<PlantingCell, int>& held, const PlantingSlotLayout& layout, const PlacedTable& table);
+std::vector<PlacedBlockRun> placedBlockRuns(std::span<const PlantingSetSlots> sets, const PlacedTable& table);
 
 /*
 * The box every part of a layer's plants in a cell may reach (chunkInView tests it, as the scene's chunks): the cell
@@ -203,7 +204,7 @@ struct PlacedViews {
 };
 
 PlacedViews placedViews(std::span<const GpuCameraCull> asked, std::span<const PlacedBlockRun> runs, std::span<const GpuCullChunk> chunks,
-                        const PlantedRegion& region, const PlacedTable& table);
+                        const PlacedTable& table);
 
 /*
 * What a cell made or dropped stands for in the shadow tiles' tests (shadowTileNeeds): the sphere round its casting
@@ -212,8 +213,8 @@ PlacedViews placedViews(std::span<const GpuCameraCull> asked, std::span<const Pl
 */
 GpuCullRecord placedChangeRecord(std::span<const GpuCullChunk> chunks);
 
-// What the cached shadow tiles depend on in the table and region: its parts' records and levels, its kinds and groups.
-std::uint64_t placedTableSignature(const PlacedTable& table, const PlantedRegion& region);
+// What the cached shadow tiles depend on in the table: its parts' records and levels, its kinds and groups.
+std::uint64_t placedTableSignature(const PlacedTable& table);
 
 // ---- Mirrored by placed_drawing.glsl ----
 
@@ -240,14 +241,13 @@ struct PlacedCullResult {
 };
 
 /*
-* What the passes write for one view from the slots' plants and counts (as the planting left them) and the maps (for the
-* region): each of its items' block's plants in its count, inside the region, their kinds' parts flagged by
+* What the passes write for one view from the slots' plants and counts (as the planting left them): each of its items'
+* block's plants in its count, their kinds' parts flagged by
 * cameraCandidateFlags at every level slot with a mesh, each one with the view's wanted bit an entry in its group. The
 * entries from the view's own (entryBase), the commands' first instances counting from there.
 */
 PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPlacedBlock> blocks, std::span<const GpuPlacedItem> items,
-                                 std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts, const PlantingMaps& maps,
-                                 const GpuPlacedView& view);
+                                 std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts, const GpuPlacedView& view);
 
 // ---- placement-compare's placed draws ----
 

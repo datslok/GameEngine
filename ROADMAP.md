@@ -358,7 +358,13 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
           - [x] d3a. The engine: a layer's kind and quarter turns read from a baked byte map, ground-following placed parts (lifted by the land under each vertex less the land under the plant), a region a layer, culling spheres grown by the land's relief; CPU tests and `placement-compare`
           - [x] d3b. The forest's grass and floor cover as two such layers, their entity cells retired; the frame measured before and after
       - [ ] e. The whole valley (the user's go, Nov 20 2026)
-        - [ ] e1. The patch's limit gone; trees in 128 m cells to about 1 km, small plants and ground cover in 64 m cells to about 200 m, each set of cells planting what it reads; trees faded in over the last cell (`valley-wide-cells`)
+        - [ ] e1. The patch's limit gone; three sets of cells, each planting its layers and re-planting what they read: trees in 128 m cells to 1 km, the understorey and palms in 64 m to 300 m, grass and floor cover in 32 m to 100 m (the user's choice A, Nov 20 2026); plants faded in over their last cell (`valley-wide-cells`)
+          - [x] e1a. The sets and their rings, every set's slots in the shared buffers, the region gone (the GPU's plants and the near trees')
+          - [ ] e1c. The frame back down (the user's go, Nov 20 2026; trees to 1 km took the laptop's GPU frame from about 17 to 54 ms; research in `docs/research/VALLEY.md`, Drawing the whole valley): each step measured at the path in one hidden copy before the next
+            - [ ] 1. The mid trees in the middle cells (300 m): past it only the sparse tall trees (BF3's payloads, Serious Sam 4's split)
+            - [ ] 2. Trees cast into the nearest cascades only (Horizon); the far forest's shadow later from a cheap caster in the far map
+            - [ ] 3. Placed plants in the probe faces only near the probe
+          - [ ] e1b. The fade by distance over each set's last cell, by the level fades' dither
         - [ ] e2. Measured at the rim, the path and the meadow (F4), radii and levers tuned
     - [ ] 3. The far tier: one impostor a tree past about 1 km, casting into the far shadow map (`impostor-fields`)
     - [ ] 4. The canopy in the terrain's colour and normal past a few km (`far-canopy`)

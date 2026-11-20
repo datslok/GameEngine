@@ -80,7 +80,6 @@ DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const
 * levels to them, which a change of levels would leave dangling.
 */
 void appendPlantedParts(FrameDescription& frame, const PlantingLooks& looks) {
-    frame.plantedRegion = looks.region;
     frame.plantedLayers = looks.layers;
 
     for (const PlantedKindLook& kind : looks.kinds) {

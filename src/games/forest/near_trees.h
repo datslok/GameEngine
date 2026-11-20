@@ -15,7 +15,6 @@
 
 #include <array>
 #include <cstdint>
-#include <optional>
 #include <vector>
 
 /*
@@ -55,19 +54,17 @@ std::vector<NearTree> plantBigTrees(const ForestSpecies& species, const Planting
 // The cells a box touches, by rows from the north then columns.
 std::vector<PlantingCell> nearCellsOver(const PlantingBox& box, float cellMetres);
 
-// What a near cell is made from: the species, maps and land the trees stand on, the region drawn (none: everywhere),
-// and how the lianas hang.
+// What a near cell is made from: the species, maps and land the trees stand on, and how the lianas hang.
 struct NearTreeSources {
     const ForestSpecies& species;
     const PlantingMaps& maps;
     const TerrainHeights& heights;
-    std::optional<PlantedRegion> region;
     const ForestLianaSettings& lianas;
     std::uint64_t lianaSeed = 0;
 };
 
 /*
-* A cell's trees and lianas: the big trees inside the region whose feet the cell holds, and those within the lianas'
+* A cell's trees and lianas: the big trees whose feet the cell holds, and those within the lianas'
 * neighbourSpan of it they may loop into, a crown each (trees[i] is crowns[i]'s tree; carries marks the cell's own),
 * and the lianas the cell's own crowns hang (chooseLianas), their crowns indexing crowns.
 */

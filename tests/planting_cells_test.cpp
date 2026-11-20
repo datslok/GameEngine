@@ -5,6 +5,7 @@
 #include "planting_helpers.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <set>
@@ -40,7 +41,7 @@ namespace {
     }
 
     // Updates until a frame makes nothing, returning every cell made in order.
-    std::vector<PlantingCellMade> catchUp(PlantingCellRing& ring, const Vec2& camera, const PlantingCellSettings& settings) {
+    std::vector<PlantingCellMade> catchUp(PlantingCellRing& ring, const Vec2& camera, const PlantingCellSetSettings& settings) {
         std::vector<PlantingCellMade> made;
 
         for (int frame = 0; frame < 10000; ++frame) {
@@ -73,7 +74,7 @@ namespace {
     * slot; a frame later nothing more is made.
     */
     void testTheRingFillsNearestFirst() {
-        const PlantingCellSettings settings{.enabled = true, .cellMetres = 50.0f, .radiusMetres = 200.0f, .cellsAFrame = 3};
+        const PlantingCellSetSettings settings{.cellMetres = 50.0f, .radiusMetres = 200.0f, .cellsAFrame = 3};
         PlantingCellRing ring;
         const Vec2 camera{12.0f, -31.0f};
         const std::vector<PlantingCellMade> first = ring.update(camera, settings);
@@ -105,7 +106,7 @@ namespace {
     * cells never outnumber the slots; the same walk makes the same cells in the same slots.
     */
     void testTheRingFollowsTheCamera() {
-        const PlantingCellSettings settings{.enabled = true, .cellMetres = 40.0f, .radiusMetres = 150.0f, .cellsAFrame = 4};
+        const PlantingCellSetSettings settings{.cellMetres = 40.0f, .radiusMetres = 150.0f, .cellsAFrame = 4};
         const auto walk = [&](std::vector<PlantingCellMade>& made) {
             PlantingCellRing ring;
 
@@ -140,7 +141,7 @@ namespace {
 
     // A teleport drops every cell behind; a new radius or cell size forgets them all and starts again from slot 0.
     void testTheRingStartsAgain() {
-        PlantingCellSettings settings{.enabled = true, .cellMetres = 64.0f, .radiusMetres = 300.0f, .cellsAFrame = 4};
+        PlantingCellSetSettings settings{.cellMetres = 64.0f, .radiusMetres = 300.0f, .cellsAFrame = 4};
         PlantingCellRing ring;
         catchUp(ring, Vec2{0.0f, 0.0f}, settings);
         const std::vector<PlantingCellMade> far = ring.update(Vec2{5000.0f, 5000.0f}, settings);
@@ -197,7 +198,7 @@ namespace {
 
     // The slots cover every cell within the drop distance wherever the camera stands.
     void testTheSlotCountCoversTheDropDistance() {
-        const PlantingCellSettings settings{.enabled = true, .cellMetres = 64.0f, .radiusMetres = 300.0f, .cellsAFrame = 4};
+        const PlantingCellSetSettings settings{.cellMetres = 64.0f, .radiusMetres = 300.0f, .cellsAFrame = 4};
         const int slots = plantingSlotCount(settings);
         assert(slots == 13 * 13);
 
@@ -231,12 +232,133 @@ namespace {
         }
     }
 
+    /*
+    * Three sets, coarsest first, Horizon's sizes: trees in 128 m cells to 1 km, plants in 64 m to 300 m, ground cover in
+    * 32 m to 100 m; each set's three fields visited.
+    */
     void testTheSettingsAreVisited() {
         PlantingCellSettings settings;
         assert(!settings.enabled);
+        assert(settings.sets[plantingCoarseCells] == (PlantingCellSetSettings{.cellMetres = 128.0f, .radiusMetres = 1000.0f, .cellsAFrame = 4}));
+        assert(settings.sets[plantingMiddleCells] == (PlantingCellSetSettings{.cellMetres = 64.0f, .radiusMetres = 300.0f, .cellsAFrame = 4}));
+        assert(settings.sets[plantingFineCells] == (PlantingCellSetSettings{.cellMetres = 32.0f, .radiusMetres = 100.0f, .cellsAFrame = 4}));
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 4);
+        assert(counter.fields == 1 + 3 * plantingCellSetCount);
+    }
+
+    // threeLayers with the small trees in the middle set and the ground plants in the fine one.
+    std::vector<PlantingLayerRecord> threeLayersInSets() {
+        std::vector<PlantingLayerRecord> layers = threeLayers();
+        layers[1].cellSet = plantingMiddleCells;
+        layers[2].cellSet = plantingFineCells;
+        return layers;
+    }
+
+    /*
+    * A set plants the layers naming it and every layer they read, renumbered; only its own are written. The big trees'
+    * set reads nothing; the small trees' reads the big; the ground plants' reads both; a set no layer names plants
+    * nothing; a layer naming no set throws.
+    */
+    void testASetPlantsWhatItReads() {
+        const std::vector<PlantingLayerRecord> layers = threeLayersInSets();
+        const PlantingSetLayers coarse = plantingSetLayers(layers, plantingCoarseCells);
+        assert(coarse.fieldLayer == (std::vector<int>{0}) && coarse.written == (std::vector<bool>{true}));
+
+        const PlantingSetLayers middle = plantingSetLayers(layers, plantingMiddleCells);
+        assert(middle.fieldLayer == (std::vector<int>{0, 1}) && middle.written == (std::vector<bool>{false, true}));
+        assert(middle.layers[1].keepAway.size() == 1 && middle.layers[1].keepAway[0].layer == 0);
+
+        const PlantingSetLayers fine = plantingSetLayers(layers, plantingFineCells);
+        assert(fine.fieldLayer == (std::vector<int>{0, 1, 2}) && fine.written == (std::vector<bool>{false, false, true}));
+
+        // The ground plants reading only the big trees: the small ones are left out and the keep-away renumbered.
+        std::vector<PlantingLayerRecord> skipping = threeLayersInSets();
+        skipping[2].keepAway = {PlantingKeepAway{.layer = 0, .radius = 3.0f}};
+        const PlantingSetLayers skipped = plantingSetLayers(skipping, plantingFineCells);
+        assert(skipped.fieldLayer == (std::vector<int>{0, 2}) && skipped.written == (std::vector<bool>{false, true}));
+        assert(skipped.layers[1].keepAway[0].layer == 0);
+        checkPlantingLayers(skipped.layers);
+
+        // A layer under another of its set's lattice: the one below is read and renumbered.
+        std::vector<PlantingLayerRecord> sharing = threeLayersInSets();
+        sharing[1].footprint = sharing[0].footprint;
+        sharing[1].under = 0;
+        sharing[1].keepAway.clear();
+        const PlantingSetLayers under = plantingSetLayers(sharing, plantingMiddleCells);
+        assert(under.fieldLayer == (std::vector<int>{0, 1}) && under.layers[1].under == 0);
+
+        std::vector<PlantingLayerRecord> oneSet = threeLayers();
+        assert(plantingSetLayers(oneSet, plantingFineCells).layers.empty());
+
+        oneSet[1].cellSet = plantingCellSetCount;
+        bool threw = false;
+
+        try {
+            plantingSetLayers(oneSet, plantingCoarseCells);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+
+        assert(threw);
+    }
+
+    // A slot keeps room only for the layers its set writes; the candidates' scratch is every layer's.
+    void testASlotKeepsOnlyItsSetsLayers() {
+        const PlantingSetLayers fine = plantingSetLayers(threeLayersInSets(), plantingFineCells);
+        const PlantingSlotLayout all = plantingSlotLayout(fine.layers, 32.0f);
+        const PlantingSlotLayout kept = plantingSlotLayout(fine.layers, 32.0f, fine.written);
+        assert(all.written == (std::vector<bool>{true, true, true}) && kept.written == fine.written);
+        assert(kept.layerCapacity[0] == 0u && kept.layerCapacity[1] == 0u && kept.layerCapacity[2] == all.layerCapacity[2]);
+        assert(kept.plantsASlot == all.layerCapacity[2] && kept.layerFirst[2] == 0u);
+        assert(kept.scratchCapacity == all.scratchCapacity && kept.candidatesACell == all.candidatesACell);
+
+        bool threw = false;
+
+        try {
+            plantingSlotLayout(fine.layers, 32.0f, std::vector<bool>{true});
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+
+        assert(threw);
+    }
+
+    /*
+    * Each set's cells, planted from its own layers alone, hold exactly the plants the whole field puts there for the
+    * layers it writes: the sets agree with one planting of everything, whatever their cells' sizes.
+    */
+    void testEachSetPlantsAsTheField() {
+        const PlantingMaps maps = straightMaps();
+        const std::vector<PlantingLayerRecord> layers = threeLayersInSets();
+        const PlantingBox whole = {-128.0f, 64.0f, -192.0f, -64.0f};
+        const std::vector<std::vector<PlantedPlant>> all = plantLayers(layers, maps, rollingGround(), whole, testJobs());
+        const std::array<float, plantingCellSetCount> cellMetres{64.0f, 32.0f, 16.0f};
+
+        for (int set = 0; set < plantingCellSetCount; ++set) {
+            const PlantingSetLayers own = plantingSetLayers(layers, set);
+            const float size = cellMetres[static_cast<std::size_t>(set)];
+            std::vector<std::size_t> counts(own.layers.size(), 0);
+
+            for (float north = whole.north; north < whole.south; north += size) {
+                for (float west = whole.west; west < whole.east; west += size) {
+                    const PlantingCell cell{static_cast<int>(std::floor(west / size)), static_cast<int>(std::floor(north / size))};
+                    const std::vector<std::vector<PlantedPlant>> planted =
+                        plantLayers(own.layers, maps, rollingGround(), plantingCellBox(cell, size), testJobs());
+
+                    for (std::size_t layer = 0; layer < own.layers.size(); ++layer) {
+                        counts[layer] += planted[layer].size();
+                    }
+                }
+            }
+
+            for (std::size_t layer = 0; layer < own.layers.size(); ++layer) {
+                if (own.written[layer]) {
+                    const std::size_t field = static_cast<std::size_t>(own.fieldLayer[layer]);
+                    assert(counts[layer] == all[field].size() && !all[field].empty());
+                }
+            }
+        }
     }
 }
 
@@ -248,4 +370,7 @@ void testPlantingCells() {
     testTheSlotCountCoversTheDropDistance();
     testTheCellsPlantTheWhole();
     testTheSettingsAreVisited();
+    testASetPlantsWhatItReads();
+    testASlotKeepsOnlyItsSetsLayers();
+    testEachSetPlantsAsTheField();
 }

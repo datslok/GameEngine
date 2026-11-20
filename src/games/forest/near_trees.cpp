@@ -78,11 +78,6 @@ NearTreeCell makeNearTreeCell(const PlantingCell& cell, float cellMetres, const 
 
     for (const NearTree& tree : plantBigTrees(sources.species, sources.maps, sources.heights, grown, jobs)) {
         const Vec3& foot = tree.placement.foot;
-
-        if (sources.region && !insidePlantedRegion(sources.maps, *sources.region, foot)) {
-            continue;
-        }
-
         const ForestTreeSettings& settings = tree.layer == ForestLayer::Emergent ? sources.species.emergent : sources.species.canopy;
         const bool mine = foot.x >= own.west && foot.x < own.east && foot.z >= own.north && foot.z < own.south;
         made.trees.push_back(tree);
@@ -131,7 +126,7 @@ std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLian
 */
 bool NearLianas::update(World& world, Entity holder, const Vec2& place, const ForestNearTreeSettings& settings, int most,
                         const NearTreeSources& sources, const NearLianaTrees& trees, const NearLianaLook& look, float barkTileMetres, JobSystem& jobs) {
-    const PlantingCellSettings ringSettings{.enabled = true, .cellMetres = settings.cellMetres, .radiusMetres = settings.radiusMetres, .cellsAFrame = most};
+    const PlantingCellSetSettings ringSettings{.cellMetres = settings.cellMetres, .radiusMetres = settings.radiusMetres, .cellsAFrame = most};
     const std::vector<PlantingCellMade> made = ring.update(place, ringSettings);
     const std::map<PlantingCell, int>& held = ring.getHeld();
     bool changed = false;

@@ -1128,8 +1128,19 @@ namespace {
         frame();
         const std::shared_ptr<const PlantingLooks> looks = plantingSourceOf(world).looks;
         assert(looks);
-        assert(looks->region.northmost == forestPatch.northmost && looks->region.southmost == forestPatch.southmost &&
-               looks->region.spread == forestPatch.spread);
+        // Each layer in the GPU's cells it is drawn as far as: the trees coarse, the understorey and palms middle, the
+        // ground cover fine.
+        const std::vector<PlantingLayerRecord>& fieldLayers = plantingSourceOf(world).field->layers;
+        assert(fieldLayers.size() == static_cast<std::size_t>(forestFloorPlanting) + 1);
+
+        for (const ForestLayer tree : {ForestLayer::Emergent, ForestLayer::Canopy, ForestLayer::Mid}) {
+            assert(fieldLayers[static_cast<std::size_t>(tree)].cellSet == plantingCoarseCells);
+        }
+
+        assert(fieldLayers[static_cast<std::size_t>(ForestLayer::Understorey)].cellSet == plantingMiddleCells);
+        assert(fieldLayers[static_cast<std::size_t>(ForestLayer::Palms)].cellSet == plantingMiddleCells);
+        assert(fieldLayers[static_cast<std::size_t>(forestGrassPlanting)].cellSet == plantingFineCells);
+        assert(fieldLayers[static_cast<std::size_t>(forestFloorPlanting)].cellSet == plantingFineCells);
         // The trees' looks, then the understorey's and the palms', then the ground cover's.
         const std::size_t plantsEnd = game.getTreeLooks().size() + game.getPlantLooks().size();
         assert(looks->kinds.size() == plantsEnd + game.getCoverLooks().size());

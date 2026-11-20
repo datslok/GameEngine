@@ -239,10 +239,9 @@ struct FrameDescription {
 
     // What the planted plants are drawn with (the field's PlantingLooks): every kind's parts as draws in the plant's
     // own frame (model the part's own, mostly the identity), attached as the frame's draws are; each kind's run of them;
-    // the region drawn, and how each layer is drawn. None when the field's plants are not drawn.
+    // how each layer is drawn. None when the field's plants are not drawn.
     std::vector<DrawItem> plantedParts{};
     std::vector<PlantedKindParts> plantedKinds{};
-    PlantedRegion plantedRegion{};
     std::vector<PlantedLayerDrawing> plantedLayers{};
 };
 
@@ -259,7 +258,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
 // A renderer's part as a draw placed by model (its flags and sway the renderer's; nothing attached yet, no history).
 DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const Mat4& model);
 
-// The looks' kinds' parts appended to the frame's plantedParts, a run a kind, and its region.
+// The looks' kinds' parts appended to the frame's plantedParts, a run a kind, and how each layer is drawn.
 void appendPlantedParts(FrameDescription& frame, const PlantingLooks& looks);
 
 // One entity's draws, a part each, into draws (as many as its parts), placed by its transform at alpha; with a

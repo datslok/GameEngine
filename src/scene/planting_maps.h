@@ -96,7 +96,7 @@ struct PlantedRegion {
     float spread = 0.0f;
 };
 
-// Whether a place's foot is in the region, the axis read from the maps (plantingInsideRegion in planting_cells.glsl).
+// Whether a place's foot is in the region, the axis read from the maps.
 bool insidePlantedRegion(const PlantingMaps& maps, const PlantedRegion& region, const Vec3& foot);
 
 // The place on the grid across the axis: its column and row coordinates, in texels from the grid's corner.
@@ -127,6 +127,12 @@ float plantingCap(const PlantingMaps& maps, float reach, float x, float z);
 // Whether a plant of reach centred over place, its top at top, fits the maps (planting.h's plantingFits).
 bool plantingFitsTheMaps(const PlantingMaps& maps, const Vec2& place, float reach, float top);
 
+// The GPU's sets of cells round the camera (planting_cells.h), coarsest first: each plants the layers naming it.
+inline constexpr int plantingCoarseCells = 0;
+inline constexpr int plantingMiddleCells = 1;
+inline constexpr int plantingFineCells = 2;
+inline constexpr int plantingCellSetCount = 3;
+
 // Plants of another layer a plant keeps away from: their trunks within radius, or (crown) their own reach.
 struct PlantingKeepAway {
     int layer = 0;
@@ -148,7 +154,9 @@ struct PlantingKeepAway {
 *   none); keepAway: earlier layers' plants it keeps clear of;
 * - coverMap: a cover layer's map in the maps' coverMaps (-1: none). A cover layer plants exactly the cells its map
 *   names, at the cell's middle, its kind and turn from the byte (plantingCoverKind, plantingCoverTurn), its scale and
-*   pick drawn as any layer's, on the ground at its middle; the dither, shares, path, keep-aways and fits are not asked.
+*   pick drawn as any layer's, on the ground at its middle; the dither, shares, path, keep-aways and fits are not asked;
+* - cellSet: which of the GPU's sets of cells plants it (plantingCoarseCells to plantingFineCells, planting_cells.h); the
+*   CPU's plantings ignore it.
 */
 struct PlantingLayerRecord {
     std::array<float, 3> sharePerWeight{};
@@ -173,6 +181,7 @@ struct PlantingLayerRecord {
     float spacingShare = 0.0f;
     std::vector<PlantingKeepAway> keepAway;
     int coverMap = -1;
+    int cellSet = plantingCoarseCells;
 };
 
 /*

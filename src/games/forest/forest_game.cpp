@@ -1092,16 +1092,12 @@ void ForestGame::buildLianas(AssetManager& assets) {
     }
 }
 
-/*
-* The cells round the player: up to most made this frame (all within the radius at the start). Over the patch only,
-* where the GPU draws the trees, until the whole valley is planted (ROADMAP e1).
-*/
+// The cells round the player: up to most made this frame (all within the radius at the start), wherever the player is.
 void ForestGame::updateNearLianas(World& world, int most) {
     const ForestSpecies species = plantingSpecies();
     const NearTreeSources sources{.species = species,
                                   .maps = valleyMaps.planting,
                                   .heights = *groundHeights,
-                                  .region = forestPatch,
                                   .lianas = lianaSettings,
                                   .lianaSeed = lianaSeed};
     const NearLianaTrees trees{.emergentHeights = emergentHeights, .canopyHeights = canopyHeights, .bend = swaySettings.trees.bend};
@@ -1945,15 +1941,15 @@ const std::vector<PlantedKindLook>& ForestGame::getPlantLooks() const {
 
 /*
 * One list for the field: the trees' looks, then the plants', then the ground cover's (applySway gives it anew when the
-* sway changes). The ground cover is drawn wherever its maps name, past the patch, its patches' culling grown by the
-* land's relief under its cells.
+* sway changes), drawn wherever their cells plant them; the ground cover's patches' culling grown by the land's relief
+* under its cells.
 */
 std::shared_ptr<const PlantingLooks> ForestGame::plantedLooks() const {
-    PlantingLooks looks{forestPatch, treeLooks, std::vector<PlantedLayerDrawing>(forestFloorPlanting + 1)};
+    PlantingLooks looks{treeLooks, std::vector<PlantedLayerDrawing>(forestFloorPlanting + 1)};
     looks.kinds.insert(looks.kinds.end(), plantLooks.begin(), plantLooks.end());
     looks.kinds.insert(looks.kinds.end(), coverLooks.begin(), coverLooks.end());
-    looks.layers[forestGrassPlanting] = PlantedLayerDrawing{.unbounded = true, .groundRelief = grassRelief};
-    looks.layers[forestFloorPlanting] = PlantedLayerDrawing{.unbounded = true, .groundRelief = floorRelief};
+    looks.layers[forestGrassPlanting] = PlantedLayerDrawing{.groundRelief = grassRelief};
+    looks.layers[forestFloorPlanting] = PlantedLayerDrawing{.groundRelief = floorRelief};
     return std::make_shared<const PlantingLooks>(std::move(looks));
 }
 

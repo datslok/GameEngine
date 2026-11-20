@@ -31,7 +31,7 @@ void main() {
     PlacedBlock block = placedBlocks[taken.block];
     uint number;
     PlacedPlant plant;
-    bool counted = placedBlockPlant(block, view, local, number, plant);
+    bool counted = placedBlockPlant(block, local, number, plant);
     uint parts = 0u;
     uint kindSlot = 0u;
 

@@ -21,7 +21,6 @@ namespace {
         return NearTreeSources{.species = defaultSpecies(),
                                .maps = patchValleyMaps().planting,
                                .heights = patchTerrainHeights(),
-                               .region = forestPatch,
                                .lianas = lianas,
                                .lianaSeed = 11};
     }
@@ -59,13 +58,17 @@ namespace {
         return {liana.from.x, liana.from.y, liana.from.z, liana.to.x, liana.to.y, liana.to.z, liana.length, liana.radius, liana.seed};
     }
 
-    // Every liana of the cells over the patch's box, cellMetres a side, checking each cell's own as it goes.
+    /*
+    * Every liana of the cells over the patch's box, cellMetres a side, whose carrying tree stands in the box (cells of
+    * another size cover other ground past its edge), checking each cell's own as it goes.
+    */
     std::vector<LianaKey> patchLianas(float cellMetres) {
         const ForestLianaSettings lianas;
         const NearTreeSources sources = patchSources(lianas);
+        const PlantingBox patch = regionBox(forestPatch);
         std::vector<LianaKey> keys;
 
-        for (const PlantingCell& cell : nearCellsOver(regionBox(forestPatch), cellMetres)) {
+        for (const PlantingCell& cell : nearCellsOver(patch, cellMetres)) {
             const NearTreeCell made = makeNearTreeCell(cell, cellMetres, sources, testJobs());
             const PlantingBox box = plantingCellBox(cell, cellMetres);
             assert(made.trees.size() == made.crowns.size());
@@ -74,12 +77,15 @@ namespace {
                 const Vec3& foot = made.trees[crown].placement.foot;
                 const bool mine = foot.x >= box.west && foot.x < box.east && foot.z >= box.north && foot.z < box.south;
                 assert(made.crowns[crown].carries == mine && made.crowns[crown].identity == nearTreeIdentity(made.trees[crown]));
-                assert(insidePlantedRegion(patchValleyMaps().planting, forestPatch, foot));
             }
 
             for (const Liana& liana : made.lianas) {
                 assert(made.crowns[static_cast<std::size_t>(liana.crown)].carries);
-                keys.push_back(keyOf(liana));
+                const Vec3& foot = made.trees[static_cast<std::size_t>(liana.crown)].placement.foot;
+
+                if (foot.x >= patch.west && foot.x < patch.east && foot.z >= patch.north && foot.z < patch.south) {
+                    keys.push_back(keyOf(liana));
+                }
             }
         }
 
@@ -89,7 +95,7 @@ namespace {
 
     /*
     * The lianas do not depend on how the land is cut into cells (ROADMAP phase 18, d2a): the patch's from 64 m cells
-    * are exactly its from 48 m cells, each hung by the cell its crown's foot stands in, every tree in the patch.
+    * are exactly its from 48 m cells, each hung by the cell its crown's foot stands in, every tree in the patch's box.
     */
     void testLianasDoNotDependOnTheCells() {
         const std::vector<LianaKey> big = patchLianas(64.0f);

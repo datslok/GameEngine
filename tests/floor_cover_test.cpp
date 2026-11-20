@@ -137,7 +137,8 @@ namespace {
             }
         }
 
-        assert(looks > 0 && forest.world.get<PlantingSource>(forest.game.getAir()).looks->layers.at(static_cast<std::size_t>(forestFloorPlanting)).unbounded);
+        assert(looks > 0 && forest.world.get<PlantingSource>(forest.game.getAir()).field->layers.at(static_cast<std::size_t>(forestFloorPlanting)).cellSet ==
+                                plantingFineCells);
 
         FieldCounter counter;
         visit(forest.game.getFloorSettings(), counter);

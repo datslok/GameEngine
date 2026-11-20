@@ -68,3 +68,26 @@ Research for phase 18's "the rest of the valley, keeping the sight lines to the 
 - **Lianas (the user's choice):** lianas made on the CPU per near cell from the mirror's trees, as today.
 - **Cost grows with:** GPU memory with the plants within the radii; GPU time with plants in cells passing each view; placement with the cells made a frame (a cap).
 - **2b's steps (the user's choices, Nov 19 2026):** b1 places cells on the GPU and compares them with the CPU before anything is drawn; b2 draws the placed trees over the patch only, behind a switch beside the entity trees, so the two compare like with like (the whole valley waits for 2e's measurements); the entities retire only after 2c gives the placed trees shadows, sway and motion.
+
+## Drawing the whole valley: distances, far shadows, probes (e1, Nov 20 2026)
+
+Trees to 1 km took the GPU frame from about 17 to 54 ms (laptop RTX 4070, DLSS at 0.67): MAIN 21.6, SHADOW 13.3, PREPASS 8.3, CUBE 4.0, PLACED culling 0.74. The mid layer (480 a hectare, 15 m tall) far outnumbers the canopy (30) and emergents (2.8); every tree's shadow stand-ins cast into every cascade. Few studios publish vegetation numbers; [V] read, [S] secondhand.
+
+| Question | What shipped games and engines do |
+|---|---|
+| How far each kind is drawn | Battlefield 3 [V]: vegetation in overlapping quadtree payloads, far "high distance, low density" trees, nearer denser trees, then bushes, then detail ([Frostbite GDC 2012](https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/gdc12-terrain-in-battlefield3.pdf)); Frostbite undergrowth only in 16 m cells near the viewer [V]; Serious Sam 4 bushes a nearer layer than its tree impostors, far forest in the terrain's colour [V]; Unity: tree distance, billboard start and a cap on mesh trees [V]; Unreal foliage start/end cull distance a type (default never) [S] |
+| Culling by size | Unreal cull distance volumes: (size, distance) pairs, each object the pair nearest its diameter [S]; Unity 6 small-mesh screen percentage 0-20 % [S]; `r.Shadow.RadiusThreshold` culls cascade casters below 0.03 of the screen [S]; no shipped pixel thresholds published |
+| Density by distance | BF3's payloads thin trees too [V]; Wildlands switches levels sooner where denser [V]; Unreal's density scale is global, not by distance [V]; survivors grown to keep cover: no published case for trees |
+| Far shadows | Horizon: vegetation only in the 2 nearest cascades; Unreal: the far cascade draws only flagged objects (the landscape), foliage left out [S]; distance-field shadows past the cascades to 1.2 km, half resolution [V]; Witcher 3: a terrain shadow clipmap of heights, re-rendered on streaming or time of day, a few large meshes cast into it [S]; CryEngine: far cascades drawn once and reused, 16 km for about 130 MB [V]; RDR2 and Flight Simulator thin or drop far tree shadows [S] |
+| Shadow stand-ins | CryEngine: 3,969-triangle roots cast through a 640-triangle stand-in, 5.4x fewer shadow triangles [V]; merged stand-ins a cell cast double shadows in Unreal's HLOD [S]; crown volumes as casters: none found |
+| Probes | RDR2: one cube a frame at the camera, static opaque objects at low levels only [V]; Unity's culling mask for plants and GTA V's terrain-only faces (`WORLDSCALE.md`); none puts far trees in a dynamic probe |
+| Cut-out cost | Unreal 4.17, 47,124 instances: masked 1.6x slower than opaque, opaque grass with 9x the triangles slightly faster than cut-out cards [V forum]; Unigine: dropping the prepass for dense near cut-outs is much slower [S]; impostors writing depth from a texture cast and receive shadows [V] |
+| Budgets | BF3 terrain decoration 1-4 ms on PS3 [V]; Ghost of Yōtei over a million objects culled to about 60,000 [S]; no long-range tree milliseconds published |
+
+**What it means here [inference]:**
+
+- **A distance a layer:** the mid trees in the middle cells (300 m) with the understorey and palms, so past 300 m only the sparse tall trees stand (BF3's payloads, Serious Sam's split); cost grows with the plants within each layer's radius.
+- **Trees cast only into the near cascades** (Horizon), their stand-ins' `shadowCascades` limited; the far forest's shadow later from one caster a cell or a canopy height field in the far shadow map (Witcher 3), drawn only when cells change or the sun moves (CryEngine's cached far cascades).
+- **Probe faces without placed plants past a short range** (RDR2, Unity, GTA V): cost with the plants near the probe.
+- **The prepass's far cards** (8.3 ms for depth alone): opaque far cards on hull meshes, or no prepass for single far cards; measured before building, since dense near cut-outs need the prepass.
+- **Size culling** of casters and seen plants (Unreal's pairs): a few pixels on each plant's sphere in the cull pass; gain unmeasured anywhere.
