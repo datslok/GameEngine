@@ -148,6 +148,7 @@ void visit(ForestGrassSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Half distance", settings.halfDistance, {.min = 1.0f, .max = 500.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Quarter distance", settings.quarterDistance, {.min = 1.0f, .max = 500.0f, .sliderMax = 100.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Farthest", settings.farthest, {.min = 1.0f, .max = 1000.0f, .sliderMax = 200.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Level cover", settings.levelCover, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
 }
 
 /*
@@ -237,9 +238,13 @@ GrassPatch growGrassPatch(const ForestGrassSettings& settings, float density, st
     }
 
     patch.mesh = bladesMesh(patch.blades, 1.0f, 1.0f, fullSegments);
-    patch.level = bladesMesh(patch.blades, levelShare, std::sqrt(1.0f / levelShare), levelSegments);
-    patch.farLevel = bladesMesh(patch.blades, farShare, std::sqrt(1.0f / farShare), farSegments);
+    patch.level = bladesMesh(patch.blades, levelShare, grassLevelWidening(settings.levelCover, levelShare), levelSegments);
+    patch.farLevel = bladesMesh(patch.blades, farShare, grassLevelWidening(settings.levelCover, farShare), farSegments);
     return patch;
+}
+
+float grassLevelWidening(float cover, float share) {
+    return std::max(cover, 0.0f) / std::max(share, 1e-6f);
 }
 
 int grassDensityStep(const ForestGrassSettings& settings, float paint) {

@@ -369,6 +369,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [x] Small plants', climbers' and epiphytes' shadows in every cascade, so they no longer pop in about 20 m away (`small-plant-shadow-reach`)
 - [x] Motion vectors written by the main pass, the separate velocity pass retired (research in `docs/research/WIND.md`, "Where the motion vectors are written") (`velocity-in-main-pass`)
 - [x] Grass and ground cover (research in `docs/research/GROUNDCOVER.md`): ground-following patches (`ground-cover-patches`), meadow grass (`meadow-grass`), the forest floor (`forest-floor-cover`)
+- [x] Grass about a quarter cheaper for the same cover: fewer, wider blades near, each level half the blades twice as wide (as Ghost of Tsushima's), measured first (`grass-by-pixels`)
 - [ ] The structures: a military brutalist megatower over the jungle, the terraced Bastion (the user's pick, Nov 19 2026), the Ring kept as the alien relic (research, concept sheets and plan in `docs/research/STRUCTURES.md`)
   - [x] 1. Faceted slabs in the stealth-alien look, kept for the Ring (`structure-slabs`)
   - [x] 2. Panel lines and sawtooth seams: a generated seam map read in each facet's own plane (`structure-seams`)
