@@ -2,7 +2,7 @@
 // so the depth prepass and the main pass place every vertex alike. Included after the extensions it needs.
 #include "frame_data.glsl"
 #include "ground_layers.glsl"
-#include "instances.glsl"
+#include "drawn_objects.glsl"
 #include "planar_reflection.glsl"
 #include "render/gpu/reflection_probe_shared.h"
 #include "terrain_data.glsl"
@@ -81,8 +81,10 @@ void stillMotion(vec3 relative) {
 invariant gl_Position;
 
 void main() {
-    uint entry = drawList[gl_InstanceIndex];
-    InstanceData instance = instances[drawnInstance(entry)];
+    // A frame's draw, or a placed plant's part (drawn_objects.glsl).
+    DrawnObject drawn = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB));
+    uint entry = drawn.entry;
+    InstanceData instance = drawn.instance;
     levelFade = drawListFade(entry);
     mat4 normalMatrix = instance.normalMatrix;
     vec4 handedness = instance.handedness;
@@ -169,10 +171,12 @@ void main() {
     * Last frame's place, only for a vertex whose instance moved (its matrix), that the wind moves now (last frame's
     * springs and time; the same fade, which changes too slowly to show: no offset now, past the fade or at a trunk's foot,
     * is none last frame either) or whose shape changed (its previous vertex): last frame's matrix applied to last frame's
-    * shape, thinned, lifted and swayed as now. Everything else stands still.
+    * shape, thinned, lifted and swayed as now. Everything else stands still. A placed plant's part (drawn_objects.glsl)
+    * never moves: its matrix last frame is its matrix now, only its sway differs.
     */
     stillMotion(relativePosition);
-    mat4 before = previousModels[drawnInstance(entry)];
+    bool placed = uint(gl_BaseInstanceARB) >= PLACED_INSTANCE_BASE;
+    mat4 before = placed ? instance.model : previousModels[drawnInstance(entry)];
     bool moves = before != instance.model || swayOffset != vec3(0.0) || previousPosition != position;
 
     if (motionOptions.x != 0.0 && moves) {

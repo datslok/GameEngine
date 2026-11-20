@@ -392,21 +392,13 @@ Vec2 forestTreesStart(const std::vector<TreePlacement>& trees);
 bool blocksSight(const Vec3& centre, float radius, const std::vector<SightLine>& lines);
 
 /*
-* A tree already standing, which later species keep clear of: its trunk's place on the ground and its crown's radius.
-*/
-struct StandingCrown {
-    Vec2 foot;
-    float radius = 0.0f;
-};
-
-/*
 * The patch planted so far (until stage 2 plants round the camera): the valley's floor between the Ring and the
 * clearing, within treeSpread of its axis, so the trees show through the Ring from the path.
 */
 inline constexpr float treeNorthmost = -210.0f;
 inline constexpr float treeSouthmost = -40.0f;
 inline constexpr float treeSpread = 130.0f;
-inline constexpr PlantingRegion forestPatch{.northmost = treeNorthmost, .southmost = treeSouthmost, .spread = treeSpread};
+inline constexpr PlantedRegion forestPatch{.northmost = treeNorthmost, .southmost = treeSouthmost, .spread = treeSpread};
 
 // The trees' sizes against their variant's: smallestTreeScale to smallestTreeScale + treeScaleRange.
 inline constexpr float smallestTreeScale = 0.85f;
@@ -416,25 +408,21 @@ inline constexpr float treeScaleRange = 0.3f;
 float treeReach(const ForestTreeSettings& settings);
 
 /*
-* Where a species' trees stand, planted from the maps (ditheredCells over forestPatch, from its own seed; under is a
-* species sharing its lattice planted first): each sized and turned at random, standing on the lowest ground round its
-* trunk, its crown fitting the maps (clear of every obstacle, under every sight line), its trunk outside the crowns of
-* the trees already standing, then outside the middle of the crowns of its own species (spacingShare of the larger's
-* radius) where the cell with the lower threshold keeps its tree. The same every run.
+* A species' layer of the planting (scene/planting_maps.h, every layer: games/forest/forest_planting.h): its density
+* from its settings, its variants alike, each sized smallestTreeScale to + treeScaleRange and turned at random, its
+* crown's sphere fitting the maps, standing on the lowest ground round its trunk (footReachMetres a unit of scale out),
+* outside the middle of its own species' crowns (spacingShare of the larger's radius) where the cell with the lower
+* threshold keeps its tree. Its own seed.
 */
 inline constexpr std::uint64_t emergentPlaceSeed = 0x454d4552ull;
 inline constexpr std::uint64_t canopyPlaceSeed = 0x54524545ull;
 inline constexpr std::uint64_t midPlaceSeed = 0x4d494444ull;
-std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& standing,
-                                      std::uint64_t seed, const PlantingLayer* under = nullptr);
+inline constexpr float footReachMetres = 2.5f;
+PlantingLayerRecord treePlantingLayer(const ForestTreeSettings& settings, std::uint64_t seed);
 
-// The placed trees as crowns for the next species to keep clear of.
-std::vector<StandingCrown> standingCrowns(const std::vector<TreePlacement>& trees, const ForestTreeSettings& settings);
-
-// The placed trees' trunks for the mid layer to keep clear of, each clearance metres round (its crown may stand under
-// theirs): past the buttresses, with room to walk between.
+// How far the mid layer's trunks keep from the big trees' (its crowns may stand under theirs): past the buttresses, with
+// room to walk between.
 inline constexpr float midTrunkClearance = 4.0f;
-std::vector<StandingCrown> standingTrunks(const std::vector<TreePlacement>& trees, float clearance);
 
 // The crown's bounding sphere of a placed tree in the world (what the sight lines are tested against).
 Vec3 placedCrownCentre(const TreePlacement& tree, const ForestTreeSettings& settings);

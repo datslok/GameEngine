@@ -16,6 +16,7 @@
 #include "scene/beacon.h"
 #include "scene/light.h"
 #include "scene/model_renderer.h"
+#include "scene/planting_cells.h"
 #include "scene/probe_volume.h"
 #include "scene/impostor.h"
 #include "scene/still_draws.h"
@@ -370,7 +371,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildGround(world, assets);
     buildShapes(world, assets);
     buildPlantingMaps();
-    buildTrees(world, assets);
+    buildTrees(assets);
     buildLianas(world, assets);
     buildUnderstorey(world, assets);
     buildPalms(world, assets);
@@ -391,6 +392,10 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     sun = world.create();
     world.add(sun, DirectionalLight{});
     air = world.create();
+    // The field the GPU plants its cells round the camera from (scene/planting_cells.h), and the trees' looks it draws
+    // over the patch (given again whenever the sway changes, applySway).
+    world.add(air, PlantingSource{std::make_shared<const PlantingField>(PlantingField{valleyMaps.planting, forestPlantingLayers(plantingSpecies())}), 1,
+                                  std::make_shared<const PlantingLooks>(PlantingLooks{forestPatch, treeLooks})});
     floorMist = world.create();
     probes = world.create();
     world.add(probes, ProbeCascades{});
@@ -439,6 +444,7 @@ void ForestGame::buildGround(World& world, AssetManager& assets) {
     heights->grids.push_back(makeTerrainHeightGrid(forestTerrainCentre, rings[1].outerHalfSize, 4.0f * nearSpacing, forestHeight, getJobs()));
     land.landHalfSize = rings.back().outerHalfSize;
     land.heights = heights;
+    groundHeights = heights;
     land.centre = forestTerrainCentre;
     land.leafSize = nearSpacing * static_cast<float>(TERRAIN_GRID_QUADS);
     land.levels = 1;
@@ -659,22 +665,24 @@ void ForestGame::buildPlantingMaps() {
     valleyMaps = buildValleyMaps(plantingSettings, forestObstacles(pillars, towers), forestSightLines(), reaches, getJobs());
 }
 
+ForestSpecies ForestGame::plantingSpecies() const {
+    return ForestSpecies{emergentSettings, treeSettings, midSettings, understoreySettings, palmSettings};
+}
+
 /*
 * The variants are grown on every core, each into its own slot, and drawn only. Every tree of a variant shares its two
 * meshes, so the GPU draws all of them in one instanced draw each; each is turned and scaled by its Transform. The
 * leaves seen cast no shadow: their shadow leaves, fewer and bigger cards drawn into shadows only, cast it. Not
 * static yet: the trunks and leaves join the sky visibility grid's rays with the forest floor.
 */
-void ForestGame::buildTrees(World& world, AssetManager& assets) {
-    // The canopy trees share the emergents' lattice (each takes the thresholds above theirs) while their cells match.
-    const bool shareLattice = treeSettings.planting.footprintMetres == emergentSettings.planting.footprintMetres;
-    emergentPlacements = placeTrees(emergentSettings, valleyMaps, {}, emergentPlaceSeed);
-    treePlacements = placeTrees(treeSettings, valleyMaps, standingCrowns(emergentPlacements, emergentSettings), canopyPlaceSeed,
-                                shareLattice ? &emergentSettings.planting : nullptr);
-    std::vector<StandingCrown> bigTrunks = standingTrunks(treePlacements, midTrunkClearance);
-    const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, midTrunkClearance);
-    bigTrunks.insert(bigTrunks.end(), emergentTrunks.begin(), emergentTrunks.end());
-    midPlacements = placeTrees(midSettings, valleyMaps, bigTrunks, midPlaceSeed);
+void ForestGame::buildTrees(AssetManager& assets) {
+    // Every layer at once (forest_planting.h), on the land drawn: the understorey and the palms are built after the trees.
+    const ForestPlanting planted = plantThePatch(plantingSpecies(), valleyMaps, *groundHeights, getJobs());
+    emergentPlacements = planted.emergents;
+    treePlacements = planted.canopy;
+    midPlacements = planted.mid;
+    understoreyPlacements = planted.understorey;
+    palmPlacements = planted.palms;
 
     if (treePlacements.empty() && emergentPlacements.empty() && midPlacements.empty()) {
         return;
@@ -702,12 +710,13 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
                                      .moss = forestLayerMaterial(assets, assetFolder, forestLimbMossLayer)};
     TreeEpiphytes smallEpiphytes = bigEpiphytes;
     smallEpiphytes.bigTree = false;
-    canopyHeights = plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers, bigEpiphytes);
-    emergentHeights = plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers,
-               bigEpiphytes);
+    canopyHeights = plantTrees(assets, ForestLayer::Canopy, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers, bigEpiphytes);
+    emergentHeights = plantTrees(assets, ForestLayer::Emergent, emergentSettings, emergentPlacements, emergentVariantSeed,
+                                 sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers, bigEpiphytes);
     const bool midSameLeaves = midSettings.clusterTexels == treeSettings.clusterTexels &&
                                midSettings.leafLength / midSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
-    plantTrees(world, assets, midSettings, midPlacements, midVariantSeed, midSameLeaves ? canopyLeaf : leafFor(midSettings), nullptr, smallEpiphytes);
+    plantTrees(assets, ForestLayer::Mid, midSettings, midPlacements, midVariantSeed, midSameLeaves ? canopyLeaf : leafFor(midSettings), nullptr,
+               smallEpiphytes);
 }
 
 namespace {
@@ -726,11 +735,6 @@ namespace {
 
         return mesh;
     }
-
-    // The trunks the understorey keeps clear of, each as far round as its buttresses reach (the big trees') or its
-    // trunk (the mid layer's).
-    constexpr float bigTrunkReach = 2.0f;
-    constexpr float midTrunkReach = 0.4f;
 
     // How far a leaf card's outline stands out from its twig's texels, as a share of the cell: 4 texels of a 1024 cell
     // (the mips' blur reaches past a leaf's edge).
@@ -812,18 +816,7 @@ namespace {
     }
 }
 
-std::vector<StandingCrown> ForestGame::floorTrunks() const {
-    std::vector<StandingCrown> trunks = standingTrunks(treePlacements, bigTrunkReach);
-    const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, bigTrunkReach);
-    const std::vector<StandingCrown> midTrunks = standingTrunks(midPlacements, midTrunkReach);
-    trunks.insert(trunks.end(), emergentTrunks.begin(), emergentTrunks.end());
-    trunks.insert(trunks.end(), midTrunks.begin(), midTrunks.end());
-    return trunks;
-}
-
 void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
-    understoreyPlacements = placeUnderstorey(understoreySettings, valleyMaps, floorTrunks());
-
     if (understoreyPlacements.empty()) {
         return;
     }
@@ -892,8 +885,6 @@ void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
 * meshes added) and placed; every palm of a variant shares its meshes, so each is one instanced draw.
 */
 void ForestGame::buildPalms(World& world, AssetManager& assets) {
-    palmPlacements = placePalms(palmSettings, valleyMaps, floorTrunks());
-
     if (palmPlacements.empty()) {
         return;
     }
@@ -1102,8 +1093,8 @@ void ForestGame::buildLianas(World& world, AssetManager& assets) {
     }
 }
 
-std::vector<float> ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                                          std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes) {
+std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
+                                          const std::vector<TreePlacement>& placements, std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes) {
     if (placements.empty()) {
         return {};
     }
@@ -1257,58 +1248,68 @@ std::vector<float> ForestGame::plantTrees(World& world, AssetManager& assets, co
         }
     }
 
+    /*
+    * Each variant's parts, as one look (scene/planting_cells.h), which the GPU's cells draw the trees with. Bark, leaves
+    * and card cast no shadow; the shadow's stand-ins (the shadow leaves and the shadow bark, one shadows-only model) cast
+    * it; the climbers' stems and leaves and the epiphytes' rosettes and moss cast into the nearest cascades. All but the
+    * card sway as trees (treeLookSwayers, applySway); the climbers' and epiphytes' models are listed for their tests.
+    */
+    for (std::size_t variant = 0; variant < grown.size(); ++variant) {
+        PlantedKindLook look{.layer = static_cast<int>(layer), .kind = static_cast<int>(variant), .models = {}};
+        const float height = treeHeights[variant];
+        const auto seen = [&](MeshHandle mesh, const Material& material, bool castsShadows, int cascades, std::optional<bool> leafy) {
+            ModelRenderer model = makeMeshRenderer(mesh, material);
+            model.castsShadows = castsShadows;
+            model.shadowCascades = cascades;
+
+            if (leafy) {
+                treeLookSwayers.push_back(LookSwayer{treeLooks.size(), look.models.size(), ForestSwayer{Entity{}, ForestSwayPart::Trees, height, *leafy}});
+            }
+
+            look.models.push_back(std::move(model));
+        };
+        seen(barkMeshes[variant], bark, false, 0, false);
+        seen(leafMeshes[variant], leaf, false, 0, true);
+        seen(cardMeshes[variant], cardMaterials[variant], false, 0, std::nullopt);
+        seen(shadowLeafMeshes[variant], leaf, true, 0, true);
+        look.models.back().shadowOnly = true;
+        look.models.back().parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
+
+        if (climberStemMeshes[variant].isValid()) {
+            for (auto [mesh, material, leafy] : {std::tuple{climberStemMeshes[variant], &climbers->stem, false},
+                                                 std::tuple{climberLeafMeshes[variant], &climbers->leaf, true}}) {
+                climberModels.push_back(LookModel{treeLooks.size(), look.models.size()});
+                seen(mesh, *material, true, climberShadowCascades, leafy);
+            }
+        }
+
+        for (auto [mesh, material] : {std::pair{epiphyteLeafMeshes[variant], &epiphytes.leaf}, std::pair{epiphyteMossMeshes[variant], &epiphytes.moss}}) {
+            if (mesh.isValid()) {
+                epiphyteModels.push_back(LookModel{treeLooks.size(), look.models.size()});
+                seen(mesh, *material, true, epiphyteShadowCascades, mesh == epiphyteLeafMeshes[variant]);
+            }
+        }
+
+        treeLooks.push_back(std::move(look));
+    }
+
+    // The trees themselves are the GPU's (no entity each): only what the commands look from, the trees carrying climbers
+    // and each one's first rosette, in the placements' order.
     for (const TreePlacement& tree : placements) {
         const Transform pose{.position = tree.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, tree.turnRadians),
                              .scale = Vec3{tree.scale, tree.scale, tree.scale}};
         const std::size_t variant = static_cast<std::size_t>(tree.variant);
-        const float height = treeHeights[variant];
-        const auto sways = [&](bool leafy) {
-            swayers.push_back(ForestSwayer{trees.back(), ForestSwayPart::Trees, height, leafy});
-        };
-        trees.push_back(addShape(world, barkMeshes[variant], bark, pose));
-        world.get<ModelRenderer>(trees.back()).castsShadows = false;
-        sways(false);
-        trees.push_back(addShape(world, leafMeshes[variant], leaf, pose));
-        world.get<ModelRenderer>(trees.back()).castsShadows = false;
-        sways(true);
 
-        // The shadow's stand-ins, one shadows-only model: the shadow leaves and the shadow bark.
-        trees.push_back(addShape(world, shadowLeafMeshes[variant], leaf, pose));
-        ModelRenderer& shadows = world.get<ModelRenderer>(trees.back());
-        shadows.shadowOnly = true;
-        shadows.parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
-        sways(true);
-
-        // The card, drawn only far away; the stand-ins above keep its shadow.
-        treeImpostors.push_back(addShape(world, cardMeshes[variant], cardMaterials[variant], pose));
-        world.get<ModelRenderer>(treeImpostors.back()).castsShadows = false;
-
-        // Its variant's climbers, stems and leaves, their shadows in the nearest cascades.
         if (climberStemMeshes[variant].isValid()) {
             climbedTrees.push_back(tree);
             climbedFacing.push_back(pose.rotation.rotate(climberFacing[variant]));
-            climberEntities.push_back(addShape(world, climberStemMeshes[variant], climbers->stem, pose));
-            world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
-            swayers.push_back(ForestSwayer{climberEntities.back(), ForestSwayPart::Trees, height, false});
-            climberEntities.push_back(addShape(world, climberLeafMeshes[variant], climbers->leaf, pose));
-            world.get<ModelRenderer>(climberEntities.back()).shadowCascades = climberShadowCascades;
-            swayers.push_back(ForestSwayer{climberEntities.back(), ForestSwayPart::Trees, height, true});
         }
 
-        // Its variant's epiphytes, rosettes and moss, likewise.
         if (epiphyteLeafMeshes[variant].isValid()) {
             const Vec3 rosette = transformPoint(pose.getMatrix(), firstRosette[variant]);
             const Vec3 out{rosette.x - tree.foot.x, 0.0f, rosette.z - tree.foot.z};
             epiphyteViews.push_back(rosette);
             epiphyteOutward.push_back(out.lengthSquared() > 1e-4f ? out.normalized() : pose.rotation.rotate(Vec3{1.0f, 0.0f, 0.0f}));
-        }
-
-        for (auto [mesh, material] : {std::pair{epiphyteLeafMeshes[variant], &epiphytes.leaf}, std::pair{epiphyteMossMeshes[variant], &epiphytes.moss}}) {
-            if (mesh.isValid()) {
-                epiphyteEntities.push_back(addShape(world, mesh, *material, pose));
-                world.get<ModelRenderer>(epiphyteEntities.back()).shadowCascades = epiphyteShadowCascades;
-                swayers.push_back(ForestSwayer{epiphyteEntities.back(), ForestSwayPart::Trees, height, material == &epiphytes.leaf});
-            }
         }
     }
 
@@ -1460,7 +1461,10 @@ void ForestGame::updateDaylight(World& world) {
     applySway(world);
 }
 
-// Everything swaying is still (ModelRenderer::isStill): given its sway, and announced, only when the settings changed.
+/*
+* Everything swaying is still (ModelRenderer::isStill): given its sway, and announced, only when the settings changed.
+* The placed trees' looks likewise, and given to the field anew.
+*/
 void ForestGame::applySway(World& world) {
     if (appliedSwaySettings == swaySettings) {
         return;
@@ -1470,6 +1474,12 @@ void ForestGame::applySway(World& world) {
         world.get<ModelRenderer>(swayer.entity).sway = forestSway(swaySettings, swayer);
         markRenderChanged(world, swayer.entity);
     }
+
+    for (const LookSwayer& swaying : treeLookSwayers) {
+        treeLooks[swaying.look].models[swaying.model].sway = forestSway(swaySettings, swaying.swayer);
+    }
+
+    world.get<PlantingSource>(air).looks = std::make_shared<const PlantingLooks>(PlantingLooks{forestPatch, treeLooks});
 
     // The lianas' anchors bend as their trees do, on the air entity.
     for (WindAnchor& anchor : lianaAnchors) {
@@ -1890,12 +1900,20 @@ const std::vector<Entity>& ForestGame::getUnderstoreyImpostors() const {
     return understoreyImpostors;
 }
 
-const std::vector<Entity>& ForestGame::getTrees() const {
-    return trees;
+const std::vector<PlantedKindLook>& ForestGame::getTreeLooks() const {
+    return treeLooks;
 }
 
-const std::vector<Entity>& ForestGame::getTreeImpostors() const {
-    return treeImpostors;
+// Copies of the listed models, as the looks hold them now (their sway included).
+std::vector<ModelRenderer> ForestGame::lookModels(const std::vector<LookModel>& listed) const {
+    std::vector<ModelRenderer> models;
+    models.reserve(listed.size());
+
+    for (const LookModel& model : listed) {
+        models.push_back(treeLooks.at(model.look).models.at(model.model));
+    }
+
+    return models;
 }
 
 ForestPalmSettings& ForestGame::getPalmSettings() {
@@ -1926,8 +1944,8 @@ ForestClimberSettings& ForestGame::getClimberSettings() {
     return climberSettings;
 }
 
-const std::vector<Entity>& ForestGame::getClimbers() const {
-    return climberEntities;
+std::vector<ModelRenderer> ForestGame::getClimberModels() const {
+    return lookModels(climberModels);
 }
 
 const std::vector<TreePlacement>& ForestGame::getClimbedTrees() const {
@@ -1942,8 +1960,8 @@ ForestEpiphyteSettings& ForestGame::getEpiphyteSettings() {
     return epiphyteSettings;
 }
 
-const std::vector<Entity>& ForestGame::getEpiphytes() const {
-    return epiphyteEntities;
+std::vector<ModelRenderer> ForestGame::getEpiphyteModels() const {
+    return lookModels(epiphyteModels);
 }
 
 const std::vector<Vec3>& ForestGame::getEpiphyteViews() const {

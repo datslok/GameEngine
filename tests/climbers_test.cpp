@@ -189,15 +189,15 @@ namespace {
         assert(host.lobes.count == (settings.buttress > 0.0f ? buttressCount : 0));
     }
 
-    // The forest's big trees carry them: still, drawn only, into the nearest cascades; their settings start-up only.
+    // The forest's big trees carry them, in their looks (the placed trees'): drawn only, into the nearest cascades; their
+    // settings start-up only.
     void testTheForestGrowsThem() {
         TestForest forest;
-        const std::vector<Entity>& climbers = forest.game.getClimbers();
+        const std::vector<ModelRenderer> climbers = forest.game.getClimberModels();
         assert(!climbers.empty());
 
-        for (const Entity entity : climbers) {
-            const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.isStill() && renderer.shadowCascades == climberShadowCascades);
+        for (const ModelRenderer& renderer : climbers) {
+            assert(renderer.castsShadows && renderer.shadowCascades == climberShadowCascades);
             assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
         }
 

@@ -4,17 +4,7 @@
 #define INSTANCES_GLSL
 
 #include "render/gpu/instance_shared.h"
-
-// One object, the same for every view. Must match GpuInstance.
-struct InstanceData {
-    mat4 model;        // places the vertex in the world
-    mat4 normalMatrix; // inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if squashed flat)
-    vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1
-    uvec4 material;    // x: the material's number in the material buffer, y: the mesh's (for ray hits)
-    vec4 sway;         // how it sways in the wind (render/gpu/wind.h, packSway): category (-1 still), height, bend, flutter
-    uvec4 hanging;     // x: one past its mesh's first hanging vertex (0 none), y: its swing's bits, z: one past its mesh's card thinning header (0 none)
-    vec4 levelSphere;  // the sphere its level of detail is chosen by, in the world: xyz centre, w radius (below 0 unknown)
-};
+#include "instance_data.glsl"
 
 // Every object in the frame: instance i is the frame's draw i.
 layout(std430, set = 1, binding = 1) readonly buffer Instances {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/placed_drawing_shared.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
@@ -21,8 +22,8 @@
 * materials, lights, shadow tiles, the draw list, the clusters' light masks and the lights probe rays' hits may need,
 * and the shadow atlas, the BRDF table and the light probes' three atlases.
 * Nothing is bound per draw; each shadow tile pushes its view (GpuShadowView) as a push constant, a few bytes recorded
-* straight into the command buffer, and the velocity pass its two cameras (GpuMotionView), reading each instance's model
-* matrix from last frame (binding 21).
+* straight into the command buffer; the main pass's motion vectors read each instance's model matrix from last frame
+* (binding 21).
 */
 inline constexpr std::uint32_t bindlessTextureSet = 0;
 inline constexpr std::uint32_t sceneFrameSet = 1;
@@ -72,8 +73,15 @@ enum SceneBinding : std::uint32_t {
     HangingVerticesBinding = 40,
     WindAnchorsBinding = 41,
     ThinningCardsBinding = 42,
-    SceneBindingCount = 43
+    PlacedPlantsBinding = 43,
+    PlacedPartsBinding = 44,
+    PlacedEntriesBinding = 45,
+    SceneBindingCount = 46
 };
+
+static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsBinding == SCENE_PLACED_PARTS_BINDING &&
+                  PlacedEntriesBinding == SCENE_PLACED_ENTRIES_BINDING,
+              "The placed bindings must match drawn_objects.glsl's");
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
 // so the sets bound for one stay bound for the next.
@@ -174,6 +182,9 @@ struct SceneBuffers {
 
     // What hanging things hang from (GpuWindAnchor, render/gpu/wind.h; one unused without).
     UploadArray windAnchors;
+
+    // Each placed part's instance in its plant's frame (GpuInstance, render/gpu/placed_drawing.h; one unused without).
+    UploadArray placedParts;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light
@@ -213,6 +224,8 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo terrainHeights{}; // the terrain's heights (a stand-in without a terrain)
     VkDescriptorBufferInfo hangingVertices{}; // every hanging mesh's vertices' anchors and arms (a stand-in without)
     VkDescriptorBufferInfo thinningCards{};   // every thinned mesh's header and cards (a stand-in without; scene/card_thinning.h)
+    VkDescriptorBufferInfo placedPlants{};    // the planting cells' slots' plants (a stand-in without; render/gpu/placed_drawing.h)
+    VkDescriptorBufferInfo placedEntries{};   // the camera's placed entries (a stand-in without)
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

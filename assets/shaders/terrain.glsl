@@ -16,21 +16,27 @@ vec2 morphGridCoordinate(vec2 grid, float morph) {
     return grid - (halved - floor(halved)) * 2.0 * morph;
 }
 
-// Bilinear between four heights: the near row (left, right), the far row, across and down in 0..1.
+// Bilinear between four heights: the near row (left, right), the far row, across and down in 0..1. Precise, so the
+// planting reads the ground as the CPU does.
 float terrainBilinear(float nearLeft, float nearRight, float farLeft, float farRight, float across, float down) {
-    float upper = nearLeft + (nearRight - nearLeft) * across;
-    float lower = farLeft + (farRight - farLeft) * across;
-    return upper + (lower - upper) * down;
+    precise float upper = nearLeft + (nearRight - nearLeft) * across;
+    precise float lower = farLeft + (farRight - farLeft) * across;
+    precise float height = upper + (lower - upper) * down;
+    return height;
 }
 
 // The height on the drawn grid square at a place (across and down in 0..1): the plane through the triangle holding it,
 // the square split as the grid mesh splits it, from the near right corner to the far left (terrainTriangleHeight).
 float terrainTriangleHeight(float nearLeft, float nearRight, float farLeft, float farRight, float across, float down) {
-    if (across + down <= 1.0) {
-        return nearLeft + (nearRight - nearLeft) * across + (farLeft - nearLeft) * down;
+    precise float sum = across + down;
+
+    if (sum <= 1.0) {
+        precise float near = nearLeft + (nearRight - nearLeft) * across + (farLeft - nearLeft) * down;
+        return near;
     }
 
-    return farRight + (farLeft - farRight) * (1.0 - across) + (nearRight - farRight) * (1.0 - down);
+    precise float far = farRight + (farLeft - farRight) * (1.0 - across) + (nearRight - farRight) * (1.0 - down);
+    return far;
 }
 
 #endif

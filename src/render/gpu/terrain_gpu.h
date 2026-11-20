@@ -21,13 +21,15 @@ struct GpuTerrainPatch {
 
 static_assert(sizeof(GpuTerrainPatch) == 48, "GpuTerrainPatch must match terrain.glsl's TerrainPatch");
 
-// One grid: its corner, spacing, points a side, and where its heights start among all the grids' heights.
+// One grid: its corner, spacing, points a side, where its heights start among all the grids' heights, and one over
+// its spacing as the CPU makes it (scene/terrain_heights.cpp multiplies by it), so both read the same squares.
 struct GpuTerrainGrid {
     float corner[2];
     float spacing;
     std::uint32_t size;
     std::uint32_t offset;
-    std::uint32_t unused[3];
+    float inverseSpacing;
+    std::uint32_t unused[2];
 };
 
 static_assert(sizeof(GpuTerrainGrid) == 32, "GpuTerrainGrid must match terrain.glsl's TerrainGrid");

@@ -10,12 +10,6 @@
 
 namespace {
     // The random numbers each cell draws for its plant, after the ones placing it.
-    enum CellDraw : std::uint64_t {
-        Kind,
-        Scale,
-        Turn,
-        Variant
-    };
 }
 
 const char* understoreyScanName(UnderstoreyKind kind) {
@@ -73,43 +67,23 @@ float understoreyKindScale(const std::vector<IndexedMesh>& plants, float height)
     return tallest > 0.0f ? height / tallest : 1.0f;
 }
 
-std::vector<UnderstoreyPlacement> placeUnderstorey(const ForestUnderstoreySettings& settings, const ValleyMaps& maps,
-                                                   const std::vector<StandingCrown>& trunks) {
-    std::vector<UnderstoreyPlacement> plants;
+PlantingLayerRecord understoreyPlantingLayer(const ForestUnderstoreySettings& settings) {
+    PlantingLayerRecord layer;
+    setPlantingDensity(layer, plantingDensity(settings.planting));
+    layer.seed = understoreySeed;
+    layer.kinds = understoreyKindCount;
+    layer.kindShares = {settings.fernShare, settings.fernShare + settings.calatheaShare};
+    layer.reachPerScale.clear();
 
-    for (const DitheredCell& cell : ditheredCells(settings.planting, maps, forestPatch, understoreySeed)) {
-        const bool byTrunk = std::any_of(trunks.begin(), trunks.end(), [&](const StandingCrown& trunk) {
-            return (cell.place - trunk.foot).length() < trunk.radius + settings.trunkClearance;
-        });
-
-        if (byTrunk) {
-            continue;
-        }
-
-        const auto draw = [&](CellDraw which) {
-            return forestUnitRandom(understoreySeed, cell.firstDraw + which);
-        };
-
-        const float kindDraw = draw(Kind);
-        const UnderstoreyKind kind = kindDraw < settings.fernShare ? UnderstoreyKind::Fern
-                                     : kindDraw < settings.fernShare + settings.calatheaShare ? UnderstoreyKind::Calathea
-                                                                                              : UnderstoreyKind::Anthurium;
-        UnderstoreyPlacement plant{
-            .foot = Vec3{cell.place.x, forestHeight(cell.place.x, cell.place.y) - understoreySinkMetres, cell.place.y},
-            .scale = 1.0f + understoreyScaleSpread * (2.0f * draw(Scale) - 1.0f),
-            .turnRadians = fullTurnRadians * draw(Turn),
-            .kind = kind,
-            .variantPick = std::min(draw(Variant), 0.99999f)
-        };
-
-        const float radius = understoreyRadius(settings, plant);
-
-        if (fitsTheMaps(maps, cell.place, radius, understoreyCentre(settings, plant).y + radius)) {
-            plants.push_back(plant);
-        }
+    for (int kind = 0; kind < understoreyKindCount; ++kind) {
+        layer.reachPerScale.push_back(0.5f * understoreyHeight(settings, static_cast<UnderstoreyKind>(kind)));
     }
 
-    return plants;
+    layer.centrePerScale = layer.reachPerScale;
+    layer.leastScale = 1.0f - understoreyScaleSpread;
+    layer.scaleRange = 2.0f * understoreyScaleSpread;
+    layer.footSink = understoreySinkMetres;
+    return layer;
 }
 
 float understoreyReach(const ForestUnderstoreySettings& settings) {

@@ -1,31 +1,41 @@
 # Forest: understorey, palms, grass and floor cover
 
-Covers: `src/games/forest/valley_maps`, `src/games/forest/understorey`, `src/games/forest/palms`, `src/games/forest/grass`, `src/games/forest/floor_cover`, `src/games/forest/ground_cells`
+Covers: `src/games/forest/valley_maps`, `src/games/forest/forest_planting`, `src/games/forest/understorey`, `src/games/forest/palms`, `src/games/forest/grass`, `src/games/forest/floor_cover`, `src/games/forest/ground_cells`
 
 What grows under and between the trees. Research: `docs/research/JUNGLE.md` (the understorey, palms), `docs/research/GROUNDCOVER.md` (grass, the floor). The game: `forest.md`; level-of-detail and impostor machinery: `level-of-detail.md`.
 
 ## Planting maps (`valley_maps`)
 
-Every layer (trees, palms, understorey) is planted from maps, not darts (Horizon Zero Dawn's way; research and the user's choices: `docs/research/VALLEY.md`). Built once at start-up (`buildPlantingMaps`, on the jobs) over the floor, walls and rim; a place's plants are the same whatever order or region asks, so stage 2 can plant any cell alone.
+Every layer (trees, palms, understorey) is planted from maps, not darts (Horizon Zero Dawn's way; research and the user's choices: `docs/research/VALLEY.md`). The forest builds the maps once at start-up (`buildPlantingMaps`, on the jobs) over the floor, walls and rim; reading them and planting are the engine's (`planting.md`), exact on CPU and GPU alike.
 
-| Map (`ValleyMaps`) | Texel | Holds |
+| Map (`ValleyMaps::planting`) | Texel | Built from |
 |---|---|---|
-| `ecotopes` | 2 m, on a grid across the winding axis | four bytes summing to 255: floor, wall, rim, bare (`landEcotopes`) |
-| `clearance` | same | decimetres to the nearest obstacle's edge, at most `farthestClearance` (60 m): a distance field, one for every reach |
-| `caps` | 2 m, square to the world, over the lines' footprint | a `CanopyCap` a species' reach: the lowest any sight line passes within reach (plus half a texel's diagonal) of the texel's middle, decimetres |
+| `axis` | a row | `valleyAxis` at each row's middle (read between rows: no sine on the GPU) |
+| `ecotopes` | 2 m, across the winding axis | `landEcotopes`: four bytes, floor, wall, rim, bare |
+| `gaps` | same | `valleyGap`: `forestFractalNoise` over `gapMetres` (70), a gap from `gapFrom` (0.3) to `gapTo` (0.5), about 13% of the patch |
+| `path`, `pathPoints` | same | `forestPathDistance` (the density's blend); the path's points (its clearance, exact) |
+| `clearance` | same | the obstacles (`forestObstacles` → `ValleyObstacle` discs): pillars at `pillarBulgeShare` (1.3) radii, the Ring's feet (`ringFootShare` 1.5 tube radii), each tower's widest section's half diagonal |
+| `caps` | 2 m, square to the world | `forestSightLines`: the lowest a line passes within each species' reach (plus half a texel's diagonal), exact per texel, less 5 cm |
 
-- **Extent** (`ForestPlantingSettings`, F5 Forest, Planting): within 450 m of the axis (floor 200, wall 150, 100 of rim), z -5000 to 800. 450 x 2900 texels, caps 94 x 633: about 8.4 MB, built in about 0.1 s (release, laptop).
-- **Ecotopes** (`landEcotopes`): across the axis floor, then wall, then rim, each blending into the next over `ecotopeBlendMetres` (30) round the land's own edges; bare by the clearing and the meadow (their radii plus `clearingEdgeMetres` 10), by slope (`bareSlopeFrom` 1.2 to `bareSlopeTo` 2) and outside the extent. Read blended (`valleyEcotopes`).
-- **Obstacles** (`forestObstacles` → `ValleyObstacle` discs): pillars at `pillarBulgeShare` (1.3) radii, the Ring's feet (`ringFootShare` 1.5 tube radii), each tower's widest section's half diagonal. `valleyClearance` reads the texel less `texelReach` (half a texel's diagonal, more where the axis winds): a lower bound.
-- **Caps** (corridors from `forestSightLines`): exact per texel (where a line enters and leaves the disc; straight, so its lowest point there is at one end), less 5 cm. `valleyCap(reach)` reads the smallest cap at least that reach; none throws.
-- **Gaps** (`valleyGap`): `forestFractalNoise` over `gapMetres` (70), a gap from `gapFrom` (0.3) to `gapTo` (0.5): about 13% of the patch.
-- **A layer** (`PlantingLayer`, in each species' settings, F5 ... Planting): plants a hectare asked on the floor, wall and rim; `footprintMetres` (its dither cells, one plant at most), `jitterShare`, `gapShare` (density in a full gap), `pathClearance`, `nearPathMetres`, `farPathMetres`, `farShare`.
-- **Share** (`layerShare`): the ecotopes' densities weighted, times a cell's area, times 1 + (`gapShare` - 1) gap, times `pathDensityShare`; at most 1.
-- **Dither** (`ditherThreshold`): Roberts' R2 over the lattice's cells, fract(column a1 + row a2) in 32-bit whole numbers, the same on every machine. A cell is planted when its threshold is under the layer's share at its middle (`ditheredCells` → `DitheredCell`, rows from the north); any band of thresholds is spread evenly, so neighbours never both fall under a small share.
-- **Shared lattice:** a layer with the same footprint planted first (`under`: the emergents under the canopy) takes the thresholds below its share, so the two never take one cell.
-- **Fits** (`fitsTheMaps`): a plant's sphere (reach, top) clear of every obstacle and `corridorClearance` (2 m) under every line. The test (`testWhatFitsBlocksNoSight`): nothing that fits meets a sight line or an obstacle.
+- **Extent** (`ForestPlantingSettings`, F5 Forest, Planting): within 450 m of the axis (floor 200, wall 150, 100 of rim), z -5000 to 800. 450 x 2900 texels, caps 94 x 633: about 12 MB.
+- **Ecotopes** (`landEcotopes`): across the axis floor, then wall, then rim, each blending into the next over `ecotopeBlendMetres` (30) round the land's own edges; bare by the clearing and the meadow (their radii plus `clearingEdgeMetres` 10), by slope (`bareSlopeFrom` 1.2 to `bareSlopeTo` 2) and outside the extent. `valleyEcotopes` reads them as shares.
+- **A layer** (`PlantingLayer`, in each species' settings, F5 ... Planting): plants a hectare asked on the floor, wall and rim; `footprintMetres` (its dither cells, one plant at most), `jitterShare`, `gapShare` (density in a full gap), `pathClearance`, `nearPathMetres`, `farPathMetres`, `farShare`; `plantingDensity` hands it to the engine's record.
 - **Asked, not stood:** crowding (trees' `spacingShare`), trunks, the path and the corridors take their share, so a layer's per-hectare figures are above what stands (the patch: 9 emergents, 79 canopy, 1,212 mid trees, 8,640 understorey plants, 721 palms).
-- **Cost:** the maps grow with the valley's area, once; a plant costs a few map reads and a hash, whatever else exists.
+
+## The forest's layers (`forest_planting`)
+
+`forestPlantingLayers(ForestSpecies)` → five `PlantingLayerRecord`s in `ForestLayer`'s order; `plantTheForest(species, maps, heights, box, jobs)` plants a box; `plantThePatch` the box round `forestPatch`, keeping what stands in it by the maps' axis (`insidePlantedRegion`, as the GPU draws the placed trees' patch; the entities' patch until 2b's cells).
+
+| Layer | Record (`treePlantingLayer`, `understoreyPlantingLayer`, `palmPlantingLayer`) | Keeps clear of |
+|---|---|---|
+| Emergents | variants alike, the crown's sphere, the lowest ground on a ring `footReachMetres` (2.5) a unit of scale out, spacing | |
+| Canopy | the same, on the emergents' lattice above their share while footprints match | the emergents' crowns |
+| Mid | the same, 4 m cells | both's trunks by `midTrunkClearance` (4 m) |
+| Understorey | three kinds by `fernShare`, `calatheaShare`; sunk `understoreySinkMetres` | each trunk's `bigTrunkReach` (2 m) or `midTrunkReach` (0.4) plus `trunkClearance` |
+| Palms | variants alike, each its own height's sphere; sunk | the same |
+
+- Every plant stands on the land drawn (`terrainSurfaceHeight` of the game's terrain heights).
+- Tests build the patch once (`defaultPatchPlanting`) on `patchValleyMaps` and `patchTerrainHeights` (`tests/forest_helpers.h`); one layer alone with `plantAlone`.
 
 ## Plant variants (`forest_game`)
 
@@ -45,8 +55,8 @@ Poly Haven's scanned fern, calathea and anthurium (`understoreyScanName`: `fern_
 
 - **Loading** (`buildUnderstorey`): each glTF part placed by its node and stood on its foot (`footedPlant`: lowest point at y 0, centred); the kind's tallest brought to its height (`understoreyKindScale`, `understoreyHeight`: `fernHeight` 1.3, `calatheaHeight` 1.5, `anthuriumHeight` 1.7 m; the scans are house plants) and baked in. Without a scan, `understoreyStandIn` (three crossed blades, plain green).
 - **Simplified** (`simplifyMesh`, meshoptimizer, within `understoreySimplifyError`): the seen mesh to `keepShare` (0.3) with its border locked, so a cut-out leaf keeps its outline; its level to `levelKeepShare` (0.12) and the shadow's stand-in to `shadowKeepShare` (0.05) without.
-- **Where** (`placeUnderstorey` → `UnderstoreyPlacement`): its layer of the planting maps: 1.5 m cells, every one on the floor within 20 m of the path, far share 0.35 past 60 m, gap share 1.5, path clearance 1.5 m; trunk clearance 1 m past each trunk's reach (`floorTrunks`: 2 m round the big trees' buttresses, 0.4 m round a mid tree).
-- **Kinds** by `fernShare` (0.45) and `calatheaShare` (0.3), the anthuriums the rest; each 75-125% of its kind's size (`understoreyScaleSpread`), sunk `understoreySinkMetres`, turned at random, a variant by `variantPick`.
+- **Where** (`UnderstoreyPlacement`, its layer above): 1.5 m cells, every one on the floor within 20 m of the path, far share 0.35 past 60 m, gap share 1.5, path clearance 1.5 m; trunk clearance 1 m past each trunk's reach.
+- **Kinds** by `fernShare` (0.45) and `calatheaShare` (0.3), the anthuriums the rest; each 75-125% of its kind's size (`understoreyScaleSpread`), sunk `understoreySinkMetres`, turned at random, a variant by `variantPick` (the plant's pick).
 - **Cards:** `impostorErrorMetres` 0.06, `impostorFrames` 8, `impostorTexels` 64: a plant is small, its card never big on screen.
 - `ForestUnderstoreySettings` (F5 Forest, Understorey; start-up).
 
@@ -60,7 +70,7 @@ Understorey palms 2-6 m tall grown by the engine (no CC0 palm scans).
 - **Variants** (`palmVariantShape` → `PalmShape`, `palmVariantHeight`): `variants` (8) evenly from `shortest` (2) to `tallest` (6) m, `leastFronds` to `mostFronds` (7-14) more on taller ones, fronds `palmFrondLengthShare` (0.45) of the height; grown on every core (`growPalmMeshes` → `PalmMeshes`, `growPalm` with a `PalmDetail`).
 - **Thinned leaflet by leaflet** (`PalmDetail::thinned`, `PinnateThinning`; `scene/card_thinning`): the stem, stalks and every `palmKeepEvery`-th (4) pair's leaflets first (the stem and stalks their own anchors, so they stay), the rest after, shrinking away about their bases past random ranks while the kept grow by share^-`leafletGrowth` (0.25). The coarser level is the kept part, its error the gap the dropped pairs leave, then the card. The shadow's stand-in (a quarter of the pairs, 2 segments) is never seen.
 - **Leaflet picture** (`palmLeafletImages` → `PalmLeafletImages`, `forestPalmLeafMaterial`): drawn at start-up, `forestPalmLeafletTexels` (256), `LeafSet024`'s mean colour (`meanColour`, alpha-weighted) tinted as the trees' leaves: a paler midrib, seven parallel veins a side, streaks, a darker edge, a browner dry tip; its height made a normal map (`normalMapFromHeight`).
-- **Where** (`placePalms` → `PalmPlacement`): its layer of the planting maps: 5 m cells, every one on the floor within 25 m of the path, far share 0.3 past 60 m, gap share 2 (palms take a gap's light first), path clearance 2 m; trunk clearance 1 m; each 85-115% of its variant (`palmScaleSpread`), turned at random.
+- **Where** (`PalmPlacement`, its layer above): 5 m cells, every one on the floor within 25 m of the path, far share 0.3 past 60 m, gap share 2 (palms take a gap's light first), path clearance 2 m; trunk clearance 1 m; each 85-115% of its variant (`palmScaleSpread`), turned at random.
 - **Cards:** `impostorErrorMetres` 0.15, 8 frames of 128 texels.
 - `ForestPalmSettings` (F5 Forest, Palms; start-up).
 

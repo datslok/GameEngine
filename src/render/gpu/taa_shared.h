@@ -1,8 +1,8 @@
 #ifndef RENDER_GPU_TAA_SHARED_H
 #define RENDER_GPU_TAA_SHARED_H
 
-// Temporal anti-aliasing's numbers, shared by render/gpu/taa.h and the shaders (taa.glsl, taa.comp, motion.vert and
-// motion.frag). Only #defines of plain numbers, since GLSL reads them too.
+// Temporal anti-aliasing's numbers, shared by render/gpu/taa.h and the shaders (taa.glsl, taa.comp, triangle_vertex.glsl
+// and scene_surface.glsl). Only #defines of plain numbers, since GLSL reads them too.
 
 // The jitter's cycle: this many frames of Halton (2, 3) points, then it starts again.
 #define TAA_JITTER_FRAMES 16

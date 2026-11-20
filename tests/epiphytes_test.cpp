@@ -266,15 +266,15 @@ namespace {
         assert(small.ferns == 0 && small.sites.size() <= static_cast<std::size_t>(epiphytes.mostPerSmallTree));
     }
 
-    // The forest's trees carry them: still, drawn only, into the nearest cascades; their settings start-up only.
+    // The forest's trees carry them, in their looks (the placed trees'): drawn only, into the nearest cascades; their
+    // settings start-up only.
     void testTheForestGrowsThem() {
         TestForest forest;
-        const std::vector<Entity>& epiphytes = forest.game.getEpiphytes();
+        const std::vector<ModelRenderer> epiphytes = forest.game.getEpiphyteModels();
         assert(!epiphytes.empty());
 
-        for (const Entity entity : epiphytes) {
-            const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
-            assert(renderer.isStill() && renderer.shadowCascades == epiphyteShadowCascades);
+        for (const ModelRenderer& renderer : epiphytes) {
+            assert(renderer.castsShadows && renderer.shadowCascades == epiphyteShadowCascades);
             assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh));
         }
 

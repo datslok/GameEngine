@@ -6,6 +6,7 @@
 #include "games/forest/bastion.h"
 #include "games/forest/drifting_rocks.h"
 #include "games/forest/forest_ground.h"
+#include "games/forest/forest_planting.h"
 #include "games/forest/forest_trees.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
@@ -24,9 +25,11 @@
 #include "physics/static_level.h"
 #include "scene/atmosphere.h"
 #include "scene/fog.h"
+#include "scene/planting_cells.h"
 #include "scene/wind.h"
 #include "games/forest/forest_sway.h"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -229,9 +232,9 @@ public:
     // The mid layer's (docs/research/JUNGLE.md).
     ForestTreeSettings& getMidSettings();
     const std::vector<TreePlacement>& getMidPlacements() const;
-    // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, the emergents, the mid layer.
-    const std::vector<Entity>& getTrees() const;
-    const std::vector<Entity>& getTreeImpostors() const;
+    // Each species' variants as the GPU's cells draw them (no entity a tree): bark, leaves, card, the shadow's
+    // stand-ins, then any climbers and epiphytes; the canopy's, the emergents', the mid layer's.
+    const std::vector<PlantedKindLook>& getTreeLooks() const;
     // The understorey's settings and places, and each plant's leaves and then its shadow's stand-in, plant by plant.
     ForestUnderstoreySettings& getUnderstoreySettings();
     const std::vector<UnderstoreyPlacement>& getUnderstoreyPlacements() const;
@@ -246,15 +249,15 @@ public:
     // The lianas' settings and their meshes' entities (bark and ivy, a chunk of ground each).
     ForestLianaSettings& getLianaSettings();
     const std::vector<Entity>& getLianas() const;
-    // The climbers' settings and their entities (stems and leaves, on each placed big tree whose variant carries any).
+    // The climbers' settings and their models in the looks (stems and leaves, of each big variant carrying any).
     ForestClimberSettings& getClimberSettings();
-    const std::vector<Entity>& getClimbers() const;
+    std::vector<ModelRenderer> getClimberModels() const;
     // The placed trees carrying climbers, in the order forest-climber numbers them.
     const std::vector<TreePlacement>& getClimbedTrees() const;
     const std::vector<Vec3>& getClimbedFacing() const;
-    // The epiphytes' settings and their entities (rosettes and moss, on each placed tree whose variant carries any).
+    // The epiphytes' settings and their models in the looks (rosettes and moss, of each variant carrying any).
     ForestEpiphyteSettings& getEpiphyteSettings();
-    const std::vector<Entity>& getEpiphytes() const;
+    std::vector<ModelRenderer> getEpiphyteModels() const;
     // Each tree carrying rosettes' first rosette in the world, in the order forest-epiphyte numbers them.
     const std::vector<Vec3>& getEpiphyteViews() const;
     // The grass's settings, its cells and their entities (a patch each, following the ground), in the cells' order.
@@ -286,7 +289,10 @@ private:
     // The trees between the Ring and the clearing: the emergents placed first, the canopy trees round them, the mid
     // layer under and between them, each species a few variants grown, each placed many times.
     void buildPlantingMaps();
-    void buildTrees(World& world, AssetManager& assets);
+
+    // The species' settings every layer is planted from (forest_planting.h).
+    ForestSpecies plantingSpecies() const;
+    void buildTrees(AssetManager& assets);
 
     // What a species' variants grow climbers with (games/forest/climbers.h): the settings and the stems' and leaves'
     // materials, made once for every species carrying them.
@@ -305,11 +311,11 @@ private:
         Material moss;
     };
 
-    // One species' variants grown and its placed trees added, bark then leaves, with its leaf material; with climbers,
-    // each variant's grown too (none for the mid layer), and likewise with epiphytes.
+    // One species' variants grown into the looks its placed trees are drawn with, with its leaf material; with
+    // climbers, each variant's grown too (none for the mid layer), and likewise with epiphytes.
     // Returns each variant's height (its box's top, in its mesh's units), which its sway bends against.
-    std::vector<float> plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
-                                  std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
+    std::vector<float> plantTrees(AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
+                                  const std::vector<TreePlacement>& placements, std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
 
     // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified,
     // placed many times.
@@ -329,7 +335,6 @@ private:
     void buildLianas(World& world, AssetManager& assets);
 
     // Every tree's trunk as far round as the floor's plants keep from it: the big trees' buttresses, the mid layer's trunk.
-    std::vector<StandingCrown> floorTrunks() const;
 
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
@@ -381,6 +386,7 @@ private:
     ForestValleySettings valleySettings;
     ForestPlantingSettings plantingSettings;
     ValleyMaps valleyMaps;
+    std::shared_ptr<const TerrainHeights> groundHeights; // the land drawn, which the plants stand on
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
     Atmosphere atmosphereSettings;
@@ -404,18 +410,34 @@ private:
     std::vector<Entity> palms;
     std::vector<Entity> palmImpostors; // a card each palm, in the placements' order
     std::vector<Entity> lianaEntities;
-    std::vector<Entity> climberEntities;
     std::vector<TreePlacement> climbedTrees;
     std::vector<Vec3> climbedFacing; // each one's first climber's way out of the trunk, in the world (forest-climber looks from it)
-    std::vector<Entity> epiphyteEntities;
+    std::vector<PlantedKindLook> treeLooks; // each species' variants as the GPU's cells draw the trees (plantTrees)
+
+    // A look's model swaying as a tree (applySway gives it its sway): its look, its model, how it sways.
+    struct LookSwayer {
+        std::size_t look = 0;
+        std::size_t model = 0;
+        ForestSwayer swayer;
+    };
+
+    std::vector<LookSwayer> treeLookSwayers;
+
+    // A model of a look: the climbers' and the epiphytes' (getClimberModels, getEpiphyteModels).
+    struct LookModel {
+        std::size_t look = 0;
+        std::size_t model = 0;
+    };
+
+    std::vector<LookModel> climberModels;
+    std::vector<LookModel> epiphyteModels;
+    std::vector<ModelRenderer> lookModels(const std::vector<LookModel>& listed) const;
     std::vector<GrassCell> grassCells;
     std::vector<Entity> grassEntities;
     std::vector<GroundCell> floorCells;
     std::vector<Entity> floorEntities;
     std::vector<Vec3> epiphyteViews;   // each tree carrying rosettes' first rosette, in the world
     std::vector<Vec3> epiphyteOutward; // the level way from its trunk to it (forest-epiphyte looks from there)
-    std::vector<Entity> trees;
-    std::vector<Entity> treeImpostors; // a card each tree, in the trees' order (scene/impostor.h)
     Entity ring;
     std::vector<Entity> monolith; // the Bastion, then its bridge
     std::vector<Entity> structures;

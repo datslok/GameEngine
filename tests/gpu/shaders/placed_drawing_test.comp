@@ -1,0 +1,42 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs placed_drawing.glsl's functions on the cases placed_drawing_gpu_test.cpp sends: a plant (foot and scale, then
+// turn) and a sphere a case.
+#include "gpu_test.glsl"
+#include "placed_drawing.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 footScale = testInput(0);
+    vec4 turn = testInput(1);
+    vec4 sphere = testInput(2);
+    PlacedPlant plant = PlacedPlant(footScale.xyz, footScale.w, turn.x, 0.0, 0u, 0.0);
+
+    if (function == GPU_TEST_PLACED_PLANT_MODEL) {
+        mat4 model = placedPlantModel(plant);
+        testOutput(0, model[0]);
+        testOutput(1, model[1]);
+        testOutput(2, model[2]);
+        testOutput(3, model[3]);
+    } else if (function == GPU_TEST_PLACED_SPHERE) {
+        testOutput(0, placedSphere(sphere, plant));
+    } else if (function == GPU_TEST_PLACED_INSTANCE) {
+        InstanceData part;
+        part.model = mat4(1.0);
+        part.normalMatrix = mat4(1.0);
+        part.handedness = vec4(1.0, 1.0, 0.0, 0.0);
+        part.material = uvec4(0u);
+        part.sway = vec4(-1.0, 0.0, 0.0, 0.0);
+        part.hanging = uvec4(0u);
+        part.levelSphere = sphere;
+        InstanceData placed = placedInstance(part, plant);
+        testOutput(0, placed.normalMatrix[0]);
+        testOutput(1, placed.normalMatrix[2]);
+        testOutput(2, placed.levelSphere);
+        testOutput(3, placed.handedness);
+    }
+}

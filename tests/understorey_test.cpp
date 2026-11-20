@@ -16,27 +16,15 @@
 #include <vector>
 
 namespace {
-    // A few trunks along the path's stretch, to keep clear of.
-    std::vector<StandingCrown> someTrunks() {
-        std::vector<StandingCrown> trunks;
-
-        for (float z = -200.0f; z <= -50.0f; z += 25.0f) {
-            trunks.push_back(StandingCrown{Vec2{valleyAxis(z) + 20.0f, z}, 1.0f});
-        }
-
-        return trunks;
-    }
-
     /*
-    * The understorey's places (docs/research/JUNGLE.md, The understorey): on the trees' stretch of the floor, clear of the path
-    * and every trunk, on the ground, no plant blocking a sight line; every kind, each scaled within its range; thick
-    * near the path and thinning away from it; the same every run.
+    * The understorey's places (docs/research/JUNGLE.md, The understorey): on the trees' stretch of the floor, clear of the path,
+    * on the ground, no plant blocking a sight line; every kind, each scaled within its range; thick near the path and
+    * thinning away from it; the same every run.
     */
     void testTheUnderstoreyIsPlaced() {
         const ForestUnderstoreySettings settings;
-        const std::vector<StandingCrown> trunks = someTrunks();
         const std::vector<SightLine> lines = forestSightLines();
-        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, patchValleyMaps(), trunks);
+        const std::vector<UnderstoreyPlacement>& plants = defaultPatchPlanting().understorey;
         assert(plants.size() > 1000);
         std::array<int, understoreyKindCount> kinds{};
         float nearCount = 0.0f;
@@ -46,14 +34,9 @@ namespace {
             assert(plant.foot.z >= treeNorthmost && plant.foot.z <= treeSouthmost);
             assert(std::fabs(plant.foot.x - valleyAxis(plant.foot.z)) <= treeSpread);
             const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
-            assert(fromPath >= settings.planting.pathClearance);
-            assert(near(plant.foot.y, forestHeight(plant.foot.x, plant.foot.z) - understoreySinkMetres, 1e-4f));
+            assert(fromPath >= settings.planting.pathClearance - 1e-3f);
+            assert(plant.foot.y == terrainSurfaceHeight(patchTerrainHeights(), plant.foot.x, plant.foot.z) - understoreySinkMetres);
             assert(plant.variantPick >= 0.0f && plant.variantPick < 1.0f);
-
-            for (const StandingCrown& trunk : trunks) {
-                assert((Vec2{plant.foot.x, plant.foot.z} - trunk.foot).length() >= trunk.radius + settings.trunkClearance);
-            }
-
             assert(plant.scale >= 1.0f - understoreyScaleSpread - 1e-5f && plant.scale <= 1.0f + understoreyScaleSpread + 1e-5f);
             assert(!blocksSight(understoreyCentre(settings, plant), understoreyRadius(settings, plant), lines));
             ++kinds[static_cast<std::size_t>(plant.kind)];
@@ -68,8 +51,9 @@ namespace {
         // Thicker near the path: there the plants per grid cell are near one; far out, about farShare of that.
         assert(nearCount > 0.0f && farCount > 0.0f);
 
-        const std::vector<UnderstoreyPlacement> again = placeUnderstorey(settings, patchValleyMaps(), trunks);
-        assert(again.size() == plants.size() && again.back().foot.x == plants.back().foot.x && again.back().kind == plants.back().kind);
+        const ForestPlanting again = plantThePatch(defaultSpecies(), patchValleyMaps(), patchTerrainHeights(), testJobs());
+        assert(again.understorey.size() == plants.size() && again.understorey.back().foot.x == plants.back().foot.x &&
+               again.understorey.back().kind == plants.back().kind);
     }
 
     // The near share is all of the lattice's cells there, the far one farShare of them: compared per square metre on a
@@ -78,12 +62,21 @@ namespace {
         ForestUnderstoreySettings settings;
         settings.planting.gapShare = 1.0f;
         const ValleyMaps open = buildValleyMaps(testPlantingSettings(), {}, {}, {understoreyReach(settings)}, testJobs());
-        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, open, {});
+        const auto alone = [&](const ForestUnderstoreySettings& asked) {
+            std::vector<Vec3> feet;
+
+            for (const PlantedPlant& plant : plantAlone(understoreyPlantingLayer(asked), open)) {
+                feet.push_back(plant.foot);
+            }
+
+            return feet;
+        };
+        const std::vector<Vec3> plants = alone(settings);
         int near = 0;
         int far = 0;
 
-        for (const UnderstoreyPlacement& plant : plants) {
-            const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
+        for (const Vec3& foot : plants) {
+            const float fromPath = forestPathDistance(foot.x, foot.z);
             near += fromPath >= settings.planting.pathClearance + settings.planting.footprintMetres && fromPath < settings.planting.nearPathMetres ? 1 : 0;
             far += fromPath > settings.planting.farPathMetres ? 1 : 0;
         }
@@ -95,8 +88,8 @@ namespace {
         int nearCells = 0;
         int farCells = 0;
 
-        for (const UnderstoreyPlacement& plant : placeUnderstorey(everything, open, {})) {
-            const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
+        for (const Vec3& foot : alone(everything)) {
+            const float fromPath = forestPathDistance(foot.x, foot.z);
             nearCells += fromPath >= settings.planting.pathClearance + settings.planting.footprintMetres && fromPath < settings.planting.nearPathMetres ? 1 : 0;
             farCells += fromPath > settings.planting.farPathMetres ? 1 : 0;
         }

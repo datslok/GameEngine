@@ -135,6 +135,8 @@ void gpuTestSkyVisibility(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestTransparency(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDither(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestTerrain(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestPlanting(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestPlacedDrawing(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestImpostor(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCardThinning(GpuFunctionRunner& runner, GpuCheckReport& report);

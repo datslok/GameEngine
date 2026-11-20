@@ -225,11 +225,11 @@ struct PalmPlacement {
 };
 
 /*
-* The palms' places, planted from the maps as the understorey's (ditheredCells over forestPatch): sized and turned at
-* random, clear of every trunk, each fitting the maps (its nominal sphere clear of every obstacle and under every sight
-* line). The same every run.
+* The palms' layer of the planting (games/forest/forest_planting.h): its density from its settings, its variants alike,
+* each its own height's sphere (palmRadius), sized within palmScaleSpread of 1 and turned at random, sunk
+* understoreySinkMetres into the ground. Kept clear of the trunks by the forest's layers.
 */
-std::vector<PalmPlacement> placePalms(const ForestPalmSettings& settings, const ValleyMaps& maps, const std::vector<StandingCrown>& trunks);
+PlantingLayerRecord palmPlantingLayer(const ForestPalmSettings& settings);
 
 // The farthest any palm's nominal sphere reaches (the tallest variant at its largest): the canopy cap it reads.
 float palmReach(const ForestPalmSettings& settings);

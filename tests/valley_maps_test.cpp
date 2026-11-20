@@ -88,16 +88,22 @@ namespace {
     void testTheMapsAreBuilt() {
         const ForestPlantingSettings settings = smallExtent();
         const ValleyMaps maps = buildValleyMaps(settings, {}, {}, {}, testJobs());
-        assert(maps.columns == 120 && maps.rows == 120);
-        assert(maps.ecotopes.size() == 120u * 120u && maps.clearance.size() == maps.ecotopes.size() && maps.caps.empty());
-        assert(maps.texelReach >= 0.5f * std::sqrt(2.0f) * settings.texelMetres && maps.texelReach < settings.texelMetres);
+        const PlantingMaps& planting = maps.planting;
+        assert(planting.columns == 120 && planting.rows == 120 && planting.inverseTexel == 1.0f / settings.texelMetres);
+        assert(planting.ecotopes.size() == 120u * 120u && planting.clearance.size() == planting.ecotopes.size() && planting.caps.empty());
+        assert(planting.gaps.size() == planting.ecotopes.size() && planting.path.size() == planting.ecotopes.size() && planting.axis.size() == 120u);
+        assert(planting.pathPoints.size() == forestPathPoints().size() && planting.pathPoints.back().x == forestPathPoints().back().x);
+        assert(planting.pathInverseLengths.size() + 1 == planting.pathPoints.size());
+        assert(planting.texelReach >= 0.5f * std::sqrt(2.0f) * settings.texelMetres && planting.texelReach < settings.texelMetres);
+        assert(planting.corridorClearance == settings.corridorClearance && planting.halfWidth == settings.halfWidth);
 
-        for (const auto& texel : maps.ecotopes) {
+        for (const auto& texel : planting.ecotopes) {
             assert(texel[0] + texel[1] + texel[2] + texel[3] == 255);
         }
 
         const ValleyMaps serial = buildValleyMaps(settings, {}, {}, {}, serialJobs());
-        assert(serial.ecotopes == maps.ecotopes && serial.clearance == maps.clearance);
+        assert(serial.planting.ecotopes == planting.ecotopes && serial.planting.clearance == planting.clearance);
+        assert(serial.planting.gaps == planting.gaps && serial.planting.path == planting.path && serial.planting.axis == planting.axis);
 
         // Read back: the floor in the patch, bare in the clearing, all bare outside.
         assert(ecotope(valleyEcotopes(maps, valleyAxis(-100.0f), -100.0f), Ecotope::Floor) > 0.98f);
@@ -129,18 +135,19 @@ namespace {
                 truth = std::min(truth, std::max((Vec2{x, z} - obstacle.centre).length() - obstacle.radius, 0.0f));
             }
 
-            const float read = valleyClearance(maps, x, z);
+            const float read = plantingClearance(maps.planting, x, z);
+            const float reach = maps.planting.texelReach;
             assert(read <= truth + 1e-4f);
 
-            if (truth < farthestClearance - 2.0f * maps.texelReach) {
-                assert(read >= truth - 2.0f * maps.texelReach - 0.1f);
+            if (truth < plantingFarthestClearance - 2.0f * reach) {
+                assert(read >= truth - 2.0f * reach - 0.1f);
             } else {
-                assert(read >= std::min(truth, farthestClearance) - 2.0f * maps.texelReach - 0.1f);
+                assert(read >= std::min(truth, plantingFarthestClearance) - 2.0f * reach - 0.1f);
             }
         }
 
         const ValleyMaps empty = buildValleyMaps(settings, {}, {}, {}, testJobs());
-        assert(valleyClearance(empty, valleyAxis(-150.0f), -150.0f) >= farthestClearance - empty.texelReach - 0.1f);
+        assert(plantingClearance(empty.planting, valleyAxis(-150.0f), -150.0f) >= plantingFarthestClearance - empty.planting.texelReach - 0.1f);
     }
 
     // The lowest the line passes within reach of a place, found by walking it finely.
@@ -166,7 +173,7 @@ namespace {
         const ForestPlantingSettings settings = smallExtent();
         const SightLine line{Vec3{0.0f, 1.7f, -80.0f}, Vec3{0.0f, 250.0f, -400.0f}};
         const ValleyMaps maps = buildValleyMaps(settings, {}, {line}, {16.0f, 4.0f}, testJobs());
-        assert(maps.caps.size() == 2);
+        assert(maps.planting.caps.size() == 2);
 
         for (int i = 0; i < 400; ++i) {
             const float z = -280.0f + 200.0f * forestUnitRandom(7, 2 * i);
@@ -174,7 +181,7 @@ namespace {
 
             for (const float reach : {16.0f, 4.0f}) {
                 const float lowest = lowestWithin(line, reach, x, z);
-                const float cap = valleyCap(maps, reach, x, z);
+                const float cap = plantingCap(maps.planting, reach, x, z);
                 assert(cap <= lowest + 1e-3f);
 
                 if (lowest < 1e8f) {
@@ -184,14 +191,14 @@ namespace {
         }
 
         // A smaller reach reads the smallest cap at least as far.
-        assert(valleyCap(maps, 3.0f, 0.0f, -200.0f) == valleyCap(maps, 4.0f, 0.0f, -200.0f));
-        assert(valleyCap(maps, 4.0f, 50.0f, -200.0f) > 1e6f);
-        assert(valleyCap(maps, 4.0f, 0.0f, -2000.0f) > 1e6f);
+        assert(plantingCap(maps.planting, 3.0f, 0.0f, -200.0f) == plantingCap(maps.planting, 4.0f, 0.0f, -200.0f));
+        assert(plantingCap(maps.planting, 4.0f, 50.0f, -200.0f) > 1e6f);
+        assert(plantingCap(maps.planting, 4.0f, 0.0f, -2000.0f) > 1e6f);
 
         bool threw = false;
 
         try {
-            valleyCap(maps, 17.0f, 0.0f, -200.0f);
+            plantingCap(maps.planting, 17.0f, 0.0f, -200.0f);
         } catch (const std::invalid_argument&) {
             threw = true;
         }
@@ -218,16 +225,18 @@ namespace {
             const float reach = 1.0f + 15.0f * forestUnitRandom(9, 4 * i + 2);
             const float centre = forestHeight(x, z) + 60.0f * forestUnitRandom(9, 4 * i + 3);
 
-            if (!fitsTheMaps(maps, Vec2{x, z}, std::min(reach, maps.caps.back().reach), centre + reach)) {
+            const float capped = std::min(reach, maps.planting.caps.back().reach);
+
+            if (!plantingFitsTheMaps(maps.planting, Vec2{x, z}, capped, centre + reach)) {
                 ++refused;
                 continue;
             }
 
             ++fitted;
-            assert(!blocksSight(Vec3{x, centre, z}, std::min(reach, maps.caps.back().reach), lines));
+            assert(!blocksSight(Vec3{x, centre, z}, capped, lines));
 
             for (const ValleyObstacle& obstacle : obstacles) {
-                assert((Vec2{x, z} - obstacle.centre).length() >= obstacle.radius + std::min(reach, maps.caps.back().reach) - 1e-3f);
+                assert((Vec2{x, z} - obstacle.centre).length() >= obstacle.radius + capped - 1e-3f);
             }
         }
 
@@ -258,64 +267,31 @@ namespace {
     }
 
     /*
-    * The dither: the same for a cell every time, in 0..1, any range of thresholds taking its share of the cells, and
-    * the cells under a small share apart (no two touching).
-    */
-    void testTheDither() {
-        assert(ditherThreshold(3, -7) == ditherThreshold(3, -7));
-        int under = 0;
-        int inBand = 0;
-        std::set<std::pair<int, int>> sparse;
-
-        for (int row = -50; row < 50; ++row) {
-            for (int column = -50; column < 50; ++column) {
-                const float threshold = ditherThreshold(column, row);
-                assert(threshold >= 0.0f && threshold < 1.0f);
-                under += threshold < 0.3f ? 1 : 0;
-                inBand += threshold >= 0.6f && threshold < 0.7f ? 1 : 0;
-
-                if (threshold < 0.05f) {
-                    sparse.insert({column, row});
-                }
-            }
-        }
-
-        assert(under >= 2950 && under <= 3050 && inBand >= 970 && inBand <= 1030);
-
-        for (const auto& [column, row] : sparse) {
-            for (int dz = -1; dz <= 1; ++dz) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    assert((dx == 0 && dz == 0) || !sparse.contains({column + dx, row + dz}));
-                }
-            }
-        }
-    }
-
-    /*
     * A layer's share: its plants a hectare times a cell's area, none where bare, thinned or thickened in a gap by its
     * gap share, and by the path: all within nearPathMetres, farShare past farPathMetres.
     */
     void testALayersShare() {
         const ValleyMaps& maps = patchValleyMaps();
-        PlantingLayer layer{.floorPerHectare = 100.0f, .footprintMetres = 5.0f, .gapShare = 0.5f, .nearPathMetres = 20.0f, .farPathMetres = 60.0f, .farShare = 0.4f};
-        assert(pathDensityShare(layer, 10.0f) == 1.0f && near(pathDensityShare(layer, 40.0f), 0.7f, 1e-5f) && near(pathDensityShare(layer, 90.0f), 0.4f, 1e-5f));
-        assert(layerShare(layer, maps, forestClearingCentre.x, forestClearingCentre.y) == 0.0f);
+        const PlantingLayer asked{.floorPerHectare = 100.0f, .footprintMetres = 5.0f, .gapShare = 0.5f, .nearPathMetres = 20.0f, .farPathMetres = 60.0f, .farShare = 0.4f};
+        PlantingLayerRecord layer;
+        setPlantingDensity(layer, plantingDensity(asked));
+        assert(plantingLayerShare(layer, maps.planting, forestClearingCentre.x, forestClearingCentre.y) == 0.0f);
 
-        // Find a place in the patch out of any gap and one fully in one.
+        // A place in the patch by the path out of any gap, and one fully in one.
         Vec2 open{1e9f, 0.0f};
         Vec2 gap{1e9f, 0.0f};
 
         for (float z = -200.0f; z < -50.0f; z += 1.0f) {
             for (float across = -100.0f; across <= 100.0f; across += 1.0f) {
                 const float x = valleyAxis(z) + across;
-                const float g = valleyGap(maps.settings, x, z);
-                const float path = forestPathDistance(x, z);
+                const float g = plantingGap(maps.planting, x, z);
+                const float path = plantingPathDistanceAt(maps.planting, x, z);
 
                 if (path < 20.0f && g == 0.0f) {
                     open = Vec2{x, z};
                 }
 
-                if (path < 20.0f && g == 1.0f) {
+                if (path < 20.0f && g == 255.0f) {
                     gap = Vec2{x, z};
                 }
             }
@@ -323,73 +299,55 @@ namespace {
 
         assert(open.x < 1e8f && gap.x < 1e8f);
         const float floor = ecotope(valleyEcotopes(maps, open.x, open.y), Ecotope::Floor);
-        assert(near(layerShare(layer, maps, open.x, open.y), floor * 100.0f * 25.0f / 10000.0f, 1e-4f));
-        assert(near(layerShare(layer, maps, gap.x, gap.y), 0.5f * ecotope(valleyEcotopes(maps, gap.x, gap.y), Ecotope::Floor) * 0.25f, 1e-4f));
+        assert(near(plantingLayerShare(layer, maps.planting, open.x, open.y), floor * 100.0f * 25.0f / 10000.0f, 1e-4f));
+        assert(near(plantingLayerShare(layer, maps.planting, gap.x, gap.y), 0.5f * ecotope(valleyEcotopes(maps, gap.x, gap.y), Ecotope::Floor) * 0.25f, 1e-4f));
 
         // Never more than every cell.
-        layer.floorPerHectare = 1e6f;
-        assert(layerShare(layer, maps, open.x, open.y) == 1.0f);
+        PlantingLayer every = asked;
+        every.floorPerHectare = 1e6f;
+        setPlantingDensity(layer, plantingDensity(every));
+        assert(plantingLayerShare(layer, maps.planting, open.x, open.y) == 1.0f);
     }
 
     /*
-    * A layer's cells: about its share of the lattice's cells, each plant inside its cell's jitter and the region and
-    * clear of the path, the same every run; one sharing its lattice never takes the same cell; none where it has none.
+    * The maps read without the CPU's sines and square roots: the axis between its rows within a millimetre of
+    * valleyAxis, the gaps within 0.02 of the noise nearly everywhere and 0.15 anywhere (it turns from none to a full gap
+    * over a few metres, measured at most 0.094), the path's distance (the density's blend only)
+    * within a few centimetres of forestPathDistance nearly everywhere and 1.5 m anywhere (it bends within a texel on
+    * the centre line, at the corners and along the ridge inside each bend); a place clears the path exactly as
+    * forestPathDistance says.
     */
-    void testALayersCells() {
+    void testTheAxisGapsAndPath() {
         const ValleyMaps& maps = patchValleyMaps();
-        const PlantingRegion region{.northmost = -200.0f, .southmost = -50.0f, .spread = 100.0f};
-        const PlantingLayer layer{.floorPerHectare = 120.0f, .footprintMetres = 4.0f, .jitterShare = 0.6f, .pathClearance = 3.0f};
-        const std::vector<DitheredCell> cells = ditheredCells(layer, maps, region, 11u);
-        float expected = 0.0f;
+        int nearPath = 0;
+        int blurred = 0;
+        int strayGaps = 0;
 
-        for (float z = -200.0f; z < -50.0f; z += 4.0f) {
-            for (float across = -100.0f; across < 100.0f; across += 4.0f) {
-                const float x = valleyAxis(z + 2.0f) + across + 2.0f;
-                expected += forestPathDistance(x, z + 2.0f) >= 3.0f ? layerShare(layer, maps, x, z + 2.0f) : 0.0f;
+        for (int i = 0; i < 4000; ++i) {
+            const float z = -400.0f + 480.0f * forestUnitRandom(13, 3 * i);
+            const float x = valleyAxis(z) + 300.0f * (2.0f * forestUnitRandom(13, 3 * i + 1) - 1.0f);
+            assert(std::fabs(plantingAxisAt(maps.planting, z) - valleyAxis(z)) < 1e-3f);
+            const float gapError = std::fabs(plantingGap(maps.planting, x, z) / 255.0f - valleyGap(maps.settings, x, z));
+            assert(gapError < 0.15f);
+            strayGaps += gapError >= 0.02f ? 1 : 0;
+
+            const float truth = forestPathDistance(x, z);
+
+            if (truth < 60.0f) {
+                const float error = std::fabs(plantingPathDistanceAt(maps.planting, x, z) - truth);
+                assert(error < 1.5f);
+                ++nearPath;
+                blurred += error >= 0.05f ? 1 : 0;
+            }
+
+            const float clearance = 4.0f * forestUnitRandom(13, 3 * i + 2);
+
+            if (std::fabs(truth - clearance) > 1e-3f) {
+                assert(plantingClearOfThePath(maps.planting, Vec2{x, z}, clearance) == (truth >= clearance));
             }
         }
 
-        assert(static_cast<float>(cells.size()) > 0.9f * expected && static_cast<float>(cells.size()) < 1.1f * expected);
-
-        for (const DitheredCell& cell : cells) {
-            const Vec2 middle{(static_cast<float>(cell.column) + 0.5f) * 4.0f, (static_cast<float>(cell.row) + 0.5f) * 4.0f};
-            assert(std::fabs(cell.place.x - middle.x) <= 0.3f * 4.0f + 1e-4f && std::fabs(cell.place.y - middle.y) <= 0.3f * 4.0f + 1e-4f);
-            assert(cell.place.y >= region.northmost && cell.place.y <= region.southmost);
-            assert(std::fabs(cell.place.x - valleyAxis(cell.place.y)) <= region.spread);
-            assert(forestPathDistance(cell.place.x, cell.place.y) >= layer.pathClearance);
-            assert(cell.threshold == ditherThreshold(cell.column, cell.row) && cell.threshold < layerShare(layer, maps, middle.x, middle.y));
-        }
-
-        const std::vector<DitheredCell> again = ditheredCells(layer, maps, region, 11u);
-        assert(again.size() == cells.size() && again.back().place.x == cells.back().place.x && again.back().firstDraw == cells.back().firstDraw);
-        assert(ditheredCells(layer, maps, region, 12u).front().place.x != cells.front().place.x);
-
-        // Sharing the lattice: the second takes the band above the first's share, never the same cell.
-        const PlantingLayer second{.floorPerHectare = 300.0f, .footprintMetres = 4.0f, .jitterShare = 0.6f};
-        const std::vector<DitheredCell> shared = ditheredCells(second, maps, region, 13u, &layer);
-        std::set<std::pair<int, int>> taken;
-
-        for (const DitheredCell& cell : cells) {
-            taken.insert({cell.column, cell.row});
-        }
-
-        assert(!shared.empty());
-
-        for (const DitheredCell& cell : shared) {
-            assert(!taken.contains({cell.column, cell.row}));
-        }
-
-        const PlantingLayer otherLattice{.floorPerHectare = 300.0f, .footprintMetres = 5.0f};
-        bool threw = false;
-
-        try {
-            ditheredCells(otherLattice, maps, region, 13u, &layer);
-        } catch (const std::invalid_argument&) {
-            threw = true;
-        }
-
-        assert(threw);
-        assert(ditheredCells(PlantingLayer{.footprintMetres = 4.0f}, maps, region, 11u).empty());
+        assert(nearPath > 500 && blurred * 20 < nearPath && strayGaps * 20 < 4000);
     }
 }
 
@@ -401,7 +359,6 @@ void testValleyMaps() {
     testTheCanopyCaps();
     testWhatFitsBlocksNoSight();
     testTheObstacles();
-    testTheDither();
     testALayersShare();
-    testALayersCells();
+    testTheAxisGapsAndPath();
 }

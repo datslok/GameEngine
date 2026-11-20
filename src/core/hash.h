@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/hash_shared.h"
+
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -42,9 +44,12 @@ struct Fnv1aHash {
 * affect every output bit about half the time. FNV-1a's last multiplication carries a byte's change only upwards, so
 * hashes of nearby inputs differ little in their top bits; mix a hash before using its bits as random numbers.
 */
+// The golden ratio's fraction in 64-bit fixed point (HASH_GOLDEN_GAMMA): added before mixing, so neighbours land far apart.
+inline constexpr std::uint64_t goldenGamma = HASH_GOLDEN_GAMMA;
+
 constexpr std::uint64_t mixBits(std::uint64_t value) {
-    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ull;
-    value = (value ^ (value >> 27)) * 0x94d049bb133111ebull;
+    value = (value ^ (value >> 30)) * HASH_MIX_FIRST;
+    value = (value ^ (value >> 27)) * HASH_MIX_SECOND;
     return value ^ (value >> 31);
 }
 

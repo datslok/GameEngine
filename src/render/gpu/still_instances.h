@@ -46,12 +46,14 @@ private:
 
 /*
 * A frame's other records, packed now: the moving draws' (every draw after the still ones) instances and last-frame
-* matrices, and a table over the still draws' (MaterialTable::over) holding the materials it lacks, numbered after its
-* entries: the GPU holds the still table's entries, then these. The still table must outlive it.
+* matrices, the planted parts' instances in their plant's frame (FrameDescription::plantedParts, in its order), and a
+* table over the still draws' (MaterialTable::over) holding the materials it lacks, numbered after its entries: the
+* GPU holds the still table's entries, then these. The still table must outlive it.
 */
 struct SceneRecords {
     std::vector<GpuInstance> moving;
     std::vector<std::array<float, 16>> movingPrevious;
+    std::vector<GpuInstance> planted;
     MaterialTable materials;
 };
 

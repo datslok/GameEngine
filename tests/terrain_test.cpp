@@ -336,6 +336,44 @@ namespace {
         assert(castersInReach(draws, BoundingSphere{}).size() == 1);
         assert(rayMaskFor(draws[1]) == 0u);
     }
+
+    /*
+    * A box's range of heights holds every height the land gives inside it, drawn or bilinear: boxes inside the fine grid,
+    * across both grids' edges and past every grid (where the coarsest's nearest edge stands). Within the fine grid it is
+    * near the land's own range there, not the whole grid's.
+    */
+    void testABoxsRangeHoldsItsHeights() {
+        const std::shared_ptr<const TerrainHeights> wavy = twoGrids(waves);
+        std::uint32_t state = 7;
+        const auto unit = [&state] {
+            state = state * 1664525u + 1013904223u;
+            return static_cast<float>(state >> 8) / 16777216.0f;
+        };
+
+        for (int test = 0; test < 300; ++test) {
+            const float reach = test < 100 ? 30.0f : (test < 200 ? 600.0f : 3000.0f);
+            const float west = (unit() - 0.5f) * 2.0f * reach;
+            const float north = (unit() - 0.5f) * 2.0f * reach;
+            const float east = west + 1.0f + unit() * 64.0f;
+            const float south = north + 1.0f + unit() * 64.0f;
+            const TerrainHeightRange range = terrainHeightRange(*wavy, west, east, north, south);
+            assert(range.lowest <= range.highest);
+
+            for (int sample = 0; sample < 40; ++sample) {
+                const float x = west + unit() * (east - west);
+                const float z = north + unit() * (south - north);
+                const float drawn = terrainSurfaceHeight(*wavy, x, z);
+                const float bilinear = terrainHeight(*wavy, x, z);
+                assert(drawn >= range.lowest && drawn <= range.highest);
+                assert(bilinear >= range.lowest && bilinear <= range.highest);
+            }
+        }
+
+        // A small box in the fine grid: no wider than its own squares' heights (waves change at most 0.2 m a metre).
+        const TerrainHeightRange small = terrainHeightRange(*wavy, 3.2f, 5.7f, -4.1f, -2.2f);
+        assert(small.highest - small.lowest < 1.5f);
+        assert(terrainHeightRange(TerrainHeights{}, 0.0f, 1.0f, 0.0f, 1.0f).lowest == 0.0f);
+    }
 }
 
 void testTerrain() {
@@ -349,4 +387,5 @@ void testTerrain() {
     testTheTerrainBecomesDraws();
     testTheHeightsArePackedForTheGpu();
     testHiddenDrawsAreDrawnByNoView();
+    testABoxsRangeHoldsItsHeights();
 }

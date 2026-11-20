@@ -3,6 +3,7 @@
 #include "render/vulkan/vulkan_device.h"
 
 #include <cstdint>
+#include <cstring>
 #include <limits>
 
 ImmediateCommands::ImmediateCommands(const VulkanDevice& device):
@@ -49,4 +50,16 @@ void ImmediateCommands::run(const std::function<void(VkCommandBuffer)>& record) 
     vulkanCheck(vkResetFences(handle, 1, &fence), "Upload fence reset failed");
     vulkanCheck(vkQueueSubmit2(device.getQueue(), 1, &submit, fence), "Upload submission failed");
     vulkanCheck(vkWaitForFences(handle, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max()), "Waiting for an upload failed");
+}
+
+VulkanBuffer gpuBufferHolding(const VulkanDevice& device, ImmediateCommands& uploads, const void* bytes, VkDeviceSize size, VkBufferUsageFlags usage) {
+    VulkanBuffer buffer{device.getAllocator(), size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
+    VulkanBuffer staging{device.getAllocator(), size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
+    std::memcpy(staging.getMapped(), bytes, size);
+    staging.flush();
+    uploads.run([&](VkCommandBuffer commands) {
+        const VkBufferCopy copy{0, 0, size};
+        vkCmdCopyBuffer(commands, staging.get(), buffer.get(), 1, &copy);
+    });
+    return buffer;
 }

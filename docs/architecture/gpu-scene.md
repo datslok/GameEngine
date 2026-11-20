@@ -1,6 +1,6 @@
 # GPU scene
 
-Covers: `src/render/gpu/gpu_scene`, `src/render/gpu/still_instances`, `src/render/gpu/lasting_buffers`, `src/render/vulkan/vulkan_lasting_buffer`, `src/render/vulkan/vulkan_indirect_commands`, `src/render/gpu/mesh_pool`, `src/render/vulkan/vulkan_mesh_pool`, `src/render/vulkan/vulkan_mesh`, `src/render/gpu/material_uniforms`, `src/render/gpu/instance_shared.h`, `src/render/vulkan/scene_layout`, `src/render/vulkan/bindless_textures`, `assets/shaders/instances.glsl`, `assets/shaders/frame_data.glsl`, `assets/shaders/materials.glsl`, `assets/shaders/triangle.vert`, `assets/shaders/triangle_vertex.glsl`, `src/render/gpu/light_uniforms`, `src/render/gpu/material_shared`, `assets/shaders/scene_lights.glsl`
+Covers: `src/render/gpu/gpu_scene`, `src/render/gpu/still_instances`, `src/render/gpu/lasting_buffers`, `src/render/vulkan/vulkan_lasting_buffer`, `src/render/vulkan/vulkan_indirect_commands`, `src/render/gpu/mesh_pool`, `src/render/vulkan/vulkan_mesh_pool`, `src/render/vulkan/vulkan_mesh`, `src/render/gpu/material_uniforms`, `src/render/gpu/instance_shared.h`, `src/render/vulkan/scene_layout`, `src/render/vulkan/bindless_textures`, `assets/shaders/instances.glsl`, `assets/shaders/instance_data.glsl`, `assets/shaders/frame_data.glsl`, `assets/shaders/materials.glsl`, `assets/shaders/triangle.vert`, `assets/shaders/triangle_vertex.glsl`, `src/render/gpu/light_uniforms`, `src/render/gpu/material_shared`, `assets/shaders/scene_lights.glsl`
 
 Every scene pass reads its objects, materials, lights and shadow tiles from storage buffers written once a frame, so nothing is bound or pushed per object and all objects sharing a mesh are one instanced draw per view. Staged plan for keeping more of it on the GPU: `docs/research/PERSISTENTSCENE.md`. How a frame uses it: `renderer.md`.
 
@@ -47,16 +47,16 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 
 ## Shaders
 
-- Declaration-only includes: `instances.glsl` (`InstanceData`, `Instances` binding 1, `DrawList` binding 10), `frame_data.glsl` (`FrameData`, binding 0), `materials.glsl` (the bindless array and `MaterialData`), `scene_lights.glsl` (light records, bindings 3-5, shared with `cluster_lights.comp`); `frame_clusters.glsl` builds `ClusterGrid` from the block.
-- `triangle.vert`: reads `instances[drawnInstance(drawList[gl_InstanceIndex])]`, subtracts `cameraOrigin` from the model's translation (camera-relative: `depth.md`), then terrain, card thinning, ground following and wind sway; passes the material number flat.
+- Declaration-only includes: `instances.glsl` (`InstanceData` from `instance_data.glsl`, `Instances` binding 1, `DrawList` binding 10), `frame_data.glsl` (`FrameData`, binding 0), `materials.glsl` (the bindless array and `MaterialData`), `scene_lights.glsl` (light records, bindings 3-5, shared with `cluster_lights.comp`); `frame_clusters.glsl` builds `ClusterGrid` from the block.
+- `triangle.vert`: reads its instance through `drawnObject` (`drawn_objects.glsl`): `instances[drawnInstance(drawList[gl_InstanceIndex])]`, or for a draw from `PLACED_INSTANCE_BASE` a placed part built from its plant (`planting.md`); subtracts `cameraOrigin` from the model's translation (camera-relative: `depth.md`), then terrain, card thinning, ground following and wind sway; passes the material number flat.
 - `scene_surface.glsl` (the main pass's shading): `materials[index]`, textures as `textures[nonuniformEXT(slot)]` (neighbouring pixels may be different objects), each light's shadow from its record.
-- `shadow.vert`: `tileMatrix * (model * position)` in world space, so cached tiles stay keyed on world matrices.
+- `shadow.vert`: `tileMatrix * (model * position)` in world space, so cached tiles stay keyed on world matrices; it, `shadow_cut_out.vert` and `triangle_vertex.glsl` read their instance through `drawnObject` too.
 
 ## Descriptors (`scene_layout`)
 
 **Set 0, `BindlessTextures`:** one binding of 16,384 combined image samplers (or the device's update-after-bind limit if lower), all with the surface sampler; update-after-bind, partially bound, update-unused-while-pending, so `uploadTexture` writes slot handle + 1 while frames using other slots are in flight; slot 0 the white stand-in (`bindlessTextureSlot`). `checkTexturesUploaded` throws for a material texture never uploaded.
 
-**Set 1, the frame's scene** (`SceneBinding`, 43 bindings), written once a frame by `writeSceneSet` from the frame's descriptor pools. Absent features bind stand-ins, so the layout never changes.
+**Set 1, the frame's scene** (`SceneBinding`, 46 bindings), written once a frame by `writeSceneSet` from the frame's descriptor pools. Absent features bind stand-ins, so the layout never changes.
 
 | Bindings | Holds | Owner |
 |---|---|---|
@@ -78,6 +78,7 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 | 35, 36 | terrain heights and patches | terrain (`scene/terrain`) |
 | 37-41 | wind field, springs (two), hanging vertices, anchors | wind (`render/gpu/wind`) |
 | 42 | card thinning records | card thinning (`scene/card_thinning`) |
+| 43-45 | the planting cells' slots' plants, placed parts' instances, every view's placed entries | `planting.md` (Placed plants drawn) |
 
 **Sharing:** `SceneLayout` owns set 1's layout and one pipeline layout of both sets plus the push constant, shared by the main, prepass, shadow, tile reset, velocity and coloured-shadow pipelines and the cluster pass (`sharedLayout`). `bindScene` binds both sets once per pass (graphics by default; compute for the cluster pass) and they stay bound across those pipelines. The glass ray pipelines add the ray tracing set; transparent pipelines add a set 2 of their own.
 

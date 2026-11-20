@@ -19,6 +19,8 @@ enum class GpuPass {
     Atmosphere,
     Probes,
     Wind,         // the wind force field's springs stepped (render/gpu/wind.h), before anything that sways is drawn
+    Planting,     // the planting cells made this frame (render/vulkan/vulkan_planting.h)
+    Placed,       // the camera's lists of the placed plants' parts (render/vulkan/vulkan_placed_drawing.h)
     Clusters,
     Shadows,
     Fog,          // the fog's grid lit and integrated (render/gpu/volumetric_fog.h)

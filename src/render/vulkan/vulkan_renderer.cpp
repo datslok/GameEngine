@@ -156,6 +156,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     cullFrameDraws.resize(framesInFlight);
     cullCompares.resize(framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
+    planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
+    placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -803,6 +805,7 @@ void VulkanRenderer::createFixedTextures() {
     noTerrainHeights = VulkanBuffer{device.getAllocator(), sizeof(GpuTerrainHeightsHeader), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noHangingVertices = VulkanBuffer{device.getAllocator(), sizeof(std::array<std::uint32_t, 3>), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noThinningCards = VulkanBuffer{device.getAllocator(), sizeof(GpuThinningRecord), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    noPlacedRecords = VulkanBuffer{device.getAllocator(), sizeof(GpuInstance), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
 
 /*
@@ -991,6 +994,8 @@ FrameContext VulkanRenderer::beginFrame() {
         takeCameraCull(*culled, frameIndex);
     }
 
+    planting->collect(frameIndex, jobs);
+    placedDrawing->collect(frameIndex);
     collectClothReadbacks();
 
     frame.descriptors->reset();
@@ -1162,6 +1167,12 @@ void VulkanRenderer::finishGpuTimings(FrameContext& context) {
 std::string VulkanRenderer::compareCulling() {
     cullCompareAsked = true;
     return cullCompareReport;
+}
+
+std::string VulkanRenderer::comparePlacement() {
+    const std::string placed = placedDrawing->compare();
+    const std::string cells = planting->compare();
+    return placed.empty() ? cells : cells + '\n' + placed;
 }
 
 /*
@@ -1613,8 +1624,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // What every view draws is laid out before anything is recorded (the frame's draw list: the GPU's regions and the
     // CPU's glass entries), so the scene buffers can be written once and the passes only draw. Each view draws the levels
-    // of detail its distances and pixels allow (scene/level_of_detail.h); the velocity pass redraws the camera's with the
-    // same levels, so its depths match the main pass's. The camera's are chosen by the output's height, not the render's:
+    // of detail its distances and pixels allow (scene/level_of_detail.h). The camera's are chosen by the output's height, not the render's:
     // the upscalers rebuild the output's detail from jittered frames, and chosen by the render's, DLSS Quality pulled
     // every switch a third closer (docs/research/LOD.md, Hiding the switches).
     validateLevelOfDetail(settings.levelOfDetail);
@@ -1630,10 +1640,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     DrawListLayout drawList;
     drawList.reserve(listEntries);
 
+    // The planting cells round the camera (render/vulkan/vulkan_planting.h), on by themselves while the field's looks draw
+    // plants, and the placed plants' table, blocks and boxes (render/vulkan/vulkan_placed_drawing.h): the cells made and
+    // dropped are shadow tiles' changes, and the scene set points at their buffers.
+    PlantingCellSettings plantingCells = settings.planting;
+    plantingCells.enabled = plantingCells.enabled || !description.plantedParts.empty();
+    const bool plantsCells = planting->prepare(description.planting, description.plantingVersion, description.terrainHeights, plantingCells, cameraOrigin,
+                                               frame.frameIndex);
+    const bool drawsPlaced = placedDrawing->prepare(description, *planting, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
+                                                    frame.frameIndex);
+    framePlaced = drawsPlaced ? std::optional{frame.frameIndex} : std::nullopt;
+
     // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway.
     validateWind(settings.wind);
     const WindSettings* sway = description.wind && settings.wind.enabled && settings.wind.sway ? &settings.wind : nullptr;
-    ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame);
+    ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
+                                                 placedDrawing->getShadowChanges());
     stats.shadowDrawn += lastCameraCull.shadowDrawn;
     stats.shadowCulled += lastCameraCull.shadowCulled;
 
@@ -1818,6 +1840,27 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // is written with its record.
     frameWind = wind->prepare(description.wind ? &*description.wind : nullptr, settings.wind, cameraOrigin, description.frameSeconds);
 
+    // The camera's culling view, and the placed plants' views (render/vulkan/vulkan_placed_drawing.h) before the scene set
+    // points at their entries: the camera, the probe faces captured this frame and the shadow tiles drawing their casters.
+    // The mirror draws only flat-faced draws, which plants are not. The camera builds no velocity list: the main pass
+    // writes the motion vectors itself (triangle_motion.vert).
+    const GpuCameraCull cameraCull = packCameraCull(cameraFrustum, cameraLevels, false, false, 0.0f);
+    placedViewNumbers = PlacedViewNumbers{};
+
+    if (drawsPlaced) {
+        std::vector<GpuCameraCull> faces;
+        std::vector<int> faceNumbers;
+
+        for (const CaptureCull& capture : captureViews) {
+            if (capture.capture < cubeFaceCount) {
+                faces.push_back(packCaptureCull(capture.view));
+                faceNumbers.push_back(capture.capture);
+            }
+        }
+
+        setPlacedViews(cameraCull, faces, faceNumbers, shadowDraws, frame.frameIndex);
+    }
+
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
     // points copied up before the fog and the main pass read them.
     const bool readsSkyVisibility = readsSkyGrid(description, settings);
@@ -1845,8 +1888,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // first, then each capture drawn this frame, then each shadow tile drawn, all together. The groups' styles are kept
     // for the counts read back, and for a comparison the CPU's lists and the records.
     beginGpuPass(frame, GpuPass::CameraCull);
-    // The camera builds no velocity list: the main pass writes the motion vectors itself (triangle_motion.vert).
-    std::vector<GpuCameraCull> cullViews{packCameraCull(cameraFrustum, cameraLevels, false, false, 0.0f)};
+    std::vector<GpuCameraCull> cullViews{cameraCull};
     cullViews[0].mainBase = 0;
     cullViews[0].motionBase = 0;
     std::vector<CullViewKind>& kinds = cullFrameViews[frame.frameIndex];
@@ -1930,6 +1972,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::Wind);
         wind->step(frame.commands, frame.descriptors, frames[frame.frameIndex].scene->wind.describe().buffer);
         endGpuPass(frame, GpuPass::Wind);
+    }
+
+    // The planting cells round the camera made this frame (render/vulkan/vulkan_planting.h), on the ground the scene's
+    // heights hold (uploaded with the scene set above); then the camera's placed plants culled from the cells held.
+    const VkBuffer plantingGround = uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get();
+
+    if (plantsCells) {
+        beginGpuPass(frame, GpuPass::Planting);
+        planting->record(frame.commands, frame.descriptors, plantingGround, frame.frameIndex);
+        endGpuPass(frame, GpuPass::Planting);
+    }
+
+    if (drawsPlaced) {
+        beginGpuPass(frame, GpuPass::Placed);
+        placedDrawing->record(frame.commands, frame.descriptors, *planting, plantingGround, frame.frameIndex);
+        endGpuPass(frame, GpuPass::Placed);
     }
 
     // The lists feed both clustered shading and its heatmap.
@@ -2353,6 +2411,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 
     checkTextures(description.stillDraws, description.draws.size() - description.stillDraws);
 
+    for (const DrawItem& part : description.plantedParts) {
+        checkTexturesUploaded(part.material);
+    }
+
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
     GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
                                            settings.clusterHeatmap, settings.shadows);
@@ -2425,6 +2487,18 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     }
 
     buffers.windAnchors.write(anchors);
+
+    // The placed parts' instances in the placed table's order (render/gpu/placed_drawing.h; one unused without).
+    std::vector<GpuInstance> placedParts;
+
+    if (framePlaced) {
+        for (const std::size_t draw : placedDrawing->getTable(frame.frameIndex).draws) {
+            placedParts.push_back(records.planted[draw]);
+        }
+    }
+
+    placedParts.resize(std::max<std::size_t>(placedParts.size(), 1));
+    buffers.placedParts.write(placedParts);
     updateVertexRecords(hangingRecords.data(), hangingRecords.size() * sizeof(hangingRecords.front()), hangingChanged, hangingVertices);
     updateVertexRecords(thinningRecords.data(), thinningRecords.size() * sizeof(GpuThinningRecord), thinningChanged, thinningCards);
 
@@ -2461,6 +2535,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.terrainHeights = VkDescriptorBufferInfo{uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get(), 0, VK_WHOLE_SIZE};
     views.hangingVertices = VkDescriptorBufferInfo{hangingRecords.empty() ? noHangingVertices.get() : hangingVertices.get(), 0, VK_WHOLE_SIZE};
     views.thinningCards = VkDescriptorBufferInfo{thinningRecords.empty() ? noThinningCards.get() : thinningCards.get(), 0, VK_WHOLE_SIZE};
+    views.placedPlants = VkDescriptorBufferInfo{framePlaced ? planting->getPlants() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    views.placedEntries = framePlaced ? placedDrawing->describeEntries(frame.frameIndex) : VkDescriptorBufferInfo{noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
 
@@ -2517,14 +2593,7 @@ void VulkanRenderer::updateTerrainHeights(const FrameDescription& description) {
     const std::vector<std::uint32_t> words = packTerrainHeights(*source);
     const VkDeviceSize bytes = words.size() * sizeof(std::uint32_t);
     device.waitIdle();
-    terrainHeights = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
-    VulkanBuffer staging{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
-    std::memcpy(staging.getMapped(), words.data(), bytes);
-    staging.flush();
-    uploads.run([&](VkCommandBuffer commands) {
-        const VkBufferCopy copy{0, 0, bytes};
-        vkCmdCopyBuffer(commands, staging.get(), terrainHeights.get(), 1, &copy);
-    });
+    terrainHeights = gpuBufferHolding(device, uploads, words.data(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     uploadedTerrain = source;
     uploadedTerrainVersion = description.terrainHeightsVersion;
 }
@@ -2601,7 +2670,7 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
 */
 VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, DrawListLayout& drawList,
                                                                bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway,
-                                                               const CameraCullFrame& table) {
+                                                               const CameraCullFrame& table, const PlantedShadowChanges& planted) {
     const std::size_t listEntries = description.draws.size();
     ShadowDraws prepared;
     prepared.tileGlass.assign(tiles.size(), false);
@@ -2624,7 +2693,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         // The nearest cascade, and a lamp reaching the swaying ground, redraw every frame while things sway: anything in
         // them might.
         const bool sways = sway != nullptr && tileSways(tile.sunCascade, tile.reach.centre, tile.reach.radius, cameraOrigin, *sway);
-        const ShadowTileNeeds needs = shadowTileNeeds(tile, levelSettings, table, description.draws, glass, sways, shadowFrame, shadowMemory);
+        const ShadowTileNeeds needs = shadowTileNeeds(tile, levelSettings, table, description.draws, glass, sways, shadowFrame, shadowMemory, planted);
 
         if (tile.separateMovers) {
             ensureStillShadow(tile.size);
@@ -2641,7 +2710,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
             continue;
         }
 
-        ShadowTileDraw drawing{&tile, BatchedDraws{}, needs.key, needs.redraw, {}, sways, PassDraws{}, PassDraws{}};
+        ShadowTileDraw drawing{&tile, BatchedDraws{}, needs.key, needs.redraw, {}, sways, PassDraws{}, PassDraws{}, std::nullopt};
 
         if (needs.redraw && !glass.empty()) {
             drawing.glass = batchByMesh(description.draws, glass, drawList.size(), nullptr);
@@ -2731,7 +2800,9 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
             bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
             const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace, drawing.sways);
             vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-            stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
+            const BatchPipelines casting{shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE};
+            stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, casting);
+            stats.shadowDrawCalls += drawPlacedDraws(commands, casting, drawing.placedView);
             vkCmdEndRendering(commands);
             renderingOpen = false;
         }
@@ -2788,6 +2859,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
 
         if (!tile.separateMovers) {
             stats.shadowDrawCalls += drawPassDraws(commands, drawing.casterDraws, casting);
+            stats.shadowDrawCalls += drawPlacedDraws(commands, casting, drawing.placedView);
         }
 
         // Only a tile keeping them apart has a list of its moved casters.
@@ -2883,6 +2955,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const PassDraws& main
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     pushUnusedView(commands, sceneLayout->getPipelineLayout());
     stats.drawCalls += drawPassDraws(commands, mainDraws, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
+    stats.drawCalls += drawPlacedDraws(commands, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT}, 0u);
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
@@ -2942,6 +3015,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const PassDraws& mainDraw
     }
     pushUnusedView(commands, pipeline.getLayout());
     stats.drawCalls += drawPassDraws(commands, mainDraws, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT, true});
+    stats.drawCalls += drawPlacedDraws(commands, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT, true}, 0u);
 
     /*
     * The sky's and the stars' pipelines draw into the scene image alone, so they need a pass of their own: the barriers
@@ -3023,16 +3097,6 @@ void VulkanRenderer::drawRayDebugView(FrameContext& frame, VkDescriptorSet scene
 }
 
 /*
-* The velocity pass: the velocity image starts cleared to "no motion" (so everything it does not draw is reprojected by
-* the camera alone), and the moving objects are drawn over the main pass's depth, which is tested and kept, with the two
-* frames' cameras as push constants. The image is left for the resolve, which reads it.
-*/
-/*
-* Glass and blended surfaces, far to near, into the scene image over the opaque picture, its depth tested and not
-* written. Set 2 holds the reflection probe's light and the picture before the glass (VulkanOpaquePicture, kept just
-* before: refracting glass reads it).
-*/
-/*
 * The beacons added to the picture in a block of their own, its depth tested and kept; the picture left readable after,
 * as the main pass leaves it.
 */
@@ -3052,6 +3116,11 @@ void VulkanRenderer::drawBeacons(FrameContext& frame, std::span<const PlacedBeac
     sceneColour.transition(commands, ImageState::SurfaceRead);
 }
 
+/*
+* Glass and blended surfaces, far to near, into the scene image over the opaque picture, its depth tested and not
+* written. Set 2 holds the reflection probe's light and the picture before the glass (VulkanOpaquePicture, kept just
+* before: refracting glass reads it).
+*/
 void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes,
                                      bool readsProbe, const TransparentRefraction& refraction) {
     const VkCommandBuffer commands = frame.commands;
@@ -3122,6 +3191,7 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, const ProbeCaptureSte
         const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane) * fromCamera, noClipPlane(), Vec3{}, probeThinning);
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
         stats.drawCalls += drawPassDraws(commands, captureDraws[static_cast<std::size_t>(face)], capturing);
+        stats.drawCalls += drawPlacedDraws(commands, capturing, placedViewNumbers.faces.at(static_cast<std::size_t>(face)));
 
         if (sky) {
             atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(),
@@ -3316,6 +3386,62 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
     }
 
     return calls;
+}
+
+/*
+* A placed plants' view (render/gpu/placed_drawing.h): every group's command drawn, empty or not (a few hundred, cheap
+* on the GPU, and their count is known without the GPU's), each style's run by one multi-draw from the shared mesh
+* buffer.
+*/
+std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const BatchPipelines& pipelines, std::optional<std::uint32_t> view) const {
+    if (!framePlaced || !view) {
+        return 0;
+    }
+
+    const VulkanPlacedDrawing::Draws placed = placedDrawing->draws(*framePlaced, *view);
+    const CullDrawOrder& order = *placed.order;
+    BatchState state{pipelines};
+    std::size_t calls = 0;
+    bindPools(commands, pipelines.previousShapes);
+
+    for (std::size_t run = 0; run < cullStyles; ++run) {
+        if (order.runCount[run] == 0) {
+            continue;
+        }
+
+        state.use(commands, (run & 2) != 0, (run & 1) != 0);
+        vkCmdDrawIndexedIndirect(commands, placed.commands, placed.offset + VkDeviceSize{order.runFirst[run]} * sizeof(GpuDrawCommand), order.runCount[run],
+                                 sizeof(GpuDrawCommand));
+        ++calls;
+    }
+
+    return calls;
+}
+
+void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
+                                    ShadowDraws& shadowDraws, std::uint32_t frameIndex) {
+    std::vector<GpuCameraCull> asked{camera};
+    std::vector<std::string> names{"Camera"};
+    const auto add = [&](const GpuCameraCull& view, std::string name) {
+        asked.push_back(view);
+        names.push_back(std::move(name));
+        return static_cast<std::uint32_t>(asked.size() - 1);
+    };
+
+    for (std::size_t face = 0; face < faces.size(); ++face) {
+        placedViewNumbers.faces.at(static_cast<std::size_t>(faceNumbers[face])) = add(faces[face], "Probe face " + std::to_string(faceNumbers[face]));
+    }
+
+    // A tile keeping its movers apart draws its casters only when its still copy is redrawn; placed plants never move.
+    for (std::size_t tile = 0; tile < shadowDraws.tiles.size(); ++tile) {
+        ShadowTileDraw& drawing = shadowDraws.tiles[tile];
+
+        if (!drawing.tile->separateMovers || drawing.still) {
+            drawing.placedView = add(shadowDraws.views[tile], "Shadow tile " + std::to_string(tile));
+        }
+    }
+
+    placedDrawing->setViews(asked, std::move(names), frameIndex);
 }
 
 /*
@@ -3779,14 +3905,7 @@ void VulkanRenderer::updateVertexRecords(const void* records, VkDeviceSize bytes
     }
 
     device.waitIdle();
-    buffer = VulkanBuffer{device.getAllocator(), bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
-    VulkanBuffer staging{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
-    std::memcpy(staging.getMapped(), records, bytes);
-    staging.flush();
-    uploads.run([&](VkCommandBuffer commands) {
-        const VkBufferCopy copy{0, 0, bytes};
-        vkCmdCopyBuffer(commands, staging.get(), buffer.get(), 1, &copy);
-    });
+    buffer = gpuBufferHolding(device, uploads, records, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     changed = false;
 }
 
@@ -3912,6 +4031,8 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     reflections->setFramesInFlight(count);
     eyeAdaptation->setFramesInFlight(count);
     cameraCulling->setFramesInFlight(count);
+    planting->setFramesInFlight(count);
+    placedDrawing->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
     cullFrameViews.assign(count, {});
     cullFrameDraws.assign(count, 0);

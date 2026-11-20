@@ -5,7 +5,7 @@
 #extension GL_ARB_shader_draw_parameters : require
 
 #include "frame_data.glsl"
-#include "instances.glsl"
+#include "drawn_objects.glsl"
 #include "planar_reflection.glsl"
 #include "terrain_data.glsl"
 #include "wind_data.glsl"
@@ -29,7 +29,8 @@ layout(push_constant) uniform ShadowView {
 out float gl_ClipDistance[1];
 
 void main() {
-    InstanceData instance = instances[drawnInstance(drawList[gl_InstanceIndex])];
+    // A frame's draw, or a placed plant's part (drawn_objects.glsl).
+    InstanceData instance = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB)).instance;
     vec4 world = instance.model * vec4(position, 1.0);
     world.y += groundLift(instance.material.w, world.xyz);
 

@@ -60,6 +60,8 @@
 #include "render/vulkan/vulkan_motion_blur.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
+#include "render/vulkan/vulkan_placed_drawing.h"
+#include "render/vulkan/vulkan_planting.h"
 #include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_camera_culling.h"
 #include "render/vulkan/vulkan_lasting_buffer.h"
@@ -132,6 +134,10 @@ public:
     // cull-compare: asks for the next frame's GPU-culled lists to be compared with the CPU's, and returns the last
     // comparison's report (empty while none has finished).
     std::string compareCulling();
+
+    // placement-compare: asks for the next frame's planting cells to be read back and planted again on the CPU, and
+    // returns the last comparison's report (empty while none has finished).
+    std::string comparePlacement();
 
     // Waits for every pipeline asked for, rethrowing the first that failed to build.
     void finishPipelines();
@@ -353,7 +359,20 @@ private:
 
     // The wind force field (render/gpu/wind.h) and this frame's record, prepared before the scene set is written.
     std::unique_ptr<VulkanWind> wind;
+    std::unique_ptr<VulkanPlanting> planting;
     GpuWindField frameWind{};
+
+    // The placed plants drawn in every view (render/gpu/placed_drawing.h): the frame in flight while it draws any, each
+    // view's number among its views (the camera's 0), and a stand-in for the scene set's placed buffers while it draws none.
+    std::unique_ptr<VulkanPlacedDrawing> placedDrawing;
+    std::optional<std::uint32_t> framePlaced;
+
+    struct PlacedViewNumbers {
+        std::array<std::optional<std::uint32_t>, cubeFaceCount> faces{};
+    };
+
+    PlacedViewNumbers placedViewNumbers;
+    VulkanBuffer noPlacedRecords;
 
     // The sky visibility grid (render/gpu/sky_visibility.h): baked on the CPU round the camera, its points copied up
     // when they change, read by the main pass and the fog without light probes.
@@ -688,6 +707,7 @@ private:
         bool sways = false; // its casters drawn swaying in the wind (tileSways)
         PassDraws casterDraws;
         PassDraws moverDraws;
+        std::optional<std::uint32_t> placedView; // its number among the placed plants' views, drawn with its casters
     };
 
     // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches). views: each drawn tile's view
@@ -737,7 +757,13 @@ private:
     // the changes the table reports (render/gpu/shadow_culling.h); each drawn tile is a view whose lists get room for
     // every draw in drawList, its glass entries appended there.
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, DrawListLayout& drawList, bool colouredShadows,
-                                   const LevelOfDetailSettings& levelSettings, const WindSettings* sway, const CameraCullFrame& table);
+                                   const LevelOfDetailSettings& levelSettings, const WindSettings* sway, const CameraCullFrame& table,
+                                   const PlantedShadowChanges& planted);
+
+    // The placed plants' views this frame (camera, each probe face, each shadow tile drawing its
+    // casters), each one's number kept for the passes drawing it, and named for placement-compare.
+    void setPlacedViews(const GpuCameraCull& camera, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
+                        ShadowDraws& shadowDraws, std::uint32_t frameIndex);
 
     // A capture drawn this frame: which (a probe face, or cubeFaceCount the mirror) and its view.
     struct CaptureCull {
@@ -802,6 +828,10 @@ private:
 
     // A camera pass's draws (PassDraws): its batches, or its groups' GPU-written commands. Returns the draw calls.
     std::size_t drawPassDraws(VkCommandBuffer commands, const PassDraws& draws, const BatchPipelines& pipelines) const;
+
+    // A placed plants' view's commands (framePlaced), each style's run by one multi-draw; none without. Returns the draw
+    // calls.
+    std::size_t drawPlacedDraws(VkCommandBuffer commands, const BatchPipelines& pipelines, std::optional<std::uint32_t> view) const;
 
     // The triangles batches draw (each mesh's times its instances), and those of cut-outs among them: the F4 readout's.
     std::pair<std::size_t, std::size_t> batchTriangles(const std::vector<DrawBatch>& batches) const;

@@ -335,21 +335,33 @@ void addRenderCommands(CommandRegistry& registry, RenderSettings& settings, Typi
                  });
 }
 
-/*
-* The comparison needs a frame drawn after it is asked for and its GPU work finished, so each call reports the last one
-* and asks for another.
-*/
-void addCullCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
-    registry.add("cull-compare", "cull-compare",
-                 "Compares every list the GPU builds (camera, velocity pass, captures, shadow tiles) with the CPU's on the next frame; "
-                 "shows the last comparison. Run it, wait a few frames, run it again.",
-                 [compare](const CommandArguments& arguments) {
-                     if (!arguments.empty()) {
-                         return commandError("cull-compare takes nothing");
-                     }
+namespace {
+    /*
+    * A comparison of the GPU's work with the CPU's needs a frame drawn after it is asked for and its GPU work finished,
+    * so each call reports the last one and asks for another.
+    */
+    void addCompareCommand(CommandRegistry& registry, const std::string& name, const std::string& help, std::function<std::string()> compare) {
+        registry.add(name, name, help + " Shows the last comparison: run it, wait a few frames, run it again.", [name, compare](const CommandArguments& arguments) {
+            if (!arguments.empty()) {
+                return commandError(name + " takes nothing");
+            }
 
-                     const std::string last = compare();
-                     return commandOk((last.empty() ? std::string{"No comparison has finished yet."} : last) +
-                                      " The next frame is compared: run cull-compare again after it.");
-                 });
+            const std::string last = compare();
+            return commandOk((last.empty() ? std::string{"No comparison has finished yet."} : last) + " The next frame is compared: run " + name +
+                             " again after it.");
+        });
+    }
+}
+
+void addCullCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
+    addCompareCommand(registry, "cull-compare",
+                      "Compares every list the GPU builds (camera, velocity pass, captures, shadow tiles) with the CPU's on the next frame.", std::move(compare));
+}
+
+void addPlacementCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
+    addCompareCommand(registry, "placement-compare",
+                      "Reads the planting cells round the camera back from the GPU on the next frame they run (with engine.render.planting.enabled on) and "
+                      "plants the same cells on the CPU, plant for plant; while placed plants draw, each view's placed lists (camera, "
+                      "velocity, probe faces, shadow tiles) against the CPU's too.",
+                      std::move(compare));
 }

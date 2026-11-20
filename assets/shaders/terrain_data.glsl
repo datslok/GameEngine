@@ -1,32 +1,11 @@
-// The terrain's heights and patches as the scene's vertex shaders read them (render/gpu/terrain_gpu.h), and the patch
-// vertex built from them: terrainHeight, terrainNormal and terrainVertex mirror scene/terrain_heights.cpp. Included by
+// The terrain's patches as the scene's vertex shaders read them (render/gpu/terrain_gpu.h), and the patch vertex built
+// from the heights (terrain_heights.glsl): terrainNormal and terrainVertex mirror scene/terrain_heights.cpp. Included by
 // every vertex shader reading instances.
 #ifndef TERRAIN_DATA_GLSL
 #define TERRAIN_DATA_GLSL
 
-#include "terrain.glsl"
+#include "terrain_heights.glsl"
 #include "render/gpu/instance_shared.h"
-
-// Must match GpuTerrainGrid.
-struct TerrainGrid {
-    vec2 corner;
-    float spacing;
-    uint size;
-    uint offset;
-    uint unused0;
-    uint unused1;
-    uint unused2;
-};
-
-// Must match GpuTerrainHeightsHeader followed by the heights.
-layout(std430, set = 1, binding = 35) readonly buffer TerrainHeights {
-    uint terrainGridCount;
-    uint terrainUnused0;
-    uint terrainUnused1;
-    uint terrainUnused2;
-    TerrainGrid terrainGrids[TERRAIN_MOST_GRIDS];
-    float terrainHeights[];
-};
 
 // Must match GpuTerrainPatch.
 struct TerrainPatch {
@@ -38,57 +17,6 @@ struct TerrainPatch {
 layout(std430, set = 1, binding = 36) readonly buffer TerrainPatches {
     TerrainPatch terrainPatches[];
 };
-
-// Whether a grid holds a place, its edges included.
-bool terrainGridHolds(TerrainGrid grid, vec2 place) {
-    float extent = float(grid.size - 1u) * grid.spacing;
-    return all(greaterThanEqual(place, grid.corner)) && all(lessThanEqual(place, grid.corner + extent));
-}
-
-// Bilinear between the four points round a place, clamped onto the grid.
-float terrainSampleGrid(TerrainGrid grid, vec2 place) {
-    float last = float(grid.size - 1u);
-    vec2 cell = clamp((place - grid.corner) / grid.spacing, vec2(0.0), vec2(last));
-    uvec2 first = min(uvec2(cell), uvec2(grid.size - 2u));
-    vec2 fraction = cell - vec2(first);
-    uint index = grid.offset + first.y * grid.size + first.x;
-    return terrainBilinear(terrainHeights[index], terrainHeights[index + 1u], terrainHeights[index + grid.size], terrainHeights[index + grid.size + 1u],
-                           fraction.x, fraction.y);
-}
-
-// The drawn land's height in a grid at a place: its square's triangle there, clamped onto the grid.
-float terrainSampleGridSurface(TerrainGrid grid, vec2 place) {
-    float last = float(grid.size - 1u);
-    vec2 cell = clamp((place - grid.corner) / grid.spacing, vec2(0.0), vec2(last));
-    uvec2 first = min(uvec2(cell), uvec2(grid.size - 2u));
-    vec2 fraction = cell - vec2(first);
-    uint index = grid.offset + first.y * grid.size + first.x;
-    return terrainTriangleHeight(terrainHeights[index], terrainHeights[index + 1u], terrainHeights[index + grid.size],
-                                 terrainHeights[index + grid.size + 1u], fraction.x, fraction.y);
-}
-
-// The drawn land's height at a place (terrainSurfaceHeight): as the finest patches draw it, their grid on the finest
-// grid's points, each square two flat triangles; the finest grid holding it, else the coarsest's nearest edge.
-float terrainSurfaceHeight(vec2 place) {
-    for (uint grid = 0u; grid < terrainGridCount; ++grid) {
-        if (terrainGridHolds(terrainGrids[grid], place)) {
-            return terrainSampleGridSurface(terrainGrids[grid], place);
-        }
-    }
-
-    return terrainGridCount > 0u ? terrainSampleGridSurface(terrainGrids[terrainGridCount - 1u], place) : 0.0;
-}
-
-// The land's height at a place: the finest grid holding it, else the coarsest's nearest edge.
-float terrainHeight(vec2 place) {
-    for (uint grid = 0u; grid < terrainGridCount; ++grid) {
-        if (terrainGridHolds(terrainGrids[grid], place)) {
-            return terrainSampleGrid(terrainGrids[grid], place);
-        }
-    }
-
-    return terrainGridCount > 0u ? terrainSampleGrid(terrainGrids[terrainGridCount - 1u], place) : 0.0;
-}
 
 // How far a vertex of an instance of a kind is lifted at a place in the world: the drawn land's height there for a mesh
 // following the ground (INSTANCE_KIND_FOLLOWS_GROUND, scene/ground_follow.h, liftedOntoGround), nothing for any other.

@@ -87,6 +87,10 @@ static_assert(sizeof(GpuCullChunk) == 32, "GpuCullChunk must match camera_cullin
 // The chunk of these draws' records: draws with a mesh and not transparent (the only candidates) count; empty slots and
 // glass are left out. None counting: no flags (no view takes it).
 GpuCullChunk packCullChunk(std::span<const GpuCullRecord> members);
+
+// A box (low to high) as a chunk's, grown by the chunks' margin (CULL_CHUNK_MARGIN and a share of its farthest
+// coordinate), which outgrows the GPU's and CPU's rounding; flags kept.
+void setCullChunkBox(GpuCullChunk& chunk, const float low[3], const float high[3]);
 GpuMeshLevels packMeshLevels(MeshHandle mesh, std::span<const MeshLevel> levels);
 GpuLevelView packLevelView(const LevelView& view);
 GpuFrustum packFrustum(const Frustum& frustum);

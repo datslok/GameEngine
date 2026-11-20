@@ -14,6 +14,7 @@
 #include "scene/material.h"
 #include "scene/mesh_level.h"
 #include "scene/model_renderer.h"
+#include "scene/planting_cells.h"
 #include "scene/terrain_heights.h"
 #include "scene/wind.h"
 #include "physics/static_level.h"
@@ -142,6 +143,14 @@ private:
     std::uint64_t frame = 2; // starts past the records' stamp of 0, so none counts as last frame's on the first
 };
 
+// One kind of a layer's planted plants: its parts, plantedParts first to first + count.
+struct PlantedKindParts {
+    int layer = 0;
+    int kind = 0;
+    std::size_t first = 0;
+    std::size_t count = 0;
+};
+
 // Draws first to first + count of a frame's list.
 struct DrawRange {
     std::size_t first = 0;
@@ -217,6 +226,18 @@ struct FrameDescription {
 
     // What hanging things hang from (scene/wind.h, the first WindAnchors placed), none without.
     std::shared_ptr<const std::vector<WindAnchor>> windAnchors{};
+
+    // The maps and layers the GPU plants its cells round the camera from (scene/planting_cells.h, the first
+    // PlantingSource placed), uploaded again when the field or its version changes; none without one.
+    std::shared_ptr<const PlantingField> planting{};
+    std::uint64_t plantingVersion = 0;
+
+    // What the planted plants are drawn with (the field's PlantingLooks): every kind's parts as draws in the plant's
+    // own frame (model the part's own, mostly the identity), attached as the frame's draws are; each kind's run of them;
+    // and the region drawn. None when the field's plants are not drawn.
+    std::vector<DrawItem> plantedParts{};
+    std::vector<PlantedKindParts> plantedKinds{};
+    PlantedRegion plantedRegion{};
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.
@@ -228,6 +249,12 @@ void attachShapes(std::span<DrawItem> draws, const std::vector<DeformedMesh>& de
 // kept from last frame (give the list back with StillDraws::giveBack once drawn), and the rest are built after them.
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history = nullptr,
                             JobSystem& jobs = serialJobs(), std::size_t laterDraws = 0, StillDraws* still = nullptr);
+
+// A renderer's part as a draw placed by model (its flags and sway the renderer's; nothing attached yet, no history).
+DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const Mat4& model);
+
+// The looks' kinds' parts appended to the frame's plantedParts, a run a kind, and its region.
+void appendPlantedParts(FrameDescription& frame, const PlantingLooks& looks);
 
 // One entity's draws, a part each, into draws (as many as its parts), placed by its transform at alpha; with a
 // history, each part's last-frame matrix from it, and this frame's remembered.

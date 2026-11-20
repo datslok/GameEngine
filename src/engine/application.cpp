@@ -673,6 +673,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     }
 
     attach(builtDraws);
+    attach(frame.plantedParts);
     partDone(SceneStage::Attach);
 
     for (const auto& [terrain, nodes] : terrains) {

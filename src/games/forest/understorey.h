@@ -97,13 +97,12 @@ struct UnderstoreyPlacement {
 inline constexpr std::uint64_t understoreySeed = 0x554e4445ull;
 
 /*
-* The plants' places, planted from the maps (ditheredCells over forestPatch): one of each planted cell, its kind by the
-* kinds' shares, sized and turned at random, none within trunkClearance of a trunk's reach (the trunks given as
-* StandingCrowns, their radius the reach), each fitting the maps (its nominal sphere clear of every obstacle and under
-* every sight line). The same every run.
+* The understorey's layer of the planting (games/forest/forest_planting.h): its density from its settings, its kinds by
+* their shares (fernShare, calatheaShare, the anthuriums the rest), each its kind's height's sphere (understoreyRadius),
+* sized within understoreyScaleSpread of 1 and turned at random, sunk understoreySinkMetres, with a pick of its kind's
+* variants. Kept clear of the trunks by the forest's layers.
 */
-std::vector<UnderstoreyPlacement> placeUnderstorey(const ForestUnderstoreySettings& settings, const ValleyMaps& maps,
-                                                   const std::vector<StandingCrown>& trunks);
+PlantingLayerRecord understoreyPlantingLayer(const ForestUnderstoreySettings& settings);
 
 // The farthest any plant's nominal sphere reaches (the tallest kind at its largest): the canopy cap it reads.
 float understoreyReach(const ForestUnderstoreySettings& settings);

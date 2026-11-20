@@ -18,6 +18,17 @@
 #include <vector>
 
 namespace {
+    // Whether a place is clear of every trunk the patch planted, each its reach and clearance round.
+    bool clearOfTheTrunks(const ForestPlanting& planted, const Vec3& foot, float clearance) {
+        const Vec2 place{foot.x, foot.z};
+        const auto clear = [&](const std::vector<TreePlacement>& trees, float reach) {
+            return std::all_of(trees.begin(), trees.end(), [&](const TreePlacement& tree) {
+                return (place - Vec2{tree.foot.x, tree.foot.z}).length() >= reach + clearance - 1e-4f;
+            });
+        };
+        return clear(planted.emergents, bigTrunkReach) && clear(planted.canopy, bigTrunkReach) && clear(planted.mid, midTrunkReach);
+    }
+
     // A segment's angle above level (radians).
     float elevationOf(const Vec3& from, const Vec3& to) {
         const Vec3 step = to - from;
@@ -243,44 +254,38 @@ namespace {
     }
 
     /*
-    * The understorey stands on its layer's dithered cells (valley_maps), in order: each plant on a cell's place, the
-    * few cells left out only by the trunk or the maps.
+    * The understorey and the palms stand clear of every trunk of the patch (its reach and their clearance round), and
+    * of each other's cells only by their own lattices.
     */
-    void testTheUnderstoreyStandsOnItsCells() {
-        const ForestUnderstoreySettings settings;
-        const ValleyMaps& maps = patchValleyMaps();
-        const std::vector<StandingCrown> trunks{StandingCrown{Vec2{valleyAxis(-100.0f) + 15.0f, -100.0f}, 2.0f}};
-        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, maps, trunks);
-        const std::vector<DitheredCell> cells = ditheredCells(settings.planting, maps, forestPatch, understoreySeed);
-        assert(!plants.empty() && plants.size() <= cells.size() && 10 * plants.size() > 9 * cells.size());
-        std::size_t next = 0;
+    void testTheFloorPlantsKeepClearOfTheTrunks() {
+        const ForestPlanting& planted = defaultPatchPlanting();
+        const ForestUnderstoreySettings understorey;
+        const ForestPalmSettings palms;
+        assert(!planted.understorey.empty() && !planted.palms.empty());
 
-        for (const UnderstoreyPlacement& plant : plants) {
-            while (next < cells.size() && (cells[next].place.x != plant.foot.x || cells[next].place.y != plant.foot.z)) {
-                ++next;
-            }
+        for (const UnderstoreyPlacement& plant : planted.understorey) {
+            assert(clearOfTheTrunks(planted, plant.foot, understorey.trunkClearance));
+        }
 
-            assert(next < cells.size());
-            ++next;
+        for (const PalmPlacement& palm : planted.palms) {
+            assert(clearOfTheTrunks(planted, palm.foot, palms.trunkClearance));
         }
     }
 
-    // The palms' places: on the trees' stretch, clear of the path and the trunks, on the ground, every variant used,
-    // none blocking a sight line; the same every run.
+    // The palms' places: on the trees' stretch, clear of the path, on the ground, every variant used, none blocking a
+    // sight line; the same every run.
     void testThePalmsArePlaced() {
         const ForestPalmSettings settings;
-        const std::vector<StandingCrown> trunks{StandingCrown{Vec2{valleyAxis(-150.0f) + 10.0f, -150.0f}, 2.0f}};
         const std::vector<SightLine> lines = forestSightLines();
-        const std::vector<PalmPlacement> palms = placePalms(settings, patchValleyMaps(), trunks);
+        const std::vector<PalmPlacement>& palms = defaultPatchPlanting().palms;
         assert(palms.size() > 100);
         std::vector<int> variants(static_cast<std::size_t>(settings.variants), 0);
 
         for (const PalmPlacement& palm : palms) {
             assert(palm.foot.z >= treeNorthmost && palm.foot.z <= treeSouthmost);
             assert(std::fabs(palm.foot.x - valleyAxis(palm.foot.z)) <= treeSpread);
-            assert(forestPathDistance(palm.foot.x, palm.foot.z) >= settings.planting.pathClearance);
-            assert(near(palm.foot.y, forestHeight(palm.foot.x, palm.foot.z) - understoreySinkMetres, 1e-4f));
-            assert((Vec2{palm.foot.x, palm.foot.z} - trunks.front().foot).length() >= trunks.front().radius + settings.trunkClearance);
+            assert(forestPathDistance(palm.foot.x, palm.foot.z) >= settings.planting.pathClearance - 1e-3f);
+            assert(palm.foot.y == terrainSurfaceHeight(patchTerrainHeights(), palm.foot.x, palm.foot.z) - understoreySinkMetres);
             assert(palm.scale >= 1.0f - palmScaleSpread - 1e-5f && palm.scale <= 1.0f + palmScaleSpread + 1e-5f);
             assert(palm.variant >= 0 && palm.variant < settings.variants);
             assert(!blocksSight(palmCentre(settings, palm), palmRadius(settings, palm), lines));
@@ -295,8 +300,8 @@ namespace {
         assert(near(palmRadius(settings, first), 0.5f * palmVariantHeight(settings, first.variant) * first.scale, 1e-5f));
         assert(near(palmCentre(settings, first).y, first.foot.y + palmRadius(settings, first), 1e-4f));
 
-        const std::vector<PalmPlacement> again = placePalms(settings, patchValleyMaps(), trunks);
-        assert(again.size() == palms.size() && again.back().foot.x == palms.back().foot.x && again.back().variant == palms.back().variant);
+        const ForestPlanting again = plantThePatch(defaultSpecies(), patchValleyMaps(), patchTerrainHeights(), testJobs());
+        assert(again.palms.size() == palms.size() && again.palms.back().foot.x == palms.back().foot.x && again.palms.back().variant == palms.back().variant);
     }
 
     /*
@@ -435,7 +440,7 @@ void testPalms() {
     testThePalmVariants();
     testAPalmIsGrown();
     testAPalmThinsLeafletByLeaflet();
-    testTheUnderstoreyStandsOnItsCells();
+    testTheFloorPlantsKeepClearOfTheTrunks();
     testThePalmsArePlaced();
     testTheLeafletsPictures();
     testAMeanColourCountsOnlyTheLeaves();

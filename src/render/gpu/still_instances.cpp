@@ -123,5 +123,6 @@ SceneRecords packMovingDraws(const FrameDescription& frame, const StillInstances
     const std::span<const DrawItem> moving = std::span<const DrawItem>{frame.draws}.subspan(frame.stillDraws);
     records.moving = packInstances(moving, records.materials, jobs);
     records.movingPrevious = packPreviousModels(moving, jobs);
+    records.planted = packInstances(frame.plantedParts, records.materials, jobs);
     return records;
 }

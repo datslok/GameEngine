@@ -35,6 +35,21 @@ TerrainHeightGrid makeTerrainHeightGrid(const Vec2& centre, float halfSize, floa
 // The land's height at a place: bilinear in the finest grid holding it; past every grid, the coarsest's nearest edge.
 float terrainHeight(const TerrainHeights& heights, float x, float z);
 
+// The lowest and highest the land stands somewhere.
+struct TerrainHeightRange {
+    float lowest = 0.0f;
+    float highest = 0.0f;
+};
+
+/*
+* Every height terrainHeight or terrainSurfaceHeight can give in the box (x west to east, z north to south): the
+* heights of every grid's points round the squares the box touches (clamped onto each grid, so a box past a grid reads
+* its edge), since both lie between their square's corners, and a hair more for rounding. Every grid's from the finest
+* up to the first holding the whole box (no coarser one is read there): a little wider, never short. Grows with the
+* box's points, not the land's. None without grids: 0.
+*/
+TerrainHeightRange terrainHeightRange(const TerrainHeights& heights, float west, float east, float north, float south);
+
 // The land's unit normal at a place, from its slope over step metres either way.
 Vec3 terrainNormal(const TerrainHeights& heights, float x, float z, float step);
 

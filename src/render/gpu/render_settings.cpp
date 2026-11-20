@@ -62,6 +62,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Terrain", [&] {
         visit(settings.terrain, visitor);
     });
+    visitor.group("Planting", [&] {
+        visit(settings.planting, visitor);
+    });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);
         visitor.field("Clustered shading", settings.clusteredShading);

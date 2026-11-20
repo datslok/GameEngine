@@ -3,6 +3,7 @@
 #include "assets/asset_manager.h"
 #include "ecs/world.h"
 #include "games/forest/forest_game.h"
+#include "games/forest/forest_planting.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/forest_trees.h"
 #include "games/forest/palms.h"
@@ -11,6 +12,8 @@
 #include "core/settings_visitor.h"
 #include "gameplay/control_mode.h"
 #include "scene/indexed_mesh.h"
+#include "scene/planting_maps.h"
+#include "scene/terrain_heights.h"
 
 #include "test_jobs.h"
 
@@ -51,6 +54,46 @@ inline const ValleyMaps& patchValleyMaps() {
                                defaultPlantReaches(), testJobs());
     }();
     return maps;
+}
+
+// The land round the patch the placement tests stand plants on: forestHeight on a 2 m grid, as the game's finest ring.
+inline const TerrainHeights& patchTerrainHeights() {
+    static const TerrainHeights heights = [] {
+        TerrainHeights made;
+        made.grids.push_back(makeTerrainHeightGrid(Vec2{0.0f, -125.0f}, 400.0f, 2.0f, forestHeight, testJobs()));
+        return made;
+    }();
+    return heights;
+}
+
+// Every species with its default settings.
+inline const ForestSpecies& defaultSpecies() {
+    static const ForestTreeSettings emergent = emergentTreeSettings();
+    static const ForestTreeSettings canopy;
+    static const ForestTreeSettings mid = midTreeSettings();
+    static const ForestUnderstoreySettings understorey;
+    static const ForestPalmSettings palms;
+    static const ForestSpecies species{emergent, canopy, mid, understorey, palms};
+    return species;
+}
+
+// The patch planted with every default layer on patchValleyMaps and patchTerrainHeights, once for the run.
+inline const ForestPlanting& defaultPatchPlanting() {
+    static const ForestPlanting planted = plantThePatch(defaultSpecies(), patchValleyMaps(), patchTerrainHeights(), testJobs());
+    return planted;
+}
+
+// One layer planted alone (nothing before it to keep clear of) over the patch's box, the plants in the patch kept.
+inline std::vector<PlantedPlant> plantAlone(const PlantingLayerRecord& layer, const ValleyMaps& maps) {
+    std::vector<PlantedPlant> kept;
+
+    for (const PlantedPlant& plant : plantLayers({layer}, maps.planting, patchTerrainHeights(), regionBox(forestPatch), testJobs()).front()) {
+        if (insidePlantedRegion(maps.planting, forestPatch, plant.foot)) {
+            kept.push_back(plant);
+        }
+    }
+
+    return kept;
 }
 
 struct TestForest {

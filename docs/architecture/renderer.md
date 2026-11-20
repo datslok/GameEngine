@@ -62,27 +62,28 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
 | 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
 | 7 | Wind [WIND] | the wind field runs | wind (`render/gpu/wind`) |
-| 8 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
-| 9 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
-| 10 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |
-| 11 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
-| 12 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
-| 13-16 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
-| 17 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
-| 18 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
-| 19 | Main [MAIN] | always; also writes the velocity image (`anti-aliasing.md`); sky and stars in a block of their own after | here |
-| 20 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
-| 21 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
-| 22 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
-| 23 | Reflections [SSR] | reflections on | `reflections.md` |
-| 24 | Fog apply [FOGMIX] | fog | `fog.md` |
-| 25 | Beacons [BEACONS] | lit beacons in the frame | `lights.md` |
-| 26 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
-| 27 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
-| 28 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
-| 29 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
-| 30 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
-| 31 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
+| 8 | Planting [PLANTING], placed [PLACED] | planting cells made, or read back (`placement-compare`); every view's placed plants' lists while a field's looks draw some (camera, probe faces, shadow tiles) | `planting.md` |
+| 9 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
+| 10 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
+| 11 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |
+| 12 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
+| 13 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
+| 14-17 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
+| 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
+| 19 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
+| 20 | Main [MAIN] | always; also writes the velocity image (`anti-aliasing.md`); sky and stars in a block of their own after | here |
+| 21 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
+| 22 | Depth range [DEPTHS] | `fitCascadesToDepth` | `sun-shadows.md` |
+| 23 | Reflection probe [CUBE], planar reflection [PLANAR] | reflections on | `reflection-probe.md`, `planar-reflections.md` |
+| 24 | Reflections [SSR] | reflections on | `reflections.md` |
+| 25 | Fog apply [FOGMIX] | fog | `fog.md` |
+| 26 | Beacons [BEACONS] | lit beacons in the frame | `lights.md` |
+| 27 | Transparent [GLASS] | glass in view (picture before it kept, reactive mask) | `glass.md` |
+| 28 | Anti-aliasing [AA] | TAA, FSR or DLSS | `anti-aliasing.md` |
+| 29 | Depth of field [DOF], motion blur [BLUR] | camera settings | `camera-effects.md` |
+| 30 | Eye adaptation [EYE] | `eyeAdaptation` | `image-pipeline.md` |
+| 31 | Bloom [BLOOM] | always (`VulkanBloom`) | `image-pipeline.md` |
+| 32 | Tone map [TONE], debug lines [LINES], overlay [OVERLAY] | in the swapchain's block | `image-pipeline.md`, `game-interface.md`, `settings-and-commands.md` |
 
 The F4 readout groups them: setup to the prepass; lighting from `firstLightingPass` (PYRAMID) to MAIN; picture from `firstPicturePass` (BALLS) on (`engine/debug_views.h`).
 
@@ -166,7 +167,7 @@ An `ImageState` names a use; `imageStateUse` gives its stages, accesses and layo
 ## Device and memory
 
 - **`VulkanDevice`:** `volkInitialize` once per process (vk-bootstrap caches the loader's first functions; SDL unloads its copy when video stops); without a window (GPU tests) vk-bootstrap's headless mode, no surface. Vulkan 1.3, discrete GPU preferred, one queue for everything, VMA.
-- **Required features:** `samplerAnisotropy`, `depthClamp`, `shaderClipDistance` (planar mirrors), `shaderStorageImageExtendedFormats`; 1.3's `dynamicRendering`, `synchronization2`, `shaderDemoteToHelperInvocation`, `subgroupSizeControl`, `computeFullSubgroups`, `privateData`; descriptor indexing for bindless textures and `bufferDeviceAddress`. `checkFormats` throws without fragment and compute subgroup arithmetic (clustered shading, the cascades' fit).
+- **Required features:** `samplerAnisotropy`, `shaderInt64` (planting's 64-bit hash), `depthClamp`, `shaderClipDistance` (planar mirrors), `shaderStorageImageExtendedFormats`; 1.3's `dynamicRendering`, `synchronization2`, `shaderDemoteToHelperInvocation`, `subgroupSizeControl`, `computeFullSubgroups`, `privateData`; descriptor indexing for bindless textures and `bufferDeviceAddress`. `checkFormats` throws without fragment and compute subgroup arithmetic (clustered shading, the cascades' fit).
 - **Asked first, dropped only if no GPU has them:** FSR's and DLSS's (`shaderInt16`, `shaderFloat16`, storage images without format, `timelineSemaphore`, `descriptorIndexing`, plus `VK_KHR_get_memory_requirements2` and `VK_KHR_dedicated_allocation`, since FSR fetches the KHR-suffixed name).
 - **Optional:** DLSS's extensions (all or none), memory budget, dual-source blending, independent blending, ray queries (acceleration structures, ray query, deferred host operations).
 - **Debug utils:** on whenever the instance has it, release too. `beginLabel`/`endLabel` mark passes; `nameObject` names objects (`ImageDescription::name`, a string literal per image: Scene colour, Scene depth, Solid mask, Shadow atlas, Still shadow, Golden capture, ...).

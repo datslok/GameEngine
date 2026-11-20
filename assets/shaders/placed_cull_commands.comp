@@ -1,0 +1,48 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+/*
+* The placed drawing's commands (render/vulkan/vulkan_placed_drawing.h): a workgroup a view turns its groups' totals
+* into each group's first entry (an exclusive prefix sum in group order, from the view's own entries) and writes each
+* of its groups' indirect commands, the instances counted from PLACED_INSTANCE_BASE plus that first entry.
+*/
+#include "placed_cull.glsl"
+
+layout(local_size_x = PLACED_SCAN_GROUP_SIZE) in;
+
+shared uint sums[PLACED_SCAN_GROUP_SIZE];
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    uint viewNumber = gl_WorkGroupID.y;
+    PlacedView view = placedViews[viewNumber];
+    uint groups = view.groups;
+    uint bases = view.viewCount * groups;
+    uint carried = 0u;
+
+    // The loop's bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
+    for (uint first = 0u; first < groups; first += PLACED_SCAN_GROUP_SIZE) {
+        uint group = first + local;
+        uint value = group < groups ? placedTotals[viewNumber * groups + group] : 0u;
+        sums[local] = value;
+        barrier();
+
+        for (uint offset = 1u; offset < PLACED_SCAN_GROUP_SIZE; offset *= 2u) {
+            uint before = local >= offset ? sums[local - offset] : 0u;
+            barrier();
+            sums[local] += before;
+            barrier();
+        }
+
+        if (group < groups) {
+            uint base = view.entryBase + carried + sums[local] - value;
+            PlacedGroup mesh = placedGroups[group];
+            placedTotals[bases + viewNumber * groups + group] = base;
+            placedCommands[viewNumber * groups + group] = DrawCommand(mesh.indexCount, value, mesh.firstIndex, mesh.vertexOffset, PLACED_INSTANCE_BASE + base);
+        }
+
+        carried += sums[PLACED_SCAN_GROUP_SIZE - 1];
+        barrier();
+    }
+}
