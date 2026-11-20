@@ -33,14 +33,15 @@ void main() {
     // A frame's draw, or a placed plant's part (drawn_objects.glsl).
     InstanceData instance = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB)).instance;
 
-    // A liana: its template bent onto its curve (liana_data.glsl), swayed in the tiles that sway, as the camera draws it.
+    // A liana's tube or ivy: its template placed on its curve (liana_data.glsl), swayed in the tiles that sway, as the
+    // camera draws it (the ivy's cards grown for the camera's distance, so its shadow matches what is seen).
     if (instance.hanging.w > 0u) {
-        LianaShape shape = lianaShapes[instance.hanging.w - 1u];
-        LianaVertex bent = lianaTemplateVertex(shape, position, uv.x);
-        vec3 lianaWorld = shape.from.xyz + bent.offset;
+        LianaDrawnVertex bent = lianaDrawnVertex(instance.hanging.w, position, uv, cameraOrigin.xyz);
+        vec3 lianaWorld = bent.shape.from.xyz + bent.offset;
 
         if (tileOptions.x != 0.0) {
-            lianaWorld += lianaSwayOffset(shape, instance.sway, uintBitsToFloat(instance.hanging.y), bent.along, bent.arm, lianaWorld, cameraOrigin.xyz, false);
+            lianaWorld += lianaSwayOffset(bent.shape, instance.sway, uintBitsToFloat(instance.hanging.y), bent.along, bent.arm, bent.shape.from.xyz + bent.swaysAt,
+                                          cameraOrigin.xyz, false);
         }
 
         gl_Position = tileMatrix * vec4(lianaWorld, 1.0);

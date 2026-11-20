@@ -4,6 +4,7 @@
 #include "games/forest/island_hangings.h"
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
+#include "scene/liana_shape.h"
 
 #include <cstdint>
 #include <functional>
@@ -12,9 +13,9 @@
 /*
 * Lianas, the woody vines hanging in the jungle patch (docs/research/VINES.md, stage 1): loops sagging from one crown into a
 * neighbour's, and ropes hanging from a crown to the ground, as old lianas are left when their hosts grow and fall. Each
-* hangs as a catenary between its two holds, its thickness drawn from Barro Colorado's census, swept into a bark tube,
-* (its ivy, dense where it runs through a crown, returns in ROADMAP d2c). Drawn by the GPU from a record each
-* (scene/liana_shape.h), in the near cells round the player (near_trees.h).
+* hangs as a catenary between its two holds, its thickness drawn from Barro Colorado's census, a bark tube with ivy
+* dense where it runs through a crown and sparse between. Drawn by the GPU from a record each (scene/liana_shape.h), in
+* the near cells round the player (near_trees.h).
 */
 
 // The most metres between a liana's points: each ring of its tube.
@@ -105,9 +106,28 @@ struct ForestLianaSettings {
     float leafSpacing = 0.35f;
     float sparseLeafSpacing = 1.2f;
     float leafSize = 0.3f;
+
+    // The distances from the camera the ivy thins from (every other card gone, the rest grown to the same leaf area) and
+    // is gone by: a 0.3 m leaf is about 4 pixels at 80 m and 2 at 150 m on a 1440p screen; the crowns' leaves hide the
+    // ends there (scene/liana_shape.h, lianaLeafGrowth).
+    float ivyThinDistance = 80.0f;
+    float ivyDistance = 150.0f;
 };
 
 void visit(ForestLianaSettings& settings, SettingsVisitor& visitor);
+
+/*
+* The metres from one end of a liana (its first hold, or with fromFarEnd its far end) it runs inside crown before it
+* first leaves it: walked in steps of lianaStepMetres, the crossing then found by halving to a millimetre; the whole
+* length when it never leaves, 0 when that end is outside.
+*/
+float lianaRunInCrown(const LianaShape& shape, const LianaCrown& crown, bool fromFarEnd);
+
+/*
+* A liana's ivy (scene/liana_shape.h, setLianaLeaves): dense along its runs through its first crown and its second
+* (none: a rope's foot), sparse between, as the settings space and size it, with the liana's seed.
+*/
+LianaLeaves lianaIvy(const LianaShape& shape, const LianaCrown& first, const LianaCrown* second, const ForestLianaSettings& settings, std::uint32_t seed);
 
 /*
 * The lianas of the carrying crowns: each carries some with the settings' share (pathShare within pathReach of the

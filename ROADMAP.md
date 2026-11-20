@@ -352,7 +352,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
         - [ ] d2. The near trees on the CPU in cells round the player, the lianas drawn by the GPU from records a cell (the user's choice, Nov 20 2026: meshes cannot be freed; `docs/research/VINES.md`)
           - [x] d2a. The big trees planted on the CPU in 64 m cells (over the patch for now), the same maths; each crown's lianas chosen by its own random stream; the commands and the start numbered from the patch planted once (`near-tree-mirror`)
           - [x] d2b. The cells held round the player within 200 m; liana records a cell slot; one template tube at three levels bent onto the catenary by the shaders (mirrored `.glsl`), the wind worked out there; the liana meshes and the anchor table retired; holds inside the crowns' envelopes (`gpu-lianas`)
-          - [ ] d2c. Ivy as template cards along the lianas, dense in the crowns
+          - [x] d2c. Ivy as template cards along the lianas, dense in the crowns, every other card dropped far off (`gpu-ivy`)
           - [ ] d2d. Persson's wire anti-aliasing, if far lianas flicker
         - [ ] d3. Grass and floor cover as placed layers: a patch an 8 m lattice cell, the paint's means baked into a map, placed plants following the ground; their entity cells retired (`gpu-ground-cover`)
       - [ ] e. The whole valley (the user's go, Nov 20 2026)

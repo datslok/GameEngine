@@ -1,5 +1,5 @@
-// The lianas the GPU bends (scene/liana_shape.h): their records, and a template vertex placed and swayed from its
-// liana's record. Included by the scene's vertex shaders after wind_data.glsl's declarations.
+// The lianas the GPU bends (scene/liana_shape.h): their records, and a template vertex (the tube's or the ivy's) placed
+// and swayed from its liana's record. Included by the scene's vertex shaders after wind_data.glsl's declarations.
 #ifndef LIANA_DATA_GLSL
 #define LIANA_DATA_GLSL
 
@@ -31,9 +31,49 @@ vec3 lianaSwayOffset(LianaShape shape, vec4 sway, float swing, float along, floa
     return windHangingOffset(first, second, along, swingOffset);
 }
 
-// A liana's template vertex (position: share along, cos and sin round; u round) bent onto its record's curve.
-LianaVertex lianaTemplateVertex(LianaShape shape, vec3 position, float around) {
-    return lianaVertex(shape, position.x, around, position.y, position.z);
+// A vertex of a liana's draw placed: its record; its offset from the first hold, the offset where it sways (itself on the
+// tube, its card's stem for the ivy, so a card swings whole); its normal, tangent, texture place, share along and arm.
+struct LianaDrawnVertex {
+    LianaShape shape;
+    vec3 offset;
+    vec3 swaysAt;
+    vec3 normal;
+    vec3 tangent;
+    vec2 uv;
+    float along;
+    float arm;
+};
+
+/*
+* A draw's template vertex placed from the liana it names (the instance's hanging.w: one past its record, with
+* LIANA_IVY_BIT for its ivy): the tube's (position: share along, cos and sin round; u round) bent onto its curve, or an
+* ivy card's corner (lianaLeafTemplateVertex) grown for its distance from eye, the camera in every view so all agree.
+*/
+LianaDrawnVertex lianaDrawnVertex(uint named, vec3 position, vec2 uv, vec3 eye) {
+    LianaDrawnVertex drawn;
+    drawn.shape = lianaShapes[(named & ~LIANA_IVY_BIT) - 1u];
+
+    if ((named & LIANA_IVY_BIT) != 0u) {
+        LianaLeafVertex leaf = lianaLeafTemplateVertex(drawn.shape, uv, eye);
+        drawn.offset = leaf.offset;
+        drawn.swaysAt = leaf.stem;
+        drawn.normal = leaf.normal;
+        drawn.tangent = leaf.tangent;
+        drawn.uv = leaf.uv;
+        drawn.along = leaf.along;
+        drawn.arm = leaf.arm;
+        return drawn;
+    }
+
+    LianaVertex tube = lianaVertex(drawn.shape, position.x, uv.x, position.y, position.z);
+    drawn.offset = tube.offset;
+    drawn.swaysAt = tube.offset;
+    drawn.normal = tube.normal;
+    drawn.tangent = tube.tangent;
+    drawn.uv = tube.uv;
+    drawn.along = tube.along;
+    drawn.arm = tube.arm;
+    return drawn;
 }
 
 #endif

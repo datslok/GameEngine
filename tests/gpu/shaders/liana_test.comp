@@ -1,8 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Runs liana.glsl's functions on the cases liana_gpu_test.cpp sends: a liana's record (six inputs), then share, u
-// round, cos and sin round.
+// Runs liana.glsl's functions on the cases liana_gpu_test.cpp sends: a liana's record (eight inputs), then share, u
+// round, cos and sin round (an ivy card: card, across, up), then the eye (an ivy card's).
 #include "gpu_test.glsl"
 #include "liana.glsl"
 
@@ -18,7 +18,10 @@ void main() {
     shape.firstTree = testInput(3);
     shape.secondTree = testInput(4);
     shape.trees = testInput(5);
-    vec4 place = testInput(6);
+    shape.leaves = testInput(6);
+    shape.leafLook = testInput(7);
+    vec4 place = testInput(8);
+    vec4 eye = testInput(9);
 
     if (function == GPU_TEST_LIANA_CENTRE) {
         LianaPoint point = lianaCentre(shape, place.x);
@@ -32,5 +35,12 @@ void main() {
         testOutput(1, vec4(vertex.normal, 0.0));
         testOutput(2, vec4(vertex.tangent, 0.0));
         testOutput(3, vec4(vertex.uv, vertex.along, vertex.arm));
+    } else if (function == GPU_TEST_LIANA_LEAF) {
+        LianaLeafVertex leaf = lianaLeafVertex(shape, place.x, place.y, place.z, eye.xyz);
+        testOutput(0, vec4(leaf.offset, lianaLeafCount(shape)));
+        testOutput(1, vec4(leaf.stem, lianaLeafGrowth(shape, place.x, eye.w)));
+        testOutput(2, vec4(leaf.normal, leaf.along));
+        testOutput(3, vec4(leaf.tangent, leaf.arm));
+        testOutput(4, vec4(leaf.uv, lianaLeafPlace(shape, place.x, 0.25), 0.0));
     }
 }

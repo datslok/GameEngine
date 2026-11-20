@@ -123,6 +123,51 @@ namespace {
         assert(!insideLianaCrown(flat, Vec3{4.0f, 25.0f - 6.0f, -3.0f}) && insideLianaCrown(flat, Vec3{4.0f + 13.0f, 25.0f, -3.0f}));
     }
 
+    // The metres from an end a liana runs inside a crown before it first leaves it, walked a millimetre at a time.
+    float walkedRunInCrown(const LianaShape& shape, const LianaCrown& crown, bool fromFarEnd) {
+        const Vec3 from{shape.from[0], shape.from[1], shape.from[2]};
+        const float length = shape.to[3];
+        const int steps = static_cast<int>(length / 0.001f);
+
+        for (int step = 0; step <= steps; ++step) {
+            const float metres = static_cast<float>(step) * 0.001f;
+            const float share = std::min(fromFarEnd ? 1.0f - metres / length : metres / length, 1.0f);
+
+            if (!insideLianaCrown(crown, from + lianaCentre(shape, std::max(share, 0.0f)).offset)) {
+                return metres;
+            }
+        }
+
+        return length;
+    }
+
+    /*
+    * The ivy knows where a liana runs through its crowns (ROADMAP d2c): from each hold to where it first leaves that
+    * crown, to a centimetre; a rope's far end none; a liana wholly inside its crown all of it. Its spacing, size, distances
+    * and seed from the settings and the liana.
+    */
+    void testTheIvyKnowsItsCrowns() {
+        const LianaCrown first{.centre = Vec3{0.0f, 25.0f, 0.0f}, .radius = 12.0f, .halfHeight = 4.0f};
+        const LianaCrown second{.centre = Vec3{24.0f, 27.0f, 4.0f}, .radius = 10.0f, .halfHeight = 4.0f};
+        const Vec3 from = lianaCrownHold(first, 0.1f, 0.5f, 0.5f);
+        const Vec3 to = lianaCrownHold(second, 0.6f, 0.5f, 0.5f);
+        const LianaTree tree{Vec3{0.0f, 0.0f, 0.0f}, 30.0f, 1.0f};
+        const LianaShape loop = makeLianaShape(from, to, (to - from).length() * 1.2f, 0.03f, 2.0f, tree, &tree, 0.2f);
+        ForestLianaSettings settings;
+        const LianaLeaves leaves = lianaIvy(loop, first, &second, settings, 0xabcdu);
+        assert(near(leaves.firstCrownMetres, walkedRunInCrown(loop, first, false), 0.01f) && leaves.firstCrownMetres > 1.0f);
+        assert(near(leaves.lastCrownMetres, walkedRunInCrown(loop, second, true), 0.01f) && leaves.lastCrownMetres > 1.0f);
+        assert(leaves.spacing == settings.leafSpacing && leaves.sparseSpacing == settings.sparseLeafSpacing && leaves.size == settings.leafSize);
+        assert(leaves.thinFrom == settings.ivyThinDistance && leaves.goneBy == settings.ivyDistance && leaves.seed == 0xabcdu);
+
+        const LianaShape rope = makeLianaShape(from, Vec3{from.x + 2.0f, 0.0f, from.z}, from.y * 1.03f, 0.03f, 2.0f, tree, nullptr, 0.2f);
+        const LianaLeaves ropeLeaves = lianaIvy(rope, first, nullptr, settings, 1u);
+        assert(ropeLeaves.lastCrownMetres == 0.0f && near(ropeLeaves.firstCrownMetres, walkedRunInCrown(rope, first, false), 0.01f));
+
+        const LianaShape inside = makeLianaShape(from, from + Vec3{1.0f, 0.0f, 0.0f}, 1.2f, 0.03f, 2.0f, tree, &tree, 0.2f);
+        assert(near(lianaIvy(inside, first, &first, settings, 1u).firstCrownMetres, 1.2f, 1e-5f));
+    }
+
     /*
     * Which crowns carry lianas and how they hang: the same every run; more often near the path; loops from the lower part
     * of one crown into a neighbour's, longer than straight; ropes from a crown to the ground a little way off, nearly
@@ -246,24 +291,26 @@ namespace {
 
     /*
     * The forest hangs them from its canopy and emergent trees in the near cells round a start among the trees (none from
-    * the rim, too far from the patch): a still entity a liana,
-    * the template tube (drawn only) naming its record, casting shadows into the nearest two cascades; their settings
-    * start-up only.
+    * the rim, too far from the patch): two still entities a liana, the template tube and its ivy (drawn only, the ivy a
+    * cut-out) naming its record, casting shadows into the nearest two cascades; their settings start-up only.
     */
     void testTheForestHangsThem() {
         TestForest forest{testValley(ForestStart::Trees)};
         const std::vector<Entity>& lianas = forest.game.getLianas();
-        assert(!lianas.empty());
+        assert(!lianas.empty() && lianas.size() % 2 == 0);
+        const MeshHandle tube = forest.world.get<ModelRenderer>(lianas.front()).parts.front().mesh;
 
-        for (const Entity entity : lianas) {
-            const ModelRenderer& renderer = forest.world.get<ModelRenderer>(entity);
+        for (std::size_t index = 0; index < lianas.size(); ++index) {
+            const ModelRenderer& renderer = forest.world.get<ModelRenderer>(lianas[index]);
+            const bool ivy = index % 2 == 1;
             assert(renderer.isStill() && renderer.shadowCascades == lianaShadowCascades && renderer.lianaShape > 0u);
-            assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh) && renderer.parts.front().mesh == forest.world.get<ModelRenderer>(lianas.front()).parts.front().mesh);
+            assert(forest.assets.isDrawnOnly(renderer.parts.front().mesh) && (renderer.parts.front().mesh == tube) != ivy);
+            assert(lianaDrawsIvy(renderer.lianaShape) == ivy && isCutOut(renderer.parts.front().material) == ivy);
         }
 
         FieldCounter counter;
         visit(forest.game.getLianaSettings(), counter);
-        assert(counter.fields == 13 && counter.live == 0);
+        assert(counter.fields == 15 && counter.live == 0);
     }
 }
 
@@ -271,6 +318,7 @@ void testLianas() {
     testDiametersFollowTheCensus();
     testTheCatenary();
     testHoldsStayInTheLeaves();
+    testTheIvyKnowsItsCrowns();
     testChoosingLianas();
     testACrownsLianasAreItsOwn();
     testTheForestHangsThem();

@@ -98,7 +98,8 @@ NearTreeCell makeNearTreeCell(const PlantingCell& cell, float cellMetres, const 
     return made;
 }
 
-std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLianaTrees& trees, float barkTileMetres, std::size_t most) {
+std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLianaTrees& trees, const ForestLianaSettings& settings, float barkTileMetres,
+                                        std::size_t most) {
     const auto treeOf = [&](int crown) {
         const NearTree& tree = cell.trees[static_cast<std::size_t>(crown)];
         const std::vector<float>& heights = tree.layer == ForestLayer::Emergent ? trees.emergentHeights : trees.canopyHeights;
@@ -114,8 +115,11 @@ std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLian
 
         const LianaTree first = treeOf(liana.crown);
         const LianaTree second = liana.otherCrown >= 0 ? treeOf(liana.otherCrown) : LianaTree{};
-        shapes.push_back(makeLianaShape(liana.from, liana.to, liana.length, liana.radius, barkTileMetres, first, liana.otherCrown >= 0 ? &second : nullptr,
-                                        trees.bend));
+        LianaShape shape = makeLianaShape(liana.from, liana.to, liana.length, liana.radius, barkTileMetres, first, liana.otherCrown >= 0 ? &second : nullptr,
+                                          trees.bend);
+        const LianaCrown* otherCrown = liana.otherCrown >= 0 ? &cell.crowns[static_cast<std::size_t>(liana.otherCrown)] : nullptr;
+        setLianaLeaves(shape, lianaIvy(shape, cell.crowns[static_cast<std::size_t>(liana.crown)], otherCrown, settings, liana.seed));
+        shapes.push_back(shape);
     }
 
     return shapes;
@@ -156,20 +160,31 @@ bool NearLianas::update(World& world, Entity holder, const Vec2& place, const Fo
         const std::size_t slot = static_cast<std::size_t>(cell.slot);
         dropSlot(world, slot);
         const NearTreeCell planted = makeNearTreeCell(cell.cell, settings.cellMetres, sources, jobs);
-        auto block = std::make_shared<std::vector<LianaShape>>(nearLianaShapes(planted, trees, barkTileMetres, lianasASlot));
+        auto block = std::make_shared<std::vector<LianaShape>>(nearLianaShapes(planted, trees, sources.lianas, barkTileMetres, lianasASlot));
         Slot& filling = slots[slot];
         filling.held = true;
         filling.cell = cell.cell;
 
-        for (std::size_t index = 0; index < block->size(); ++index) {
-            ModelRenderer renderer = makeMeshRenderer(look.tube, look.bark).withStill(true);
+        const auto addDraw = [&](MeshHandle mesh, const Material& material, std::uint32_t named, const Transform& pose) {
+            ModelRenderer renderer = makeMeshRenderer(mesh, material).withStill(true);
             renderer.shadowCascades = look.shadowCascades;
             renderer.sway = look.sway;
-            renderer.lianaShape = static_cast<std::uint32_t>(slot * lianasASlot + index + 1);
+            renderer.lianaShape = named;
             const Entity entity = world.create();
-            world.add(entity, lianaPose((*block)[index]));
+            world.add(entity, pose);
             world.add(entity, std::move(renderer));
             filling.entities.push_back(entity);
+        };
+
+        for (std::size_t index = 0; index < block->size(); ++index) {
+            const LianaShape& shape = (*block)[index];
+            const std::uint32_t named = static_cast<std::uint32_t>(slot * lianasASlot + index + 1);
+            addDraw(look.tube, look.bark, named, lianaPose(shape));
+            const float leaves = lianaLeafCount(shape);
+
+            if (leaves > 0.0f) {
+                addDraw(look.ivy[lianaLeafTemplate(leaves)], look.leaf, named | LIANA_IVY_BIT, lianaLeafPose(shape));
+            }
         }
 
         shapes.slots[slot] = std::move(block);

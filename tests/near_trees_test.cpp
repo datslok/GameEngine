@@ -112,7 +112,25 @@ namespace {
         assert(counter.fields == 3 && counter.live == 3 && settings.cellMetres == 64.0f && settings.radiusMetres == 200.0f);
     }
 
-    // A world holding near lianas, with the template and the trees' heights they are made with.
+    // The ivy's templates, one of each size.
+    std::array<MeshHandle, lianaLeafTemplateCards.size()> ivyTemplates(AssetManager& assets) {
+        std::array<MeshHandle, lianaLeafTemplateCards.size()> templates{};
+
+        for (std::size_t size = 0; size < templates.size(); ++size) {
+            templates[size] = assets.addDrawnMesh(lianaLeafTemplateMesh(lianaLeafTemplateCards[size]));
+        }
+
+        return templates;
+    }
+
+    // A plain cut-out, as the ivy's leaf is.
+    Material cutOutLeaf() {
+        Material leaf;
+        leaf.alphaMode = AlphaMode::Mask;
+        return leaf;
+    }
+
+    // A world holding near lianas, with the templates and the trees' heights they are made with.
     struct LianaWorld {
         World world;
         AssetManager assets;
@@ -122,7 +140,8 @@ namespace {
         NearTreeSources sources = patchSources(lianaSettings);
         std::vector<float> heights{30.0f, 32.0f};
         NearLianaTrees trees{.emergentHeights = heights, .canopyHeights = heights, .bend = 0.25f};
-        NearLianaLook look{.tube = assets.addDrawnMesh(lianaTemplateMesh(4, 3)), .bark = Material{}, .sway = WindSway{}, .shadowCascades = 2};
+        NearLianaLook look{.tube = assets.addDrawnMesh(lianaTemplateMesh(4, 3)), .bark = Material{}, .sway = WindSway{}, .shadowCascades = 2,
+                           .ivy = ivyTemplates(assets), .leaf = cutOutLeaf()};
         ForestNearTreeSettings settings;
 
         bool update(const Vec2& place, int most) {
@@ -136,7 +155,13 @@ namespace {
         std::vector<LianaKey> keys;
 
         for (const Entity entity : held.lianas.getEntities()) {
-            const std::uint32_t record = held.world.get<ModelRenderer>(entity).lianaShape - 1u;
+            const std::uint32_t named = held.world.get<ModelRenderer>(entity).lianaShape;
+
+            if (lianaDrawsIvy(named)) {
+                continue;
+            }
+
+            const std::uint32_t record = lianaRecordOf(named);
             const LianaShape& shape = (*shapes.slots[record / shapes.perSlot])[record % shapes.perSlot];
             keys.emplace_back(shape.from[0], shape.from[1], shape.from[2], shape.to[0], shape.to[1], shape.to[2], shape.to[3], shape.from[3], 0u);
         }
@@ -165,11 +190,20 @@ namespace {
             assert(!block || block->size() <= NearLianas::lianasASlot);
         }
 
-        assert(records == first.size());
+        assert(2 * records == first.size());
+        const LianaShapes& shapes = held.world.get<LianaShapes>(held.holder);
 
-        for (const Entity entity : first) {
-            const ModelRenderer& renderer = held.world.get<ModelRenderer>(entity);
-            assert(renderer.isStill() && renderer.shadowCascades == 2 && renderer.parts.front().mesh == held.look.tube);
+        // Each liana its tube, then its ivy naming the same record, the template holding its cards; every one leafy in
+        // its first crown.
+        for (std::size_t index = 0; index < first.size(); index += 2) {
+            const ModelRenderer& tube = held.world.get<ModelRenderer>(first[index]);
+            const ModelRenderer& ivy = held.world.get<ModelRenderer>(first[index + 1]);
+            assert(tube.isStill() && tube.shadowCascades == 2 && tube.parts.front().mesh == held.look.tube && !lianaDrawsIvy(tube.lianaShape));
+            assert(ivy.isStill() && ivy.shadowCascades == 2 && ivy.lianaShape == (tube.lianaShape | LIANA_IVY_BIT) && isCutOut(ivy.parts.front().material));
+            const std::uint32_t record = lianaRecordOf(tube.lianaShape);
+            const LianaShape& shape = (*shapes.slots[record / shapes.perSlot])[record % shapes.perSlot];
+            assert(ivy.parts.front().mesh == held.look.ivy[lianaLeafTemplate(lianaLeafCount(shape))]);
+            assert(shape.leafLook[0] == held.lianaSettings.leafSize && shape.leaves[0] > 0.0f && lianaLeafCount(shape) > 0.0f);
         }
 
         assert(!held.update(start, std::numeric_limits<int>::max()));
