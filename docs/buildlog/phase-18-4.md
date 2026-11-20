@@ -9,3 +9,8 @@
   - **Checked in a hidden copy:** `placement-compare` agrees in every view (camera 2,386 entries, a probe face, a shadow tile); the meadow looks as before; GPU frame 21.9 ms (laptop RTX 4070).
   - **Sway from the start:** the looks are given their sway when built (TestForest runs no frame), and anew with the plants' settings.
   - **Tested:** `placedKindSlot` against the entities' choice, a table's variants and refusals, the understorey's and palms' looks (models, levels, cards, sway), the field's looks after the trees' and swaying by the plants' settings.
+- `card-fleck-glow` (Nov 20 2026): an understorey card ~18 m off glowed in a sun fleck while its mesh there was mostly shadowed
+  - **Probed** (green/red for lit/shadowed in the main pass, one hidden copy): at each pixel's own place the card read an even ~half lit, its neighbours and the ground fully shadowed; the leaf points (the self-shadow's lookup) lay in the fleck and read lit. Same with dithered cascades, so not their blend. Ruled out before: slope bias, the stand-in's own shadow, contact shadows, the card's self-shadow, d1.
+  - **Fix:** one sun-shadow value a card, averaged over 7 points spread over its plant (middle and +-0.5 radius along its axes, `impostorShadowSpread`), as engines shadow far cards coarsely; the far map once at the middle.
+  - **Cost:** 7 one-tap lookups and one soft far lookup a card pixel, in place of a soft cascade lookup (32 taps) and a soft far one at each pixel's leaf.
+  - **Left:** the mirror's cascades are not read for cards (they take the sun beyond).

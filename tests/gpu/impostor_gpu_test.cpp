@@ -2,6 +2,7 @@
 #include "gpu_test_functions.h"
 
 #include "scene/impostor.h"
+#include "scene/impostor_shared.h"
 
 #include <cmath>
 #include <cstddef>
@@ -122,6 +123,23 @@ namespace {
             report.check("impostorShadowPoint", transcendentalTolerance, expected, Vec3{outputs[i][0], outputs[i][1], outputs[i][2]});
         }
     }
+
+    // Every sample of a card's shadow points, at spreads from 0 to 1, exactly. Inputs: (index, spread).
+    void checkPlantShadowSample(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{73};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 70; ++i) {
+            inputs.push_back(GpuVec4{static_cast<float>(i % IMPOSTOR_PLANT_SHADOW_SAMPLES), random.between(0.0f, 1.0f), 0.0f, 0.0f});
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_IMPOSTOR_PLANT_SAMPLE, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const Vec3 expected = impostorPlantShadowSample(static_cast<int>(inputs[i][0]), inputs[i][1]);
+            report.check("impostorPlantShadowSample", exactTolerance, expected, Vec3{outputs[i][0], outputs[i][1], outputs[i][2]});
+        }
+    }
 }
 
 void gpuTestImpostor(GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -131,4 +149,5 @@ void gpuTestImpostor(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkSurfacePoint(runner, report);
     checkGatherLit(runner, report);
     checkShadowPoint(runner, report);
+    checkPlantShadowSample(runner, report);
 }

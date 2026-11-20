@@ -104,7 +104,7 @@ struct GpuFrameData {
     float viewUp[4];
     float viewForward[4];
     std::int32_t shadingOptions[4]; // x: 1 shades from the clusters' lists, y: 1 shows their light counts (the heatmap)
-    float cascadeOptions[4];        // x: the sun cascades' blend band (a share of a radius), y: 1 dithers between them instead
+    float cascadeOptions[4];        // x: the sun cascades' blend band (a share of a radius), y: 1 dithers between them instead, z: a card's sun shadow points' spread over its plant's radius (LevelOfDetailSettings::impostorShadowSpread; 0 reads at each pixel's leaf)
     // The light probes (render/gpu/ddgi_sampling.h, packProbeSampling), all zero while they are not sampled.
     float probeShading[4];          // x: the self-shadow bias setting, y: the share of probe light a probe ray's hit passes on
     std::int32_t probeAtlas[4];     // xy: the probe atlases' columns and rows (ddgi.h, probeAtlasGrid), w: how many cascades

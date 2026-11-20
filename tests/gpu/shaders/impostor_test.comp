@@ -30,5 +30,7 @@ void main() {
         vec4 b = testInput(1);
         vec4 c = testInput(2);
         testOutput(0, vec4(impostorShadowPoint(a.xyz, b.xyz, c.xyz, a.w), 0.0));
+    } else if (function == GPU_TEST_IMPOSTOR_PLANT_SAMPLE) {
+        testOutput(0, vec4(impostorPlantShadowSample(int(a.x), a.y), 0.0));
     }
 }

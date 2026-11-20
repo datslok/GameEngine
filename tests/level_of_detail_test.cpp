@@ -442,6 +442,21 @@ namespace {
         }
 
         assert(refusedBias);
+
+        // A card's shadow points spread over 0 to 1 of the plant's radius only.
+        for (const float spread : {-0.1f, 1.5f}) {
+            bool refusedSpread = false;
+
+            try {
+                validateLevelOfDetail(LevelOfDetailSettings{.impostorShadowSpread = spread});
+            } catch (const std::invalid_argument&) {
+                refusedSpread = true;
+            }
+
+            assert(refusedSpread);
+        }
+
+        validateLevelOfDetail(LevelOfDetailSettings{.impostorShadowSpread = 0.0f});
         assert(threw);
 
         // Settable by its settings.cfg key, as every setting is (the command line's set and get).
@@ -455,7 +470,9 @@ namespace {
         assert(setSetting(walk, "levelOfDetail.fadeBand", "0.3").outcome == SettingOutcome::Set && settings.levelOfDetail.fadeBand == 0.3f);
         assert(setSetting(walk, "levelOfDetail.impostorSelfShadow", "false").outcome == SettingOutcome::Set && !settings.levelOfDetail.impostorSelfShadow);
         assert(setSetting(walk, "levelOfDetail.impostorShadowBias", "2.5").outcome == SettingOutcome::Set && settings.levelOfDetail.impostorShadowBias == 2.5f);
+        assert(setSetting(walk, "levelOfDetail.impostorShadowSpread", "0.25").outcome == SettingOutcome::Set && settings.levelOfDetail.impostorShadowSpread == 0.25f);
         assert(LevelOfDetailSettings{}.impostorSelfShadow);
+        assert(LevelOfDetailSettings{}.impostorShadowSpread == 0.5f);
         assert(!settings.levelOfDetail.impostors && LevelOfDetailSettings{}.impostors);
         assert(!settings.levelOfDetail.enabled);
         assert(settings.levelOfDetail.pixelError == 6.0f);

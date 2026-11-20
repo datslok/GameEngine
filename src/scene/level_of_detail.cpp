@@ -12,6 +12,7 @@ void visit(LevelOfDetailSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Impostors", settings.impostors);
     visitor.field("Impostor self-shadow", settings.impostorSelfShadow);
     visitor.field("Impostor shadow bias", settings.impostorShadowBias, {.min = 0.0f, .max = 16.0f, .sliderMax = 4.0f, .unit = "texels"});
+    visitor.field("Impostor shadow spread", settings.impostorShadowSpread, {.min = 0.0f, .max = 1.0f, .unit = "of a radius"});
     visitor.field("Fade band", settings.fadeBand, {.min = 0.0f, .max = fadeBandMost, .sliderMax = 0.5f});
 }
 
@@ -26,6 +27,10 @@ void validateLevelOfDetail(const LevelOfDetailSettings& settings) {
 
     if (!(settings.impostorShadowBias >= 0.0f)) {
         throw std::invalid_argument("Level of detail needs an impostor shadow bias of 0 or more");
+    }
+
+    if (!(settings.impostorShadowSpread >= 0.0f && settings.impostorShadowSpread <= 1.0f)) {
+        throw std::invalid_argument("Level of detail needs an impostor shadow spread from 0 to 1");
     }
 }
 

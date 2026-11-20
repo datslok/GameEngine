@@ -1,4 +1,5 @@
 #include "scene/impostor.h"
+#include "scene/impostor_shared.h"
 
 #include "core/srgb.h"
 
@@ -95,6 +96,16 @@ Vec3 impostorShadowPoint(const Vec3& point, const Vec3& normal, const Vec3& sunD
     const float facing = normal.dot(sunDirection);
     const float sine = std::sqrt(std::max(1.0f - facing * facing, 0.0f));
     return point + normal * ((facing < 0.0f ? -bias : bias) * sine);
+}
+
+Vec3 impostorPlantShadowSample(int index, float spread) {
+    if (index <= 0) {
+        return Vec3{};
+    }
+
+    const int axis = (index - 1) / 2;
+    const float along = (index - 1) % 2 == 0 ? spread : -spread;
+    return Vec3{axis == 0 ? along : 0.0f, axis == 1 ? along : 0.0f, axis == 2 ? along : 0.0f};
 }
 
 namespace {
