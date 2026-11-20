@@ -11,6 +11,7 @@
 #include "math/angles.h"
 #include "input/input.h"
 #include "math/closest_points.h"
+#include "scene/impostor.h"
 #include "scene/model_renderer.h"
 #include "scene/planting_cells.h"
 
@@ -1045,20 +1046,39 @@ namespace {
             assert(isCutOut(shadows.parts[0].material) && !isCutOut(shadows.parts[1].material));
             assert(assets.isDrawnOnly(bark.parts.front().mesh) && !isCutOut(bark.parts.front().material));
 
-            // The bark and leaves seen have two coarser levels each, the second the shadow's own stand-in (one mesh kept
-            // for both).
+            // The card's error is its texels' (scene/impostor.h, impostorCardError): its frames span the sphere it was
+            // baked round, whose radius the card carries in its normals.
+            const ForestTreeSettings& kind = look.layer == static_cast<int>(ForestLayer::Emergent) ? game.getEmergentSettings()
+                                             : look.layer == static_cast<int>(ForestLayer::Mid)    ? game.getMidSettings()
+                                                                                                   : game.getTreeSettings();
+            const float cardRadius = assets.getDrawnMesh(card.parts.front().mesh).vertices.front().normal.x;
+            const float cardError = impostorCardError(cardRadius, kind.impostorTexels, kind.cardErrorTexels);
+
+            // The bark and leaves seen end where the card begins: their coarser levels finer than the card (the leaves'
+            // first its own first vertices, thinned by the same records), the shadow's stand-in among them only if it is
+            // finer too (one mesh kept for both), then nothing from the card's error on.
             const std::vector<MeshLevel>& barkLevels = assets.getMeshLevels().at(bark.parts.front().mesh.index);
             const std::vector<MeshLevel>& leafLevels = assets.getMeshLevels().at(leaves.parts.front().mesh.index);
-            assert(barkLevels.size() == 3 && barkLevels[1].mesh == shadows.parts[1].mesh && !barkLevels[2].mesh.isValid());
-            assert(leafLevels.size() == 3 && leafLevels[1].mesh == shadows.parts[0].mesh && !leafLevels[2].mesh.isValid());
-            // The first level is the leaves' own first vertices, thinned by the same records; the shadow leaves are not.
-            assert(leafLevels[0].sharesVertices && !leafLevels[1].sharesVertices);
+
+            for (const std::vector<MeshLevel>* levels : {&barkLevels, &leafLevels}) {
+                assert(!levels->empty() && levels->size() <= 3 && !levels->back().mesh.isValid() && levels->back().errorMetres == cardError);
+
+                for (std::size_t level = 0; level + 1 < levels->size(); ++level) {
+                    assert((*levels)[level].mesh.isValid() && (*levels)[level].errorMetres < cardError);
+                }
+            }
+
+            assert(leafLevels.size() < 2 || leafLevels[0].sharesVertices);
+            assert(barkLevels.size() < 3 || barkLevels[1].mesh == shadows.parts[1].mesh);
+
+            // The shadow leaves (twice the cards' size) are coarser than any tree's card, so they only cast and are never seen.
+            assert(leafLevels.size() < 3);
 
             // Past the last level the impostor takes over (scene/impostor.h): its card drawn only from the error the bark and
             // leaves end on, all three chosen by the tree's one box; a cut-out of its baked atlases, casting no shadow, still.
             const MeshLevelOptions& cardOptions = assets.getMeshLevelOptions().at(card.parts.front().mesh.index);
             const MeshLevelOptions& barkOptions = assets.getMeshLevelOptions().at(bark.parts.front().mesh.index);
-            assert(cardOptions.hiddenBelowError == barkLevels[2].errorMetres && leafLevels[2].errorMetres == barkLevels[2].errorMetres);
+            assert(cardOptions.hiddenBelowError == cardError);
             assert(cardOptions.chooseBounds && barkOptions.chooseBounds && cardOptions.chooseBounds->maximum.y == barkOptions.chooseBounds->maximum.y);
             assert(card.parts.front().material.impostorFrames > 0 && !card.castsShadows && card.sway.kind == SwayKind::Still);
 
@@ -1128,15 +1148,16 @@ namespace {
         frame();
         const std::shared_ptr<const PlantingLooks> looks = plantingSourceOf(world).looks;
         assert(looks);
-        // Each layer in the GPU's cells it is drawn as far as: the trees coarse, the understorey and palms middle, the
-        // ground cover fine.
+        // Each layer in the GPU's cells it is drawn as far as: the tall trees coarse, the mid trees, understorey and palms
+        // middle, the ground cover fine.
         const std::vector<PlantingLayerRecord>& fieldLayers = plantingSourceOf(world).field->layers;
         assert(fieldLayers.size() == static_cast<std::size_t>(forestFloorPlanting) + 1);
 
-        for (const ForestLayer tree : {ForestLayer::Emergent, ForestLayer::Canopy, ForestLayer::Mid}) {
+        for (const ForestLayer tree : {ForestLayer::Emergent, ForestLayer::Canopy}) {
             assert(fieldLayers[static_cast<std::size_t>(tree)].cellSet == plantingCoarseCells);
         }
 
+        assert(fieldLayers[static_cast<std::size_t>(ForestLayer::Mid)].cellSet == plantingMiddleCells);
         assert(fieldLayers[static_cast<std::size_t>(ForestLayer::Understorey)].cellSet == plantingMiddleCells);
         assert(fieldLayers[static_cast<std::size_t>(ForestLayer::Palms)].cellSet == plantingMiddleCells);
         assert(fieldLayers[static_cast<std::size_t>(forestGrassPlanting)].cellSet == plantingFineCells);

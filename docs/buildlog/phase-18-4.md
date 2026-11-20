@@ -51,3 +51,10 @@
   - **A set is a smaller field:** its layers renumbered (`plantingSetLayers`), so `plantLayers`, the jobs and the shaders are unchanged; every set's slots lie in one plants and one counts buffer at their own places, so the placed drawing still binds one of each.
   - **The region gone everywhere:** the GPU's culling test, the cover layers' `unbounded`, the near trees' (lianas wherever the player walks); the CPU's start-up patch (`plantThePatch`) stays for the climbers, epiphytes and the start.
   - **Tested:** a set's layers and renumbering, a slot's room only for its own layers, each set's cells planting what the whole field does, a set's jobs at its places, two sets' blocks and runs and their plants all culled, the settings' keys a set each.
+- `gpu-placement` e1c (`valley-wide-cells`, Nov 21 2026): the frame back down, measured at the rim and the ring (laptop RTX 4070, `--typical-gpu`, DLSS at 0.67, still camera, three readings each)
+  - **e1a's frame:** rim 29.6 ms, ring 39.3; shadows only about 1 ms with the camera still (tiles cached), so the 54 ms reading was taken moving.
+  - **Step 1, mid trees to 300 m:** rim 26.6, ring 36.4.
+  - **Where the rest went (radii cut live at the ring):** tall trees 300 m-1 km 4.8 ms, tall trees within 300 m 7.2, the middle set 150-300 m 4.1 and within 150 m 3.7, grass and floor cover nothing; MAIN and PREPASS, not shadows.
+  - **Triangles, not pixels:** render scale 0.67 to 0.5 saved 3.7 ms, pixel error 2 to 8 saved 18.6; cards off cost 19 more.
+  - **Found:** every tree switched to its card at one 1.5 m error (about 580 m), and never before its shadow stand-in's error; the mid trees, now planted to 300 m, never became cards. Lowering the error to 0.5 or 0.25 m gave the same frame: the stand-in set the floor.
+  - **Step 1b, cards by size (the user's choice over three hand-set errors):** a card's error is 2 of its own texels (`impostorCardError`), and the levels no finer than it are dropped (`levelsUntilCard`): mid trees to cards at about 115 m, canopy 300 m, emergents 370 m; the shadow leaves now only cast, the mid trees' leaves go straight to the card. Rim 20.6 ms, ring 23.8.

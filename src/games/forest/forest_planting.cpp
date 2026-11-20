@@ -46,6 +46,9 @@ std::vector<PlantingLayerRecord> forestPlantingLayers(const ForestSpecies& speci
 
     PlantingLayerRecord& mid = at(ForestLayer::Mid);
     mid = treePlantingLayer(species.mid, midPlaceSeed);
+    // The mid trees far outnumber the tall ones (480 a hectare against about 33), so they stand only as far as the
+    // understorey; past it the sparse tall trees carry the far forest (Battlefield 3's payloads, VALLEY.md).
+    mid.cellSet = plantingMiddleCells;
     mid.keepAway = {PlantingKeepAway{.layer = layerOf(ForestLayer::Emergent), .radius = midTrunkClearance},
                     PlantingKeepAway{.layer = layerOf(ForestLayer::Canopy), .radius = midTrunkClearance}};
 

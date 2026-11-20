@@ -52,7 +52,7 @@ Engine side: `level-of-detail.md`. Per variant (`plantTrees` in `forest_game`):
 | Leaves | the cards, casting none | thinned card by card to `levelCardShare` (0.5), survivors grown by share^-`levelCardGrowth` (0.5), the level the mesh's first cards (`ClusterCardRun`, `nodeCardStride`); then the shadow leaves; then nothing at the card's error | — |
 | Bark | the tubes, casting none | simplified to `levelBarkShare` (0.3); then the shadow bark; then nothing | — |
 | Shadow stand-ins | never (`shadowOnly`, one model of two parts) | | shadow leaves: `shadowCardsPerNode` 1, `shadowFillCards` 8, `shadowCardScale` 2 (about a sixth of the cards); shadow bark: `shadowBarkShare` (0.1) by meshoptimizer |
-| Card | far away only | hidden below `impostorErrorMetres` (1.5 m, at least the stand-ins' errors) | none (the stand-ins keep casting) |
+| Card | far away only | hidden below its error, `cardErrorTexels` (2) of its texels (`impostorCardError`: about 115 m for a mid tree, 300 m canopy, 370 m emergent); the tree's levels no finer than it dropped (`levelsUntilCard`), so the stand-ins are seen only where finer than the card | none (the stand-ins keep casting) |
 
 - The impostor is baked from the bark's first level, the leaves, and the variant's climbers and epiphytes (`impostorFrames` 8, `impostorTexels` 128); every part chooses by the tree's one box, so exactly one of tree and card is drawn.
 - The cards' level errors are how much longer their sides grew; the bark's how far the simplifier moved its surface.
@@ -61,7 +61,7 @@ Engine side: `level-of-detail.md`. Per variant (`plantTrees` in `forest_game`):
 
 ## Placing trees
 
-- `treePlantingLayer(settings, seed)`: a species' layer of the planting (`forest-plants.md`, The forest's layers) → `TreePlacement {foot, scale, turnRadians, variant}`; the CPU's placements over `forestPatch` (z `treeNorthmost` -210 to `treeSouthmost` -40, within `treeSpread` 130 m of the maps' axis: `insidePlantedRegion`), the GPU's in its coarse cells round the camera, the whole valley. Each cell's tree 85-115% size (`smallestTreeScale`, `treeScaleRange`), any turn, on the lowest drawn ground on a ring `footReachMetres` (2.5 m) a unit of scale round the trunk.
+- `treePlantingLayer(settings, seed)`: a species' layer of the planting (`forest-plants.md`, The forest's layers) → `TreePlacement {foot, scale, turnRadians, variant}`; the CPU's placements over `forestPatch` (z `treeNorthmost` -210 to `treeSouthmost` -40, within `treeSpread` 130 m of the maps' axis: `insidePlantedRegion`), the GPU's round the camera over the whole valley, the emergent and canopy trees in its coarse cells (to 1 km), the mid trees in its middle ones (to 300 m). Each cell's tree 85-115% size (`smallestTreeScale`, `treeScaleRange`), any turn, on the lowest drawn ground on a ring `footReachMetres` (2.5 m) a unit of scale round the trunk.
 - Kept when its crown sphere (`placedCrownCentre`, `placedCrownRadius`, the record's reach) fits the maps, it keeps clear of the layers before, then not within `spacingShare` of a candidate of its species with a lower threshold (the earlier cell on a tie): local, so any box decides alone.
 - Order: emergents (`emergentPlaceSeed`); canopy trees (`canopyPlaceSeed`) on the emergents' 12 m lattice above their share, no trunk inside an emergent's crown; the mid layer (`midPlaceSeed`, 4 m cells) under and between them, trunks `midTrunkClearance` (4 m) from theirs.
 - `treeReach` (the largest crown sphere) names the canopy cap a species reads.

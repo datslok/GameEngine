@@ -10,6 +10,8 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -313,6 +315,29 @@ namespace {
     }
 
     /*
+    * A card's error is its texels' size times how many it may stray by: a frame spans the sphere's diameter, so a bigger
+    * plant or fewer texels give a coarser card, switched to only farther off. Nonsense throws.
+    */
+    void testACardsErrorIsItsTexels() {
+        assert(near(impostorCardError(3.0f, 128, 2.0f), 2.0f * 3.0f / 128.0f * 2.0f, 1e-7f));
+        assert(near(impostorCardError(6.0f, 128, 2.0f), 2.0f * impostorCardError(3.0f, 128, 2.0f), 1e-7f));
+        assert(near(impostorCardError(3.0f, 256, 2.0f), 0.5f * impostorCardError(3.0f, 128, 2.0f), 1e-7f));
+        assert(near(impostorCardError(3.0f, 128, 1.0f), 0.5f * impostorCardError(3.0f, 128, 2.0f), 1e-7f));
+
+        for (const auto& [radius, texels, errorTexels] : {std::tuple{0.0f, 128, 2.0f}, std::tuple{3.0f, 0, 2.0f}, std::tuple{3.0f, 128, 0.0f}}) {
+            bool threw = false;
+
+            try {
+                impostorCardError(radius, texels, errorTexels);
+            } catch (const std::invalid_argument&) {
+                threw = true;
+            }
+
+            assert(threw);
+        }
+    }
+
+    /*
     * An impostor's material: a cut-out whose colour and normal textures are the atlases, its frames a side; the GPU
     * record flags it and carries the frames, the instance flags it for the vertex shader, and rays never meet it.
     */
@@ -342,5 +367,6 @@ void testImpostors() {
     testTheCardsShadowPointsSpreadOverThePlant();
     testCardsShadowThemselves();
     testTheCardCarriesItsMiddleAndRadius();
+    testACardsErrorIsItsTexels();
     testAnImpostorMaterialReachesTheGpu();
 }

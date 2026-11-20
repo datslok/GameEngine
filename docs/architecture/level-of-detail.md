@@ -33,7 +33,7 @@ A far tree as one card facing the viewer, showing pictures baked from many direc
 - Out (`ImpostorBake`): a colour atlas (sRGB, alpha 255 where something was) and a normal atlas (the tree's frame, n · 0.5 + 0.5; alpha the depth along the frame over the radius, `impostorDepthEncode`; `TextureStorage::Exact`, as BC7 would smear the depth), plus the sphere's centre and radius. Empty texels take their neighbours' colour, normal and depth (colour alpha 0), so mips do not darken the edges.
 - Leaves are lit from the front only in the bake (`shading.md`).
 
-**The card** (`impostorCardMesh(centre, radius)`): two triangles, corners a radius round the middle in x and y (so bounds hold the sphere), UVs the corners (-1..1), the normal's x the radius.
+**The card** (`impostorCardMesh(centre, radius)`): two triangles, corners a radius round the middle in x and y (so bounds hold the sphere), UVs the corners (-1..1), the normal's x the radius. Its error (`impostorCardError(radius, frameTexels, errorTexels)`): a texel's size, 2 radius / frameTexels, times errorTexels.
 
 **Material** (`impostorMaterial(colour, normal, frames)`): a double-sided cut-out of the colour atlas (`impostorCoverageCutoff` 0.5, coverage-keeping mips), the normal atlas in the normal map's slot, `Material::impostorFrames` set. Packed as the `MATERIAL_IMPOSTOR` flag and the frames in `GpuMaterial::attenuation.w`.
 
@@ -53,7 +53,7 @@ A far tree as one card facing the viewer, showing pictures baked from many direc
 
 **Switching** (all through the level chain):
 
-- The tree's parts end on a level without a mesh at the card's error; the card has `hiddenBelowError` at that error; all choose by the tree's `chooseBounds`, so exactly one of tree and card is drawn.
+- The tree's parts end on a level without a mesh at the card's error (`levelsUntilCard`: levels no finer than the card dropped); the card has `hiddenBelowError` at that error, its texels' size times a count (`impostorCardError`, so bigger plants and coarser atlases switch farther off); all choose by the tree's `chooseBounds`, so exactly one of tree and card is drawn.
 - Levels off: the tree whole, never the card. `LevelOfDetailSettings::impostors` off: a level without a mesh is never chosen, so the tree keeps its last real level however far (for comparing).
 
 ## Card thinning

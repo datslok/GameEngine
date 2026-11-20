@@ -24,7 +24,7 @@ Every layer (trees, palms, understorey) is planted from maps, not darts (Horizon
 
 ## The forest's layers (`forest_planting`)
 
-`forestPlantingLayers(ForestSpecies)` → five `PlantingLayerRecord`s in `ForestLayer`'s order, the trees in the GPU's coarse cells and the understorey and palms in its middle ones (`cellSet`); `plantTheForest(species, maps, heights, box, jobs)` plants a box; `plantThePatch` the box round `forestPatch`, keeping what stands in it by the maps' axis (`insidePlantedRegion`): the CPU's start-up placements (climbers, epiphytes, the start). The GPU plants the whole valley round the camera.
+`forestPlantingLayers(ForestSpecies)` → five `PlantingLayerRecord`s in `ForestLayer`'s order, the emergent and canopy trees in the GPU's coarse cells (to 1 km), the mid trees, understorey and palms in its middle ones (to 300 m; `cellSet`); `plantTheForest(species, maps, heights, box, jobs)` plants a box; `plantThePatch` the box round `forestPatch`, keeping what stands in it by the maps' axis (`insidePlantedRegion`): the CPU's start-up placements (climbers, epiphytes, the start). The GPU plants the whole valley round the camera.
 
 | Layer | Record (`treePlantingLayer`, `understoreyPlantingLayer`, `palmPlantingLayer`) | Keeps clear of |
 |---|---|---|

@@ -389,7 +389,8 @@ namespace {
         assert(settings.leastFronds <= settings.mostFronds && settings.variants >= 4);
         // Shadows in every cascade (0), as the understorey's, so they do not pop in as one walks up.
         assert(settings.shadowCascades == 0);
-        assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < ForestTreeSettings{}.impostorErrorMetres);
+        // Its card takes over a few tens of metres away: under half a metre's error, about 200 m at 2 pixels.
+        assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < 0.5f);
     }
 
     /*

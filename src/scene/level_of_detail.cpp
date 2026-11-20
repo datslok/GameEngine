@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 
@@ -128,6 +129,17 @@ namespace {
 
 std::size_t chooseLevel(std::span<const MeshLevel> levels, float distance, const LevelView& view) {
     return levelWithin(levels, distance, view, view.pixelError);
+}
+
+std::vector<MeshLevel> levelsUntilCard(std::span<const MeshLevel> levels, float cardErrorMetres) {
+    if (!(cardErrorMetres >= 0.0f)) {
+        throw std::invalid_argument("levelsUntilCard: a card's error cannot be negative");
+    }
+
+    std::vector<MeshLevel> kept;
+    std::copy_if(levels.begin(), levels.end(), std::back_inserter(kept), [&](const MeshLevel& level) { return level.errorMetres < cardErrorMetres; });
+    kept.push_back(MeshLevel{MeshHandle{}, cardErrorMetres});
+    return kept;
 }
 
 float levelDistance(const BoundingSphere& bounds, const Vec3& eye) {

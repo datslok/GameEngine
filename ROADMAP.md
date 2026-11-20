@@ -361,7 +361,8 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
         - [ ] e1. The patch's limit gone; three sets of cells, each planting its layers and re-planting what they read: trees in 128 m cells to 1 km, the understorey and palms in 64 m to 300 m, grass and floor cover in 32 m to 100 m (the user's choice A, Nov 20 2026); plants faded in over their last cell (`valley-wide-cells`)
           - [x] e1a. The sets and their rings, every set's slots in the shared buffers, the region gone (the GPU's plants and the near trees')
           - [ ] e1c. The frame back down (the user's go, Nov 20 2026; trees to 1 km took the laptop's GPU frame from about 17 to 54 ms; research in `docs/research/VALLEY.md`, Drawing the whole valley): each step measured at the path in one hidden copy before the next
-            - [ ] 1. The mid trees in the middle cells (300 m): past it only the sparse tall trees (BF3's payloads, Serious Sam 4's split)
+            - [x] 1. The mid trees in the middle cells (300 m): past it only the sparse tall trees (BF3's payloads, Serious Sam 4's split)
+            - [x] 1b. Trees switched to their cards by size: the card's error its own texels' (2), ahead of any coarser level (the user's go, Nov 21 2026: the frame was triangles, not pixels)
             - [ ] 2. Trees cast into the nearest cascades only (Horizon); the far forest's shadow later from a cheap caster in the far map
             - [ ] 3. Placed plants in the probe faces only near the probe
           - [ ] e1b. The fade by distance over each set's last cell, by the level fades' dither

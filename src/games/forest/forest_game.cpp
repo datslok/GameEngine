@@ -19,6 +19,7 @@
 #include "scene/planting_cells.h"
 #include "scene/probe_volume.h"
 #include "scene/impostor.h"
+#include "scene/level_of_detail.h"
 #include "scene/still_draws.h"
 #include "scene/sun.h"
 #include "scene/terrain.h"
@@ -1198,7 +1199,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         }
 
         const ImpostorBake baked = bakeImpostor(parts, settings.impostorFrames, settings.impostorTexels, getJobs());
-        const float impostorError = std::max({settings.impostorErrorMetres, variant.shadowLeafError, variant.shadowBarkError});
+        const float impostorError = impostorCardError(baked.radius, settings.impostorTexels, settings.cardErrorTexels);
         Aabb treeBox = enclosing(indexedMeshBounds(variant.bark), indexedMeshBounds(variant.leaves));
 
         if (climbed) {
@@ -1224,12 +1225,15 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         cardMaterials.back().diffuseTransmission = leaf.diffuseTransmission;
         cardMaterials.back().diffuseTransmissionTint = leaf.diffuseTransmissionTint;
 
-        // The levels of detail (docs/research/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing. The
-        // leaves' coarser level is their own first vertices, thinned as the leaves are (scene/card_thinning.h).
-        assets.setMeshLevels(barkMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
-                                                 MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}, MeshLevel{MeshHandle{}, impostorError}});
-        assets.setMeshLevels(leafMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError, true},
-                                                 MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}, MeshLevel{MeshHandle{}, impostorError}});
+        // The levels of detail (docs/research/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing
+        // where the card begins, the levels no finer than the card dropped (levelsUntilCard). The leaves' coarser level is
+        // their own first vertices, thinned as the leaves are (scene/card_thinning.h).
+        const std::array barkLevels{MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
+                                    MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}};
+        const std::array leafLevels{MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError, true},
+                                    MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}};
+        assets.setMeshLevels(barkMeshes.back(), levelsUntilCard(barkLevels, impostorError));
+        assets.setMeshLevels(leafMeshes.back(), levelsUntilCard(leafLevels, impostorError));
         assets.setMeshLevelOptions(barkMeshes.back(), sharedBox);
         assets.setMeshLevelOptions(leafMeshes.back(), sharedBox);
         assets.setMeshLevelOptions(cardMeshes.back(), MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = treeBox});

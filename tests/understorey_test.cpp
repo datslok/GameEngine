@@ -142,9 +142,9 @@ namespace {
         visit(settings, counter);
         assert(counter.fields == 23 && counter.live == 0);
 
-        // Its cards (scene/impostor.h) take over a few tens of metres away: a plant is a twentieth of a tree's height, so
-        // its card's error is about that share of the trees' too, and its frames fewer texels, never big on screen.
-        assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < ForestTreeSettings{}.impostorErrorMetres / 10.0f);
+        // Its cards (scene/impostor.h) take over a few tens of metres away (under 15 cm's error: about 60 m at 2 pixels),
+        // and its frames have fewer texels than a tree's, never big on screen.
+        assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < 0.15f);
         assert(settings.impostorFrames >= 4 && settings.impostorTexels > 0 && settings.impostorTexels < ForestTreeSettings{}.impostorTexels);
 
         // Its shadows in every cascade (0): stopped at the nearest two, they popped in plant by plant about 20 m away.
