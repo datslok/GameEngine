@@ -382,13 +382,14 @@ namespace {
         assert(counter.fields == 24 && counter.live == 0);
         assert(settings.shortest >= 1.5f && settings.tallest <= 6.0f && settings.shortest < settings.tallest);
         assert(settings.leastFronds <= settings.mostFronds && settings.variants >= 4);
-        assert(settings.shadowCascades >= 1 && settings.shadowCascades <= 2);
+        // Shadows in every cascade (0), as the understorey's, so they do not pop in as one walks up.
+        assert(settings.shadowCascades == 0);
         assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < ForestTreeSettings{}.impostorErrorMetres);
     }
 
     /*
     * The game plants them: each palm its seen mesh (casting no shadow) and its shadow's stand-in (shadows only, in the
-    * nearest cascades), with levels ending where its card begins; an opaque, double-sided leaf letting light through,
+    * cascades its settings name), with levels ending where its card begins; an opaque, double-sided leaf letting light through,
     * placed, turned and scaled as its placement says.
     */
     void testTheGamePlantsThePalms() {
