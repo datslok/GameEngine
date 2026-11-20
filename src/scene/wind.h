@@ -62,8 +62,9 @@ inline constexpr std::uint16_t windAnchorFixed = 0xFFFF;
 inline constexpr std::uint16_t windAnchorOwn = 0xFFFE;
 
 /*
-* A vertex of something hanging (IndexedMesh::hanging, docs/research/WIND.md stage 3): the two anchors it hangs between (indices
-* into the frame's WindAnchors, or the codes above; the same twice for something hanging from one), its share of the
+* A vertex of something hanging (IndexedMesh::hanging, docs/research/WIND.md stage 3): the two anchors it hangs between (the
+* codes above; the same twice for something hanging from one; lianas hang from their trees through their own records,
+* scene/liana_shape.h), its share of the
 * way from the first to the second (their motions blended by it), and its arm: how far it hangs below the line between
 * them, or below its one anchor (metres), which swings it on the hanging spring as a chain's links swing; and its swing's
 * length, the pendulum its strand swings as (metres): a strand hung from one anchor its whole length, one between two
@@ -80,21 +81,4 @@ struct HangingVertex {
     bool operator==(const HangingVertex&) const = default;
 };
 
-/*
-* A point things hang from on a swaying tree (a liana's hold in a crown): the tree's foot and its height in its mesh's
-* units, its scale and bend (as its WindSway), and the point in the world. The shaders move it exactly as the tree's
-* own vertex there moves.
-*/
-struct WindAnchor {
-    Vec3 foot{};
-    float height = 1.0f;
-    float scale = 1.0f;
-    float bend = 1.0f;
-    Vec3 point{};
-};
 
-// Component: the anchors a game's hanging things hang from (FrameDescription::windAnchors; the first counts), shared so
-// each frame takes them without copying.
-struct WindAnchors {
-    std::shared_ptr<const std::vector<WindAnchor>> anchors;
-};

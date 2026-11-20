@@ -77,6 +77,13 @@ struct ModelRenderer {
     // How it sways in the wind (scene/wind.h; Still by default): every vertex shader bends it by its spring.
     WindSway sway{};
 
+    /*
+    * A liana the GPU bends (scene/liana_shape.h): one past its record in the frame's LianaShapes (0 for everything
+    * else). Its mesh is the template tube, which the vertex shaders put on the record's catenary and sway; its Transform
+    * only places the template's box round the liana (lianaPose), for its bounds and level. No ray meets it.
+    */
+    std::uint32_t lianaShape = 0;
+
 private:
     friend void setRenderVisible(World& world, Entity entity, bool shown);
     friend void setRenderStill(World& world, Entity entity, bool kept);

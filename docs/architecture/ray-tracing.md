@@ -42,6 +42,8 @@ Required by Vulkan 1.3 and used here as pointers for builds and shader reads.
 | `glassRayMask` | 8 | Glass and blended surfaces, alone: only `glassTransmittance`'s rays see them, tinting light per pane |
 | `everythingRayMask` | 255 | Reflections, the debug view |
 
+None (mask 0): shadow-only stand-ins, hidden draws, terrain patches, impostor cards, meshes following the ground and lianas, whose meshes only the vertex shaders shape (lianas come into rays with the placed trees, ROADMAP c3).
+
 **Instances:** `GpuRayInstance` (64 bytes, `VkAccelerationStructureInstanceKHR`'s layout, `static_assert`ed in `vulkan_ray_tracing.cpp`) from `packRayInstance(draw, instanceNumber, meshStructure, flags)`.
 
 - Model's top three rows row-major; instance number (24 bits, `maxRayInstances`) under the mask; record offset under the flags; the mesh structure's address.

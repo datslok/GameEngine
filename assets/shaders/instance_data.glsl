@@ -10,7 +10,7 @@ struct InstanceData {
     vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale)
     uvec4 material;    // x: the material's number in the material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: its kind (instance_shared.h)
     vec4 sway;         // how it sways in the wind (render/gpu/wind.h, packSway): category (-1 still), height, bend, flutter
-    uvec4 hanging;     // x: one past its mesh's first hanging vertex (0 none), y: its swing's bits, z: one past its mesh's card thinning header (0 none)
+    uvec4 hanging;     // x: one past its mesh's first hanging vertex (0 none), y: its swing's bits, z: one past its mesh's card thinning header (0 none), w: one past its liana's record (liana_data.glsl, 0 none)
     vec4 levelSphere;  // the sphere its level of detail is chosen by, in the world: xyz centre, w radius (below 0 unknown)
 };
 

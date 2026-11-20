@@ -4,7 +4,11 @@
 #include "core/settings_visitor.h"
 #include "games/forest/forest_planting.h"
 #include "games/forest/forest_trees.h"
+#include "ecs/world.h"
 #include "games/forest/lianas.h"
+#include "scene/liana_shape.h"
+#include "scene/material.h"
+#include "scene/wind.h"
 #include "scene/planting_cells.h"
 #include "scene/planting_maps.h"
 #include "scene/terrain_heights.h"
@@ -19,9 +23,15 @@
 * A cell's trees and lianas are the same whichever cells are made with it, so cells come and go one by one.
 */
 
-// The near cells (F5 Forest, Near trees): their side in metres (start-up; the lianas do not depend on it).
+/*
+* The near cells (F5 Forest, Near trees): their side (the lianas do not depend on it), those within radiusMetres of the
+* player held (about 200 m: a liana a few centimetres across is a third of a pixel there), at most cellsAFrame made a
+* frame, nearest first.
+*/
 struct ForestNearTreeSettings {
     float cellMetres = 64.0f;
+    float radiusMetres = 200.0f;
+    int cellsAFrame = 2;
 };
 
 void visit(ForestNearTreeSettings& settings, SettingsVisitor& visitor);
@@ -67,3 +77,63 @@ struct NearTreeCell {
 };
 
 NearTreeCell makeNearTreeCell(const PlantingCell& cell, float cellMetres, const NearTreeSources& sources, JobSystem& jobs);
+
+// How the near lianas are drawn: the template tube (its levels named), the bark, the sway, the cascades they cast into.
+struct NearLianaLook {
+    MeshHandle tube;
+    Material bark;
+    WindSway sway{};
+    int shadowCascades = 0;
+};
+
+// What a liana's records take from the trees: each tree layer's variants' heights (their meshes' units), and the bend.
+struct NearLianaTrees {
+    const std::vector<float>& emergentHeights;
+    const std::vector<float>& canopyHeights;
+    float bend = 1.0f;
+};
+
+// A cell's lianas as records (makeLianaShape): from each liana's trees, its far end fixed for a rope; at most most.
+std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLianaTrees& trees, float barkTileMetres, std::size_t most);
+
+/*
+* The lianas round the player the GPU draws (ROADMAP phase 18, d2b): the near cells held round a place (the GPU cells'
+* ring, scene/planting_cells.h), each cell's lianas a block of records in its slot (LianaShapes) and a still entity
+* each, the template tube placed round it (lianaPose) naming its record. A dropped cell's entities are destroyed and its
+* block emptied; a cell made fills its slot's block anew. The cost grows with the cells made, not with those held.
+*/
+class NearLianas {
+public:
+    // The most lianas a cell's slot holds (a 64 m cell of the patch's densest forest hangs about 100).
+    static constexpr std::size_t lianasASlot = 256;
+
+    /*
+    * The cells round place: those past the radius dropped, then up to most new ones made (nearest first). The records'
+    * component, on holder, given anew when anything changed. True when anything did.
+    */
+    bool update(World& world, Entity holder, const Vec2& place, const ForestNearTreeSettings& settings, int most, const NearTreeSources& sources,
+                const NearLianaTrees& trees, const NearLianaLook& look, float barkTileMetres, JobSystem& jobs);
+
+    // Every liana's sway given anew, and every record's bend (each block replaced), the component given anew.
+    void resway(World& world, Entity holder, const WindSway& sway, float bend);
+
+    // The lianas' entities, cell by cell in their slots' order, and the cells held.
+    const std::vector<Entity>& getEntities() const;
+    std::size_t getCellCount() const;
+    const LianaShapes& getShapes() const;
+
+private:
+    struct Slot {
+        bool held = false;
+        PlantingCell cell;
+        std::vector<Entity> entities;
+    };
+
+    void dropSlot(World& world, std::size_t slot);
+    void gatherEntities();
+
+    PlantingCellRing ring;
+    std::vector<Slot> slots;
+    LianaShapes shapes;
+    std::vector<Entity> entities;
+};

@@ -71,7 +71,7 @@ enum SceneBinding : std::uint32_t {
     WindSpringsBinding = 38,
     WindPreviousSpringsBinding = 39,
     HangingVerticesBinding = 40,
-    WindAnchorsBinding = 41,
+    LianaShapesBinding = 41,
     ThinningCardsBinding = 42,
     PlacedPlantsBinding = 43,
     PlacedPartsBinding = 44,
@@ -180,9 +180,6 @@ struct SceneBuffers {
     // The wind force field's record (GpuWindField, render/gpu/wind.h; off without wind).
     UploadArray wind;
 
-    // What hanging things hang from (GpuWindAnchor, render/gpu/wind.h; one unused without).
-    UploadArray windAnchors;
-
     // Each placed part's instance in its plant's frame (GpuInstance, render/gpu/placed_drawing.h; one unused without).
     UploadArray placedParts;
 };
@@ -226,6 +223,7 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo thinningCards{};   // every thinned mesh's header and cards (a stand-in without; scene/card_thinning.h)
     VkDescriptorBufferInfo placedPlants{};    // the planting cells' slots' plants (a stand-in without; render/gpu/placed_drawing.h)
     VkDescriptorBufferInfo placedEntries{};   // the camera's placed entries (a stand-in without)
+    VkDescriptorBufferInfo lianaShapes{};     // the lianas' records, slot by slot (scene/liana_shape.h; one unused without)
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

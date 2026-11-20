@@ -189,7 +189,6 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     skyVisibilityCascades(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     terrainPatches(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     wind(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    windAnchors(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     placedParts(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
@@ -240,7 +239,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
         views.hangingVertices,
-        buffers.windAnchors.describe(),
+        views.lianaShapes,
         views.thinningCards,
         views.placedPlants,
         buffers.placedParts.describe(),

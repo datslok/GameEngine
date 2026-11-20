@@ -1,0 +1,36 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs liana.glsl's functions on the cases liana_gpu_test.cpp sends: a liana's record (six inputs), then share, u
+// round, cos and sin round.
+#include "gpu_test.glsl"
+#include "liana.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    LianaShape shape;
+    shape.from = testInput(0);
+    shape.to = testInput(1);
+    shape.curve = testInput(2);
+    shape.firstTree = testInput(3);
+    shape.secondTree = testInput(4);
+    shape.trees = testInput(5);
+    vec4 place = testInput(6);
+
+    if (function == GPU_TEST_LIANA_CENTRE) {
+        LianaPoint point = lianaCentre(shape, place.x);
+        testOutput(0, vec4(point.offset, point.travelled));
+        testOutput(1, vec4(point.along, 0.0));
+        testOutput(2, vec4(lianaRun(shape), 0.0));
+        testOutput(3, vec4(0.0));
+    } else if (function == GPU_TEST_LIANA_VERTEX) {
+        LianaVertex vertex = lianaVertex(shape, place.x, place.y, place.z, place.w);
+        testOutput(0, vec4(vertex.offset, 0.0));
+        testOutput(1, vec4(vertex.normal, 0.0));
+        testOutput(2, vec4(vertex.tangent, 0.0));
+        testOutput(3, vec4(vertex.uv, vertex.along, vertex.arm));
+    }
+}
