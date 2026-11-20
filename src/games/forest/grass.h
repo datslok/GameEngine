@@ -35,11 +35,13 @@ struct ForestGrassSettings {
     // Blades a square metre where the grass paint is full, their heights (each a random share between, times its
     // clump's) and their width at the root, metres. Games draw blades wider than real ones (5 mm) and fewer: the ground's
     // grass texture under them fills between. 60 a square metre 1.2 cm wide was too sparse (the user's first look, Nov 16
-    // 2026): about 3.75 times the cover.
-    float bladesPerSquareMetre = 150.0f;
+    // 2026): about 3.75 times the cover. 150 at 1.8 cm cost about 3.8 ms in the meadow on the laptop, most of it in the
+    // blades within 7 m (thin blades are mostly edge, and the GPU shades 2 x 2 pixel blocks); 100 at 2.7 cm keep that
+    // cover for about 1 ms less.
+    float bladesPerSquareMetre = 100.0f;
     float shortest = 0.25f;
     float tallest = 0.6f;
-    float bladeWidth = 0.018f;
+    float bladeWidth = 0.027f;
 
     // The clumps' spacing (metres): each clump's blades share a height, a lean and a tone.
     float clumpMetres = 0.8f;
@@ -55,9 +57,13 @@ struct ForestGrassSettings {
 
     // From where a patch draws half its blades, a quarter, and none (metres, at a 1080-pixel, 70 degree view and the
     // levels' default pixel error; they scale with both).
-    float halfDistance = 15.0f;
-    float quarterDistance = 30.0f;
+    float halfDistance = 10.0f;
+    float quarterDistance = 20.0f;
     float farthest = 60.0f;
+
+    // The share of the full mesh's cover each coarser level keeps: 1 keeps it all (half the blades twice as wide, as
+    // Ghost of Tsushima's), less lets the ground's grass texture show through further off.
+    float levelCover = 1.0f;
 };
 
 void visit(ForestGrassSettings& settings, SettingsVisitor& visitor);
@@ -87,7 +93,7 @@ void appendGrassBlade(IndexedMesh& mesh, const GrassBlade& blade, int segments);
 /*
 * A patch: its blades (density times the full count of its cell, in a fixed random order, so a sparser patch of the same
 * seed is the first of the same blades) and its meshes, centred on the cell's middle: all its blades in 4 segments; the
-* first half widened by sqrt 2 in 3; the first quarter widened by 2 in 2.
+* first half in 3 and the first quarter in 2, each widened by grassLevelWidening to keep levelCover of the cover.
 */
 struct GrassPatch {
     std::vector<GrassBlade> blades;
@@ -97,6 +103,9 @@ struct GrassPatch {
 };
 
 GrassPatch growGrassPatch(const ForestGrassSettings& settings, float density, std::uint32_t seed);
+
+// How much wider a level's blades are when it keeps share of them and cover of the full mesh's cover: cover / share.
+float grassLevelWidening(float cover, float share);
 
 // A cell's density step for its mean grass paint: 0 (no patch) below leastPaint, else the nearest of 1 to densitySteps.
 int grassDensityStep(const ForestGrassSettings& settings, float paint);

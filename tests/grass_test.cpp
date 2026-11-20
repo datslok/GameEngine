@@ -98,6 +98,43 @@ namespace {
         assert(again.mesh.vertices.size() == patch.mesh.vertices.size() && again.mesh.vertices[100].position.x == patch.mesh.vertices[100].position.x);
     }
 
+    // A mesh's area: what its blades cover seen face on.
+    float meshArea(const IndexedMesh& mesh) {
+        float area = 0.0f;
+
+        for (std::size_t index = 0; index + 2 < mesh.indices.size(); index += 3) {
+            const Vec3& a = mesh.vertices[mesh.indices[index]].position;
+            const Vec3& b = mesh.vertices[mesh.indices[index + 1]].position;
+            const Vec3& c = mesh.vertices[mesh.indices[index + 2]].position;
+            area += 0.5f * (b - a).cross(c - a).length();
+        }
+
+        return area;
+    }
+
+    /*
+    * The coarser levels keep the cover (Ghost of Tsushima's half the blades, twice as wide): their area the full mesh's
+    * times levelCover, within the few percent fewer segments trim off the curve; their blades the first of the full's.
+    */
+    void testTheLevelsKeepTheCover() {
+        assert(grassLevelWidening(1.0f, 0.5f) == 2.0f && grassLevelWidening(1.0f, 0.25f) == 4.0f && grassLevelWidening(0.5f, 0.5f) == 1.0f);
+
+        ForestGrassSettings settings;
+        settings.bladesPerSquareMetre = 20.0f;
+        const GrassPatch patch = growGrassPatch(settings, 1.0f, 7);
+        const float full = meshArea(patch.mesh);
+        assert(near(meshArea(patch.level) / full, 1.0f, 0.1f) && near(meshArea(patch.farLevel) / full, 1.0f, 0.1f));
+
+        // A level's first blade is the full mesh's first: their roots' middles the same.
+        const Vec3 fullRoot = (patch.mesh.vertices[0].position + patch.mesh.vertices[1].position) * 0.5f;
+        const Vec3 levelRoot = (patch.level.vertices[0].position + patch.level.vertices[1].position) * 0.5f;
+        assert((fullRoot - levelRoot).length() < 1e-5f);
+
+        settings.levelCover = 0.5f;
+        const GrassPatch thinner = growGrassPatch(settings, 1.0f, 7);
+        assert(near(meshArea(thinner.level) / full, 0.5f, 0.05f) && near(meshArea(thinner.farLevel) / full, 0.5f, 0.05f));
+    }
+
     // A cell's density step: none below the least paint, else the nearest of the steps, at least the first.
     void testDensitySteps() {
         ForestGrassSettings settings;
@@ -166,13 +203,14 @@ namespace {
 
         FieldCounter counter;
         visit(forest.game.getGrassSettings(), counter);
-        assert(counter.fields == 13 && counter.live == 0);
+        assert(counter.fields == 14 && counter.live == 0);
     }
 }
 
 void testGrass() {
     testABlade();
     testAPatch();
+    testTheLevelsKeepTheCover();
     testDensitySteps();
     testTheBladesPicture();
     testTheBackKeepsItsNormal();
