@@ -41,7 +41,7 @@ With reflections on, the main pass writes three more targets at the render size 
 | Stand-in | `B10G11R11_UFLOAT`, RGBA16F where that cannot be drawn into | what the pixel added for its reflection |
 
 - Not cleared: the pass reads only pixels with a surface (`VulkanReflections::beginSurfaces` discards old contents).
-- `mainPipelines` is indexed by `mainPipelineIndex` (after the prepass, probes, surfaces, cut-outs without the prepass, glass rays); `PipelineDescription::extraColourFormats` names the extra targets.
+- `mainPipelines` is indexed by `mainPipelineIndex` (after the prepass, probes, surfaces, cut-outs without the prepass, glass rays); `PipelineDescription::extraColourFormats` names the extra targets: the velocity image first (`anti-aliasing.md`), then the three surfaces (fragment locations 2-4).
 - Sky and stars pipelines draw into the scene image alone, so with surfaces they go in a second rendering block after the main one (colour and depth loaded; depth stored for it).
 
 ## The pyramids
