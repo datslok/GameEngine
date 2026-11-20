@@ -154,8 +154,8 @@ namespace {
         assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < ForestTreeSettings{}.impostorErrorMetres / 10.0f);
         assert(settings.impostorFrames >= 4 && settings.impostorTexels > 0 && settings.impostorTexels < ForestTreeSettings{}.impostorTexels);
 
-        // Its shadows only in the nearest cascades: a knee-high plant's shadow is a few metres long.
-        assert(settings.shadowCascades >= 1 && settings.shadowCascades <= 2);
+        // Its shadows in every cascade (0): stopped at the nearest two, they popped in plant by plant about 20 m away.
+        assert(settings.shadowCascades == 0);
     }
 
     /*

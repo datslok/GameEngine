@@ -20,8 +20,9 @@
 * with it, as the tree and its climbers do.
 */
 
-// The sun's cascades epiphytes cast into (ModelRenderer::shadowCascades).
-inline constexpr int epiphyteShadowCascades = 2;
+// The sun's cascades epiphytes cast into (ModelRenderer::shadowCascades; 0 all): all, so their shadows do not pop in as
+// one walks up (ForestUnderstoreySettings::shadowCascades).
+inline constexpr int epiphyteShadowCascades = 0;
 
 // How many epiphytes and how they grow (F5 Forest, Epiphytes; start-up: the meshes are built once).
 struct ForestEpiphyteSettings {
