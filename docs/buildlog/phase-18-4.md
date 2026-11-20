@@ -14,3 +14,10 @@
   - **Fix:** one sun-shadow value a card, averaged over 7 points spread over its plant (middle and +-0.5 radius along its axes, `impostorShadowSpread`), as engines shadow far cards coarsely; the far map once at the middle.
   - **Cost:** 7 one-tap lookups and one soft far lookup a card pixel, in place of a soft cascade lookup (32 taps) and a soft far one at each pixel's leaf.
   - **Left:** the mirror's cascades are not read for cards (they take the sun beyond).
+- `gpu-placement` d2a (`near-tree-mirror`, Nov 20 2026): the big trees planted by the CPU a cell at a time, each crown's lianas its own
+  - **Found:** the mesh pool only grows (`VulkanMeshPool`), so cells round the player could never drop their liana meshes. Weighed staging, mesh freeing, fixed slot meshes and GPU-drawn lianas; the user chose the GPU drawing them from records (scales best: about 100 bytes a liana against 20-40 KB). Research and plan in `docs/research/VINES.md`; rays for them with c3, as the trees are not in rays yet.
+  - **Per-crown streams:** `chooseLianas` drew one stream across every crown, so one crown's lianas hung on every crown before it. Now each draws from the seed and its identity (layer and dither cell); different trees carry lianas than before, about as many (accepted).
+  - **Neighbours across a cell's edge:** crowns stand above their feet, so planting the cell grown by `neighbourSpan` (30 m) finds every crown a loop can reach; `plantBigTrees`' order is the same in any box, so neighbours are drawn in the same order.
+  - **Only the big trees' two layers planted:** they read nothing after them, so the same trees for a fraction of the work.
+  - **Tested:** a crown's lianas the same among only its neighbours, a cell's trees the forest's, the patch's lianas the same from 64 m and 48 m cells. The last failed only at -O2: the test's `NearTreeSources` held a reference to a temporary settings struct (passed in debug by luck).
+  - **Path-share test:** 0.95 against 0.8 over 60 crowns is within chance, and the new streams flipped it; now checked against a far share of 0.3.

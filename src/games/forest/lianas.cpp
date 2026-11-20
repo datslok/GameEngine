@@ -127,15 +127,16 @@ void visit(ForestLianaSettings& settings, SettingsVisitor& visitor) {
 }
 
 /*
-* Random numbers drawn in a fixed order from (seed, a running count), so the same crowns and settings always give the
-* same lianas. A crown's neighbours are found by walking every crown: a patch has a few hundred.
+* Random numbers drawn in a fixed order from (the crown's own seed, a running count), so the same crowns and settings
+* always give the same lianas. A crown's neighbours are found by walking every crown: a cell holds a few dozen.
 */
 std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const ForestLianaSettings& settings, std::uint64_t seed,
                                 const std::function<float(float, float)>& groundHeight, const std::function<float(float, float)>& pathDistance) {
     std::vector<Liana> lianas;
+    std::uint64_t crownSeed = 0;
     std::uint64_t draw = 0;
     const auto next = [&] {
-        return forestUnitRandom(seed, draw++);
+        return forestUnitRandom(crownSeed, draw++);
     };
     const int most = std::max(settings.mostPerTree, 1);
     const float leastSag = std::min(settings.leastSag, settings.mostSag);
@@ -143,6 +144,15 @@ std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const For
 
     for (std::size_t index = 0; index < crowns.size(); ++index) {
         const LianaCrown& crown = crowns[index];
+
+        if (!crown.carries) {
+            continue;
+        }
+
+        // The crown's own stream: its identity spread over the bits (an odd multiplier, so no two identities meet).
+        crownSeed = seed ^ (crown.identity * 0x9E3779B97F4A7C15ull);
+        draw = 0;
+        const std::uint32_t lianaSeed = static_cast<std::uint32_t>(crownSeed ^ (crownSeed >> 32));
         const float share = pathDistance(crown.centre.x, crown.centre.z) <= settings.pathReach ? settings.pathShare : settings.treeShare;
 
         if (next() >= share) {
@@ -165,6 +175,7 @@ std::vector<Liana> chooseLianas(const std::vector<LianaCrown>& crowns, const For
         for (int liana = 0; liana < count; ++liana) {
             Liana hung;
             hung.crown = static_cast<int>(index);
+            hung.seed = lianaSeed + static_cast<std::uint32_t>(liana);
             const float turn = next();
             const float out = next();
             const float down = next();
@@ -275,7 +286,7 @@ std::vector<LianaMeshes> lianaMeshes(const std::vector<Liana>& lianas, const std
                 const float spacing = inCrown ? settings.leafSpacing : settings.sparseLeafSpacing;
 
                 for (const HangingStrand& leafy : crownRuns(strand, first, second, inCrown)) {
-                    appendLeafCards(built.leaves, leafy, spacing, settings.leafSize, forestShapeSeed(lianaLeafSeed + static_cast<std::uint32_t>(index), ++run));
+                    appendLeafCards(built.leaves, leafy, spacing, settings.leafSize, forestShapeSeed(lianaLeafSeed + liana.seed, ++run));
                 }
             }
         }

@@ -94,7 +94,7 @@ Everything on the air entity, rewritten each frame by `updateDaylight`:
 
 ## Settings
 
-F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, Hangings, Moss, Drifting rocks, Canopy trees, Emergent trees, Mid trees, Leaf light, Understorey, Palms, Lianas, Climbers, Epiphytes, Grass, Forest floor, Valley, Planting (the maps; each species' layer is a Planting group in its own).
+F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, Hangings, Moss, Drifting rocks, Canopy trees, Emergent trees, Mid trees, Leaf light, Understorey, Palms, Lianas, Near trees, Climbers, Epiphytes, Grass, Forest floor, Valley, Planting (the maps; each species' layer is a Planting group in its own).
 
 - Live: Sun, Atmosphere, Wind, Sway, Mist, Ground (`ForestGroundSettings`: blend depth 0.2, hex tiling on), Rock (but its bed waves), Structures, drifting rocks' `moving`.
 - Start-up: the rest, including `ForestValleySettings` (`groundCoarseness` 0, `pillarCount` 220, `islandCount` 30, `start`).
@@ -110,4 +110,4 @@ F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, H
 
 ## Tests
 
-`forest_test` (the land, rings, paint, weights, layer files and stand-ins, strata, shapes, the headless game at its coarsest ground, `forest-view`, settings applied); one test file per other module (`forest_structures_test`, `forest_trees_test`, `island_hangings_test`, `hanging_moss_test`, `drifting_rocks_test`, `understorey_test`, `palms_test`, `lianas_test`, `climbers_test`, `epiphytes_test`, `grass_test`, `floor_cover_test`), sway in `wind_sway_test` and `wind_hanging_test`. Shared helpers: `tests/forest_helpers.h`.
+`forest_test` (the land, rings, paint, weights, layer files and stand-ins, strata, shapes, the headless game at its coarsest ground, `forest-view`, settings applied); one test file per other module (`forest_structures_test`, `forest_trees_test`, `island_hangings_test`, `hanging_moss_test`, `drifting_rocks_test`, `understorey_test`, `palms_test`, `lianas_test`, `near_trees_test`, `climbers_test`, `epiphytes_test`, `grass_test`, `floor_cover_test`), sway in `wind_sway_test` and `wind_hanging_test`. Shared helpers: `tests/forest_helpers.h`.
