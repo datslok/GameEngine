@@ -404,6 +404,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 - [ ] Level of detail (research in `docs/research/LOD.md`): by error in pixels (`tree-lod`), shadows from the same levels (`shadow-lod`), the terrain's CDLOD (`terrain-lod`)
 - [x] Impostors (`tree-impostors`, `impostor-switch`, `plant-impostors`)
   - [x] Cards shadowed by their own leaves: a depth atlas baked beside the normals, the sun's frames read as the plant's own shadow map, the scene's sun shadow read at the leaf seen rather than on the card, so small plants no longer glow in sun flecks (research in `docs/research/LOD.md`, "Self-shadowed impostors") (`impostor-self-shadow`)
+  - [x] The scene's sun shadow on a card from points spread over its plant and averaged, one value a card, so a card at a fleck's edge is not lit whole where its mesh is mostly shadowed (probe: the leaf points lay in the fleck, the card itself half lit, its mesh shadowed) (`card-fleck-glow`)
 - [ ] Pop-in: done for the trees' and palms' cards (`lod-pop-in`, `palm-thinning`); left: the trees' bark if it shows
   - [x] The scanned plants' levels cross-faded by a dither over a band of distance (`plant-fades`)
 - [x] Leaf shimmer: the trees' flutter slower and in step (`tree-flutter`)

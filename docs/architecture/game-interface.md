@@ -141,7 +141,7 @@ Each view draws the coarsest of a mesh's levels whose error covers at most `pixe
 - **`thinningErrorPerMetre`:** pixelError / pixelsPerMetre, card thinning's allowance (0 orthographic or off).
 - The camera chooses by its **output** height (`RenderStats::outputHeight`), not the render height, so upscaling does not pull switches closer. Other views' choices (probe faces, mirror, shadow tiles by their texels): renderer.md.
 - **Switching** is instant (TAA softens it) but for fading draws (`levelFade`, level-of-detail.md).
-- **Settings:** `LevelOfDetailSettings` (`RenderSettings::levelOfDetail`, F5 Level of detail): `enabled`, `pixelError` (2), `impostors`, `impostorSelfShadow`, `impostorShadowBias`, `fadeBand` (0.2); live; `validateLevelOfDetail` checks them.
+- **Settings:** `LevelOfDetailSettings` (`RenderSettings::levelOfDetail`, F5 Level of detail): `enabled`, `pixelError` (2), `impostors`, `impostorSelfShadow`, `impostorShadowBias`, `impostorShadowSpread`, `fadeBand` (0.2); live; `validateLevelOfDetail`.
 
 ## Debug drawing
 

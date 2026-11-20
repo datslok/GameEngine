@@ -32,6 +32,12 @@ struct LevelOfDetailSettings {
     bool impostorSelfShadow = true;
     float impostorShadowBias = 1.5f;
 
+    // With the self-shadow on: the scene's sun shadow on a card read at points spread this share of the plant's radius
+    // round its middle and averaged, one value for the whole card (impostorPlantShadowSample), as its mesh's leaves
+    // average over a fleck's edge; 0 reads it at each pixel's leaf instead, which can lie wholly in a fleck the mesh
+    // mostly misses and light the card whole.
+    float impostorShadowSpread = 0.5f;
+
     // The camera's cross-fade (docs/research/LOD.md, Hiding the switches): a draw that fades (MeshLevelOptions::fadesLevels)
     // draws both levels over this share of a switch's distance before it, each keeping the pixels the other throws away
     // (render/gpu/level_fade.h). 0 swaps in one frame. Captures and shadow tiles never fade.
@@ -40,8 +46,8 @@ struct LevelOfDetailSettings {
 
 void visit(LevelOfDetailSettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a budget not above 0, a fade band outside 0 to fadeBandMost, or a negative impostor
-// shadow bias.
+// Throws std::invalid_argument for a budget not above 0, a fade band outside 0 to fadeBandMost, a negative impostor
+// shadow bias or an impostor shadow spread outside 0 to 1.
 void validateLevelOfDetail(const LevelOfDetailSettings& settings);
 
 /*

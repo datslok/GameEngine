@@ -339,12 +339,14 @@ vec3 offsetForShadow(int tile, vec3 normal, float distanceToLight) {
 /*
 * How much light reaches a point according to one tile: 1 lit, 0 blocked, in between at a shadow's soft edge.
 * The point is projected exactly as the shadow pass drew the scene, and its depth is compared with what the light saw
-* there. Nine nearby comparisons are averaged (percentage-closer filtering) so edges are not jagged.
+* there. (2 reach + 1)^2 nearby comparisons a texel apart are averaged (percentage-closer filtering) so edges are not
+* jagged: reach 1, nine, for a light's own lookup; reach 0, one (filtered over 2 x 2 texels by the comparison sampler),
+* where many points are averaged anyway (sunShadowOverPlant).
 * Points outside the tile's view (beyond a directional light's shadow box) count as lit. Where the tile's coloured shadow
 * map holds glass, each comparison is tinted by the glass in front of the point there (glassTintAt), so the tint's edge
 * is as soft as the shadow's; the answer is then a colour.
 */
-vec3 shadowFromTile(int tile, vec3 position) {
+vec3 shadowFromTile(int tile, vec3 position, int reach) {
     // A cube face the camera cannot see got no square in the atlas (an empty rectangle).
     if (shadowTiles[tile].rect.z <= 0.0) {
         return vec3(1.0);
@@ -364,15 +366,16 @@ vec3 shadowFromTile(int tile, vec3 position) {
 
     vec3 lit = vec3(0.0);
 
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
+    for (int x = -reach; x <= reach; ++x) {
+        for (int y = -reach; y <= reach; ++y) {
             vec2 uv = atlasUv + vec2(x, y) * atlasTexel.xy;
             float passes = texture(shadowAtlas, vec3(uv, projected.z));
             lit += glass ? passes * glassTintAt(uv, projected.z) : vec3(passes);
         }
     }
 
-    return lit / 9.0;
+    float side = float(2 * reach + 1);
+    return lit / (side * side);
 }
 
 // Sixteen points spread over a unit disc with no two close together (a Poisson disc): even coverage from few samples.
@@ -418,7 +421,7 @@ vec3 softShadowFromTileLifted(int tile, vec3 position, float emitterSize, float 
     bool box = lens.x <= 0.0;
 
     if (lens.y <= 0.0 || emitterSize <= 0.0) {
-        return shadowFromTile(tile, position);
+        return shadowFromTile(tile, position, 1);
     }
 
     vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
@@ -591,6 +594,53 @@ vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float
 
     ownShare = 0.0;
     return vec3(0.0);
+}
+
+/*
+* An impostor card's scene sun shadow (LevelOfDetailSettings::impostorShadowSpread; impostor.glsl,
+* impostorPlantShadowSample): read at IMPOSTOR_PLANT_SHADOW_SAMPLES points spread over its plant (middle, the plant's
+* middle measured from the camera; plantAxes, its frame's axes times its radius) and averaged, one value for the whole
+* card, as its mesh's leaves average over a fleck's edge. Each point takes the finest cascade holding it, one filtered
+* comparison (the points' spread blurs more than a soft shadow would), past the row the sun beyond the cascades; the
+* far map's distant blockers once, at the middle. Cost: seven taps and one soft far lookup a card pixel, against a soft
+* cascade and far lookup at each pixel's leaf. The mirror's cascades are not read: a card past a mirror's camera rows is
+* rare, and takes the sun beyond.
+*/
+vec3 sunShadowOverPlant(int firstTile, int cascades, vec3 toLight, float tanAngularRadius, int farTile, float distantReach, vec3 middle,
+                        mat3 plantAxes, float spread) {
+    vec3 sum = vec3(0.0);
+    float beyond = -1.0;
+
+    for (int index = 0; index < IMPOSTOR_PLANT_SHADOW_SAMPLES; ++index) {
+        vec3 point = middle + plantAxes * impostorPlantShadowSample(index, spread);
+        vec3 lit = vec3(-1.0);
+
+        for (int cascade = 0; cascade < cascades; ++cascade) {
+            int tile = firstTile + cascade;
+            vec3 position = point + toLight * sunShadowBias(shadowTiles[tile].offset.y, 1.0);
+
+            if (sunCascadeEdge(tile, position) > 0.0) {
+                lit = shadowFromTile(tile, position, 0);
+                break;
+            }
+        }
+
+        if (lit.x < 0.0) {
+            beyond = beyond < 0.0 ? sunBeyondCascades(toLight, toLight) : beyond;
+            lit = vec3(beyond);
+        }
+
+        sum += lit;
+    }
+
+    vec3 average = sum / float(IMPOSTOR_PLANT_SHADOW_SAMPLES);
+
+    if (farTile < 0 || max(average.r, max(average.g, average.b)) <= 0.0) {
+        return average;
+    }
+
+    return withDistantOccluders(average, softShadowFromTileLifted(farTile, distantOccluderPoint(middle, toLight, distantReach), tanAngularRadius,
+                                                                  distantReach));
 }
 
 // A row's shadow with plain sunlight past it, as mix(beyond, own, share) always gave it.
@@ -1326,9 +1376,18 @@ void main() {
 
             if (tile >= 0) {
                 // Lifted towards the light for light coming through a leaf (shadowLiftNormal), not into its own shadow.
-                radiance *= sunShadow(tile, directional[i].cascadeCount, directional[i].mirrorShadowTile, directional[i].mirrorCascadeCount,
-                                      shadowLiftNormal(point, geometricNormal, directional[i].toLight.xyz), directional[i].toLight.xyz,
-                                      directional[i].tanAngularRadius, directional[i].farShadowTile, directional[i].distantOccluderReach);
+                // A self-shadowed card: one value over its plant (sunShadowOverPlant), its middle and axes from the card
+                // point's offset (framePosition, over the radius in the tree's frame; worldTangent.w the card's metres a unit).
+                if (impostor && levelOptions.z > 0.5 && cascadeOptions.z > 0.0) {
+                    mat3 plantAxes = frameAxes * worldTangent.w;
+                    radiance *= sunShadowOverPlant(tile, directional[i].cascadeCount, directional[i].toLight.xyz, directional[i].tanAngularRadius,
+                                                   directional[i].farShadowTile, directional[i].distantOccluderReach,
+                                                   relativePosition - plantAxes * framePosition, plantAxes, cascadeOptions.z);
+                } else {
+                    radiance *= sunShadow(tile, directional[i].cascadeCount, directional[i].mirrorShadowTile, directional[i].mirrorCascadeCount,
+                                          shadowLiftNormal(point, geometricNormal, directional[i].toLight.xyz), directional[i].toLight.xyz,
+                                          directional[i].tanAngularRadius, directional[i].farShadowTile, directional[i].distantOccluderReach);
+                }
 
                 // The brightest light's short shadows the shadow map misses, from the camera's own depths (none in
                 // captures, which have no depth image of their own, or for glass, which is not in it, or for light

@@ -5,6 +5,8 @@
 #ifndef IMPOSTOR_GLSL
 #define IMPOSTOR_GLSL
 
+#include "scene/impostor_shared.h"
+
 // The upper hemisphere folded onto the unit square (straight up the middle, the horizon its edge).
 vec2 hemiOctahedralEncode(vec3 direction) {
     vec3 above = vec3(direction.x, max(direction.y, 0.0), direction.z);
@@ -81,6 +83,18 @@ vec3 impostorShadowPoint(vec3 point, vec3 normal, vec3 sunDirection, float bias)
     float facing = dot(normal, sunDirection);
     float sine = sqrt(max(1.0 - facing * facing, 0.0));
     return point + normal * ((facing < 0.0 ? -bias : bias) * sine);
+}
+
+// One of the IMPOSTOR_PLANT_SHADOW_SAMPLES points a card's scene sun shadow is read at and averaged, over the radius in
+// the tree's frame: 0 the middle, then +x, -x, +y, -y, +z, -z, each spread from it.
+vec3 impostorPlantShadowSample(int index, float spread) {
+    if (index <= 0) {
+        return vec3(0.0);
+    }
+
+    int axis = (index - 1) / 2;
+    float along = (index - 1) % 2 == 0 ? spread : -spread;
+    return vec3(axis == 0 ? along : 0.0, axis == 1 ? along : 0.0, axis == 2 ? along : 0.0);
 }
 
 #endif

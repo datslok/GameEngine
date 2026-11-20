@@ -87,6 +87,15 @@ float impostorShadowBias(float biasTexels, float frameTexels);
 */
 Vec3 impostorShadowPoint(const Vec3& point, const Vec3& normal, const Vec3& sunDirection, float bias);
 
+/*
+* One of the IMPOSTOR_PLANT_SHADOW_SAMPLES points (impostor_shared.h) a card's scene sun shadow is read at and averaged
+* (LevelOfDetailSettings::impostorShadowSpread), over the radius in the tree's frame: 0 the middle, then +x, -x, +y, -y,
+* +z, -z, each spread from it. A card is one plane standing in for a cloud of leaves; read at the leaves it shows, a
+* whole card could lie in a sun fleck its mesh's leaves mostly miss. Spread over the plant, the card takes about their
+* average, one value a card (coarse, as engines shadow far cards).
+*/
+Vec3 impostorPlantShadowSample(int index, float spread);
+
 // The baked atlases (frames x frames frames of frameTexels a side): colour (sRGB, alpha 255 where something was) and
 // the normals in the tree's frame (linear bytes, n * 0.5 + 0.5) with the depth in alpha (impostorDepthEncode; kept
 // uncompressed, TextureStorage::Exact), and the sphere they fill.

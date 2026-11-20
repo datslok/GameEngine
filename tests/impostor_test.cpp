@@ -3,6 +3,7 @@
 #include "render/gpu/material_shared.h"
 #include "render/gpu/ray_tracing.h"
 #include "scene/impostor.h"
+#include "scene/impostor_shared.h"
 #include "scene/indexed_mesh.h"
 #include "test_jobs.h"
 
@@ -217,6 +218,31 @@ namespace {
         assert(nearVec(impostorShadowPoint(point, normal, fromBehind, 0.1f), Vec3{0.1f, 0.2f, 0.3f - 0.1f * std::sqrt(3.0f) * 0.5f}, 1e-6f));
     }
 
+    /*
+    * A card's scene sun shadow is read at points spread over its plant (over the radius, in the tree's frame): the middle
+    * first, then one each way along x, y and z, each the spread from the middle, so they balance about it; a spread of 0
+    * puts all at the middle.
+    */
+    void testTheCardsShadowPointsSpreadOverThePlant() {
+        assert(IMPOSTOR_PLANT_SHADOW_SAMPLES == 7);
+        assert(nearVec(impostorPlantShadowSample(0, 0.5f), Vec3{}, 0.0f));
+        const std::array<Vec3, 6> expected{Vec3{0.5f, 0.0f, 0.0f}, Vec3{-0.5f, 0.0f, 0.0f}, Vec3{0.0f, 0.5f, 0.0f},
+                                           Vec3{0.0f, -0.5f, 0.0f}, Vec3{0.0f, 0.0f, 0.5f}, Vec3{0.0f, 0.0f, -0.5f}};
+        Vec3 sum{};
+
+        for (int index = 1; index < IMPOSTOR_PLANT_SHADOW_SAMPLES; ++index) {
+            const Vec3 sample = impostorPlantShadowSample(index, 0.5f);
+            assert(nearVec(sample, expected[static_cast<std::size_t>(index - 1)], 0.0f));
+            sum = sum + sample;
+        }
+
+        assert(nearVec(sum, Vec3{}, 0.0f));
+
+        for (int index = 0; index < IMPOSTOR_PLANT_SHADOW_SAMPLES; ++index) {
+            assert(nearVec(impostorPlantShadowSample(index, 0.0f), Vec3{}, 0.0f));
+        }
+    }
+
     // A quad facing +z at height z, x from -half to half, y from bottom to bottom + 2 half.
     IndexedMesh facingQuad(float half, float bottom, float z) {
         IndexedMesh mesh;
@@ -313,6 +339,7 @@ void testImpostors() {
     testDepthAndTheSurfaceBehindACardPoint();
     testTheSunsTestFiltersFourTexels();
     testTheSunsTestStartsOffTheLeaf();
+    testTheCardsShadowPointsSpreadOverThePlant();
     testCardsShadowThemselves();
     testTheCardCarriesItsMiddleAndRadius();
     testAnImpostorMaterialReachesTheGpu();
