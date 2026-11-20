@@ -33,9 +33,12 @@ void main() {
     PlacedPlant plant;
     bool counted = placedBlockPlant(block, view, local, number, plant);
     uint parts = 0u;
+    uint kindSlot = 0u;
 
     if (counted) {
-        parts = placedKinds[block.firstKind + plant.kind].parts;
+        PlacedKind own = placedKinds[block.firstKind + plant.kind];
+        kindSlot = block.firstKind + placedKindSlot(plant.kind, own.variants, own.variantSlot, plant.pick);
+        parts = placedKinds[kindSlot].parts;
     }
 
     // The same number of rounds for every thread (the most parts any kind may have), so the barriers are reached by all.
@@ -46,7 +49,7 @@ void main() {
         uint part = 0u;
 
         if (partRound < parts) {
-            part = placedKinds[block.firstKind + plant.kind].part[partRound];
+            part = placedKinds[kindSlot].part[partRound];
             draws = placedPartEntries(placedParts[part], plant, number, view.camera);
         }
 

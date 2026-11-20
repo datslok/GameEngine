@@ -22,9 +22,9 @@ struct PlacedPart {
 // A layer's kind: how many parts and which (indices into the parts). Must match GpuPlacedKind.
 struct PlacedKind {
     uint parts;
-    uint unused0;
-    uint unused1;
-    uint unused2;
+    uint variants;    // its looks, chosen by the plant's pick (placedKindSlot)
+    uint variantSlot; // the slot of its variant 1, the rest after it
+    uint unused;
     uint part[PLACED_MOST_PARTS];
 };
 
@@ -73,6 +73,18 @@ vec2 placedTurn(float turnRadians) {
     precise float diagonal = 1.0 - 2.0 * (sine * sine + 0.0);
     precise float corner = 2.0 * (0.0 + cosine * sine);
     return vec2(diagonal, corner);
+}
+
+// The slot of its layer's kinds a plant of kind draws: the kind's own, or, with variants, the one its pick chooses,
+// min(pick * variants, variants - 1), variant 1 on at variantSlot. Mirrors placedKindSlot (render/gpu/placed_drawing.cpp).
+uint placedKindSlot(uint kind, uint variants, uint variantSlot, float pick) {
+    if (variants <= 1u) {
+        return kind;
+    }
+
+    precise float scaled = pick * float(variants);
+    uint variant = min(uint(scaled), variants - 1u);
+    return variant == 0u ? kind : variantSlot + variant - 1u;
 }
 
 // The plant's model matrix from its turn already made (placedTurnedModel), so a vertex makes the sine and cosine once.

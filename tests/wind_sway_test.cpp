@@ -413,11 +413,12 @@ namespace {
             assert(epiphyte.sway.kind == SwayKind::Tree);
         }
 
-        bool plants = false;
-        forest.world.each<ModelRenderer>([&](Entity, const ModelRenderer& renderer) {
-            plants = plants || renderer.sway.kind == SwayKind::Plant;
-        });
-        assert(plants);
+        // The understorey and palms are looks too: seen mesh and stand-in sway as plants, the card holds still.
+        assert(!forest.game.getPlantLooks().empty());
+
+        for (const PlantedKindLook& look : forest.game.getPlantLooks()) {
+            assert(look.models[0].sway.kind == SwayKind::Plant && look.models[1].sway.kind == SwayKind::Plant && look.models[2].sway.kind == SwayKind::Still);
+        }
 
         Input input;
         forest.game.getSwaySettings().grass.bend = 0.9f;

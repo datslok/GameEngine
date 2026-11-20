@@ -53,7 +53,9 @@ static_assert(sizeof(GpuPlacedPart) == 112, "GpuPlacedPart must match placed_dra
 // kind's are not one run). The table holds one a layer's PLANTING_MOST_KINDS kinds.
 struct GpuPlacedKind {
     std::uint32_t parts = 0;
-    std::uint32_t unused[3] = {0, 0, 0};
+    std::uint32_t variants = 0;    // its looks (0 or 1: itself alone), chosen by the plant's pick (placedKindSlot)
+    std::uint32_t variantSlot = 0; // the slot of its variant 1, the rest after it
+    std::uint32_t unused = 0;
     std::uint32_t part[PLACED_MOST_PARTS] = {};
 };
 
@@ -151,10 +153,16 @@ struct PlacedTable {
     std::uint32_t mostParts = 0;
 };
 
+// The slot of its layer's kinds a plant of kind draws: the kind's own, or, with variants (its kind given several looks),
+// the one its pick chooses, min(pick * variants, variants - 1) as an entity choosing among them would, variant 1 on at
+// variantSlot. Mirrored by placed_drawing.glsl.
+std::uint32_t placedKindSlot(std::uint32_t kind, std::uint32_t variants, std::uint32_t variantSlot, float pick);
+
 /*
 * The table of the frame's planted parts and kinds over layerCount layers. Throws std::invalid_argument for a kind
 * past PLANTING_MOST_KINDS or a layer past layerCount, more than placedMostParts parts in a kind, glass, a mesh not in
-* the pools, more than three levels, or more than placedMostGroups groups.
+* the pools, more than three levels, or more than placedMostGroups groups; a kind's variants missing one below another,
+* given twice, or reaching a slot a look's kind holds (they take the layer's top slots, its last variant in the last).
 */
 PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const PlantedKindParts> kinds, std::size_t layerCount,
                              const std::function<MeshPlacement(MeshHandle)>& placement);

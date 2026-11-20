@@ -27,10 +27,12 @@ struct PlantingField {
 };
 
 // How one kind of a layer's plants is drawn on the GPU: its models in the plant's own frame (the plant's foot, turn and
-// scale place them, as an entity's Transform would).
+// scale place them, as an entity's Transform would). A kind given several looks (variants 0 to n - 1) draws the one
+// its plant's pick chooses, min(pick * n, n - 1) (placedKindSlot).
 struct PlantedKindLook {
     int layer = 0;
     int kind = 0;
+    int variant = 0;
     std::vector<ModelRenderer> models;
 };
 

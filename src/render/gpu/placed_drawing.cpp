@@ -210,10 +210,51 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
         throw std::invalid_argument("The placed parts have more level slots than the passes take");
     }
 
+    /*
+    * Each kind's variants (its looks, 0 to n - 1, each once) and where those past the first go: down from the layer's
+    * top slot, kind by kind in order, each kind's run upwards; every slot below the lowest stays its own kind's.
+    */
+    std::map<std::pair<int, int>, std::vector<int>> variantsOf;
+    std::vector<int> highestKind(layerCount, -1);
+
+    for (const PlantedKindParts& kind : kinds) {
+        variantsOf[{kind.layer, kind.kind}].push_back(kind.variant);
+        highestKind[static_cast<std::size_t>(kind.layer)] = std::max(highestKind[static_cast<std::size_t>(kind.layer)], kind.kind);
+    }
+
+    std::map<std::pair<int, int>, std::uint32_t> firstVariantSlot;
+    std::vector<int> lowestVariantSlot(layerCount, plantingMostKinds);
+
+    for (auto& [kind, variants] : variantsOf) {
+        std::sort(variants.begin(), variants.end());
+
+        for (std::size_t each = 0; each < variants.size(); ++each) {
+            if (variants[each] != static_cast<int>(each)) {
+                throw std::invalid_argument("A placed kind's variants must be 0 to n - 1, each once");
+            }
+        }
+
+        int& lowest = lowestVariantSlot[static_cast<std::size_t>(kind.first)];
+        lowest -= static_cast<int>(variants.size()) - 1;
+        firstVariantSlot[kind] = static_cast<std::uint32_t>(lowest);
+
+        if (lowest <= highestKind[static_cast<std::size_t>(kind.first)]) {
+            throw std::invalid_argument("A layer's kinds and their variants past the first need more than its kind slots");
+        }
+    }
+
     // Each kind names its parts' places, in its own order (the parts run by style, so a kind's are not one run).
     for (const PlantedKindParts& kind : kinds) {
-        GpuPlacedKind& placed = table.kinds[static_cast<std::size_t>(kind.layer * plantingMostKinds + kind.kind)];
+        const std::pair<int, int> key{kind.layer, kind.kind};
+        const std::uint32_t variantSlot = firstVariantSlot.at(key);
+        const std::uint32_t slot = kind.variant == 0 ? static_cast<std::uint32_t>(kind.kind) : variantSlot + static_cast<std::uint32_t>(kind.variant) - 1;
+        GpuPlacedKind& placed = table.kinds[static_cast<std::size_t>(kind.layer * plantingMostKinds) + slot];
         placed.parts = static_cast<std::uint32_t>(kind.count);
+
+        if (kind.variant == 0) {
+            placed.variants = static_cast<std::uint32_t>(variantsOf.at(key).size());
+            placed.variantSlot = placed.variants > 1 ? variantSlot : 0u;
+        }
 
         for (std::size_t part = 0; part < kind.count; ++part) {
             placed.part[part] = placeOf[kind.first + part];
@@ -400,6 +441,16 @@ std::uint64_t placedTableSignature(const PlacedTable& table, const PlantedRegion
     return mixSpan(hash, std::span<const float>{regionNumbers});
 }
 
+// One multiply and a truncation, rounded alike on both sides (a single product cannot be fused).
+std::uint32_t placedKindSlot(std::uint32_t kind, std::uint32_t variants, std::uint32_t variantSlot, float pick) {
+    if (variants <= 1u) {
+        return kind;
+    }
+
+    const std::uint32_t variant = std::min(static_cast<std::uint32_t>(pick * static_cast<float>(variants)), variants - 1u);
+    return variant == 0u ? kind : variantSlot + variant - 1u;
+}
+
 // Transform::getMatrix's steps from the plant's turn (placedTurnedModel).
 Mat4 placedPlantModel(const GpuPlacedPlant& plant) {
     return placedTurnedModel(plant, placedTurn(plant.turnRadians));
@@ -469,7 +520,8 @@ PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPl
 
             const std::uint32_t number = block.firstPlant + thread;
             const GpuPlacedPlant& plant = plants[number];
-            const GpuPlacedKind& kind = table.kinds.at(block.firstKind + plant.kind);
+            const GpuPlacedKind& own = table.kinds.at(block.firstKind + plant.kind);
+            const GpuPlacedKind& kind = table.kinds.at(block.firstKind + placedKindSlot(plant.kind, own.variants, own.variantSlot, plant.pick));
 
             for (std::uint32_t each = 0; each < kind.parts; ++each) {
                 const PartDraws draws = placedPartEntries(table.parts[kind.part[each]], plant, number, view.camera);

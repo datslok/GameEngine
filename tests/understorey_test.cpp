@@ -152,24 +152,32 @@ namespace {
     }
 
     /*
-    * The game plants them (stand-ins without the scans): each plant its leaves, seen and casting no shadow, and its
-    * shadow's stand-in, drawn into shadows only, placed, turned and scaled as its placement says; clear of every tree's
-    * trunk. Far away its card takes over, as a tree's does.
+    * The game draws them on the GPU (stand-ins without the scans): a look for each kind's variant, in the variants'
+    * order, the layer's pick choosing among them as each plant's did; each its leaves, seen and casting no shadow,
+    * swaying, its shadow's stand-in, drawn into shadows only, and its card, still, taking over far away; no entity a
+    * plant. The plants themselves clear of every tree's trunk.
     */
     void testTheGamePlantsTheUnderstorey() {
         TestForest forest;
-        World& world = forest.world;
         ForestGame& game = forest.game;
         const std::vector<UnderstoreyPlacement>& placed = game.getUnderstoreyPlacements();
-        const std::vector<Entity>& plants = game.getUnderstorey();
-        assert(!placed.empty() && plants.size() == 2 * placed.size());
-        assert(game.getUnderstoreyImpostors().size() == placed.size());
+        assert(!placed.empty());
+        std::array<int, understoreyKindCount> variants{};
 
-        for (std::size_t plant = 0; plant < placed.size(); plant += 97) {
-            const ModelRenderer& leaves = world.get<ModelRenderer>(plants[2 * plant]);
-            const ModelRenderer& shadow = world.get<ModelRenderer>(plants[2 * plant + 1]);
+        for (const PlantedKindLook& look : game.getPlantLooks()) {
+            if (look.layer != static_cast<int>(ForestLayer::Understorey)) {
+                continue;
+            }
+
+            assert(look.kind >= 0 && look.kind < understoreyKindCount && look.variant == variants[static_cast<std::size_t>(look.kind)]);
+            ++variants[static_cast<std::size_t>(look.kind)];
+            assert(look.models.size() == 3);
+            const ModelRenderer& leaves = look.models[0];
+            const ModelRenderer& shadow = look.models[1];
+            const ModelRenderer& card = look.models[2];
             assert(!leaves.castsShadows && !leaves.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
             assert(shadow.shadowCascades == ForestUnderstoreySettings{}.shadowCascades);
+            assert(leaves.sway.kind != SwayKind::Still && shadow.sway.kind == leaves.sway.kind && card.sway.kind == SwayKind::Still);
 
             // The leaves seen have two coarser levels (docs/research/LOD.md): simplified further, then the shadow's own stand-in,
             // then nothing, where the card begins.
@@ -179,9 +187,7 @@ namespace {
             assert(levels[2].errorMetres >= ForestUnderstoreySettings{}.impostorErrorMetres);
 
             // The card (scene/impostor.h): drawn only from the error the leaves end on, both chosen by the plant's one
-            // box; a cut-out of its baked atlases, casting no shadow, standing where the plant stands.
-            const Entity cardEntity = game.getUnderstoreyImpostors()[plant];
-            const ModelRenderer& card = world.get<ModelRenderer>(cardEntity);
+            // box; a cut-out of its baked atlases, casting no shadow.
             const MeshLevelOptions& cardOptions = forest.assets.getMeshLevelOptions().at(card.parts.front().mesh.index);
             const MeshLevelOptions& leafOptions = forest.assets.getMeshLevelOptions().at(leaves.parts.front().mesh.index);
             assert(cardOptions.hiddenBelowError == levels[2].errorMetres && leafOptions.hiddenBelowError == 0.0f);
@@ -192,12 +198,13 @@ namespace {
             // Light comes through the plant's leaves and its card alike.
             assert(leaves.parts.front().material.diffuseTransmission == ForestLeafLightSettings{}.share);
             assert(card.parts.front().material.diffuseTransmission == leaves.parts.front().material.diffuseTransmission);
-            const Transform& cardPose = world.get<Transform>(cardEntity);
-            assert(cardPose.position.x == placed[plant].foot.x && cardPose.position.z == placed[plant].foot.z && cardPose.scale.y == placed[plant].scale);
-            const Transform& pose = world.get<Transform>(plants[2 * plant]);
-            assert(pose.position.x == placed[plant].foot.x && pose.scale.y == placed[plant].scale);
-            assert(world.get<Transform>(plants[2 * plant + 1]).position.z == placed[plant].foot.z);
+        }
 
+        for (const int count : variants) {
+            assert(count >= 1);
+        }
+
+        for (std::size_t plant = 0; plant < placed.size(); plant += 97) {
             for (const TreePlacement& tree : game.getTreePlacements()) {
                 assert((Vec2{placed[plant].foot.x, placed[plant].foot.z} - Vec2{tree.foot.x, tree.foot.z}).length() >=
                        ForestUnderstoreySettings{}.trunkClearance);

@@ -966,11 +966,73 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A kind given several looks (the understorey's scans, several plants a file) draws the one its plant's pick chooses,
+    * min(pick * variants, variants - 1) as the entities chose; its variants past the first take the layer's top kind
+    * slots, never one a look's kind holds.
+    */
+    void testTheVariants() {
+        assert(placedKindSlot(2, 0, 0, 0.7f) == 2 && placedKindSlot(2, 1, 0, 0.7f) == 2);
+        assert(placedKindSlot(2, 4, 29, 0.0f) == 2 && placedKindSlot(2, 4, 29, 0.25f) == 29 && placedKindSlot(2, 4, 29, 0.9999f) == 31);
+        assert(placedKindSlot(2, 4, 29, 1.0f) == 31);
+
+        for (int each = 0; each < 1000; ++each) {
+            const float pick = static_cast<float>(each) / 999.0f;
+            const std::uint32_t chosen = std::min(static_cast<std::uint32_t>(pick * 3.0f), 2u);
+            assert(placedKindSlot(1, 3, 30, pick) == (chosen == 0 ? 1u : 30u + chosen - 1u));
+        }
+
+        TestKinds test;
+        const auto look = [&](int layer, int which, int variant, MeshHandle mesh) {
+            test.kinds.push_back(PlantedKindParts{.layer = layer, .kind = which, .first = test.parts.size(), .count = 1, .variant = variant});
+            test.parts.push_back(treePart(mesh, nullptr, false, false, 0.0f, 0));
+        };
+        look(1, 0, 0, MeshHandle{10});
+        look(1, 0, 1, MeshHandle{11});
+        look(1, 0, 2, MeshHandle{12});
+        look(1, 1, 0, MeshHandle{20});
+        look(0, 0, 0, MeshHandle{30});
+        const PlacedTable table = buildPlacedTable(test.parts, test.kinds, 3, testPlacement);
+        const std::size_t layerOne = plantingMostKinds;
+        const GpuPlacedKind& ferns = table.kinds[layerOne];
+        assert(ferns.variants == 3 && ferns.variantSlot == static_cast<std::uint32_t>(plantingMostKinds) - 2);
+        assert(table.kinds[layerOne + 1].variants == 1 && table.kinds[0].variants == 1);
+
+        // Each pick's slot holds that variant's part.
+        for (const auto& [pick, mesh] : {std::pair{0.1f, 10u}, std::pair{0.5f, 11u}, std::pair{0.9f, 12u}}) {
+            const std::uint32_t slot = placedKindSlot(0, ferns.variants, ferns.variantSlot, pick);
+            const GpuPlacedKind& chosen = table.kinds[layerOne + slot];
+            assert(chosen.parts == 1 && table.parts[chosen.part[0]].record.mesh == mesh);
+        }
+
+        // Refused: a variant missing below another, and variants reaching a slot a look's kind holds.
+        const auto refuses = [&](std::vector<PlantedKindParts> runs) {
+            try {
+                buildPlacedTable(test.parts, runs, 3, testPlacement);
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+
+            return false;
+        };
+        assert(refuses({PlantedKindParts{.layer = 1, .kind = 0, .first = 0, .count = 1, .variant = 0},
+                        PlantedKindParts{.layer = 1, .kind = 0, .first = 1, .count = 1, .variant = 2}}));
+        std::vector<PlantedKindParts> crowded{PlantedKindParts{.layer = 1, .kind = 31, .first = 0, .count = 1, .variant = 0},
+                                              PlantedKindParts{.layer = 1, .kind = 0, .first = 1, .count = 1, .variant = 0},
+                                              PlantedKindParts{.layer = 1, .kind = 0, .first = 2, .count = 1, .variant = 1}};
+        assert(refuses(crowded));
+        crowded.front().kind = 30;
+        assert(!refuses(crowded));
+    }
+}
+
 void testPlacedDrawing() {
     testTheModelIsTheEntitys();
     testThePartsAreTheEntitys();
     testTheRegion();
     testTheTable();
+    testTheVariants();
     testTheBlocks();
     testTheCellBoxes();
     testTheViewsLayout();

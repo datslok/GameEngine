@@ -38,5 +38,8 @@ void main() {
         testOutput(1, placed.normalMatrix[2]);
         testOutput(2, placed.levelSphere);
         testOutput(3, placed.handedness);
+    } else if (function == GPU_TEST_PLACED_KIND_SLOT) {
+        // Here the inputs are kind, variants, variant slot and pick.
+        testOutput(0, vec4(float(placedKindSlot(uint(footScale.x), uint(footScale.y), uint(footScale.z), footScale.w))));
     }
 }

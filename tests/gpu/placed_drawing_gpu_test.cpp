@@ -113,10 +113,41 @@ namespace {
             report.check("placedInstance scale", exactTolerance, expected.handedness[1], outputs[4 * i + 3][1]);
         }
     }
+    // The kind slot a pick chooses: exact, picks on and beside each variant's edge as often as between.
+    void checkKindSlot(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{59};
+        std::vector<GpuVec4> inputs;
+        std::vector<std::uint32_t> expected;
+
+        for (int i = 0; i < 4000; ++i) {
+            const std::uint32_t kind = static_cast<std::uint32_t>(random.between(0.0f, 8.0f));
+            const std::uint32_t variants = static_cast<std::uint32_t>(random.between(0.0f, 7.0f));
+            const std::uint32_t variantSlot = 32u - std::max(variants, 1u) + 1u;
+            float pick = random.between(0.0f, 1.0f);
+
+            if (i % 2 == 0 && variants > 0) {
+                const float edge = static_cast<float>(static_cast<std::uint32_t>(random.between(0.0f, static_cast<float>(variants + 1)))) / static_cast<float>(variants);
+                pick = std::nextafter(edge, i % 4 == 0 ? 0.0f : 2.0f);
+                pick = std::clamp(pick, 0.0f, 1.0f);
+            }
+
+            inputs.push_back(gpuVec4(static_cast<float>(kind), static_cast<float>(variants), static_cast<float>(variantSlot), pick));
+            inputs.push_back(gpuVec4(0.0f));
+            inputs.push_back(gpuVec4(0.0f));
+            expected.push_back(placedKindSlot(kind, variants, variantSlot, pick));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PLACED_KIND_SLOT, inputs, 3, 1);
+
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            report.check("placedKindSlot", exactTolerance, static_cast<float>(expected[i]), outputs[i][0]);
+        }
+    }
 }
 
 void gpuTestPlacedDrawing(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkModel(runner, report);
     checkSphere(runner, report);
     checkInstance(runner, report);
+    checkKindSlot(runner, report);
 }

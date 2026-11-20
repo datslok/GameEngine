@@ -235,17 +235,15 @@ public:
     // Each species' variants as the GPU's cells draw them (no entity a tree): bark, leaves, card, the shadow's
     // stand-ins, then any climbers and epiphytes; the canopy's, the emergents', the mid layer's.
     const std::vector<PlantedKindLook>& getTreeLooks() const;
-    // The understorey's settings and places, and each plant's leaves and then its shadow's stand-in, plant by plant.
+    // The understorey's settings and places.
     ForestUnderstoreySettings& getUnderstoreySettings();
     const std::vector<UnderstoreyPlacement>& getUnderstoreyPlacements() const;
-    const std::vector<Entity>& getUnderstorey() const;
-    // Each plant's card (scene/impostor.h), plant by plant.
-    const std::vector<Entity>& getUnderstoreyImpostors() const;
-    // The palms' settings and places, each palm's seen mesh and then its shadow's stand-in, palm by palm, and its card.
+    // The palms' settings and places.
     ForestPalmSettings& getPalmSettings();
     const std::vector<PalmPlacement>& getPalmPlacements() const;
-    const std::vector<Entity>& getPalms() const;
-    const std::vector<Entity>& getPalmImpostors() const;
+    // The understorey's and palms' variants as the GPU's cells draw them (no entity a plant): each its seen mesh, its
+    // shadow's stand-in and its card; the understorey's kinds' variants in order, then the palms'.
+    const std::vector<PlantedKindLook>& getPlantLooks() const;
     // The lianas' settings and their meshes' entities (bark and ivy, a chunk of ground each).
     ForestLianaSettings& getLianaSettings();
     const std::vector<Entity>& getLianas() const;
@@ -317,12 +315,15 @@ private:
     std::vector<float> plantTrees(AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
                                   const std::vector<TreePlacement>& placements, std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
 
-    // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified,
-    // placed many times.
-    void buildUnderstorey(World& world, AssetManager& assets);
+    // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified, a
+    // look each for the GPU's cells.
+    void buildUnderstorey(AssetManager& assets);
 
-    // The understorey palms (docs/research/JUNGLE.md, Palms): a few variants grown on every core, placed many times.
-    void buildPalms(World& world, AssetManager& assets);
+    // The understorey palms (docs/research/JUNGLE.md, Palms): a few variants grown on every core, a look each.
+    void buildPalms(AssetManager& assets);
+
+    // What the GPU's cells draw: the trees' looks, then the plants', over the patch.
+    std::shared_ptr<const PlantingLooks> plantedLooks() const;
 
     // The grass in the open (docs/research/GROUNDCOVER.md): a few patches grown on every core, a cell of land each.
     void buildGrass(World& world, AssetManager& assets);
@@ -404,15 +405,12 @@ private:
     std::vector<TreePlacement> emergentPlacements;
     std::vector<TreePlacement> midPlacements;
     std::vector<UnderstoreyPlacement> understoreyPlacements;
-    std::vector<Entity> understorey;
-    std::vector<Entity> understoreyImpostors; // a card each plant, in the placements' order (scene/impostor.h)
     std::vector<PalmPlacement> palmPlacements;
-    std::vector<Entity> palms;
-    std::vector<Entity> palmImpostors; // a card each palm, in the placements' order
     std::vector<Entity> lianaEntities;
     std::vector<TreePlacement> climbedTrees;
     std::vector<Vec3> climbedFacing; // each one's first climber's way out of the trunk, in the world (forest-climber looks from it)
     std::vector<PlantedKindLook> treeLooks; // each species' variants as the GPU's cells draw the trees (plantTrees)
+    std::vector<PlantedKindLook> plantLooks; // the understorey's and palms' variants as the GPU's cells draw them
 
     // A look's model swaying as a tree (applySway gives it its sway): its look, its model, how it sways.
     struct LookSwayer {
@@ -422,6 +420,7 @@ private:
     };
 
     std::vector<LookSwayer> treeLookSwayers;
+    std::vector<LookSwayer> plantLookSwayers;
 
     // A model of a look: the climbers' and the epiphytes' (getClimberModels, getEpiphyteModels).
     struct LookModel {
