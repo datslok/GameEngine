@@ -1,8 +1,8 @@
 # Sun shadows
 
-Covers: `src/render/gpu/cascades`, `src/render/gpu/depth_range`, `src/render/vulkan/vulkan_depth_range`, `src/render/gpu/contact_shadows`, `src/render/vulkan/vulkan_contact_shadows`, `assets/shaders/cascades.glsl`, `assets/shaders/depth_range.glsl`, `assets/shaders/depth_range.comp`, `assets/shaders/contact_shadows.glsl`, `assets/shaders/contact_shadows.comp`
+Covers: `src/render/gpu/cascades`, `src/render/gpu/depth_range`, `src/render/vulkan/vulkan_depth_range`, `assets/shaders/cascades.glsl`, `assets/shaders/depth_range.glsl`, `assets/shaders/depth_range.comp`
 
-The sun's cascaded shadow maps (with the far map, staggering and a mirror's row) and screen-space contact shadows for the sun and nearby lamps. The atlas, its tiles, the shadow cache and lamp shadows are the shadow atlas's topic; mirror rules: `.claude/rules/shader-mirror.md`.
+The sun's cascaded shadow maps (with the far map, staggering and a mirror's row). Contact shadows: `contact-shadows.md`. The atlas, its tiles, the shadow cache and lamp shadows are the shadow atlas's topic; mirror rules: `.claude/rules/shader-mirror.md`.
 
 ## Who gets cascades
 
@@ -26,26 +26,34 @@ The sun's cascaded shadow maps (with the far map, staggering and a mirror's row)
 - Near end: the camera's near plane. Far end: the least of `directionalDistance` (200 m), the far plane and the fitted distance (below).
 - Unfitted, a 70° 16:9 view splits at about 3, 9, 36 and 200 m.
 
-## Fit and snapping
+## Balls and steps
 
-- `cascadeSphere(camera, near, far)`: the slice's smallest bounding sphere. Centre on the view axis at `(f + n)(1 + t²) / 2` (t² = the squared half-width plus half-height tangents), or at the far end's centre with radius `f t` when nearer.
-- The radius depends only on the lens, so turning never resizes the box (tested with `==`).
-- `cascadeBox(direction, sphere, casterReach, tileSize)` → `CascadeBox` {matrix, `depthRange` = 2r + reach, `texelSize` = 2r / tile}:
+Research: `docs/research/SHADOWCACHE.md` (Cascades while the camera moves).
+
+- `cascadeBall(camera, depth, radius)`: a cascade ending at split `depth` is the ball round the camera of `radius` (`depth`, the last cascade's below): turning never moves it.
+  - A narrow view (under 90° across the diagonal, a scope) takes `cascadeSphere(camera, 0, depth)` instead, the smallest sphere round the view up to depth (centre on the axis at `f(1 + t²) / 2`, t² = the squared half-width plus half-height tangents, or the far end's centre with radius `f t`), smaller than the ball there.
+  - A view point within `depth` of the camera is in the ball; further, in a corner, the next cascade's (chosen by box).
+- **The shadow distance is a radius:** cascade shadows end `directionalDistance` from the camera every way; at the view's corners, past it, the far map shades.
+- **Last cascade** (`lastCascadeRadius`): fitted to a depth (a room), its radius is the depth × `viewCornerStretch` (√(1 + t²), 1.74 at 70° 16:9, capped at the shadow distance), so the fitted view's corners stay covered.
+- `cascadeBox(direction, sphere, casterReach, tileSize, stepTexels)` → `CascadeBox` {matrix, `depthRange` = 2h + reach, `texelSize` = 2h / tile, `halfWidth` h}:
   - looks along the light, up from `shadowViewUp` (shared with lamp views);
-  - centre snapped to whole texels across the light, so edges do not crawl;
+  - centre the sphere's rounded to steps of `stepTexels` texels on all three light axes, half-width h = r · tile / (tile − k), so the ball fits wherever it is in its step; k = `cascadeStepTexels(cascadeStepShare` 1/16, tile) = 256 at 4096;
+  - k = 0 (the far map; a share of 0): whole texels across only, h = r;
+  - built round the origin then translated, so a moved box keeps its upper 3 × 3 bit for bit;
   - extends `directionalCasterReach` (200 m) towards the sun so tall casters outside the view still cast.
+- A step is k whole texels across and the same length in depth, so a cascade moves only when the camera crosses a step (`testWalkingRarelyMovesTheSunCascades`), its edges never crawl, and a scrolled copy would line up.
 - Tile edge: `cascadeTilePixels(cascadeResolution)`, 1024, 2048 or 4096 (default 4096; the atlas grows to hold four, see the atlas doc).
-- Each cascade's `ShadowTileData`: the box times `translation(camera)` (camera-relative lookup); `offset.y` = `normalOffsetTexels` (2.5) × texel; `lens` = (0, depth range, texel, radius), `lens.x` 0 marking a box rather than a perspective tile.
+- Each cascade's `ShadowTileData`: the box times `translation(camera)` (camera-relative lookup); `offset.y` = `normalOffsetTexels` (2.5) × texel; `lens` = (0, depth range, texel, h), `lens.x` 0 marking a box rather than a perspective tile.
 - Cached like any tile: a box that did not move and whose casters did not change is not redrawn.
 
-Texels for a 70° 16:9 view, unfitted (a box spans about 2.9 × its far distance):
+Texels for a 70° 16:9 view, unfitted (a box spans 2 × 16/15 × its far distance):
 
 | Cascade ends | 4096 tile | 2048 tile |
 |---|---|---|
-| ~3 m | 0.22 cm | 0.44 cm |
-| ~9 m | 0.65 cm | 1.3 cm |
-| ~36 m | 2.5 cm | 5 cm |
-| 200 m | 14 cm | 28 cm |
+| ~3 m | 0.16 cm | 0.31 cm |
+| ~9 m | 0.47 cm | 0.94 cm |
+| ~36 m | 1.9 cm | 3.8 cm |
+| 200 m | 10.4 cm | 21 cm |
 
 ## Lookup
 
@@ -118,7 +126,7 @@ One more box at the end of the sun's row (`ShadowKind::Far`, right after the cas
 
 ## Staggered cascades
 
-`holdStaggeredCascades` (after `planShadows`), `cascadeStagger` (2; 1 off): turning the camera moves every box and redraws its casters, so the far half of the sun's own cascades take turns.
+`holdStaggeredCascades` (after `planShadows`), `cascadeStagger` (2; 1 off): a box that moves redraws its casters, so the far half of the sun's own cascades take turns. Since the boxes are balls in steps, only a step crossed (or a narrow view turning) moves one.
 
 - Cascade k of the far half is redrawn on frames where frame + k is a multiple of the stagger; with two far cascades and 2, one a frame, so every frame costs the same.
 - Otherwise it keeps last frame's tile from `VulkanRenderer::lastShadowPlan` (box, square, reach, record); only the shader's matrix is rebuilt from the camera's position, so its shadows stay put.
@@ -137,66 +145,13 @@ A flat mirror's picture (planar reflections) shows mostly what is behind the cam
 - **Tiles:** after every other tile, the first to shrink when the atlas is full. `LightShadow::mirrorFirstTile` and `mirrorCascades` reach the shader in `GpuDirectionalLight`.
 - **Lookup:** the camera's row first; where no box holds the point, or in its last cascade's band, the mirror's row takes over, so the camera's last cascade fades into the mirror's rather than into sunlight.
 
-## Contact shadows
-
-Short shadows the maps miss: map texels are millimetres to centimetres and lookups are biased sunwards, so a small object's shadow detaches or vanishes, worst at a grazing sun.
-
-| Part | File |
-|---|---|
-| Maths, settings, packing, light choice | `render/gpu/contact_shadows` (mirrored by `contact_shadows.glsl`; numbers in `contact_shadows_shared.h`) |
-| Pass | `contact_shadows.comp`, `render/vulkan/vulkan_contact_shadows` |
-| Main pass reads | `scene_surface.glsl` (`lightContactShadow`) |
-
-### The march
-
-`contactShadowAt` (CPU mirror of the pass's loop), after the depth prepass, one invocation per render pixel in 8 × 8 groups (`CONTACT_GROUP_SIDE`):
-
-- Walks from the pixel's surface towards the light in `steps` (32) even steps over `length` (0.3 m) (`contactStepDistance`).
-- Start offset: the blue noise tile's green channel plus `contactNoiseTurn` (golden ratio a frame, `CONTACT_NOISE_FRAME_STEP`, only while anti-aliasing averages it).
-- Each step (camera-relative) → jittered view-projection → pixel (`clipToScreen`) and view distance (clip w); the surface there → its view distance (`viewDistanceAtPixel`).
-- **Crossing test** (`contactBlocked`): blocked when the step is now behind the surface by more than the bias and less than bias + a step's reach (`contactStepReach` = length / steps), and the previous step was not (the start and passed-over steps count as in front).
-  - Bias: `contactBias`, `CONTACT_BIAS_PIXELS` (2) pixels' footprint at the pixel's distance.
-  - Why: the depth image shows only fronts; a ray that entered something within the last step is at most one step behind its front, so deeper means passing behind it. A thin thing's shadow is at most a step's reach too wide; no fixed thickness, which doubled post shadows and widened thin ones.
-- Mask = 1 − blocked × `contactDistanceFade` (`fadeStart` 40 m to `fadeEnd` 60 m) × `contactEdgeFade` (over `CONTACT_EDGE_PIXELS` 16).
-- Sky pixels are lit; a march stops at the screen's edge or nearer than `CONTACT_NEAREST_W`.
-- **Cut-outs pass over:** the prepass writes a solid mask (`VulkanRenderer::solidMask`, R8, cleared to 1): the solid pipeline has the attachment with colour writes off (`PipelineDescription::colourWrites`), `cut_out_prepass.frag` writes 0, cut-outs are drawn last so a solid in front stays 1. Steps landing on 0 are skipped; a cut-out's shadow map already draws its holes.
-
-### Point and spot lights
-
-The same pass marches towards up to `localLights` (`CONTACT_MAX_LIGHTS`, 4) lamps.
-
-- `chooseContactLights`: seated lights holding a shadow, ranked by `lightImportance` at the focus; last frame's picks (`VulkanRenderer::contactLightHistory`) count `LightPrioritySettings::incumbentAdvantage` times as bright, so channels do not swap.
-- Per pixel, `contactLightRay`: none out of range, outside a spot's cone (`CONTACT_NO_CONE` for a point light) or within the stop; else `length`, or less if the stop is nearer.
-- `contactLightStop` = `emitterRadius` + `CONTACT_LIGHT_CLEARANCE` (0.25 m), so the lamp's own glowing mesh in the depth image never shadows it. A shortened march keeps its step count, so its reach shrinks with it.
-- `contactShadowTowards` is the CPU mirror; `contactLightFor` builds each `ContactLight` (camera-relative).
-- `ContactShadowFrame::runs()` is true for the sun or any lamp, so lamps get contact shadows at night.
-
-### Pass data and the main pass
-
-- `GpuContactShadowPass` (std430, 352 bytes, `packContactShadowPass`): matrices, size, sun direction with the footprint, options (length, steps, reach, noise turn), fades, per lamp position + range, beam + cone, stop, and `lightOptions` (x lamp count, y 1 when the sun marches).
-- Sun mask: R32F, scene set 1 binding 31 (`ContactShadowsBinding`; a stand-in when off), multiplying directional light 0's shadow while `GpuFrameData::contactShadowOptions.x` is 1.
-- Lamp mask: RGBA16F, a channel each, binding 32 (`LightContactShadowsBinding`), while `contactShadowOptions.y` is 1. A light finds its channel through `GpuFrameData::contactLightSlots` (`contactLightSlotCodes`: point slot, spot slot + `CONTACT_SPOT_SLOT_BASE`, −1 none), so light records are unchanged.
-- Not read by probe captures (no depth image of their own) or glass (not in the depth image).
-- Timed as `GpuPass::ContactShadows` (CONTACT in F4).
-
-### Settings
-
-`ContactShadowSettings` (`RenderSettings::contactShadows`, F5 Contact shadows, `engine.render.contactShadows.*`): `enabled` (off on Low), `length`, `steps` (1 to `CONTACT_MAX_STEPS` 64; more → tighter round thin things), `fadeStart`, `fadeEnd`, `localLights` (0-4; 0 = sun only). Checked by `validateContactShadows`.
-
-### Limits
-
-- Only what is on screen casts (an off-screen or hidden caster casts nothing).
-- Only the shadowed sun and at most 4 lamps (on a street of lamps, the most important at the focus).
-- A lamp seen from where it shines (the player's flashlight) casts behind what it lights, so its contact shadows are slivers.
-
 ## Tests
 
 | Test | Checks |
 |---|---|
-| `cascades_test`, `cascades_gpu_test` | Splits, spheres (lens-only radius), snapping, edge distance, blend and dither, bias along the light, the ladder and its rounding down, far map sphere (holds the view, on the grid, still within a cell, one step across one), distant occluders |
+| `cascades_test`, `cascades_gpu_test` | Splits, spheres (lens-only radius), balls (round the camera, a scope's cone, the view within depth held), corner stretch, steps (box half a step wider, holds its ball, moves in whole steps only), snapping, edge distance, blend and dither, bias along the light, the ladder and its rounding down, far map sphere (holds the view, on the grid, still within a cell, one step across one), distant occluders |
 | `depth_range_test`, `depth_range_gpu_test` | The range, sky skipped, combining, distances |
 | `soft_shadow_test`, `soft_shadow_gpu_test` | Box distances, sun blocker search and penumbra |
-| `shadow_map_test` | The row (cascades, far map last, mirror row after every other tile), far map size, smallest caster, movers, distant occluder reach (no gap between a box and the reach), staggering (far half held, matrix following the camera, nothing held when sun, fit, settings or previous plan differ), shrinking order |
+| `shadow_map_test` | The row (cascades, far map last, mirror row after every other tile), the view covered within the shadow distance (a fitted view's corners too), turning moving no cascade, walking a metre moving each a few times, far map size, smallest caster, movers, distant occluder reach (no gap between a box and the reach), staggering (far half held, matrix following the camera, nothing held when sun, fit, settings or previous plan differ), shrinking order |
 | `planar_reflection_test` | The mirrored camera, the mirror row's start on the ladder and never past anything visible |
 | `culling_test` | Small casters left out, unknown bounds kept |
-| `contact_shadows_test`, `contact_shadows_gpu_test` | Settings and presets, steps, crossing test, bias, fades, noise turn; marches through ray-cast depths (floor and block, cut-outs passed over, a 1 cm pen at 16 and 32 steps, no halo under a hanging bar); lamp rays (range, cone, stop), choosing lights, slot codes, packing |

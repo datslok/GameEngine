@@ -57,6 +57,32 @@ BoundingSphere cascadeSphere(const Camera& camera, float nearDistance, float far
     return BoundingSphere{camera.getPosition() + camera.getForward() * along, radius};
 }
 
+float viewCornerStretch(const Camera& camera) {
+    const float tanHalfHeight = std::tan(camera.getVerticalFov() * 0.5f);
+    const float tanHalfWidth = tanHalfHeight * camera.getAspectRatio();
+    return std::sqrt(1.0f + tanHalfWidth * tanHalfWidth + tanHalfHeight * tanHalfHeight);
+}
+
+// Both hold the view within depth of the camera. The cone's sphere has radius depth (1 + t^2) / 2 when t (cascadeSphere's
+// spread) is under 1, else depth t, so it is narrower than a ball of radius depth only for views under 90 degrees
+// across the diagonal (70 high at 16:9 is 110). The choice is by depth alone, not by the radius asked for: a wide
+// view's last cascade keeps its ball even where a larger radius makes the cone smaller, since only the ball stays put
+// as the camera turns.
+BoundingSphere cascadeBall(const Camera& camera, float depth, float radius) {
+    const BoundingSphere cone = cascadeSphere(camera, 0.0f, depth);
+
+    if (cone.radius < depth) {
+        return cone;
+    }
+
+    return BoundingSphere{camera.getPosition(), radius};
+}
+
+std::uint32_t cascadeStepTexels(float stepShare, std::uint32_t tileSize) {
+    const float texels = std::round(std::clamp(stepShare, 0.0f, 0.25f) * static_cast<float>(tileSize));
+    return static_cast<std::uint32_t>(texels);
+}
+
 namespace {
     float ladderDistance(int step) {
         return std::pow(shadowDistanceStep, static_cast<float>(step));
@@ -143,27 +169,30 @@ Vec3 shadowViewUp(const Vec3& forward) {
 * whole texels, measured across the light's direction: as the sphere moves with the camera, the box jumps a whole texel
 * at a time, so every shadow edge falls on the same texels instead of crawling and shimmering.
 */
-CascadeBox cascadeBox(const Vec3& lightDirection, const BoundingSphere& sphere, float casterReach, std::uint32_t tileSize) {
+CascadeBox cascadeBox(const Vec3& lightDirection, const BoundingSphere& sphere, float casterReach, std::uint32_t tileSize,
+                      std::uint32_t stepTexels) {
     const Vec3 along = lightDirection.lengthSquared() > 1e-12f ? lightDirection.normalized() : Vec3{0.0f, -1.0f, 0.0f};
-    const float radius = sphere.radius;
+    const float tile = static_cast<float>(tileSize);
+    const std::uint32_t step = std::min(stepTexels, tileSize / 2);
+    const float radius = sphere.radius * tile / (tile - static_cast<float>(step));
 
     // The light's orientation only: a view at the origin looking along the light.
     const Mat4 rotation = Mat4::lookAt(Vec3{0.0f, 0.0f, 0.0f}, along, shadowViewUp(along));
     const Vec4 centreInLight = rotation * Vec4{sphere.centre.x, sphere.centre.y, sphere.centre.z, 1.0f};
 
-    const float texel = 2.0f * radius / static_cast<float>(tileSize);
-    const float snappedX = std::round(centreInLight.x / texel) * texel;
-    const float snappedY = std::round(centreInLight.y / texel) * texel;
+    const float texel = 2.0f * radius / tile;
+    const float across = static_cast<float>(std::max(step, 1u)) * texel;
+    const float snappedX = std::round(centreInLight.x / across) * across;
+    const float snappedY = std::round(centreInLight.y / across) * across;
 
-    // The view looks down -z, so a point's distance along the light is -z.
-    const float centreDistance = -centreInLight.z;
-    const Mat4 box = Mat4::orthographic(
-        snappedX - radius, snappedX + radius,
-        snappedY - radius, snappedY + radius,
-        centreDistance - radius - casterReach, centreDistance + radius
-    );
+    // The view looks down -z, so a point's distance along the light is -z; stepped along the light too only with steps.
+    const float centreDistance = step > 0 ? std::round(-centreInLight.z / across) * across : -centreInLight.z;
+    // Built round the origin, then moved to its centre: its scale and depth are then the same bits wherever it is, so a
+    // box that only moved keeps exactly its shape (holdStaggeredCascades compares it).
+    const Mat4 box = Mat4::orthographic(-radius, radius, -radius, radius, -radius - casterReach, radius);
+    const Mat4 toCentre = Mat4::translation(-snappedX, -snappedY, centreDistance);
 
-    return CascadeBox{toGpuDepthRange(box) * rotation, 2.0f * radius + casterReach, texel};
+    return CascadeBox{toGpuDepthRange(box) * toCentre * rotation, 2.0f * radius + casterReach, texel, radius};
 }
 
 float cascadeEdgeDistance(const Vec3& projected, float depthRangeOverRadius) {

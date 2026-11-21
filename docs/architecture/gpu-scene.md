@@ -74,7 +74,7 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 | 26, 33, 34 | glass bounds, coloured shadow maps (tint, depth) | `glass.md` |
 | 27, 28 | fog record and volume | `fog.md` |
 | 29, 30 | sky visibility grid and cascades | `sky-visibility.md` |
-| 31, 32 | contact shadow masks | `sun-shadows.md` |
+| 31, 32 | contact shadow masks | `contact-shadows.md` |
 | 35, 36 | terrain heights and patches | terrain (`scene/terrain`) |
 | 37-41 | wind field, springs (two), hanging vertices, anchors | wind (`render/gpu/wind`) |
 | 42 | card thinning records | card thinning (`scene/card_thinning`) |

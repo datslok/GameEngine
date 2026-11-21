@@ -174,7 +174,11 @@ namespace {
         assert(plan.tileData[0].lens[2] < 0.01f);
     }
 
-    // Every point the camera sees, out to the shadow distance (or its far plane, if nearer), lands inside some cascade's box.
+    /*
+    * Every point the camera sees within the shadow distance of it (or its far plane, if nearer) lands inside some
+    * cascade's box. The distance is a radius round the camera (cascadeBall): at the view's corners the cascades end
+    * nearer along the view than at its centre.
+    */
     void testCascadesCoverTheViewToTheShadowDistance() {
         FrameLighting lighting;
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
@@ -191,8 +195,8 @@ namespace {
 
             for (float x : {-0.99f, 0.0f, 0.99f}) {
                 for (float y : {-0.99f, 0.0f, 0.99f}) {
-                    const Vec3 point = camera.getPosition() + camera.getForward() * distance +
-                                       camera.getRight() * (x * halfWidth * distance) + viewUp * (y * halfHeight * distance);
+                    const Vec3 direction = (camera.getForward() + camera.getRight() * (x * halfWidth) + viewUp * (y * halfHeight)).normalized();
+                    const Vec3 point = camera.getPosition() + direction * distance;
                     bool covered = false;
 
                     for (const ShadowTile& tile : plan.tiles) {
@@ -232,16 +236,26 @@ namespace {
         const float spread = std::sqrt(halfHeight * halfHeight * (1.0f + camera.getAspectRatio() * camera.getAspectRatio()));
         assert(close.tileData[close.tiles.size() - 1].lens[3] < fitted * (spread + 1.0f));
 
+        // The whole view up to the fitted depth stays covered, its corners too (a room's far corners).
+        const Vec3 viewUp = camera.getRight().cross(camera.getForward());
+
         for (int step = 1; step <= 20; ++step) {
-            const Vec3 point = camera.getPosition() + camera.getForward() * (fitted * static_cast<float>(step) / 20.0f);
-            bool covered = false;
+            const float depth = fitted * static_cast<float>(step) / 20.0f;
 
-            for (const ShadowTile& tile : close.tiles) {
-                const Vec3 projected = project(tile.matrix, point);
-                covered = covered || (std::abs(projected.x) <= 1.0f && std::abs(projected.y) <= 1.0f && projected.z > 0.0f && projected.z < 1.0f);
+            for (float x : {-1.0f, 0.0f, 1.0f}) {
+                for (float y : {-1.0f, 0.0f, 1.0f}) {
+                    const Vec3 point = camera.getPosition() + camera.getForward() * depth +
+                                       camera.getRight() * (x * halfHeight * camera.getAspectRatio() * depth) + viewUp * (y * halfHeight * depth);
+                    bool covered = false;
+
+                    for (const ShadowTile& tile : close.tiles) {
+                        const Vec3 projected = project(tile.matrix, point);
+                        covered = covered || (std::abs(projected.x) <= 1.0f && std::abs(projected.y) <= 1.0f && projected.z > 0.0f && projected.z < 1.0f);
+                    }
+
+                    assert(covered);
+                }
             }
-
-            assert(covered);
         }
 
         const ShadowPlan beyond = planShadows(lighting, camera, settings, 5000.0f);
@@ -287,6 +301,64 @@ namespace {
                 assert(nearlyEqual(shiftY, std::round(shiftY), 0.02f));
             }
         }
+    }
+
+    // A typical wide view (70 degrees high, 16:9) standing in one place: turning it anywhere leaves every sun cascade's
+    // box exactly where it was, so turning redraws none of them.
+    void testTurningKeepsTheSunCascades() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+        const Vec3 position{3.0f, 1.7f, -2.0f};
+        const auto view = [&](const Vec3& target) {
+            return Camera{position, target, Vec3{0.0f, 1.0f, 0.0f}, 1.2217f, 16.0f / 9.0f, 0.1f, 1000.0f};
+        };
+        const ShadowSettings settings;
+        const ShadowPlan ahead = planShadows(lighting, view(Vec3{3.0f, 1.7f, -20.0f}), settings);
+
+        for (const Vec3& target : {Vec3{30.0f, 1.7f, -2.0f}, Vec3{3.0f, -20.0f, -1.0f}, Vec3{-10.0f, 9.0f, 15.0f}}) {
+            const ShadowPlan turned = planShadows(lighting, view(target), settings);
+
+            for (std::size_t cascade = 0; cascade < static_cast<std::size_t>(settings.cascadeCount); ++cascade) {
+                assert(turned.tiles[cascade].matrix == ahead.tiles[cascade].matrix);
+            }
+        }
+    }
+
+    /*
+    * Walking a metre in centimetre moves, each cascade's box moves only when the camera crosses one of its steps
+    * (ShadowSettings::cascadeStepShare of its width): at most about three times a step walked, plus one an axis for
+    * where the walk began, and the 200 m cascade, whose steps are metres long, hardly ever.
+    */
+    void testWalkingRarelyMovesTheSunCascades() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+        const ShadowSettings settings;
+        const auto view = [](const Vec3& position) {
+            return Camera{position, position + Vec3{0.0f, -0.1f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2217f, 16.0f / 9.0f, 0.1f, 1000.0f};
+        };
+        ShadowPlan previous = planShadows(lighting, view(Vec3{0.0f, 1.7f, 0.0f}), settings);
+        std::vector<int> moves(static_cast<std::size_t>(settings.cascadeCount), 0);
+
+        for (int move = 1; move <= 100; ++move) {
+            const ShadowPlan plan = planShadows(lighting, view(Vec3{0.007f * static_cast<float>(move), 1.7f, -0.007f * static_cast<float>(move)}), settings);
+
+            for (std::size_t cascade = 0; cascade < moves.size(); ++cascade) {
+                // The world box (the shader's is measured from the camera, so it changes with every move).
+                if (!(plan.tiles[cascade].matrix == previous.tiles[cascade].matrix)) {
+                    ++moves[cascade];
+                }
+            }
+
+            previous = plan;
+        }
+
+        for (std::size_t cascade = 0; cascade < moves.size(); ++cascade) {
+            const float texel = previous.tileData[cascade].lens[2];
+            const float step = static_cast<float>(cascadeStepTexels(settings.cascadeStepShare, previous.tiles[cascade].size)) * texel;
+            assert(static_cast<float>(moves[cascade]) <= 3.0f * (1.0f / step) + 3.0f);
+        }
+
+        assert(moves.back() <= 3);
     }
 
     void testOrthographic() {
@@ -508,8 +580,13 @@ namespace {
             assert(anyTileHolds(with.tiles, mirrorFirst, static_cast<std::size_t>(sun.mirrorCascades), Vec3{0.3f, 1.0f, z}));
         }
 
-        // The camera's own boxes reach towards the sun, which is ahead, so far enough behind the camera only the mirror's do.
-        assert(!anyTileHolds(with.tiles, 0, static_cast<std::size_t>(sun.cascades), Vec3{0.3f, 1.0f, 12.0f}));
+        // The camera's own balls reach behind it too (cascadeBall), but only as far as its fitted view's corners (about
+        // 16 m here): 30 m behind, only a mirror's cascades reaching that far hold a point.
+        MirrorShadowView deeper = mirrorTestView();
+        deeper.farDistance = 45.0f;
+        const ShadowPlan deep = planShadows(lighting, camera, settings, fitted, deeper);
+        assert(anyTileHolds(deep.tiles, mirrorFirst, static_cast<std::size_t>(sun.mirrorCascades), Vec3{0.3f, 1.0f, 30.0f}));
+        assert(!anyTileHolds(deep.tiles, 0, static_cast<std::size_t>(sun.cascades), Vec3{0.3f, 1.0f, 30.0f}));
 
         ShadowSettings none = settings;
         none.mirrorCascadeCount = 0;
@@ -1340,9 +1417,10 @@ namespace {
     }
 
     /*
-    * Staggered cascades (ShadowSettings::cascadeStagger, 2): turning in place, the near half of the sun's cascades follow
-    * the view every frame, while the far half take turns, one redrawn a frame, the other keeping last frame's tile
-    * (its box and square, so the atlas cache keeps its contents); the next frame the other way round.
+    * Staggered cascades (ShadowSettings::cascadeStagger, 2): moving 100 m a frame (at least 58 m along some axis of the
+    * light's frame, over two steps of the 200 m cascade, so every box moves), the near half of the sun's cascades follow the camera every frame, while the far half
+    * take turns, one redrawn a frame, the other keeping last frame's tile (its box and square, so the atlas cache keeps
+    * its contents); the next frame the other way round.
     */
     void testFarCascadesTakeTurns() {
         const ShadowSettings settings;
@@ -1354,9 +1432,10 @@ namespace {
         const int count = settings.cascadeCount;
 
         for (std::uint64_t frame = 1; frame <= 4; ++frame) {
-            const ShadowPlan fresh = planShadows(sunOnly(), turnedCamera(place, 0.3f * static_cast<float>(frame)), layout, settings);
+            const Vec3 walked = place + Vec3{100.0f * static_cast<float>(frame), 0.0f, 0.0f};
+            const ShadowPlan fresh = planShadows(sunOnly(), turnedCamera(walked, 0.3f * static_cast<float>(frame)), layout, settings);
             ShadowPlan held = fresh;
-            holdStaggeredCascades(held, previous, place, settings, frame);
+            holdStaggeredCascades(held, previous, walked, settings, frame);
             int kept = 0;
 
             for (int cascade = 0; cascade < count; ++cascade) {
@@ -1390,7 +1469,8 @@ namespace {
         const ShadowSettings settings;
         ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
         const ShadowPlan previous = planShadows(sunOnly(), turnedCamera(Vec3{10.0f, 2.0f, 20.0f}, 0.0f), layout, settings);
-        const Vec3 moved{10.3f, 2.0f, 19.6f};
+        // 100 m on, so every box moved (turning alone moves none, cascadeBall).
+        const Vec3 moved{110.3f, 2.0f, 19.6f};
         ShadowPlan held = planShadows(sunOnly(), turnedCamera(moved, 0.4f), layout, settings);
         holdStaggeredCascades(held, previous, moved, settings, 1);
         // On frame 1 the first of the far half keeps its tile (its place 0: 1 + 0 is not a whole number of intervals).
@@ -1440,7 +1520,9 @@ namespace {
             return false;
         };
 
-        const ShadowPlan turned = planShadows(sunOnly(), turnedCamera(place, 0.5f), layout, settings);
+        // Walked 100 m, so every box moved (turning alone moves none, cascadeBall).
+        const Vec3 walked = place + Vec3{100.0f, 0.0f, 0.0f};
+        const ShadowPlan turned = planShadows(sunOnly(), turnedCamera(walked, 0.5f), layout, settings);
         assert(keptAny(turned, previous, settings));
         assert(!keptAny(turned, ShadowPlan{}, settings));
 
@@ -1450,10 +1532,10 @@ namespace {
 
         FrameLighting movedSun;
         movedSun.directionalLights.push_back(DirectionalLight{Vec3{0.41f, -0.6f, -0.5f}});
-        assert(!keptAny(planShadows(movedSun, turnedCamera(place, 0.5f), layout, settings), previous, settings));
+        assert(!keptAny(planShadows(movedSun, turnedCamera(walked, 0.5f), layout, settings), previous, settings));
 
         // A shorter shadow distance makes every box smaller.
-        assert(!keptAny(planShadows(sunOnly(), turnedCamera(place, 0.5f), layout, settings, 60.0f), previous, settings));
+        assert(!keptAny(planShadows(sunOnly(), turnedCamera(walked, 0.5f), layout, settings, 60.0f), previous, settings));
     }
 }
 
@@ -1496,6 +1578,8 @@ void testShadowMap() {
     testMirrorCascadesShrinkFirst();
     testOnlyTheFirstDirectionalLightCastsShadows();
     testCascadesMoveInWholeTexels();
+    testTurningKeepsTheSunCascades();
+    testWalkingRarelyMovesTheSunCascades();
     testLightsCastShadowsByDefault();
     testTileSizeFollowsTheLightsReach();
     testSpotlightsGetFinerTiles();

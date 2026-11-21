@@ -45,6 +45,24 @@ std::vector<float> cascadeSplits(float nearDistance, float farDistance, int coun
 */
 BoundingSphere cascadeSphere(const Camera& camera, float nearDistance, float farDistance);
 
+// How much further a corner of the view is than its centre at the same depth: the length of (1, tan of half the
+// width, tan of half the height), about 1.74 for a 70 degree, 16:9 view.
+float viewCornerStretch(const Camera& camera);
+
+/*
+* A cascade's sphere when the camera moves (docs/research/SHADOWCACHE.md, Cascades while the camera moves): the ball round
+* the camera reaching radius (at least depth), which does not move when the camera turns and is narrower than its view
+* slice's sphere for any wide view (1.43 times narrower at 70 degrees, 16:9); or, for a narrow view such as a scope (whose
+* view up to depth fits a sphere smaller than depth), that sphere (cascadeSphere from the camera on). Either holds everything
+* the camera sees within depth of it; a point further away in a corner falls to the next cascade, chosen by box. The
+* last cascade takes a radius past its depth where it must hold a fitted view's corners (planShadows).
+*/
+BoundingSphere cascadeBall(const Camera& camera, float depth, float radius);
+
+// How many texels a cascade's box moves at a time: a share of its tile (ShadowSettings::cascadeStepShare), rounded to
+// whole texels, so a step moves its shadows by whole texels; 0 for a share of 0 (whole-texel moves only).
+std::uint32_t cascadeStepTexels(float stepShare, std::uint32_t tileSize);
+
 /*
 * Sample distribution shadow maps (Lauritzen 2011): the cascades end at the farthest surface on screen instead of at the
 * shadow distance, so in a room they share out their texels over metres, not the 200 m the view could reach. The
@@ -104,18 +122,25 @@ float farShadowSmallestCaster(float texelSize);
 Vec3 shadowViewUp(const Vec3& forward);
 
 // One cascade's shadow view: its view-projection (the GPU's depth range), how deep the box is from its near side
-// (towards the light) to its far side, and the world size of one texel.
+// (towards the light) to its far side, the world size of one texel, and half its width (the shader's radius).
 struct CascadeBox {
     Mat4 matrix = Mat4::identity();
     float depthRange = 0.0f;
     float texelSize = 0.0f;
+    float halfWidth = 0.0f;
 };
 
 /*
 * A box looking along the light around the sphere, reaching casterReach further back towards the light so that tall
 * things outside the view still cast into it. Its centre moves across the light in whole texels of a tile of tileSize.
+*
+* With stepTexels, it moves in steps of that many texels instead, along the light too: its centre is the sphere's
+* rounded to the step on each axis of the light's frame, so the sphere moves inside a still box until it crosses a
+* step, and the box is half a step wider on each side to hold it wherever it is: half-width r tile / (tile - k). Each
+* step is a whole number of texels across and the same length of depth, so a scrolled copy lines up exactly.
 */
-CascadeBox cascadeBox(const Vec3& lightDirection, const BoundingSphere& sphere, float casterReach, std::uint32_t tileSize);
+CascadeBox cascadeBox(const Vec3& lightDirection, const BoundingSphere& sphere, float casterReach, std::uint32_t tileSize,
+                      std::uint32_t stepTexels = 0);
 
 /*
 * How far a point is inside a cascade's box, in units of the cascade's radius: 1 at the centre, 0 on the box's edge,

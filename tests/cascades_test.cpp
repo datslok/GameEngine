@@ -391,7 +391,182 @@ namespace {
     }
 }
 
+namespace {
+    // Directions spread over the view: its centre, its edges and its corners, as unit vectors from the camera.
+    std::vector<Vec3> viewDirections(const Camera& camera) {
+        const float halfHeight = std::tan(camera.getVerticalFov() * 0.5f);
+        const float halfWidth = halfHeight * camera.getAspectRatio();
+        const Vec3 viewUp = camera.getRight().cross(camera.getForward());
+        std::vector<Vec3> directions;
+
+        for (float x : {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f}) {
+            for (float y : {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f}) {
+                directions.push_back((camera.getForward() + camera.getRight() * (x * halfWidth) + viewUp * (y * halfHeight)).normalized());
+            }
+        }
+
+        return directions;
+    }
+
+    // A corner of the view lies the view's corner stretch further away than the centre at the same depth.
+    void testCornerStretchIsTheCornersDistanceOverItsDepth() {
+        const Camera camera = cameraAt(Vec3{0.0f, 2.0f, 0.0f}, Vec3{0.0f, 2.0f, -10.0f}, 1.2217f);
+        const std::vector<Vec3> corners = sliceCorners(camera, 1.0f, 10.0f);
+        assert(nearlyEqual(viewCornerStretch(camera), (corners.back() - camera.getPosition()).length() / 10.0f));
+
+        // About 1.74 for a 70 degree, 16:9 view.
+        assert(viewCornerStretch(camera) > 1.73f && viewCornerStretch(camera) < 1.75f);
+    }
+
+    /*
+    * A wide view's cascade is a ball round the camera itself: the radius is where the cascade ends, so wherever the
+    * camera turns, the ball, and so the box, does not move at all.
+    */
+    void testWideViewsBallIsRoundTheCamera() {
+        const Vec3 position{4.0f, 3.0f, -7.0f};
+        const BoundingSphere ball = cascadeBall(cameraAt(position, Vec3{0.0f, 2.0f, -30.0f}, 1.2217f), 30.0f, 30.0f);
+        assert(sameVector(ball.centre, position) && ball.radius == 30.0f);
+
+        for (const Vec3& target : {Vec3{40.0f, 3.0f, 0.0f}, Vec3{4.0f, -50.0f, -6.0f}, Vec3{-9.0f, 20.0f, 11.0f}}) {
+            const BoundingSphere turned = cascadeBall(cameraAt(position, target, 1.2217f), 30.0f, 30.0f);
+            assert(sameVector(turned.centre, ball.centre) && turned.radius == ball.radius);
+        }
+
+        // The last cascade may reach further than its depth (where a fitted view's corners are).
+        assert(cascadeBall(cameraAt(position, Vec3{0.0f, 2.0f, -30.0f}, 1.2217f), 30.0f, 50.0f).radius == 50.0f);
+    }
+
+    /*
+    * A narrow view (a scope) is a thin cone, which a sphere round the view up to the cascade's depth holds more tightly
+    * than a ball round the camera: that sphere is taken instead, the same one cascadeSphere makes from the camera on.
+    */
+    void testNarrowViewsKeepTheirCone() {
+        const Camera scope = cameraAt(Vec3{4.0f, 3.0f, -7.0f}, Vec3{0.0f, 2.0f, -30.0f}, 0.3f);
+        const BoundingSphere ball = cascadeBall(scope, 30.0f, 30.0f);
+        const BoundingSphere cone = cascadeSphere(scope, 0.0f, 30.0f);
+        assert(sameVector(ball.centre, cone.centre) && ball.radius == cone.radius);
+        assert(ball.radius < 30.0f);
+    }
+
+    // Wide or narrow, everything the camera sees within the cascade's depth of it lies inside the ball.
+    void testBallHoldsTheViewWithinItsDepth() {
+        const Camera cameras[] = {
+            cameraAt(Vec3{0.0f, 2.0f, 0.0f}, Vec3{0.0f, 2.0f, -10.0f}, 1.2217f),
+            cameraAt(Vec3{30.0f, 5.0f, -12.0f}, Vec3{10.0f, 0.0f, 40.0f}, 0.3f, 1.0f),
+            cameraAt(Vec3{-4.0f, 80.0f, 9.0f}, Vec3{0.0f, 0.0f, 0.0f}, 1.6f, 2.4f)
+        };
+
+        for (const Camera& camera : cameras) {
+            for (const float depth : {3.0f, 36.0f, 200.0f}) {
+                const BoundingSphere ball = cascadeBall(camera, depth, depth);
+
+                for (const Vec3& direction : viewDirections(camera)) {
+                    assert((camera.getPosition() + direction * depth - ball.centre).length() <= ball.radius * 1.0001f);
+                }
+            }
+        }
+    }
+
+    // A step of k texels: round(share x tile), so a step is a whole number of texels; none for a share of 0.
+    void testStepTexelsAreAShareOfTheTile() {
+        assert(cascadeStepTexels(1.0f / 16.0f, 4096) == 256);
+        assert(cascadeStepTexels(1.0f / 16.0f, 2048) == 128);
+        assert(cascadeStepTexels(0.0f, 4096) == 0);
+    }
+
+    /*
+    * A box moving in steps of k texels has its centre up to half a step from the ball's on each axis, so it is half a
+    * step wider on each side: h = r + k h / tile, h = r tile / (tile - k). Its texels and depth follow from h.
+    */
+    void testSteppedBoxGrowsByHalfAStep() {
+        const Vec3 sunlight{0.0f, -1.0f, 0.0f};
+        const CascadeBox box = cascadeBox(sunlight, BoundingSphere{Vec3{0.0f, 0.0f, 0.0f}, 10.0f}, 30.0f, 1024, 64);
+        const float halfWidth = 10.0f * 1024.0f / 960.0f;
+
+        assert(nearlyEqual(box.halfWidth, halfWidth));
+        assert(nearlyEqual(box.texelSize, 2.0f * halfWidth / 1024.0f));
+        assert(nearlyEqual(box.depthRange, 2.0f * halfWidth + 30.0f, 0.001f));
+
+        // Without steps, the box is the sphere's own size.
+        assert(cascadeBox(sunlight, BoundingSphere{Vec3{0.0f, 0.0f, 0.0f}, 10.0f}, 30.0f, 1024).halfWidth == 10.0f);
+    }
+
+    // Wherever the ball has moved to, all of it, and the caster reach towards the light, lies inside the stepped box.
+    void testSteppedBoxHoldsItsBall() {
+        const Vec3 sunlight = Vec3{0.4f, -1.0f, -0.6f}.normalized();
+        const Vec3 directions[] = {
+            Vec3{1.0f, 0.0f, 0.0f}, Vec3{-1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f},
+            Vec3{0.0f, -1.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f}, Vec3{0.0f, 0.0f, -1.0f},
+            Vec3{1.0f, 1.0f, 1.0f}.normalized(), Vec3{-1.0f, 0.5f, 0.2f}.normalized(), sunlight, sunlight * -1.0f
+        };
+
+        for (int place = 0; place < 50; ++place) {
+            const float t = static_cast<float>(place);
+            const BoundingSphere ball{Vec3{0.37f * t, 5.0f - 0.21f * t, 0.53f * t}, 12.0f};
+            const CascadeBox box = cascadeBox(sunlight, ball, 50.0f, 1024, 64);
+
+            for (const Vec3& direction : directions) {
+                const Vec3 onSurface = project(box.matrix, ball.centre + direction * ball.radius);
+                assert(std::abs(onSurface.x) <= 1.0f && std::abs(onSurface.y) <= 1.0f);
+                assert(onSurface.z > 0.0f && onSurface.z < 1.0f);
+            }
+
+            const Vec3 towardsLight = project(box.matrix, ball.centre - sunlight * (ball.radius + 49.0f));
+            assert(towardsLight.z > 0.0f && towardsLight.z < 1.0f);
+        }
+    }
+
+    /*
+    * Walking the ball in small moves, the stepped box moves only when the ball crosses a step, a few times over a few
+    * steps' walk (texel snapping would move it at almost every move), and always by whole steps: across the light by
+    * whole multiples of k texels, along it by whole steps of depth, so a scrolled copy lines up exactly.
+    */
+    void testSteppedBoxMovesInWholeSteps() {
+        const Vec3 sunlight = Vec3{0.4f, -1.0f, -0.6f}.normalized();
+        const std::uint32_t tileSize = 1024;
+        const std::uint32_t stepTexels = 64;
+        const Vec3 fixedPoint{1.0f, 0.0f, -3.0f};
+        const float radius = 12.0f;
+        CascadeBox previous = cascadeBox(sunlight, BoundingSphere{Vec3{2.0f, 5.0f, 4.0f}, radius}, 50.0f, tileSize, stepTexels);
+        const float step = static_cast<float>(stepTexels) * previous.texelSize;
+        int moves = 0;
+
+        // Four steps' walk in 200 moves, diagonally, so every axis of the light's frame changes.
+        for (int move = 1; move <= 200; ++move) {
+            const float along = 4.0f * step * static_cast<float>(move) / 200.0f;
+            const Vec3 centre = Vec3{2.0f, 5.0f, 4.0f} + Vec3{0.6f, 0.3f, -0.74f}.normalized() * along;
+            const CascadeBox box = cascadeBox(sunlight, BoundingSphere{centre, radius}, 50.0f, tileSize, stepTexels);
+            const Vec3 then = project(previous.matrix, fixedPoint);
+            const Vec3 now = project(box.matrix, fixedPoint);
+
+            if (then.x != now.x || then.y != now.y || then.z != now.z) {
+                ++moves;
+                const float texelsPerUnit = static_cast<float>(tileSize) * 0.5f;
+                const float stepsX = (now.x - then.x) * texelsPerUnit / static_cast<float>(stepTexels);
+                const float stepsY = (now.y - then.y) * texelsPerUnit / static_cast<float>(stepTexels);
+                const float stepsDepth = (now.z - then.z) * box.depthRange / step;
+                assert(nearlyEqual(stepsX, std::round(stepsX), 0.01f));
+                assert(nearlyEqual(stepsY, std::round(stepsY), 0.01f));
+                assert(nearlyEqual(stepsDepth, std::round(stepsDepth), 0.01f));
+            }
+
+            previous = box;
+        }
+
+        // At most four crossings an axis, plus one for where the walk began in its cell.
+        assert(moves >= 1 && moves <= 15);
+    }
+}
+
 void testCascades() {
+    testCornerStretchIsTheCornersDistanceOverItsDepth();
+    testWideViewsBallIsRoundTheCamera();
+    testNarrowViewsKeepTheirCone();
+    testBallHoldsTheViewWithinItsDepth();
+    testStepTexelsAreAShareOfTheTile();
+    testSteppedBoxGrowsByHalfAStep();
+    testSteppedBoxHoldsItsBall();
+    testSteppedBoxMovesInWholeSteps();
     testFarSphereHoldsTheViewAndStaysPut();
     testNothingMeasuredIsNotFitted();
     testTheFitRoundsUpToTheLadder();

@@ -96,6 +96,11 @@ struct ShadowSettings {
     // shadows a frame while turning (docs/research/SHADOWCACHE.md).
     int cascadeStagger = 2;
 
+    // The sun's cascades move in steps of this share of their box's width (cascadeBall, cascadeBox): the box stays put
+    // until the camera crosses a step, so walking rarely redraws a cascade, and it is half a step wider on each side to
+    // hold its ball wherever the camera is in the step (1/16 costs about 7% of texel size). 0 moves them by whole texels.
+    float cascadeStepShare = 1.0f / 16.0f;
+
     // Each cascade's tile size (see CascadeResolution); 4096 by default (Ultra), 2048 on High. The atlas is remade when
     // it changes, and every shadow redrawn.
     CascadeResolution cascadeResolution = CascadeResolution::Pixels4096;

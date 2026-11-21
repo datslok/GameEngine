@@ -2,7 +2,7 @@
 
 Covers: `src/render/gpu/light_priority`, `src/render/gpu/shadow_map`, `src/render/gpu/shadow_atlas`, `src/render/gpu/shadow_cache`, `src/render/gpu/soft_shadow`, `src/render/gpu/shader_shared.h`, `assets/shaders/soft_shadow.glsl`, `assets/shaders/scene_shadow_tiles.glsl`, `assets/shaders/shadow.vert`, `assets/shaders/shadow.frag`, `assets/shaders/shadow_cut_out.vert`
 
-Which lights the shader gets, which cast shadows, and how point and spot shadows are planned, cached, drawn and filtered. The sun's cascades, far map and contact shadows: `sun-shadows.md`. Glass tinting shadows: `glass.md`. Research on caching: `docs/research/SHADOWCACHE.md`.
+Which lights the shader gets, which cast shadows, and how point and spot shadows are planned, cached, drawn and filtered. The sun's cascades and far map: `sun-shadows.md`; contact shadows: `contact-shadows.md`. Glass tinting shadows: `glass.md`. Research on caching: `docs/research/SHADOWCACHE.md`.
 
 ## Light priority (`prioritizeLights`)
 

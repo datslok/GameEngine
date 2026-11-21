@@ -365,9 +365,13 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
             - [x] 1b. Trees switched to their cards by size: the card's error its own texels' (2), ahead of any coarser level (the user's go, Nov 21 2026: the frame was triangles, not pixels)
             - [x] 1c. Sun cascades a mover reaches keep their movers apart, as the far map (the user's choice A, Nov 21 2026: the drifting rocks redrew whole cascades of forest, 10.6 ms 150 m up)
             - [x] 2. Trees cast into the four cascades, not the far map (the user's go, Nov 21 2026; the nearest two would have ended their shadows about 9 m away)
-            - [ ] 2b. The far forest's shadow from a cheap caster in the far map (one a cell, or a canopy height field: Witcher 3, CryEngine)
+            - [ ] 1d. The mid trees (and palms, if the frame allows) past 300 m again as cards only, out to 1 km: since 1b a mid tree is a card from about 115 m, so step 1 cut two-triangle cards; measured before and after (the user, Nov 21 2026: 300 m to 1 km looks empty from the air)
+            - [ ] 2b. The far forest's shadow from a cheap caster in the far map (one a cell, or a canopy height field: Witcher 3, CryEngine); research first (the user, Nov 21 2026: past the cascades' 200 m no tree casts, so the valley looks flat and bright)
             - [ ] 3. Placed plants in the probe faces only near the probe
-            - [ ] 4. Sun cascades as balls round the camera in coarse steps (1/16 of a box), so turning never redraws them and walking rarely (the user's go, Nov 21 2026; `docs/research/SHADOWCACHE.md`, Cascades while the camera moves) (`cascade-steps`)
+            - [ ] 4. Sun cascades as balls round the camera in coarse steps (1/16 of a box), so turning never redraws them and walking rarely (the user's go, Nov 21 2026; `docs/research/SHADOWCACHE.md`, Cascades while the camera moves) (`cascade-steps`): built and tested, the shadow distance a radius (the user's choice), unmeasured; standing in the forest SHADOW 0.37 ms
+              - [ ] 4b. Limited casters thinned by distance from the camera, not from the box's sides: the band jumps a whole step with the box, a batch of plant shadows popping (the user saw it, Nov 21 2026)
+              - [ ] 4c. Plants' seen meshes cast in the nearest one or two cascades, their stand-in only beyond: the 5% stand-in's triangles poke above the seen leaves and shadow them in hard polygons (with the sun overhead; the 25% smaller texels' bias shows it more); research first
+            - [ ] 4d. The card-to-3D switch of trees and plants pops (the user, Nov 21 2026; switches nearer since 1b): do trees cross-fade at all; then a wider fade band, a stricter card error, or better-matching cards
             - [ ] 5. Scrolling a stepped cascade's still copy, only the exposed strips' casters drawn (Insomniac) (`cascade-scrolling`)
           - [ ] e1b. The fade by distance over each set's last cell, by the level fades' dither
         - [ ] e2. Measured at the rim, the path and the meadow (F4), radii and levers tuned

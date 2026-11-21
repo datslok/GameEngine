@@ -69,7 +69,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 12 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
 | 13 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
 | 14-17 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
-| 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
+| 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `contact-shadows.md` |
 | 19 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
 | 20 | Main [MAIN] | always; also writes the velocity image (`anti-aliasing.md`); sky and stars in a block of their own after | here |
 | 21 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |

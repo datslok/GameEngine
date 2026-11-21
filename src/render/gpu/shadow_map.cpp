@@ -198,17 +198,12 @@ namespace {
         plan.tileData.push_back(data);
     }
 
-    /*
-    * A sun's cascades for one view (the camera's, or the camera seen in a mirror): from nearDistance to farDistance
-    * along it, cut into slices, each in its own box around its bounding sphere (see cascades.h). A box texel is the same
-    * size everywhere, so its offset is fixed rather than growing with distance. The box is snapped to texels in world
-    * space, so the shader's version is the same box shifted to the camera (origin), rather than one snapped around the
-    * camera, which would crawl as it moves.
-    */
     // A sun's box tile: the box for the shader (shifted to the camera), its base bias, where the sun is, and the lens soft
-    // shadows read (no near plane, the box's depth, a texel's size, the radius).
+    // shadows read (no near plane, the box's depth, a texel's size, its half-width as the radius). The box is snapped
+    // in world space, so the shader's version is the same box shifted to the camera (origin), rather than one snapped
+    // around the camera, which would crawl as it moves. A box texel is the same size everywhere, so its offset is fixed.
     void addSunBox(ShadowPlan& plan, const ShadowAtlasSize& atlas, const ShadowTile& tile, const DirectionalLight& light,
-                   const CascadeBox& box, float radius, const ShadowSettings& settings, const Vec3& origin) {
+                   const CascadeBox& box, const ShadowSettings& settings, const Vec3& origin) {
         addTile(plan, atlas, tile, box.matrix, box.matrix * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
                 settings.normalOffsetTexels * box.texelSize, BoundingSphere{});
 
@@ -218,22 +213,39 @@ namespace {
         float* lens = plan.tileData.back().lens;
         lens[1] = box.depthRange;
         lens[2] = box.texelSize;
-        lens[3] = radius;
+        lens[3] = box.halfWidth;
     }
 
+    /*
+    * A sun's cascades for one view (the camera's, or the camera seen in a mirror): from nearDistance to farDistance
+    * along it, cut into slices, each in a stepped box round its ball (cascadeBall, cascadeBox): a ball reaching where its
+    * slice ends, the last reaching lastRadius (at least farDistance), so a fitted view's corners stay covered.
+    */
     void addSunCascades(ShadowPlan& plan, const ShadowAtlasSize& atlas, const ShadowRequest& request, const DirectionalLight& light,
-                        const Camera& view, float nearDistance, float farDistance, const ShadowSettings& settings, const Vec3& origin) {
+                        const Camera& view, float nearDistance, float farDistance, float lastRadius, const ShadowSettings& settings,
+                        const Vec3& origin) {
         const std::vector<float> splits = cascadeSplits(nearDistance, farDistance, request.tileCount, settings.cascadeSplitLambda);
+        const std::uint32_t stepTexels = cascadeStepTexels(settings.cascadeStepShare, request.size);
 
         for (int cascade = 0; cascade < request.tileCount; ++cascade) {
             const std::size_t index = static_cast<std::size_t>(cascade);
-            const BoundingSphere sphere = cascadeSphere(view, splits[index], splits[index + 1]);
-            const CascadeBox box = cascadeBox(light.direction, sphere, settings.directionalCasterReach, request.size);
-            addSunBox(plan, atlas, request.tiles[index], light, box, sphere.radius, settings, origin);
+            const float depth = splits[index + 1];
+            const float radius = cascade + 1 == request.tileCount ? std::max(lastRadius, depth) : depth;
+            const BoundingSphere ball = cascadeBall(view, depth, radius);
+            const CascadeBox box = cascadeBox(light.direction, ball, settings.directionalCasterReach, request.size, stepTexels);
+            addSunBox(plan, atlas, request.tiles[index], light, box, settings, origin);
             plan.tiles.back().sunCascade = cascade;
             plan.tiles.back().thinStart = settings.limitedCasterThinStart;
             plan.tiles.back().thinEnd = settings.cascadeBlendBand;
         }
+    }
+
+    /*
+    * How far the last cascade reaches round the camera: the shadow distance is a radius, but a view fitted to its
+    * farthest surface's depth (a room) must hold its corners too, which lie the view's corner stretch further away.
+    */
+    float lastCascadeRadius(const Camera& view, float shadowDistance, float fittedDepth) {
+        return std::min(shadowDistance, fittedDepth * viewCornerStretch(view));
     }
 
     // How far the far shadow map reaches, or 0 for none: off, or the view ending before the cascades do.
@@ -422,14 +434,16 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             sun.cascades = request.tileCount;
 
             const float shadowDistance = std::min({settings.directionalDistance, camera.getFarPlane(), fittedSunDistance});
-            addSunCascades(plan, atlas, request, light, camera, camera.getNearPlane(), shadowDistance, settings, origin);
+            const float reach = std::min(settings.directionalDistance, camera.getFarPlane());
+            addSunCascades(plan, atlas, request, light, camera, camera.getNearPlane(), shadowDistance,
+                           lastCascadeRadius(camera, reach, fittedSunDistance), settings, origin);
         }
         else if (request.kind == ShadowKind::Far) {
             // Its tile follows the cascades', so the row reads it as its last box.
             const DirectionalLight& light = selected.directionalLights[request.slot];
             const BoundingSphere sphere = farShadowSphere(origin, farShadowReach(settings, camera));
             const CascadeBox box = cascadeBox(light.direction, sphere, settings.directionalCasterReach, request.size);
-            addSunBox(plan, atlas, request.tiles.front(), light, box, sphere.radius, settings, origin);
+            addSunBox(plan, atlas, request.tiles.front(), light, box, settings, origin);
             plan.tiles.back().smallestCaster = farShadowSmallestCaster(box.texelSize);
             plan.tiles.back().separateMovers = true;
             plan.tiles.back().sunCascade = plan.directional[request.slot].cascades;
@@ -449,7 +463,9 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
             const float farDistance = std::min({mirror->farDistance, settings.directionalDistance, camera.getFarPlane()});
             addSunCascades(plan, atlas, request, light, mirror->camera, mirror->nearDistance,
-                           std::max(farDistance, mirror->nearDistance * shadowDistanceStep), settings, origin);
+                           std::max(farDistance, mirror->nearDistance * shadowDistanceStep),
+                           lastCascadeRadius(mirror->camera, std::min(settings.directionalDistance, camera.getFarPlane()), mirror->farDistance),
+                           settings, origin);
         }
         else if (request.kind == ShadowKind::Spot) {
             const PlacedSpotLight& placed = selected.spotLights[request.slot];
@@ -649,6 +665,7 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.choice("Cascade transition", settings.cascadeTransition, cascadeTransitionNames);
     visitor.choice("Cascade resolution", settings.cascadeResolution, cascadeResolutionNames);
     visitor.field("Cascade stagger", settings.cascadeStagger, {.min = 1, .max = 8, .unit = "frames"});
+    visitor.field("Cascade step", settings.cascadeStepShare, {.min = 0.0f, .max = 0.25f, .unit = "of a box (0 whole texels)"});
     visitor.field("Mirror cascades", settings.mirrorCascadeCount, {.min = 0, .max = maxShadowCascades});
     visitor.choice("Mirror cascade resolution", settings.mirrorCascadeResolution, cascadeResolutionNames);
     visitor.field("Far shadow distance", settings.farShadowDistance, {.min = 0.0f, .max = 100000.0f, .sliderMax = 20000.0f, .unit = "m (0 off)"});
