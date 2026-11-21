@@ -58,3 +58,11 @@ struct ShadowTileNeeds {
 ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSettings& settings, const CameraCullFrame& table, const std::vector<DrawItem>& draws,
                                 const std::vector<std::size_t>& glass, bool sways, std::uint64_t frame, const ShadowTileMemory& memory,
                                 const PlantedShadowChanges& planted);
+
+/*
+* Whether a tile keeps its movers apart this frame (ShadowTile::separateMovers; render/gpu/shadow_cache.h): the far map
+* always; a sun cascade once a moving draw (the table's moving records) is in it, and from then on while it has its still
+* copy (hasStillCopy), so a drifting rock redraws only its own patch, not the forest under the whole cascade, and a
+* cascade no mover reaches costs no copy. Never a swaying cascade (sways: redrawn every frame anyway) or a lamp's tile.
+*/
+bool keepsMoversApart(const ShadowTile& tile, const CameraCullFrame& table, bool sways, bool hasStillCopy);

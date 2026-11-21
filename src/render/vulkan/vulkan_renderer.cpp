@@ -702,6 +702,8 @@ void VulkanRenderer::ensureShadowAtlas(const ShadowAtlasSize& size) {
     createShadowAtlas(size);
     shadowLayout = ShadowAtlasLayout{size};
     shadowMemory.forgetAll();
+    // The still copies are kept by the old atlas's squares.
+    stillShadows.clear();
 }
 
 /*
@@ -2694,7 +2696,7 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
 * view and casters are what was drawn into it last keeps its contents (shadow caching). A tile drawn gets a view and
 * room in the draw list for its casters (and, keeping its movers apart, its moved casters) for the GPU to fill.
 */
-VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, DrawListLayout& drawList,
+VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, std::vector<ShadowTile>& tiles, DrawListLayout& drawList,
                                                                bool colouredShadows, const LevelOfDetailSettings& levelSettings, const WindSettings* sway,
                                                                const CameraCullFrame& table, const PlantedShadowChanges& planted) {
     const std::size_t listEntries = description.draws.size();
@@ -2702,7 +2704,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
     prepared.tileGlass.assign(tiles.size(), false);
 
     for (std::size_t tileIndex = 0; tileIndex < tiles.size(); ++tileIndex) {
-        const ShadowTile& tile = tiles[tileIndex];
+        ShadowTile& tile = tiles[tileIndex];
 
         if (tile.size == 0) {
             ++stats.shadowTilesSkipped;
@@ -2719,24 +2721,35 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         // The nearest cascade, and a lamp reaching the swaying ground, redraw every frame while things sway: anything in
         // them might.
         const bool sways = sway != nullptr && tileSways(tile.sunCascade, tile.reach.centre, tile.reach.radius, cameraOrigin, *sway);
-        const ShadowTileNeeds needs = shadowTileNeeds(tile, levelSettings, table, description.draws, glass, sways, shadowFrame, shadowMemory, planted);
+
+        // A tile a mover reaches keeps its still casters in their own copy (keepsMoversApart); a new copy is drawn whole.
+        tile.separateMovers = keepsMoversApart(tile, table, sways, stillShadowOf(tile) != nullptr);
+        StillShadowCopy* stillCopy = nullptr;
+        bool newCopy = false;
 
         if (tile.separateMovers) {
-            ensureStillShadow(tile.size);
+            std::tie(stillCopy, newCopy) = ensureStillShadow(tile);
+        }
+
+        ShadowTileNeeds needs = shadowTileNeeds(tile, levelSettings, table, description.draws, glass, sways, shadowFrame, shadowMemory, planted);
+        needs.redraw = needs.redraw || newCopy;
+
+        if (stillCopy != nullptr) {
+            std::vector<ShadowPatch>& patches = prepared.nextMoverPatches.emplace_back(stillCopy, std::vector<ShadowPatch>{}).second;
 
             for (std::size_t index : needs.movers.moving) {
                 if (const std::optional<ShadowPatch> patch = shadowPatch(tile, description.draws[index].bounds)) {
-                    prepared.nextMoverPatches.push_back(*patch);
+                    patches.push_back(*patch);
                 }
             }
         }
 
-        if (!needs.redraw && needs.movers.moving.empty() && (!tile.separateMovers || moverPatches.empty())) {
+        if (!needs.redraw && needs.movers.moving.empty() && (stillCopy == nullptr || stillCopy->moverPatches.empty())) {
             ++stats.shadowTilesCached;
             continue;
         }
 
-        ShadowTileDraw drawing{&tile, BatchedDraws{}, needs.key, needs.redraw, {}, sways, PassDraws{}, PassDraws{}, std::nullopt};
+        ShadowTileDraw drawing{&tile, BatchedDraws{}, needs.key, needs.redraw, {}, sways, PassDraws{}, PassDraws{}, std::nullopt, stillCopy};
 
         if (needs.redraw && !glass.empty()) {
             drawing.glass = batchByMesh(description.draws, glass, drawList.size(), nullptr);
@@ -2745,12 +2758,13 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         }
 
         // What to copy back from the still copy: all of it after a redraw, else where movers were and are.
-        if (tile.separateMovers) {
+        if (stillCopy != nullptr) {
             if (needs.redraw) {
                 drawing.restore.push_back(ShadowPatch{tile.x, tile.y, tile.size, tile.size});
             } else {
-                drawing.restore = moverPatches;
-                drawing.restore.insert(drawing.restore.end(), prepared.nextMoverPatches.begin(), prepared.nextMoverPatches.end());
+                const std::vector<ShadowPatch>& next = prepared.nextMoverPatches.back().second;
+                drawing.restore = stillCopy->moverPatches;
+                drawing.restore.insert(drawing.restore.end(), next.begin(), next.end());
             }
         }
 
@@ -2766,34 +2780,45 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
     return prepared;
 }
 
+VulkanRenderer::StillShadowCopy* VulkanRenderer::stillShadowOf(const ShadowTile& tile) {
+    const auto found = stillShadows.find({tile.x, tile.y});
+    return found != stillShadows.end() && found->second.size == tile.size ? &found->second : nullptr;
+}
+
 /*
-* The still copy is drawn into as a depth target and copied from; nothing reads it as a texture. A new one starts
-* undefined and is drawn whole before anything is copied from it, since the tile memory forgets what the far tile held
-* at another size.
+* A still copy is drawn into as a depth target and copied from; nothing reads it as a texture. A new one starts
+* undefined, so its tile is drawn whole before anything is copied from it (the caller redraws it). Replacing one at
+* another size waits for the GPU, which may still be copying from the old one.
 */
-void VulkanRenderer::ensureStillShadow(std::uint32_t size) {
-    if (stillShadowSize == size) {
-        return;
+std::pair<VulkanRenderer::StillShadowCopy*, bool> VulkanRenderer::ensureStillShadow(const ShadowTile& tile) {
+    if (StillShadowCopy* existing = stillShadowOf(tile)) {
+        return {existing, false};
     }
 
-    device.waitIdle();
+    StillShadowCopy& copy = stillShadows[{tile.x, tile.y}];
+
+    if (copy.size != 0) {
+        device.waitIdle();
+    }
+
     ImageDescription description;
     description.format = depthFormat;
-    description.width = size;
-    description.height = size;
+    description.width = tile.size;
+    description.height = tile.size;
     description.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     description.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     description.name = "Still shadow";
-    stillShadow = VulkanImage{device, description};
-    stillShadowSize = size;
-    moverPatches.clear();
+    copy.image = VulkanImage{device, description};
+    copy.size = tile.size;
+    copy.moverPatches.clear();
+    return {&copy, true};
 }
 
 /*
 * The shadow maps, one tile per view (the viewport picks the tile), depth only: each redrawn tile is first reset to the
 * far depth, then its casters drawn, one instanced draw per mesh. When nothing changed there is no pass at all.
 *
-* A tile keeping its movers apart (the far shadow map) works in three steps: its still casters drawn into the still copy
+* A tile keeping its movers apart (the far shadow map, a cascade a mover reached) works in three steps: its still casters drawn into its still copy
 * when they changed (its own pass, cleared to the far depth); the restore patches copied from the still copy into the
 * atlas (one copy, a region each); and in the atlas's pass, no reset, only its movers drawn over the patches.
 *
@@ -2803,7 +2828,9 @@ void VulkanRenderer::ensureStillShadow(std::uint32_t size) {
 * drawn, before the main pass samples it.
 */
 void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet) {
-    moverPatches = shadowDraws.nextMoverPatches;
+    for (const auto& [copy, patches] : shadowDraws.nextMoverPatches) {
+        copy->moverPatches = patches;
+    }
 
     if (shadowDraws.tiles.empty()) {
         return;
@@ -2817,6 +2844,8 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
         if (!tile.separateMovers) {
             continue;
         }
+
+        VulkanImage& stillShadow = drawing.stillCopy->image;
 
         if (drawing.still) {
             stillShadow.transition(commands, ImageState::DepthTarget, ImageContents::Discard);

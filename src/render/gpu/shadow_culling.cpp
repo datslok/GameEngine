@@ -79,3 +79,20 @@ ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSetti
     needs.redraw = table.stillRebuilt || planted.all || touched || !memory.isCurrent(tile, needs.key);
     return needs;
 }
+
+bool keepsMoversApart(const ShadowTile& tile, const CameraCullFrame& table, bool sways, bool hasStillCopy) {
+    if (tile.separateMovers) {
+        return true;
+    }
+
+    if (tile.sunCascade < 0 || sways) {
+        return false;
+    }
+
+    if (hasStillCopy) {
+        return true;
+    }
+
+    const GpuCameraCull view = packShadowCull(tile, LevelOfDetailSettings{});
+    return std::any_of(table.movingRecords.begin(), table.movingRecords.end(), [&view](const GpuCullRecord& record) { return shadowTakes(record, view); });
+}

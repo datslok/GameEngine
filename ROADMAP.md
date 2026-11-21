@@ -363,6 +363,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
           - [ ] e1c. The frame back down (the user's go, Nov 20 2026; trees to 1 km took the laptop's GPU frame from about 17 to 54 ms; research in `docs/research/VALLEY.md`, Drawing the whole valley): each step measured at the path in one hidden copy before the next
             - [x] 1. The mid trees in the middle cells (300 m): past it only the sparse tall trees (BF3's payloads, Serious Sam 4's split)
             - [x] 1b. Trees switched to their cards by size: the card's error its own texels' (2), ahead of any coarser level (the user's go, Nov 21 2026: the frame was triangles, not pixels)
+            - [x] 1c. Sun cascades a mover reaches keep their movers apart, as the far map (the user's choice A, Nov 21 2026: the drifting rocks redrew whole cascades of forest, 10.6 ms 150 m up)
             - [ ] 2. Trees cast into the nearest cascades only (Horizon); the far forest's shadow later from a cheap caster in the far map
             - [ ] 3. Placed plants in the probe faces only near the probe
           - [ ] e1b. The fade by distance over each set's last cell, by the level fades' dither

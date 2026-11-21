@@ -236,8 +236,9 @@ bool tileHasGlass(const ShadowTileData& data);
 // lightPlace (world space) is where its light is, for the coloured shadow map's glass (its angle to the light, and which
 // faces count): a local light's position with w 1, or for a sun's cascades the direction towards the sun with w 0.
 //
-// separateMovers: its moving casters are drawn every frame over a cached copy of its still ones (render/gpu/shadow_cache.h,
-// the far shadow map's) rather than redrawing it whole. smallestCaster: casters with a smaller bounding sphere are not
+// separateMovers: its moving casters are drawn every frame over a cached copy of its still ones (render/gpu/shadow_cache.h)
+// rather than redrawing it whole: the plan sets it on the far shadow map, the renderer on cascades a mover reaches
+// (keepsMoversApart, render/gpu/shadow_culling.h). smallestCaster: casters with a smaller bounding sphere are not
 // drawn into it (the far shadow map's, cascades.h); 0 draws every one.
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();

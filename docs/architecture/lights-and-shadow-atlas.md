@@ -82,7 +82,8 @@ A tile's image depends only on its view and its casters, so unchanged tiles are 
 - `ShadowTileMemory`: per square, the matrix and signature last drawn there. `isCurrent`, `remember` (forgets squares the new one overlaps), `forgetAll` (after any render error, or atlas contents lost).
 - `shadowCasterSignature`: FNV-1a over each caster's mesh, model matrix, shape and, with levels, the level drawn; `tintedShadowSignature` adds the glass that tints it (identical without glass); `swayingShadowSignature` (`render/gpu/wind`) makes a swaying tile redraw every frame.
 - **What the fingerprint covers:** only the moving draws and glass; still changes come from the scene's announcements and the GPU finds the casters (`gpu-driven.md`, Shadow tiles).
-- **Still and moving casters** (`separateMovers`, the far map): its still casters cached in a separate "Still shadow" image; each frame the movers' patches (`shadowPatch`, `splitMovingCasters`, `movedSinceLastFrame`) are copied back from it and the movers drawn over them.
+- **Still and moving casters** (`separateMovers`): its still casters cached in a "Still shadow" image of its own (`VulkanRenderer::stillShadows`, by the tile's square); each frame the movers' patches (`shadowPatch`, `splitMovingCasters`, `movedSinceLastFrame`) are copied back from it and the movers drawn over them.
+- **Which tiles** (`keepsMoversApart`, set each frame before the tile's needs): the far map always; a sun cascade once a moving draw is in it, then while it has its copy (a new copy redraws the tile); never a swaying cascade or a lamp's tile. A drifting rock then redraws its patch, not the forest under the whole cascade. Cost: a copy the tile's size (64 MB at 4096) for each cascade a mover reached.
 
 ## Preparing and drawing
 
