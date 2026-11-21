@@ -4140,8 +4140,8 @@ SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
-VertexEntries VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
-    return uploadMeshes({MeshUpload{&mesh, deforming}}).front();
+VertexEntries VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming, ClusterLevels levels) {
+    return uploadMeshes({MeshUpload{&mesh, deforming, levels}}).front();
 }
 
 /*
@@ -4154,11 +4154,11 @@ std::vector<VertexEntries> VulkanRenderer::uploadMeshes(const std::vector<MeshUp
         throw std::logic_error("Upload meshes before beginning a frame");
     }
 
-    std::vector<const IndexedMesh*> pooled;
+    std::vector<MeshClusterBuild> pooled;
 
     for (const MeshUpload& upload : batch) {
         if (meshPool && !upload.deforming) {
-            pooled.push_back(upload.mesh);
+            pooled.push_back({upload.mesh, upload.levels});
         }
     }
 

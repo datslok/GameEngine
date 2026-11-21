@@ -468,7 +468,7 @@ Added Nov 21 2026 (the user: AAA quality; the forest's shadows popped all over f
   - [x] 2a. meshoptimizer 0.22 to 1.3, `external/meshoptimizer/clusterlod.h` vendored beside it (`cluster-levels-2a`)
   - [ ] 2b. The hierarchy built on the CPU when a mesh reaches the GPU, simplified with normals and UVs; tested: each level covers the mesh, a parent's error at least its children's, a parent's sphere holds its children's, any consistent cut watertight; five times one level's build at start-up, so (the user, Nov 21 2026, after research: engines build ahead of time and only meshes flagged for it): (`cluster-levels-2b`)
     - [x] 2b-i. Built a mesh a thread on the job system, largest first, a batch at a time behind the loading screen; measured (`cluster-levels-2b`)
-    - [ ] 2b-ii. Levels only for meshes marked to use them (rock, trunks, structures; Nanite's per-mesh switch); leaf cards, hanging and thinned meshes, terrain and sky one level until their stages
+    - [x] 2b-ii. Levels only for meshes marked to use them (rock, trunks, structures; Nanite's per-mesh switch); leaf cards, hanging and thinned meshes, terrain and sky one level until their stages (`cluster-levels-2b-ii`)
     - [ ] 2b-iii. Only if the build still shows at start-up: cached on disk, keyed by each mesh's bytes (the same seed and code a hit, any change a miss)
   - [ ] 2c. The cut tested a cluster in the culling passes (own error at most `errorPixels` projected, the parent's above), mirrored in `.glsl` and checked by `cluster-compare`; the culling pass timed
   - [ ] 2d. Only if 2c's culling shows in the timings: the group tree walked instead of every cluster tested

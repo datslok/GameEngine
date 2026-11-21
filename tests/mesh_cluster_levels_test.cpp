@@ -248,7 +248,7 @@ namespace {
     */
     void testASpheresLevels() {
         const IndexedMesh ball = sphere();
-        const MeshClusters built = buildMeshClusters(ball);
+        const MeshClusters built = buildMeshClusters(ball, ClusterLevels::All);
         assertShape(ball, built);
         assertParentsBoundChildren(built);
 
@@ -291,7 +291,7 @@ namespace {
     // An open sheet: every cut's open edges lie on the sheet's own border (no crack inside), its area kept within 10%.
     void testASheetsLevels() {
         const IndexedMesh sheet = rippledSheet(160);
-        const MeshClusters built = buildMeshClusters(sheet);
+        const MeshClusters built = buildMeshClusters(sheet, ClusterLevels::All);
         assertShape(sheet, built);
         assertParentsBoundChildren(built);
         const std::vector<std::uint32_t> numbers = positionNumbers(sheet);
@@ -333,18 +333,64 @@ namespace {
     // the same hierarchy.
     void testSmallAndRepeatable() {
         const IndexedMesh small = buildIndexedMesh(Mesh::cube());
-        const MeshClusters one = buildMeshClusters(small);
+        const MeshClusters one = buildMeshClusters(small, ClusterLevels::All);
         assert(one.clusters.size() == 1 && one.originalCount == 1 && one.groups.size() == 1);
         assert(one.groups[0].error == FLT_MAX);
 
         const IndexedMesh sheet = rippledSheet();
-        assertSameClusters(buildMeshClusters(sheet), buildMeshClusters(sheet));
+        assertSameClusters(buildMeshClusters(sheet, ClusterLevels::All), buildMeshClusters(sheet, ClusterLevels::All));
+    }
+
+    // A cluster's triangles as mesh vertex numbers, in its own order.
+    std::vector<std::uint32_t> clusterCorners(const MeshClusters& built, const MeshCluster& cluster) {
+        std::vector<std::uint32_t> found;
+
+        for (std::uint32_t triangle = 0; triangle < cluster.triangleCount; ++triangle) {
+            const std::array<std::uint32_t, 3> three = corners(built, cluster, triangle);
+            found.insert(found.end(), three.begin(), three.end());
+        }
+
+        return found;
+    }
+
+    /*
+    * A mesh without levels (ClusterLevels::One): exactly the clusters a mesh with levels has at full detail (the same
+    * triangles in the same clusters, in the same order within each; the clusters' order may differ, since levels list
+    * them group by group), all in one group never simplified (drawn however far) whose sphere holds every cluster's;
+    * cut, it is the mesh, closed.
+    */
+    void testOneLevel() {
+        const IndexedMesh ball = sphere();
+        const MeshClusters one = buildMeshClusters(ball, ClusterLevels::One);
+        const MeshClusters all = buildMeshClusters(ball, ClusterLevels::All);
+        assert(one.originalCount == one.clusters.size() && one.originalCount == all.originalCount);
+        assert(one.groups.size() == 1 && one.groups[0].error == FLT_MAX && one.groups[0].level == 0);
+
+        std::vector<std::vector<std::uint32_t>> fromOne;
+        std::vector<std::vector<std::uint32_t>> fromAll;
+
+        for (std::uint32_t number = 0; number < one.originalCount; ++number) {
+            const MeshCluster& cluster = one.clusters[number];
+            assert(cluster.group == 0 && cluster.refinedGroup == meshClusterNoGroup);
+            const Vec3 offset = cluster.centre - one.groups[0].centre;
+            assert(std::sqrt(offset.dot(offset)) + cluster.radius <= one.groups[0].radius * 1.00001f + 1e-6f);
+            fromOne.push_back(clusterCorners(one, cluster));
+            fromAll.push_back(clusterCorners(all, all.clusters[number]));
+        }
+
+        std::sort(fromOne.begin(), fromOne.end());
+        std::sort(fromAll.begin(), fromAll.end());
+        assert(fromOne == fromAll);
+
+        const std::vector<std::uint32_t> drawn = cut(one, seenError(one, Vec3{0.0f, 0.0f, 50.0f}), 0.01f);
+        assert(drawn.size() == one.clusters.size());
+        assert(openEdges(ball, one, positionNumbers(ball), drawn).empty());
     }
 
     /*
     * Many meshes built at once on every thread (largest first) give each mesh what building it alone gives, in the
-    * order asked: sheets of many sizes (an empty mesh among them), so the largest-first order differs from the order
-    * asked.
+    * order asked, with or without levels as asked: sheets of many sizes (an empty mesh among them), so the largest-first
+    * order differs from the order asked.
     */
     void testManyBuiltAtOnce() {
         std::vector<IndexedMesh> meshes;
@@ -354,20 +400,21 @@ namespace {
         }
 
         meshes.insert(meshes.begin() + 3, IndexedMesh{});
-        std::vector<const IndexedMesh*> asked;
+        std::vector<MeshClusterBuild> asked;
 
-        for (const IndexedMesh& mesh : meshes) {
-            asked.push_back(&mesh);
+        for (std::size_t mesh = 0; mesh < meshes.size(); ++mesh) {
+            asked.push_back({&meshes[mesh], mesh % 3 == 1 ? ClusterLevels::One : ClusterLevels::All});
         }
 
         const std::vector<MeshClusters> together = buildMeshClusters(asked, testJobs());
         assert(together.size() == meshes.size());
 
         for (std::size_t mesh = 0; mesh < meshes.size(); ++mesh) {
-            assertSameClusters(together[mesh], buildMeshClusters(meshes[mesh]));
+            assertSameClusters(together[mesh], buildMeshClusters(meshes[mesh], asked[mesh].levels));
         }
 
-        assert(buildMeshClusters(std::vector<const IndexedMesh*>{}, testJobs()).empty());
+        assert(together[1].groups.size() == 1 && together[2].groups.size() > 1);
+        assert(buildMeshClusters(std::vector<MeshClusterBuild>{}, testJobs()).empty());
     }
 }
 
@@ -375,5 +422,6 @@ void testMeshClusterLevels() {
     testASpheresLevels();
     testASheetsLevels();
     testSmallAndRepeatable();
+    testOneLevel();
     testManyBuiltAtOnce();
 }

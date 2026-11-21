@@ -74,6 +74,7 @@
 #include "scene/asset_handles.h"
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
+#include "scene/mesh_clusters.h"
 
 #include <array>
 #include <cstdint>
@@ -196,13 +197,14 @@ public:
     // (FrameDescription::deformedMeshes); mesh is then its rest shape.
     // Returns where its per-vertex records begin: one past its first entry in the hanging vertices (IndexedMesh::hanging),
     // one past its header in the card thinning records (IndexedMesh::thinning); 0 for none.
-    VertexEntries uploadMesh(const IndexedMesh& mesh, bool deforming = false);
+    VertexEntries uploadMesh(const IndexedMesh& mesh, bool deforming = false, ClusterLevels levels = ClusterLevels::One);
 
     // Many meshes uploaded as uploadMesh would one by one, in order, their clusters built first on every thread at once
     // (buildMeshClusters); the entries in the same order.
     struct MeshUpload {
         const IndexedMesh* mesh = nullptr;
         bool deforming = false;
+        ClusterLevels levels = ClusterLevels::One; // the cluster levels (AssetManager::hasClusterLevels)
     };
     std::vector<VertexEntries> uploadMeshes(const std::vector<MeshUpload>& batch);
 

@@ -65,14 +65,21 @@ struct MeshClusters {
 };
 
 /*
+* Whether a mesh gets cluster levels (ROADMAP phase 21, 2b-ii), as Nanite's per-mesh switch: only meshes the cut will
+* draw coarser (rocks, trunks, structures; AssetManager::setClusterLevels), so the cost grows with them alone.
+*/
+enum class ClusterLevels { One, All };
+
+/*
 * Cut a mesh's triangles into clusters, each triangle in exactly one with its winding, then build the levels over them
 * (meshoptimizer's clusterlod, Nanite's scheme): about 16 neighbouring clusters grouped, simplified to half with the
 * group's border locked (normals weighed, UV seams kept), cut back into clusters, repeated until one is left or nothing
 * simplifies. Coarser levels' corners are the mesh's own vertices, so its vertex buffer serves every level; about twice
-* the mesh's triangles in all. Deterministic: the same mesh gives the same clusters. Cost grows with the mesh's
-* triangles, paid once a mesh.
+* the mesh's triangles in all. Without levels (ClusterLevels::One): exactly the clusters the full detail has with them,
+* all in one group never simplified (drawn however far), at about a fifth of the cost. Deterministic: the same mesh
+* gives the same clusters. Cost grows with the mesh's triangles, paid once a mesh.
 */
-MeshClusters buildMeshClusters(const IndexedMesh& mesh);
+MeshClusters buildMeshClusters(const IndexedMesh& mesh, ClusterLevels levels);
 
 /*
 * Many meshes' clusters built at once on every thread, a mesh a job and the largest first (so a big mesh does not
@@ -80,7 +87,12 @@ MeshClusters buildMeshClusters(const IndexedMesh& mesh);
 * so the result is what building them one by one gives, whichever threads run them. Cost: the meshes' triangles,
 * shared over the threads.
 */
-std::vector<MeshClusters> buildMeshClusters(const std::vector<const IndexedMesh*>& meshes, JobSystem& jobs);
+struct MeshClusterBuild {
+    const IndexedMesh* mesh = nullptr;
+    ClusterLevels levels = ClusterLevels::One;
+};
+
+std::vector<MeshClusters> buildMeshClusters(const std::vector<MeshClusterBuild>& meshes, JobSystem& jobs);
 
 /*
 * Whether an eye (in the mesh's own space) sees only the backs of every triangle in a cluster, so a single-sided cluster

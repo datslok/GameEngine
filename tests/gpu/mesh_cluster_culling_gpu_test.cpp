@@ -30,7 +30,7 @@ namespace {
     // Clusters of a sphere placed round random eyes: turned, scaled unevenly, some mirrored, some swaying, thinned,
     // double-sided or of another kind, so every branch of meshClusterKept is reached.
     std::vector<Case> cases() {
-        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(buildIndexedMesh(Mesh::sphere(48, 24))), 0, 0, 0);
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(buildIndexedMesh(Mesh::sphere(48, 24)), ClusterLevels::One), 0, 0, 0);
         CaseRandom random{31};
         std::vector<Case> made;
 

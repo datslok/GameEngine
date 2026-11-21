@@ -112,6 +112,22 @@ const std::vector<MeshLevelOptions>& AssetManager::getMeshLevelOptions() const {
     return meshLevelOptions;
 }
 
+void AssetManager::setClusterLevels(MeshHandle mesh) {
+    if (!mesh.isValid() || mesh.index >= meshes.size() || isDeforming(mesh)) {
+        throw std::invalid_argument("Cluster levels need a mesh already added that does not deform");
+    }
+
+    if (clusterLevels.size() <= mesh.index) {
+        clusterLevels.resize(mesh.index + 1, 0);
+    }
+
+    clusterLevels[mesh.index] = 1;
+}
+
+bool AssetManager::hasClusterLevels(MeshHandle mesh) const {
+    return mesh.isValid() && mesh.index < clusterLevels.size() && clusterLevels[mesh.index] != 0;
+}
+
 std::uint64_t AssetManager::getLevelsVersion() const {
     return levelsVersion;
 }

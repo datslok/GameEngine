@@ -148,7 +148,7 @@ namespace {
     // A curved open sheet: every triangle once, within the limits, spheres holding, facing never wrong.
     void testASheetsClusters() {
         const IndexedMesh sheet = rippledSheet();
-        const MeshClusters built = buildMeshClusters(sheet);
+        const MeshClusters built = buildMeshClusters(sheet, ClusterLevels::One);
         assert(built.clusters.size() >= sheet.indices.size() / 3 / MESH_CLUSTER_MAX_TRIANGLES);
         assertWithinLimits(sheet, built);
         assertEveryTriangleOnce(sheet, built);
@@ -162,7 +162,7 @@ namespace {
     */
     void testASpheresClustersFaceAway() {
         const IndexedMesh ball = sphere();
-        const MeshClusters built = buildMeshClusters(ball);
+        const MeshClusters built = buildMeshClusters(ball, ClusterLevels::One);
         assertWithinLimits(ball, built);
         assertEveryTriangleOnce(ball, built);
         assertSpheresHoldTheirVertices(ball, built);
@@ -173,12 +173,12 @@ namespace {
 
     // No triangles, no clusters; building twice gives the same clusters (deterministic, as everything the GPU culls by).
     void testEmptyAndRepeatable() {
-        const MeshClusters none = buildMeshClusters(IndexedMesh{});
+        const MeshClusters none = buildMeshClusters(IndexedMesh{}, ClusterLevels::One);
         assert(none.clusters.empty() && none.vertices.empty() && none.triangles.empty());
 
         const IndexedMesh ball = sphere();
-        const MeshClusters first = buildMeshClusters(ball);
-        const MeshClusters second = buildMeshClusters(ball);
+        const MeshClusters first = buildMeshClusters(ball, ClusterLevels::One);
+        const MeshClusters second = buildMeshClusters(ball, ClusterLevels::One);
         assert(first.vertices == second.vertices && first.triangles == second.triangles);
         assert(first.clusters.size() == second.clusters.size());
 
