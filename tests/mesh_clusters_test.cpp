@@ -30,11 +30,13 @@ namespace {
         return triangle;
     }
 
-    // The mesh's triangles in mesh vertex numbers, cluster by cluster.
+    // The mesh's own clusters' triangles (not the coarser levels') in mesh vertex numbers, cluster by cluster.
     std::vector<Triangle> clusterTriangles(const MeshClusters& built) {
         std::vector<Triangle> triangles;
 
-        for (const MeshCluster& cluster : built.clusters) {
+        for (std::uint32_t number = 0; number < built.originalCount; ++number) {
+            const MeshCluster& cluster = built.clusters[number];
+
             for (std::uint32_t triangle = 0; triangle < cluster.triangleCount; ++triangle) {
                 Triangle corners{};
 

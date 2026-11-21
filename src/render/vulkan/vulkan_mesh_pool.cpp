@@ -3,7 +3,6 @@
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_device.h"
 
-#include <chrono>
 #include <cstring>
 
 /*
@@ -39,7 +38,7 @@ void VulkanMeshPool::ensure(VulkanBuffer& pool, std::uint64_t& capacity, std::ui
 * Grown first where it does not fit, then copied in through an upload buffer; the barrier makes the copy visible to
 * everything that reads meshes later (meshUploadBarrier). Then its clusters.
 */
-MeshPlacement VulkanMeshPool::add(const IndexedMesh& mesh) {
+MeshPlacement VulkanMeshPool::add(const IndexedMesh& mesh, const MeshClusters& clusters) {
     checkMeshUpload(mesh);
     const std::uint64_t vertexCount = mesh.vertices.size();
     const std::uint64_t indexCount = mesh.indices.size();
@@ -63,17 +62,15 @@ MeshPlacement VulkanMeshPool::add(const IndexedMesh& mesh) {
         meshUploadBarrier(commands, device);
     });
 
-    addClusters(mesh, placement);
+    addClusters(clusters, placement);
     return placement;
 }
 
 /*
-* Built here, once a mesh (cost growing with its triangles, timed for the load), packed with the vertex pool's numbers,
-* then copied in as the mesh was. The records are kept on the CPU too, for cluster-compare.
+* Packed with the vertex pool's numbers, then copied in as the mesh was. The records are kept on the CPU too, for
+* cluster-compare.
 */
-void VulkanMeshPool::addClusters(const IndexedMesh& mesh, MeshPlacement& placement) {
-    const auto started = std::chrono::steady_clock::now();
-    const MeshClusters built = buildMeshClusters(mesh);
+void VulkanMeshPool::addClusters(const MeshClusters& built, MeshPlacement& placement) {
     std::uint32_t words = 0;
 
     for (const MeshCluster& cluster : built.clusters) {
@@ -90,9 +87,8 @@ void VulkanMeshPool::addClusters(const IndexedMesh& mesh, MeshPlacement& placeme
         layout.placeClusters(static_cast<std::uint32_t>(clusterCount), static_cast<std::uint32_t>(built.vertices.size()), words);
     const PackedMeshClusters packed = packMeshClusters(built, placement.firstVertex, place.firstVertex, place.firstTriangleWord);
     placement.firstCluster = place.firstCluster;
-    placement.clusterCount = static_cast<std::uint32_t>(clusterCount);
+    placement.clusterCount = built.originalCount; // the levels wait in the pool for the cut (phase 21, stage 2c)
     clusterRecords.insert(clusterRecords.end(), packed.clusters.begin(), packed.clusters.end());
-    clusterBuildSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 
     if (clusterCount == 0) {
         return;
@@ -137,10 +133,6 @@ VkDeviceAddress VulkanMeshPool::getTriangleWordAddress() const {
 
 const std::vector<GpuMeshCluster>& VulkanMeshPool::getClusterRecords() const {
     return clusterRecords;
-}
-
-double VulkanMeshPool::getClusterBuildSeconds() const {
-    return clusterBuildSeconds;
 }
 
 /*

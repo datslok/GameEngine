@@ -15,8 +15,9 @@ void runWhileWaiting(const std::function<void()>& work, const std::function<void
 
 /*
 * Work that must stay on this thread spread over loading frames (meshes uploaded through the GPU queue the loading
-* screen draws with): step(index) for done, done + 1, ... until budgetSeconds have passed since the first (clock read
-* after each step), at least one while any are left, none past total. Returns how many are done.
+* screen draws with): step(done) does the next one or several (a batch of meshes) and returns how many, at least one;
+* steps until budgetSeconds have passed since the first (clock read after each step), at least one while any are left,
+* the count never past total. Returns how many are done.
 */
 std::size_t stepsWithinBudget(std::size_t done, std::size_t total, double budgetSeconds, const std::function<double()>& clock,
-                              const std::function<void(std::size_t)>& step);
+                              const std::function<std::size_t(std::size_t)>& step);

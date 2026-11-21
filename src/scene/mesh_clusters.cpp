@@ -2,14 +2,52 @@
 
 #include "meshoptimizer/meshoptimizer.h"
 
+#define CLUSTERLOD_IMPLEMENTATION
+#include "meshoptimizer/clusterlod.h"
+
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
-#include <utility>
 
 namespace {
-    // How much the builder weighs keeping a cluster's facings alike against keeping it small: meshoptimizer's advice
-    // when clusters are culled by their cones.
-    constexpr float CONE_WEIGHT = 0.25f;
+    /*
+    * How much a simplified group's error counts a turned normal against a moved surface: meshoptimizer's clusterlod
+    * demo's weight, the light choice (the user's, phase 21 stage 2b), raised only if levels are seen to change shading.
+    */
+    constexpr float NORMAL_WEIGHT = 0.5f;
+
+    // The attributes simplification reads, as floats from the normal on in MeshVertex: the normal (weighed), then the UV,
+    // whose seams are kept (corners at one place with different UVs never merge, so the picture does not tear).
+    constexpr std::size_t WEIGHED_ATTRIBUTES = 3;
+    constexpr unsigned UV_SEAM_MASK = (1u << 3) | (1u << 4);
+
+    // Turn one cluster clusterlod made into ours: its corners as a vertex run and local triangles, its sphere and cone.
+    void addCluster(MeshClusters& built, const IndexedMesh& mesh, const clodCluster& made, std::uint32_t group) {
+        std::array<std::uint32_t, MESH_CLUSTER_MAX_TRIANGLES * 3> vertices{};
+        std::array<std::uint8_t, MESH_CLUSTER_MAX_TRIANGLES * 3> triangles{};
+        const std::size_t vertexCount = clodLocalIndices(vertices.data(), triangles.data(), made.indices, made.index_count);
+        const std::size_t triangleCount = made.index_count / 3;
+        const meshopt_Bounds bounds = meshopt_computeMeshletBounds(vertices.data(), triangles.data(), triangleCount,
+                                                                   &mesh.vertices[0].position.x, mesh.vertices.size(), sizeof(MeshVertex));
+
+        MeshCluster cluster;
+        cluster.centre = Vec3{bounds.center[0], bounds.center[1], bounds.center[2]};
+        cluster.radius = bounds.radius;
+        cluster.coneApex = Vec3{bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]};
+        cluster.coneAxis = Vec3{bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]};
+        cluster.coneCutoff = bounds.cone_cutoff;
+        cluster.firstVertex = static_cast<std::uint32_t>(built.vertices.size());
+        cluster.vertexCount = static_cast<std::uint32_t>(vertexCount);
+        cluster.firstTriangle = static_cast<std::uint32_t>(built.triangles.size() / 3);
+        cluster.triangleCount = static_cast<std::uint32_t>(triangleCount);
+        cluster.group = group;
+        cluster.refinedGroup = made.refined < 0 ? meshClusterNoGroup : static_cast<std::uint32_t>(made.refined);
+        built.clusters.push_back(cluster);
+
+        built.vertices.insert(built.vertices.end(), vertices.begin(), vertices.begin() + vertexCount);
+        built.triangles.insert(built.triangles.end(), triangles.begin(), triangles.begin() + made.index_count);
+    }
 }
 
 MeshClusters buildMeshClusters(const IndexedMesh& mesh) {
@@ -19,47 +57,62 @@ MeshClusters buildMeshClusters(const IndexedMesh& mesh) {
         return built;
     }
 
-    // Room for the worst case, then cut down to what was made. Positions are the first three floats of each MeshVertex.
-    const std::size_t most = meshopt_buildMeshletsBound(mesh.indices.size(), MESH_CLUSTER_MAX_VERTICES, MESH_CLUSTER_MAX_TRIANGLES);
-    std::vector<meshopt_Meshlet> made(most);
-    built.vertices.resize(most * MESH_CLUSTER_MAX_VERTICES);
-    built.triangles.resize(most * MESH_CLUSTER_MAX_TRIANGLES * 3);
-    const float* positions = &mesh.vertices[0].position.x;
-    const std::size_t count = meshopt_buildMeshlets(made.data(), built.vertices.data(), built.triangles.data(), mesh.indices.data(),
-                                                    mesh.indices.size(), positions, mesh.vertices.size(), sizeof(MeshVertex),
-                                                    MESH_CLUSTER_MAX_VERTICES, MESH_CLUSTER_MAX_TRIANGLES, CONE_WEIGHT);
-    made.resize(count);
+    // Clusters as the mesh shaders take them; the rest clusterlod's defaults for rasterising (groups of about 16, half a
+    // level, permissive simplification with a sloppy fallback, the error a parent's at least its children's).
+    clodConfig config = clodDefaultConfig(MESH_CLUSTER_MAX_TRIANGLES);
+    config.max_vertices = MESH_CLUSTER_MAX_VERTICES;
 
-    // The builder leaves gaps (each cluster's triangles start on a fresh row): pack the runs end to end.
-    std::vector<std::uint32_t> packedVertices;
-    std::vector<std::uint8_t> packedTriangles;
-    built.clusters.reserve(count);
+    const std::array<float, WEIGHED_ATTRIBUTES> weights{NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT};
+    clodMesh input{};
+    input.indices = mesh.indices.data();
+    input.index_count = mesh.indices.size();
+    input.vertex_count = mesh.vertices.size();
+    input.vertex_positions = &mesh.vertices[0].position.x;
+    input.vertex_positions_stride = sizeof(MeshVertex);
+    input.vertex_attributes = &mesh.vertices[0].normal.x;
+    input.vertex_attributes_stride = sizeof(MeshVertex);
+    input.attribute_weights = weights.data();
+    input.attribute_count = WEIGHED_ATTRIBUTES;
+    input.attribute_protect_mask = UV_SEAM_MASK;
 
-    for (const meshopt_Meshlet& piece : made) {
-        std::uint32_t* vertices = &built.vertices[piece.vertex_offset];
-        std::uint8_t* triangles = &built.triangles[piece.triangle_offset];
-        meshopt_optimizeMeshlet(vertices, triangles, piece.triangle_count, piece.vertex_count);
-        const meshopt_Bounds bounds = meshopt_computeMeshletBounds(vertices, triangles, piece.triangle_count, positions,
-                                                                   mesh.vertices.size(), sizeof(MeshVertex));
+    // Groups come level by level, so the mesh's own clusters (made from no group) come first.
+    clodBuild(config, input, [&](clodGroup group, const clodCluster* clusters, std::size_t count) {
+        const auto number = static_cast<std::uint32_t>(built.groups.size());
+        const clodBounds& bounds = group.simplified;
+        built.groups.push_back(MeshClusterGroup{Vec3{bounds.center[0], bounds.center[1], bounds.center[2]}, bounds.radius, bounds.error,
+                                                static_cast<std::uint32_t>(group.depth)});
 
-        MeshCluster cluster;
-        cluster.centre = Vec3{bounds.center[0], bounds.center[1], bounds.center[2]};
-        cluster.radius = bounds.radius;
-        cluster.coneApex = Vec3{bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]};
-        cluster.coneAxis = Vec3{bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]};
-        cluster.coneCutoff = bounds.cone_cutoff;
-        cluster.firstVertex = static_cast<std::uint32_t>(packedVertices.size());
-        cluster.vertexCount = piece.vertex_count;
-        cluster.firstTriangle = static_cast<std::uint32_t>(packedTriangles.size() / 3);
-        cluster.triangleCount = piece.triangle_count;
-        built.clusters.push_back(cluster);
+        for (std::size_t cluster = 0; cluster < count; ++cluster) {
+            addCluster(built, mesh, clusters[cluster], number);
 
-        packedVertices.insert(packedVertices.end(), vertices, vertices + piece.vertex_count);
-        packedTriangles.insert(packedTriangles.end(), triangles, triangles + piece.triangle_count * 3);
+            if (clusters[cluster].refined < 0) {
+                ++built.originalCount;
+            }
+        }
+
+        return static_cast<int>(number);
+    });
+
+    return built;
+}
+
+std::vector<MeshClusters> buildMeshClusters(const std::vector<const IndexedMesh*>& meshes, JobSystem& jobs) {
+    std::vector<std::size_t> largestFirst(meshes.size());
+
+    for (std::size_t mesh = 0; mesh < meshes.size(); ++mesh) {
+        largestFirst[mesh] = mesh;
     }
 
-    built.vertices = std::move(packedVertices);
-    built.triangles = std::move(packedTriangles);
+    // Ties keep the order asked, so the jobs are handed out the same way every run.
+    std::stable_sort(largestFirst.begin(), largestFirst.end(), [&meshes](std::size_t first, std::size_t second) {
+        return meshes[first]->indices.size() > meshes[second]->indices.size();
+    });
+
+    std::vector<MeshClusters> built(meshes.size());
+    jobs.parallelFor(meshes.size(), 1, [&](std::size_t place) {
+        const std::size_t mesh = largestFirst[place];
+        built[mesh] = buildMeshClusters(*meshes[mesh]);
+    });
     return built;
 }
 

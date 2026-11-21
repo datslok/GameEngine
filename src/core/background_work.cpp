@@ -1,5 +1,6 @@
 #include "core/background_work.h"
 
+#include <algorithm>
 #include <condition_variable>
 #include <exception>
 #include <mutex>
@@ -55,7 +56,7 @@ void runWhileWaiting(const std::function<void()>& work, const std::function<void
 }
 
 std::size_t stepsWithinBudget(std::size_t done, std::size_t total, double budgetSeconds, const std::function<double()>& clock,
-                              const std::function<void(std::size_t)>& step) {
+                              const std::function<std::size_t(std::size_t)>& step) {
     if (done >= total) {
         return done;
     }
@@ -63,8 +64,8 @@ std::size_t stepsWithinBudget(std::size_t done, std::size_t total, double budget
     const double start = clock();
 
     while (done < total) {
-        step(done);
-        ++done;
+        // A step that says it did none still counts one, so the loop always moves on.
+        done = std::min(total, done + std::max<std::size_t>(1, step(done)));
 
         if (clock() - start >= budgetSeconds) {
             break;
