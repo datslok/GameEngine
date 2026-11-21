@@ -12,7 +12,7 @@ Covers: `src/render/vulkan/vulkan_renderer`, `src/render/vulkan/vulkan_device`, 
 | `pipelineProgress`, `finishPipelines`, `drawLoadingScreen` | The loading screen (below) |
 | `render(frame, settings, ui)` | One frame to the screen; false while minimised or out of date |
 | `capture` | A frame into an image read back (golden images), after warm-up frames (`drawFramesBeforeCapture`) |
-| `uploadMesh`, `uploadTexture`, `uploadCompressedTexture` (BC7, when `supportsBlockCompression`), counts | GPU copies in arrays indexed exactly like the handles |
+| `uploadMesh`, `uploadMeshes` (a batch, its clusters built on the job system: `mesh-clusters.md`), `uploadTexture`, `uploadCompressedTexture` (BC7, when `supportsBlockCompression`), counts | GPU copies in arrays indexed exactly like the handles |
 | `startDebugUi`, `beginDebugUiFrame`, `stopDebugUi` | ImGui's Vulkan backend |
 | `setPresentMode`, `setFramesInFlight` and getters | Applied live by `Application` |
 | `getLastFrameStats`, `getDisplayOutput`, `getFrameAspectRatio`, `getDeviceName` (the golden folder's name), `supportsRayQueries`, `upscalerSupport` | Queries |

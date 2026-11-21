@@ -59,8 +59,8 @@ Owns every CPU-side mesh, image and imported model. Append-only, so "new since l
 
 | Mesh kind | Uploaded | Bounds | Flat faces |
 |---|---|---|---|
-| ordinary | `buildIndexedMesh` once, then `uploadMesh` | `meshBounds` | `findFlatFaces` |
-| deforming | its topology's `rest`, `uploadMesh(rest, true)` | `meshBounds` (replaced each frame) | none |
+| ordinary | `buildIndexedMesh` once, then up in a batch (`uploadMeshes`) | `meshBounds` | `findFlatFaces` |
+| deforming | its topology's `rest`, in the batch as deforming | `meshBounds` (replaced each frame) | none |
 | drawn-only | as it is | `indexedMeshBounds` | none |
 
 Textures: new ones are cooked together, a texture a job, then uploaded in handle order: `uploadCompressedTexture` for a compressed one, else `uploadTexture(width, height, pixels, encoding, mips)`. GPU side: [meshes.md](meshes.md) (mesh buffers), Colour and textures below.
