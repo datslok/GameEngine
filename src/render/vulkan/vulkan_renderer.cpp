@@ -1221,8 +1221,9 @@ double VulkanRenderer::getMeshClusterBuildSeconds() const {
 
 /*
 * The totals kept for F4. A frame compared culls again on the CPU from what the GPU read: its own copy of the view,
-* groups, order, records and instances, the camera culling's commands and list read back from the same frame, and the
-* pool's cluster records; pairs near an edge may differ either way.
+* groups, order, records and instances, the camera culling's commands and list read back from the same frame, the
+* placed plants' commands, entries and slots read back with it, and the pool's cluster records; pairs near an edge may
+* differ either way.
 */
 void VulkanRenderer::takeMeshClusterCull(const VulkanMeshClusterCulling::Collected& culled, const VulkanCameraCulling::Collected* cameraCulled,
                                          std::uint32_t frameIndex) {
@@ -1234,17 +1235,29 @@ void VulkanRenderer::takeMeshClusterCull(const VulkanMeshClusterCulling::Collect
         return;
     }
 
-    const MeshClusterTables tables{cameraCulled->mainCommands[0], compare->order, compare->groups, cameraCulled->mainEntries[0],
-                                   compare->instances, compare->records, meshPool->getClusterRecords()};
+    MeshClusterTables tables{cameraCulled->mainCommands[0], compare->order, compare->groups, cameraCulled->mainEntries[0],
+                             compare->instances, compare->records, meshPool->getClusterRecords()};
+
+    // The placed plants' pairs from the same frame's placed drawing, read back (the camera's commands first).
+    if (compare->placed) {
+        const std::optional<VulkanPlacedDrawing::ReadBack> placed = placedDrawing->readBack(frameIndex);
+
+        if (!placed) {
+            compare.reset();
+            return;
+        }
+
+        tables.placed = MeshClusterPlacedTables{placed->commands.first(placed->table->groups.size()), placed->table->groups, placed->entries,
+                                                compare->placedParts, placed->table->parts, placed->plants};
+    }
+
     // With occlusion the GPU's two lists together against the CPU's frustum and facing alone: the GPU may lack pairs
     // (hidden), never add them.
     const MeshClusterList cpu = cullMeshClustersOnCpu(tables, compare->view, meshClusterCulling->getRoom());
     std::vector<GpuMeshClusterItem> gpu = culled.items[MESH_CLUSTER_EARLY];
     gpu.insert(gpu.end(), culled.items[MESH_CLUSTER_LATE].begin(), culled.items[MESH_CLUSTER_LATE].end());
     const MeshClusterComparison comparison = compareMeshClusterLists(gpu, cpu.items, [&](const GpuMeshClusterItem& item) {
-        const std::uint32_t entry = tables.drawList[item.entry];
-        const std::uint32_t draw = entry & DRAW_LIST_INSTANCE_MASK;
-        return nearAMeshClusterEdge(tables.clusters[item.cluster], tables.instances[draw], entry, tables.records[draw], compare->view);
+        return nearAMeshClusterEdge(tables, item, compare->view);
     });
     const std::uint32_t kept = culled.totals[MESH_CLUSTER_EARLY][MESH_CLUSTER_TOTAL_KEPT] + culled.totals[MESH_CLUSTER_LATE][MESH_CLUSTER_TOTAL_KEPT];
     clusterCompareReport = describeMeshClusterComparison(comparison, culled.totals[MESH_CLUSTER_EARLY][MESH_CLUSTER_TOTAL_TESTED], kept, culled.occlusion);
@@ -2029,25 +2042,67 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     endGpuPass(frame, GpuPass::CameraCull);
     meshClusterCompares[frame.frameIndex].reset();
 
-    // The camera's mesh clusters culled from its list, its view given the wind's sway (the camera culls without it), so
-    // a draw swaying near the camera keeps every cluster.
+    // The planting cells round the camera made this frame (render/vulkan/vulkan_planting.h), on the ground the scene's
+    // heights hold (uploaded with the scene set above); then every view's placed plants culled from the cells held,
+    // before the camera's mesh clusters, which take its placed plants too (phase 21, 2f). Compared, they are read back
+    // for cluster-compare.
+    const VkBuffer plantingGround = uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get();
+
+    if (plantsCells) {
+        beginGpuPass(frame, GpuPass::Planting);
+        planting->record(frame.commands, frame.descriptors, plantingGround, frame.frameIndex);
+        endGpuPass(frame, GpuPass::Planting);
+    }
+
+    const bool placedClusters = cullsClusters && drawsPlaced;
+    framePlacedByClusters = placedClusters && drawsClusters;
+
+    if (drawsPlaced) {
+        if (placedClusters && clusterComparing) {
+            placedDrawing->askReadback();
+        }
+
+        beginGpuPass(frame, GpuPass::Placed);
+        placedDrawing->record(frame.commands, frame.descriptors, *planting, plantingGround, frame.frameIndex);
+        endGpuPass(frame, GpuPass::Placed);
+    }
+
+    // The camera's mesh clusters culled from its list and its placed plants' (each style's draws, then its placed
+    // groups), its view given the wind's sway (the camera culls without it), so a draw swaying near the camera keeps
+    // every cluster.
     if (cullsClusters) {
         beginGpuPass(frame, GpuPass::MeshCull);
         const VulkanCameraCulling::Outputs culled = cameraCulling->outputs(frame.frameIndex);
+        const VulkanPlacedDrawing::ClusterInputs placed =
+            placedClusters ? placedDrawing->clusterInputs(frame.frameIndex) : VulkanPlacedDrawing::ClusterInputs{};
+        const CullDrawOrder order = meshClusterDrawOrder(cullFrame.drawOrder, static_cast<std::uint32_t>(cullFrame.groups.size()),
+                                                         placedClusters ? *placed.order : CullDrawOrder{});
         VulkanMeshClusterCulling::Inputs inputs;
         inputs.view = cameraCulling->placedView(frame.frameIndex, 0);
         inputs.view.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
         inputs.view.swayFadeEnd = settings.wind.swayFadeEnd;
         inputs.view.levels.pixelError = settings.meshClusterErrorPixels;
-        inputs.order = culled.order;
+
+        for (std::size_t style = 0; style < cullStyles; ++style) {
+            inputs.view.runFirst[style] = order.runFirst[style];
+            inputs.view.runCount[style] = order.runCount[style];
+        }
+
+        inputs.order = order.order;
+        inputs.drawGroups = static_cast<std::uint32_t>(cullFrame.groups.size());
         inputs.groups = culled.groups;
         inputs.commands = culled.mainCommands;
         inputs.records = culled.records;
         inputs.drawList = drawListBuffer;
         inputs.instances = lastingInstances->describe();
         inputs.clusters = meshPool->getClusters();
-        inputs.pooled = cullFrame.drawOrder.pooled;
-        inputs.pairBound = meshClusterPairBound(cullFrame);
+
+        if (placedClusters) {
+            inputs.placed = VulkanMeshClusterCulling::PlacedInputs{placed.commands, placed.groups, placed.entries,
+                                                                   frames[frame.frameIndex].scene->placedParts.describe(), placed.parts, planting->getPlants()};
+        }
+
+        inputs.pairBound = meshClusterPairBound(cullFrame) + placed.pairBound;
         inputs.occlusion = occludesClusters;
         inputs.viewProjection = relativeViewProjection;
         inputs.origin = cameraOrigin;
@@ -2055,8 +2110,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::MeshCull);
 
         if (clusterComparing) {
-            meshClusterCompares[frame.frameIndex] = MeshClusterCompare{inputs.view, cullFrame.groups, cullFrame.drawOrder.order, cullFrame.join().records,
-                                                                      std::move(clusterCompareInstances)};
+            meshClusterCompares[frame.frameIndex] = MeshClusterCompare{inputs.view, cullFrame.groups, order.order, cullFrame.join().records,
+                                                                      std::move(clusterCompareInstances), std::move(clusterComparePlacedParts),
+                                                                      placedClusters};
         }
     }
     stats.stillCells = description.stillCells;
@@ -2134,22 +2190,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::Wind);
         wind->step(frame.commands, frame.descriptors, frames[frame.frameIndex].scene->wind.describe().buffer);
         endGpuPass(frame, GpuPass::Wind);
-    }
-
-    // The planting cells round the camera made this frame (render/vulkan/vulkan_planting.h), on the ground the scene's
-    // heights hold (uploaded with the scene set above); then the camera's placed plants culled from the cells held.
-    const VkBuffer plantingGround = uploadedTerrain != nullptr ? terrainHeights.get() : noTerrainHeights.get();
-
-    if (plantsCells) {
-        beginGpuPass(frame, GpuPass::Planting);
-        planting->record(frame.commands, frame.descriptors, plantingGround, frame.frameIndex);
-        endGpuPass(frame, GpuPass::Planting);
-    }
-
-    if (drawsPlaced) {
-        beginGpuPass(frame, GpuPass::Placed);
-        placedDrawing->record(frame.commands, frame.descriptors, *planting, plantingGround, frame.frameIndex);
-        endGpuPass(frame, GpuPass::Placed);
     }
 
     // The lists feed both clustered shading and its heatmap.
@@ -2668,6 +2708,13 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         for (const std::size_t draw : placedDrawing->getTable(frame.frameIndex).draws) {
             placedParts.push_back(records.planted[draw]);
         }
+    }
+
+    // A cluster-compare asked culls the placed plants' parts on the CPU too.
+    clusterComparePlacedParts.clear();
+
+    if (clusterCompareAsked) {
+        clusterComparePlacedParts = placedParts;
     }
 
     placedParts.resize(std::max<std::size_t>(placedParts.size(), 1));
@@ -3634,8 +3681,10 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
     meshPipelines.cutOut = pipelines.meshCutOut;
     BatchState meshState{meshPipelines};
 
+    // Drawn by clusters, every style: its run may hold placed plants' clusters with none of the frame's draws (an empty
+    // run's indirect draw launches nothing).
     for (std::size_t run = 0; run < cullStyles; ++run) {
-        if (order.runCount[run] == 0) {
+        if (order.runCount[run] == 0 && !byClusters) {
             continue;
         }
 
@@ -3684,6 +3733,11 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
 */
 std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const BatchPipelines& pipelines, std::optional<std::uint32_t> view) const {
     if (!framePlaced || !view) {
+        return 0;
+    }
+
+    // The camera's (view 0) are its mesh clusters' this frame, drawn with the frame's draws (drawPassDraws).
+    if (*view == 0 && framePlacedByClusters) {
         return 0;
     }
 

@@ -38,9 +38,18 @@ namespace {
     constexpr BufferUse copyRead{VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT};
 
     // Every earlier use of the slots: the planting's and the placed drawing's passes, a comparison's copy, the vertex
-    // shaders drawing placed plants (render/vulkan/vulkan_placed_drawing.h).
-    constexpr BufferUse slotsUsed{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-                                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT};
+    // shaders drawing placed plants (render/vulkan/vulkan_placed_drawing.h) and, where the GPU has them, the mesh shaders
+    // drawing their mesh clusters.
+    BufferUse slotsUsed(const VulkanDevice& device) {
+        BufferUse use{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT};
+
+        if (device.supportsMeshShaders()) {
+            use.stages |= VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT;
+        }
+
+        return use;
+    }
 }
 
 VulkanPlanting::VulkanPlanting(const VulkanDevice& device, ImmediateCommands& uploads, std::uint32_t framesInFlight):
@@ -167,8 +176,8 @@ bool VulkanPlanting::prepare(const std::shared_ptr<const PlantingField>& frameFi
 void VulkanPlanting::record(VkCommandBuffer commands, FrameDescriptors& descriptors, VkBuffer heightsBuffer, std::uint32_t frameIndex) {
     // Last frame's passes and copies are done with the candidates and the slots before this frame's write them.
     bufferBarrier(commands, candidates.get(), computeUse, computeUse);
-    bufferBarrier(commands, plants.get(), slotsUsed, computeUse);
-    bufferBarrier(commands, counts.get(), slotsUsed, computeUse);
+    bufferBarrier(commands, plants.get(), slotsUsed(device), computeUse);
+    bufferBarrier(commands, counts.get(), slotsUsed(device), computeUse);
 
     for (const CellSet& set : sets) {
         const auto cells = static_cast<std::uint32_t>(set.made.size());

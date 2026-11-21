@@ -13,22 +13,22 @@
 
 layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
 
-layout(std430, set = 0, binding = 12) readonly buffer BlockCounts {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS) readonly buffer BlockCounts {
     uint blockCounts[];
 };
 
 // Each block's first place, then the total.
-layout(std430, set = 0, binding = 13) coherent buffer BlockFirst {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 1) coherent buffer BlockFirst {
     uint blockFirst[];
 };
 
 // MESH_CLUSTER_TOTAL_WORDS.
-layout(std430, set = 0, binding = 14) writeonly buffer Totals {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 2) writeonly buffer Totals {
     uint totals[];
 };
 
 // Each style's mesh shader draw (VkDrawMeshTasksIndirectCommandEXT: x y z workgroups).
-layout(std430, set = 0, binding = 15) writeonly buffer TaskCommands {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 3) writeonly buffer TaskCommands {
     uint taskCommands[];
 };
 

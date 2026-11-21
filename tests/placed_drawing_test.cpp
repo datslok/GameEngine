@@ -28,13 +28,14 @@ namespace {
         return std::fabs(a - b) <= share * std::max({std::fabs(a), std::fabs(b), 1.0f});
     }
 
-    // Every mesh in the pools, a different place each, so commands name the right one; mesh 99 has buffers of its own.
+    // Every mesh in the pools, a different place and clusters each, so commands and groups name the right one; mesh 99
+    // has buffers of its own.
     MeshPlacement testPlacement(MeshHandle mesh) {
         if (mesh.index == 99) {
             return MeshPlacement{0, 100, 0, 15, false};
         }
 
-        return MeshPlacement{1000 * mesh.index, 100, 5000 * mesh.index, 3 * (mesh.index + 1), true};
+        return MeshPlacement{1000 * mesh.index, 100, 5000 * mesh.index, 3 * (mesh.index + 1), true, 40 * mesh.index, mesh.index + 2};
     }
 
     // The meshes' levels, kept for the draws' spans: a tree's bark (a coarser level, the shadow's stand-in, nothing past
@@ -434,6 +435,8 @@ namespace {
                 assert(groupStyle.mesh == mesh && groupStyle.cutOut == isCutOut(draw.material) && groupStyle.doubleSided == draw.material.doubleSided);
                 assert(group.indexCount == (mesh.isValid() ? testPlacement(mesh).indexCount : 0u));
                 assert(!mesh.isValid() || group.firstIndex == testPlacement(mesh).firstIndex);
+                assert(group.clusterCount == (mesh.isValid() ? testPlacement(mesh).clusterCount : 0u));
+                assert(!mesh.isValid() || group.firstCluster == testPlacement(mesh).firstCluster);
             }
         }
 

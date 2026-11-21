@@ -72,15 +72,18 @@ struct GpuPlacedBlock {
 
 static_assert(sizeof(GpuPlacedBlock) == 16, "GpuPlacedBlock must match placed_drawing.glsl's PlacedBlock");
 
-// A group: its mesh's indices in the shared mesh buffer. Must match placed_drawing.glsl's PlacedGroup.
+// A group: its mesh's indices in the shared mesh buffer and its clusters in the cluster pool (none for a meshless slot).
+// Must match placed_drawing.glsl's PlacedGroup.
 struct GpuPlacedGroup {
     std::uint32_t indexCount = 0;
     std::uint32_t firstIndex = 0;
     std::int32_t vertexOffset = 0;
-    std::uint32_t unused = 0;
+    std::uint32_t firstCluster = 0;
+    std::uint32_t clusterCount = 0;
+    std::uint32_t unused[3] = {0, 0, 0};
 };
 
-static_assert(sizeof(GpuPlacedGroup) == 16, "GpuPlacedGroup must match placed_drawing.glsl's PlacedGroup");
+static_assert(sizeof(GpuPlacedGroup) == 32, "GpuPlacedGroup must match placed_drawing.glsl's PlacedGroup");
 
 // A block one view culls: the passes run an item a workgroup, every view's at once.
 struct GpuPlacedItem {

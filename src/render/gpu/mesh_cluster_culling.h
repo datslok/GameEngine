@@ -8,6 +8,7 @@
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/gpu/mesh_pool.h"
+#include "render/gpu/placed_drawing.h"
 #include "render/gpu/screen_reflections.h"
 #include "scene/mesh_clusters.h"
 
@@ -223,10 +224,35 @@ inline constexpr std::uint32_t smallestMeshClusterRoom = 1u << 20;
 */
 std::uint64_t meshClusterPairBound(const CameraCullFrame& table);
 
+/*
+* At least the placed plants' pairs a view can test (phase 21, 2f): each of its items' block's plants (placedGroupSize)
+* times the most a plant of the block's layer can test, its kind's parts' every level slot's clusters (a plant draws at
+* most two slots of a part, while fading). Cost grows with the view's items and the table's kinds.
+*/
+std::uint64_t placedMeshClusterPairBound(const PlacedTable& table, std::span<const GpuPlacedBlock> blocks, std::span<const GpuPlacedItem> items,
+                                         const GpuPlacedView& view);
+
 // ---- The passes' steps on the CPU ----
 
-// What the passes read: the camera's commands by group (its culling's, unpacked), the drawing order, the groups
-// (their clusters), and the frame's draw list, instances, records and clusters.
+/*
+* The camera's placed plants as the passes read them (phase 21, 2f; render/gpu/placed_drawing.h): its commands by placed
+* group (first instances from placedInstanceBase), the placed groups (their clusters), every view's entries, each part's
+* instance and record in its plant's frame, and the slots' plants. Empty without placed plants.
+*/
+struct MeshClusterPlacedTables {
+    std::span<const GpuDrawCommand> commands;
+    std::span<const GpuPlacedGroup> groups;
+    std::span<const GpuPlacedEntry> entries;
+    std::span<const GpuInstance> partInstances;
+    std::span<const GpuPlacedPart> parts;
+    std::span<const GpuPlacedPlant> plants;
+};
+
+/*
+* What the passes read: the camera's commands by group (its culling's, unpacked), the drawing order (meshClusterDrawOrder:
+* a number past the groups is a placed group's, less their count), the groups (their clusters), the frame's draw list,
+* instances, records and clusters, and the placed plants.
+*/
 struct MeshClusterTables {
     std::span<const GpuDrawCommand> commands;
     std::span<const std::uint32_t> drawOrder;
@@ -235,7 +261,28 @@ struct MeshClusterTables {
     std::span<const GpuInstance> instances;
     std::span<const GpuCullRecord> records;
     std::span<const GpuMeshCluster> clusters;
+    MeshClusterPlacedTables placed{};
 };
+
+/*
+* The order the passes walk: each style's run of the draws' pooled groups, then its run of the placed groups, numbered
+* after the draws' drawGroups; every place pooled. Cost grows with the groups.
+*/
+CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t drawGroups, const CullDrawOrder& placed);
+
+// What a pair's place draws: its instance, its entry's bits (thinned, fade, with its draw's or plant's number) and its record.
+struct MeshClusterDrawn {
+    GpuInstance instance{};
+    std::uint32_t entry = 0;
+    GpuCullRecord record{};
+};
+
+/*
+* The instance at a place the passes and mesh shaders read (a pair's entry): a frame's draw through the draw list, or,
+* from placedInstanceBase, a placed entry's part placed by its plant (placedInstance, placedCullRecord), as the vertex
+* shaders' drawnObject does. Mirrored by mesh_cluster_pass.glsl's meshClusterDrawnAt.
+*/
+MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32_t place);
 
 // A list culled: its pairs in drawing order (at most the room), each style's run of them, the pairs tested and the
 // survivors (all of them, past the room too).
@@ -297,3 +344,6 @@ std::string describeMeshClusterComparison(const MeshClusterComparison& compariso
 // its sphere within a millimetre of a plane, its cone's test within 1e-4), where the GPU and the CPU may each be right.
 bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                           const GpuCameraCull& view);
+
+// The same for a pair of the tables: its cluster and what its place draws.
+bool nearAMeshClusterEdge(const MeshClusterTables& tables, const GpuMeshClusterItem& item, const GpuCameraCull& view);

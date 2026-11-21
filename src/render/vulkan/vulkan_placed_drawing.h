@@ -77,8 +77,37 @@ public:
 
     Draws draws(std::uint32_t frameIndex, std::uint32_t view) const;
 
+    /*
+    * What the camera's mesh cluster passes read of its placed plants (after setViews; render/vulkan/
+    * vulkan_mesh_cluster_culling.h): the commands (the camera's first), groups, entries and parts, the drawing order,
+    * and the bound on its pairs (placedMeshClusterPairBound).
+    */
+    struct ClusterInputs {
+        VkBuffer commands = VK_NULL_HANDLE;
+        VkBuffer groups = VK_NULL_HANDLE;
+        VkBuffer entries = VK_NULL_HANDLE;
+        VkBuffer parts = VK_NULL_HANDLE;
+        const CullDrawOrder* order = nullptr;
+        std::uint64_t pairBound = 0;
+    };
+
+    ClusterInputs clusterInputs(std::uint32_t frameIndex) const;
+
     // Asks for the next frame drawing placed plants to be read back and compared; returns the last comparison's report.
     std::string compare();
+
+    // Asks for the next frame drawing placed plants to be read back (cluster-compare reads it; the comparison is made too).
+    void askReadback();
+
+    // A frame read back, after its fence and before collect: its table, every view's commands, the entries, the slots' plants.
+    struct ReadBack {
+        const PlacedTable* table = nullptr;
+        std::span<const GpuDrawCommand> commands;
+        std::span<const GpuPlacedEntry> entries;
+        std::span<const GpuPlacedPlant> plants;
+    };
+
+    std::optional<ReadBack> readBack(std::uint32_t frameIndex);
 
     // After a frame's fence: a comparison it was read back for, made (cullPlacedOnCpu over the slots it read back).
     void collect(std::uint32_t frameIndex);

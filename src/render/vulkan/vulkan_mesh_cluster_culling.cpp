@@ -21,8 +21,12 @@ namespace {
     // The dispatch's three words: x the blocks (written by the count pass), y and z 1.
     constexpr std::uint32_t dispatchWords = 3;
 
-    // The shared storage buffers (mesh_cluster_pass.glsl's bindings 0 to 11).
-    constexpr std::uint32_t sharedBuffers = 12;
+    // The shared storage buffers (mesh_cluster_pass.glsl's: the camera's tables, then the placed plants').
+    constexpr std::uint32_t sharedBuffers = MESH_CLUSTER_PASS_BINDINGS;
+
+    // The unused record bound for each placed buffer without placed plants: as large as the largest record read.
+    constexpr VkDeviceSize noPlacedBytes = std::max({sizeof(GpuDrawCommand), sizeof(GpuPlacedGroup), sizeof(GpuPlacedEntry), sizeof(GpuInstance),
+                                                     sizeof(GpuPlacedPart), sizeof(GpuPlacedPlant)});
 
     // Every pass pushes the list it makes (mesh_cluster_pass.glsl's MeshClusterList); those testing pairs read the two
     // pyramids after their storage buffers.
@@ -114,13 +118,21 @@ void VulkanMeshClusterCulling::makeReadable(VkCommandBuffer commands, VulkanDept
 }
 
 std::vector<ComputeBinding> VulkanMeshClusterCulling::passBindings(const PerFrame& frame, std::initializer_list<VkBuffer> own, bool pyramids) const {
+    const PlacedInputs& placed = frame.inputs.placed;
+    const auto placedOr = [&](VkBuffer buffer) { return storageBufferBinding(buffer != VK_NULL_HANDLE ? buffer : frame.noPlaced.get()); };
     std::vector<ComputeBinding> all{
-        storageBufferBinding(frame.view.get()),  storageBufferBinding(frame.inputs.order),       storageBufferBinding(frame.inputs.groups),
+        storageBufferBinding(frame.view.get()),  storageBufferBinding(frame.order.get()),         storageBufferBinding(frame.inputs.groups),
         storageBufferBinding(frame.inputs.commands), storageBufferBinding(frame.workEnds.get()), storageBufferBinding(frame.work.get()),
         storageBufferBinding(frame.inputs.drawList), storageBufferBinding(frame.inputs.instances.buffer), storageBufferBinding(frame.inputs.records),
         storageBufferBinding(frame.inputs.clusters), storageBufferBinding(frame.setup.get()),     storageBufferBinding(frame.occlusionRecord.get()),
+        placedOr(placed.commands),                   placedOr(placed.groups),                    placedOr(placed.entries),
+        placedOr(placed.partInstances.buffer),       placedOr(placed.parts),                     placedOr(placed.plants),
     };
     all[7].buffer = frame.inputs.instances;
+
+    if (placed.partInstances.buffer != VK_NULL_HANDLE) {
+        all[15].buffer = placed.partInstances;
+    }
 
     for (VkBuffer buffer : own) {
         all.push_back(storageBufferBinding(buffer));
@@ -172,7 +184,8 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     frameViewProjection = inputs.viewProjection;
     frameOrigin = inputs.origin;
 
-    ensureBuffer(allocator, frame.workEnds, VkDeviceSize{std::max(inputs.pooled, 1u)} * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    const auto places = static_cast<std::uint32_t>(inputs.order.size());
+    ensureBuffer(allocator, frame.workEnds, VkDeviceSize{std::max(places, 1u)} * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.work, MESH_CLUSTER_WORK_WORDS * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.dispatch, dispatchWords * sizeof(std::uint32_t),
                  storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu);
@@ -181,7 +194,7 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     const VkDeviceSize itemBytes = MESH_CLUSTER_LISTS * VkDeviceSize{frame.room} * sizeof(GpuMeshClusterItem);
     ensureBuffer(allocator, frame.readback, totalBytes + (readItems ? itemBytes : 0), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
 
-    const std::uint32_t setup[4] = {inputs.pooled, blockRoom, frame.room, 0};
+    const std::uint32_t setup[4] = {places, blockRoom, frame.room, inputs.drawGroups};
     MeshClusterOcclusionView view;
     view.previous = hasHistory ? previousRelativeViewProjection(historyViewProjection, historyOrigin, inputs.origin) : inputs.viewProjection;
     view.current = inputs.viewProjection;
@@ -190,7 +203,15 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     view.history = hasHistory;
     const GpuMeshClusterOcclusion occlusion = packMeshClusterOcclusion(view, pyramidSize, history->getLevels());
     uploadBytes(allocator, frame.view, &inputs.view, sizeof(GpuCameraCull));
+    const std::uint32_t noPlaces = 0;
+    uploadBytes(allocator, frame.order, places > 0 ? static_cast<const void*>(inputs.order.data()) : &noPlaces,
+                std::max<VkDeviceSize>(places, 1) * sizeof(std::uint32_t));
     uploadBytes(allocator, frame.setup, setup, sizeof(setup));
+
+    if (frame.noPlaced.get() == VK_NULL_HANDLE) {
+        const std::array<std::byte, noPlacedBytes> unused{};
+        uploadBytes(allocator, frame.noPlaced, unused.data(), unused.size());
+    }
     uploadBytes(allocator, frame.occlusionRecord, &occlusion, sizeof(occlusion));
 
     // The pyramids are bound whether built or not; one not built is never read (no history, or the early list only).

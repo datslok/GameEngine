@@ -36,12 +36,16 @@ struct PlacedBlock {
     uint firstKind;    // its layer's kinds in the kind table
 };
 
-// A group's mesh in the shared mesh buffer. Must match GpuPlacedGroup.
+// A group's mesh in the shared mesh buffer and its clusters in the cluster pool. Must match GpuPlacedGroup.
 struct PlacedGroup {
     uint indexCount;
     uint firstIndex;
     int vertexOffset;
-    uint unused;
+    uint firstCluster;
+    uint clusterCount;
+    uint unused0;
+    uint unused1;
+    uint unused2;
 };
 
 // A block one view culls. Must match GpuPlacedItem.

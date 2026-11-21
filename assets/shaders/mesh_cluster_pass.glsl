@@ -5,13 +5,14 @@
 #define MESH_CLUSTER_PASS_GLSL
 
 #include "mesh_cluster_culling.glsl"
+#include "placed_drawing.glsl"
 
 // The camera's view as its culling placed it, with the wind's sway (its own copy: the camera culls without it).
 layout(std430, set = 0, binding = 0) readonly buffer Views {
     CameraCull views[];
 };
 
-// The groups in drawing order (CullDrawOrder::order).
+// The groups in drawing order (meshClusterDrawOrder: each style's draw groups, then its placed groups past setup.w).
 layout(std430, set = 0, binding = 1) readonly buffer Order {
     uint drawOrder[];
 };
@@ -52,7 +53,8 @@ layout(std430, set = 0, binding = 9) readonly buffer Clusters {
     MeshCluster clusters[];
 };
 
-// x: places in the drawing order's pooled runs, y: room for block sums, z: room for pairs.
+// x: places in the drawing order, y: room for block sums, z: room for pairs, w: the draw groups (a place's group past
+// them is a placed group's).
 layout(std430, set = 0, binding = 10) readonly buffer Setup {
     uvec4 setup;
 };
@@ -67,19 +69,86 @@ layout(std430, set = 0, binding = 11) readonly buffer Occlusion {
     uvec4 pyramid;
 } occlusion;
 
+// The camera's placed plants (render/gpu/placed_drawing.h; one unused record each without): its commands by placed
+// group (the camera is the placed drawing's first view), the placed groups, every view's entries, each part's instance
+// and record in its plant's frame, and the slots' plants.
+layout(std430, set = 0, binding = 12) readonly buffer PlacedCommands {
+    DrawCommand placedCommands[];
+};
+
+layout(std430, set = 0, binding = 13) readonly buffer PlacedGroups {
+    PlacedGroup placedGroups[];
+};
+
+layout(std430, set = 0, binding = 14) readonly buffer PlacedEntries {
+    uvec2 placedEntries[];
+};
+
+layout(std430, set = 0, binding = 15) readonly buffer PlacedPartInstances {
+    InstanceData placedPartInstances[];
+};
+
+layout(std430, set = 0, binding = 16) readonly buffer PlacedParts {
+    PlacedPart placedParts[];
+};
+
+layout(std430, set = 0, binding = 17) readonly buffer PlacedPlants {
+    PlacedPlant placedPlants[];
+};
+
 // The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands.
 layout(push_constant) uniform MeshClusterList {
     uint list;
 } pass;
 
-// A group's command.
+// A group's command: a draw group's, or, past them, a placed group's (orderedGroup).
 DrawCommand groupCommand(uint group) {
-    return commands[views[0].slices.z + group];
+    return group < setup.w ? commands[views[0].slices.z + group] : placedCommands[group - setup.w];
+}
+
+// A group's clusters: first, count.
+uvec2 groupClusters(uint group) {
+    if (group < setup.w) {
+        return uvec2(groups[group].firstCluster, groups[group].clusterCount);
+    }
+
+    PlacedGroup placed = placedGroups[group - setup.w];
+    return uvec2(placed.firstCluster, placed.clusterCount);
 }
 
 // A group's pairs: its drawn instances times its clusters.
 uint groupPairs(uint group) {
-    return groupCommand(group).instanceCount * groups[group].clusterCount;
+    return groupCommand(group).instanceCount * groupClusters(group).y;
+}
+
+// What a pair's place draws (meshClusterDrawnAt): its instance, entry bits and record.
+struct MeshClusterDrawn {
+    InstanceData instance;
+    uint entry;
+    CullRecord record;
+};
+
+/*
+* A frame's draw through the draw list, or, from PLACED_INSTANCE_BASE, a placed entry's part placed by its plant, as the
+* vertex shaders' drawnObject does. Mirrors meshClusterDrawnAt.
+*/
+MeshClusterDrawn meshClusterDrawnAt(uint place) {
+    MeshClusterDrawn drawn;
+
+    if (place >= PLACED_INSTANCE_BASE) {
+        uvec2 placed = placedEntries[place - PLACED_INSTANCE_BASE];
+        PlacedPlant plant = placedPlants[placed.x & DRAW_LIST_INSTANCE_MASK];
+        drawn.instance = placedInstance(placedPartInstances[placed.y], plant);
+        drawn.record = placedCullRecord(placedParts[placed.y].record, plant);
+        drawn.entry = placed.x;
+        return drawn;
+    }
+
+    drawn.entry = drawList[place];
+    uint draw = drawn.entry & DRAW_LIST_INSTANCE_MASK;
+    drawn.instance = instances[draw];
+    drawn.record = records[draw];
+    return drawn;
 }
 
 // The first of the list's totals.
@@ -161,13 +230,12 @@ bool meshClusterPairKept(uint pair, out MeshClusterItem item, out bool candidate
     }
 
     uint within = pair - first;
-    CullGroup culled = groups[group];
-    item = MeshClusterItem(groupCommand(group).firstInstance + within / culled.clusterCount, culled.firstCluster + within % culled.clusterCount);
-    uint entry = drawList[item.entry];
-    uint draw = entry & DRAW_LIST_INSTANCE_MASK;
+    uvec2 grouped = groupClusters(group);
+    item = MeshClusterItem(groupCommand(group).firstInstance + within / grouped.y, grouped.x + within % grouped.y);
+    MeshClusterDrawn drawn = meshClusterDrawnAt(item.entry);
     MeshCluster cluster = clusters[item.cluster];
-    InstanceData instance = instances[draw];
-    uint visibility = meshClusterVisibility(cluster, instance, entry, records[draw], views[0]);
+    InstanceData instance = drawn.instance;
+    uint visibility = meshClusterVisibility(cluster, instance, drawn.entry, drawn.record, views[0]);
     bool late = pass.list == MESH_CLUSTER_LATE;
 
     if (visibility == MESH_CLUSTER_HIDDEN) {

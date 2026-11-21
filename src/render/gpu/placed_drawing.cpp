@@ -198,7 +198,11 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
                     throw std::invalid_argument("A placed part's mesh is not in the pools");
                 }
 
-                group = GpuPlacedGroup{where.indexCount, where.firstIndex, static_cast<std::int32_t>(where.firstVertex), 0};
+                group.indexCount = where.indexCount;
+                group.firstIndex = where.firstIndex;
+                group.vertexOffset = static_cast<std::int32_t>(where.firstVertex);
+                group.firstCluster = where.firstCluster;
+                group.clusterCount = where.clusterCount;
             }
 
             table.groups.push_back(group);
