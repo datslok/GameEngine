@@ -26,6 +26,9 @@ enum class GpuPass {
     Shadows,
     Fog,          // the fog's grid lit and integrated (render/gpu/volumetric_fog.h)
     DepthPrepass,
+    MeshCullLate,     // with mesh cluster occlusion: this frame's pyramid from the early list's depth, the late list's passes
+    DepthPrepassLate, // the late list's depth
+    OcclusionPyramid, // the next frame's pyramid from the whole depth
     ColourPyramid, // last frame's picture's blurrier levels, built here while ambient occlusion gathers light from them
     AmbientOcclusion, // ambient occlusion from the prepass's depth (render/gpu/ambient_occlusion.h): the pass itself
     AoHistory,    // its temporal accumulation

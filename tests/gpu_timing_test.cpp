@@ -119,8 +119,19 @@ void testGpuTiming() {
     // Ambient occlusion in five parts, each timed apart: last frame's picture's pyramid (built first while AO gathers
     // light from it), the pass itself (with its half-size depths), the history it blends into, the denoiser, and the
     // upsample to the render's size at half resolution.
+    // With mesh cluster occlusion, the depth prepass is followed by the late list (this frame's pyramid from the early
+    // list's depth, then the late passes), its own prepass, and the next frame's pyramid from the whole depth.
     {
-        assert(static_cast<int>(GpuPass::DepthPrepass) + 1 == static_cast<int>(GpuPass::ColourPyramid));
+        assert(static_cast<int>(GpuPass::DepthPrepass) + 1 == static_cast<int>(GpuPass::MeshCullLate));
+        assert(std::string(gpuPassName(GpuPass::MeshCullLate)) == "MESHLATE");
+        assert(static_cast<int>(GpuPass::MeshCullLate) + 1 == static_cast<int>(GpuPass::DepthPrepassLate));
+        assert(std::string(gpuPassName(GpuPass::DepthPrepassLate)) == "LATEDEPTH");
+        assert(static_cast<int>(GpuPass::DepthPrepassLate) + 1 == static_cast<int>(GpuPass::OcclusionPyramid));
+        assert(std::string(gpuPassName(GpuPass::OcclusionPyramid)) == "HIZ");
+    }
+
+    {
+        assert(static_cast<int>(GpuPass::OcclusionPyramid) + 1 == static_cast<int>(GpuPass::ColourPyramid));
         assert(static_cast<int>(GpuPass::ColourPyramid) + 1 == static_cast<int>(GpuPass::AmbientOcclusion));
         assert(static_cast<int>(GpuPass::AmbientOcclusion) + 1 == static_cast<int>(GpuPass::AoHistory));
         assert(static_cast<int>(GpuPass::AoHistory) + 1 == static_cast<int>(GpuPass::AoDenoise));
@@ -151,7 +162,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 2, 40, 17, 25, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -167,7 +178,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1381 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1402 * nanosecondsPerTick * 1e-9));
         // Ambient occlusion's parts, each between its own stamps, add up to what its one line used to read.
         assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid), 4 * nanosecondsPerTick * 1e-9));
         assert(nearlyEqual(timings.seconds(GpuPass::AmbientOcclusion), 16 * nanosecondsPerTick * 1e-9));

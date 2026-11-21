@@ -5,29 +5,30 @@
 * Mesh clusters' culling, pass 3 of 4 (render/vulkan/vulkan_mesh_cluster_culling.h): one workgroup sums the blocks'
 * survivors into each block's first place (a prefix sum carried between rounds, the total after the last), then writes
 * the totals: pairs tested, survivors, and each style's run (from its first block's first place to the next style's),
-* cut to the room, and each run's mesh shader draw; the survivors' triangles started at none for the write pass. Mirrored
-* by cullMeshClustersOnCpu.
+* cut to the room, and each run's mesh shader draw; the survivors' triangles and candidates started at none for the
+* write pass; the list's first place in the items. Each list its own totals and task commands. Mirrored by
+* cullMeshClustersOnCpu.
 */
 #include "mesh_cluster_pass.glsl"
 
 layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
 
-layout(std430, set = 0, binding = 11) readonly buffer BlockCounts {
+layout(std430, set = 0, binding = 12) readonly buffer BlockCounts {
     uint blockCounts[];
 };
 
 // Each block's first place, then the total.
-layout(std430, set = 0, binding = 12) coherent buffer BlockFirst {
+layout(std430, set = 0, binding = 13) coherent buffer BlockFirst {
     uint blockFirst[];
 };
 
 // MESH_CLUSTER_TOTAL_WORDS.
-layout(std430, set = 0, binding = 13) writeonly buffer Totals {
+layout(std430, set = 0, binding = 14) writeonly buffer Totals {
     uint totals[];
 };
 
 // Each style's mesh shader draw (VkDrawMeshTasksIndirectCommandEXT: x y z workgroups).
-layout(std430, set = 0, binding = 14) writeonly buffer TaskCommands {
+layout(std430, set = 0, binding = 15) writeonly buffer TaskCommands {
     uint taskCommands[];
 };
 
@@ -60,11 +61,15 @@ void main() {
         barrier();
     }
 
+    uint totalsFirst = listTotals();
+
     if (local == 0u) {
         blockFirst[blocks] = carried;
-        totals[MESH_CLUSTER_TOTAL_TESTED] = work[MESH_CLUSTER_WORK_REAL];
-        totals[MESH_CLUSTER_TOTAL_KEPT] = carried;
-        totals[MESH_CLUSTER_TOTAL_TRIANGLES] = 0u;
+        totals[totalsFirst + MESH_CLUSTER_TOTAL_TESTED] = work[MESH_CLUSTER_WORK_REAL];
+        totals[totalsFirst + MESH_CLUSTER_TOTAL_KEPT] = carried;
+        totals[totalsFirst + MESH_CLUSTER_TOTAL_TRIANGLES] = 0u;
+        totals[totalsFirst + MESH_CLUSTER_TOTAL_LIST_FIRST] = pass.list * setup.z;
+        totals[totalsFirst + MESH_CLUSTER_TOTAL_CANDIDATES] = 0u;
     }
 
     // Every first place written before the runs read them.
@@ -77,11 +82,12 @@ void main() {
         uint endBlock = min(work[MESH_CLUSTER_WORK_STYLE_FIRST + local + 1u] / MESH_CLUSTER_GROUP_SIZE, blocks);
         uint runFirst = min(blockFirst[firstBlock], room);
         uint runCount = min(blockFirst[endBlock], room) - runFirst;
-        totals[MESH_CLUSTER_TOTAL_RUN_FIRST + local] = runFirst;
-        totals[MESH_CLUSTER_TOTAL_RUN_COUNT + local] = runCount;
+        totals[totalsFirst + MESH_CLUSTER_TOTAL_RUN_FIRST + local] = runFirst;
+        totals[totalsFirst + MESH_CLUSTER_TOTAL_RUN_COUNT + local] = runCount;
         uvec3 groups = meshClusterTaskGroups(runCount);
-        taskCommands[3u * local] = groups.x;
-        taskCommands[3u * local + 1u] = groups.y;
-        taskCommands[3u * local + 2u] = groups.z;
+        uint command = 3u * (pass.list * MESH_CLUSTER_STYLES + local);
+        taskCommands[command] = groups.x;
+        taskCommands[command + 1u] = groups.y;
+        taskCommands[command + 2u] = groups.z;
     }
 }

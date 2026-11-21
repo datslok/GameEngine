@@ -155,8 +155,77 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Spheres round a camera at the origin turned every way, near and far, some cut by its plane or behind it, on screens
+    * of several sizes: the box within the projective divide's rounding (pixels, so absolute slack for the cancellation
+    * near the screen's left and top), the nearest depth and whether it is on screen; the pixels and level exactly, from
+    * the GPU's own box (a box corner within rounding of a pixel edge may land on either side).
+    */
+    void checkScreenBox(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{41};
+        const float sizes[3][2] = {{1920.0f, 1080.0f}, {191.0f, 107.0f}, {1.0f, 5.0f}};
+        std::vector<GpuVec4> inputs;
+        std::vector<Mat4> matrices;
+        std::vector<std::array<float, 4>> spheres;
+
+        for (int index = 0; index < 900; ++index) {
+            const float yaw = random.between(0.0f, 6.28f);
+            const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.9f, 16.0f / 9.0f, 0.1f, 800.0f));
+            const Mat4 viewProjection = projection * Mat4::lookAt(Vec3{}, Vec3{std::cos(yaw), random.between(-0.5f, 0.5f), std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
+            const std::array<float, 4> sphere{random.between(-60.0f, 60.0f), random.between(-20.0f, 20.0f), random.between(-60.0f, 60.0f), random.between(0.05f, 8.0f)};
+            const float* size = sizes[index % 3];
+            float columns[16];
+            writeColumnMajor(viewProjection, columns);
+            inputs.push_back(gpuVec4(sphere[0], sphere[1], sphere[2], sphere[3]));
+
+            for (int column = 0; column < 4; ++column) {
+                inputs.push_back(gpuVec4(columns[4 * column], columns[4 * column + 1], columns[4 * column + 2], columns[4 * column + 3]));
+            }
+
+            inputs.push_back(gpuVec4(size[0], size[1], 12.0f));
+            matrices.push_back(viewProjection);
+            spheres.push_back(sphere);
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_SCREEN_BOX, inputs, 6, 4);
+        const FloatTolerance pixelTolerance{.absolute = 1e-3f, .relative = 1e-5f};
+
+        for (std::size_t i = 0; i < spheres.size(); ++i) {
+            const GpuVec4& box = outputs[4 * i];
+            const GpuVec4& depth = outputs[4 * i + 1];
+            const GpuVec4& pixels = outputs[4 * i + 2];
+            const float width = inputs[6 * i + 5][0];
+            const float height = inputs[6 * i + 5][1];
+            const MeshClusterScreenBox expected = meshClusterScreenBox(spheres[i], matrices[i], Vec2{width, height});
+
+            // A corner within rounding of the camera's plane may go either way.
+            if (std::fabs(depth[1] - (expected.onScreen ? 1.0f : 0.0f)) > 0.5f) {
+                continue;
+            }
+
+            report.check("meshClusterScreenBox on screen", exactTolerance, expected.onScreen ? 1.0f : 0.0f, depth[1]);
+
+            if (!expected.onScreen) {
+                continue;
+            }
+
+            report.check("meshClusterScreenBox least", pixelTolerance, Vec3{expected.box[0], expected.box[1], 0.0f}, Vec3{box[0], box[1], 0.0f});
+            report.check("meshClusterScreenBox most", pixelTolerance, Vec3{expected.box[2], expected.box[3], 0.0f}, Vec3{box[2], box[3], 0.0f});
+            report.check("meshClusterScreenBox nearest depth", arithmeticTolerance, expected.nearestDepth, depth[0]);
+            const std::array<int, 4> covered = meshClusterBoxPixels({box[0], box[1], box[2], box[3]}, static_cast<int>(width), static_cast<int>(height));
+            report.check("meshClusterBoxPixels least", exactTolerance, Vec3{static_cast<float>(covered[0]), static_cast<float>(covered[1]), 0.0f},
+                         Vec3{pixels[0], pixels[1], 0.0f});
+            report.check("meshClusterBoxPixels most", exactTolerance, Vec3{static_cast<float>(covered[2]), static_cast<float>(covered[3]), 0.0f},
+                         Vec3{pixels[2], pixels[3], 0.0f});
+            report.check("meshClusterPyramidLevel", exactTolerance, static_cast<float>(meshClusterPyramidLevel(covered, 12)), outputs[4 * i + 3][0]);
+        }
+    }
+}
+
 void gpuTestMeshClusterCulling(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("mesh_cluster_culling.glsl");
     checkKept(runner, report);
     checkTasks(runner, report);
+    checkScreenBox(runner, report);
 }

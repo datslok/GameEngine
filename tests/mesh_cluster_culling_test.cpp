@@ -9,6 +9,8 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/instance_shared.h"
 #include "render/gpu/mesh_cluster_culling.h"
+#include "render/gpu/screen_reflections.h"
+#include "render/gpu/taa.h"
 #include "render/render_stats.h"
 #include "scene/indexed_mesh.h"
 #include "scene/level_of_detail.h"
@@ -19,19 +21,29 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <numbers>
 #include <random>
 #include <string>
 #include <vector>
 
 namespace {
-    // A view from an eye looking along yaw, slightly down, 0.9 radians tall; things sway within fadeEnd.
-    GpuCameraCull testView(const Vec3& eye, float yaw, bool sway, float fadeEnd) {
+    // The world's view-projection from an eye looking along yaw, slightly down, 0.9 radians tall.
+    Mat4 testViewProjection(const Vec3& eye, float yaw) {
         const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.9f, 16.0f / 9.0f, 0.1f, 500.0f));
-        const Mat4 view = Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
+        return projection * Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
+    }
+
+    // The same, taking points measured from the eye (as the main pass's camera-relative matrices do).
+    Mat4 testRelativeViewProjection(const Vec3& eye, float yaw) {
+        return testViewProjection(eye, yaw) * Mat4::translation(eye.x, eye.y, eye.z);
+    }
+
+    // That view's record; things sway within fadeEnd.
+    GpuCameraCull testView(const Vec3& eye, float yaw, bool sway, float fadeEnd) {
         LevelView levels;
         levels.eye = eye;
-        return packCameraCull(Frustum::fromClipMatrix(projection * view, ClipDepth::OneToZero), levels, true, sway, fadeEnd);
+        return packCameraCull(Frustum::fromClipMatrix(testViewProjection(eye, yaw), ClipDepth::OneToZero), levels, true, sway, fadeEnd);
     }
 
     // A plain still instance placed by the matrix.
@@ -363,6 +375,271 @@ namespace {
         }
     }
 
+    // The way testViewProjection looks, at unit length.
+    Vec3 testForward(float yaw) {
+        return Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}.normalized();
+    }
+
+    // The depth (reversed-Z) of a point this far straight ahead: every point at that distance along the view has it.
+    float depthAhead(const Mat4& relativeViewProjection, float yaw, float distance) {
+        const Vec3 ahead = testForward(yaw) * distance;
+        const Vec4 clip = relativeViewProjection * Vec4{ahead.x, ahead.y, ahead.z, 1.0f};
+        return clip.z / clip.w;
+    }
+
+    // A depth image of sky (the far depth) and a few walls at random distances, each a rectangle of the screen, the
+    // nearest wall winning where they overlap; leftOut: a wall not drawn (its numbers still drawn from random).
+    std::vector<float> wallDepths(std::mt19937& random, RenderSize size, const Mat4& relativeViewProjection, float yaw, int leftOut = -1) {
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        std::vector<float> depths(static_cast<std::size_t>(size.width) * size.height, gpuFarDepth);
+
+        for (int wall = 0; wall < 6; ++wall) {
+            const int x0 = static_cast<int>(unit(random) * static_cast<float>(size.width));
+            const int y0 = static_cast<int>(unit(random) * static_cast<float>(size.height));
+            const int x1 = std::min(static_cast<int>(size.width), x0 + 1 + static_cast<int>(unit(random) * static_cast<float>(size.width) * 0.6f));
+            const int y1 = std::min(static_cast<int>(size.height), y0 + 1 + static_cast<int>(unit(random) * static_cast<float>(size.height) * 0.8f));
+            const float depth = depthAhead(relativeViewProjection, yaw, 3.0f + unit(random) * 40.0f);
+
+            if (wall == leftOut) {
+                continue;
+            }
+
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) {
+                    float& at = depths[static_cast<std::size_t>(y) * size.width + static_cast<std::size_t>(x)];
+                    at = std::max(at, depth);
+                }
+            }
+        }
+
+        return depths;
+    }
+
+    // A random sphere (centre measured from the camera, radius) ahead of a camera at the origin looking along yaw.
+    std::array<float, 4> sphereAhead(std::mt19937& random, float yaw) {
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const float turn = yaw + (unit(random) - 0.5f) * 1.4f;
+        const Vec3 direction = Vec3{std::cos(turn), -0.1f + (unit(random) - 0.5f) * 0.8f, std::sin(turn)}.normalized();
+        const Vec3 centre = direction * (1.0f + unit(random) * 80.0f);
+        return {centre.x, centre.y, centre.z, 0.05f + unit(random) * 4.0f};
+    }
+
+    /*
+    * The screen box holds the sphere: every point on it lands within the box's pixels, no nearer than its nearest depth;
+    * a sphere the camera's plane cuts has none.
+    */
+    void testScreenBoxHoldsTheSphere() {
+        std::mt19937 random(5);
+        std::normal_distribution<float> gauss(0.0f, 1.0f);
+        const Vec2 size{191.0f, 107.0f};
+        int bounded = 0;
+
+        for (int round = 0; round < 400; ++round) {
+            const float yaw = static_cast<float>(round) * 0.37f;
+            const Mat4 viewProjection = testRelativeViewProjection(Vec3{}, yaw);
+            const std::array<float, 4> sphere = sphereAhead(random, yaw);
+            const MeshClusterScreenBox box = meshClusterScreenBox(sphere, viewProjection, size);
+
+            if (!box.onScreen) {
+                continue;
+            }
+
+            ++bounded;
+            assert(box.box[0] <= box.box[2] && box.box[1] <= box.box[3]);
+
+            for (int sample = 0; sample < 300; ++sample) {
+                const Vec3 offset = Vec3{gauss(random), gauss(random), gauss(random)}.normalized() * sphere[3];
+                const Vec4 clip = viewProjection * Vec4{sphere[0] + offset.x, sphere[1] + offset.y, sphere[2] + offset.z, 1.0f};
+                assert(clip.w > 0.0f);
+                const Vec2 pixel = ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, size);
+                const float slack = 1e-3f * std::max(1.0f, std::fabs(pixel.x) + std::fabs(pixel.y));
+                assert(pixel.x >= box.box[0] - slack && pixel.x <= box.box[2] + slack);
+                assert(pixel.y >= box.box[1] - slack && pixel.y <= box.box[3] + slack);
+                assert(clip.z / clip.w <= box.nearestDepth + 1e-6f);
+            }
+        }
+
+        assert(bounded > 300);
+        const Mat4 viewProjection = testRelativeViewProjection(Vec3{}, 0.0f);
+        assert(!meshClusterScreenBox({0.0f, 0.0f, 0.0f, 1.0f}, viewProjection, size).onScreen);
+        assert(!meshClusterScreenBox({-5.0f, 0.0f, 0.0f, 1.0f}, viewProjection, size).onScreen);
+    }
+
+    /*
+    * The pyramid hides nothing with a pixel nearer than it: a hidden sphere's box covers only pixels farther than its
+    * nearest point, read at a level where it spans at most two cells each way; screens of odd sizes and one pixel thin.
+    */
+    void testOcclusionHidesNothingSeen() {
+        std::mt19937 random(9);
+        int hidden = 0;
+        int tested = 0;
+
+        for (const RenderSize size : {RenderSize{191, 107}, RenderSize{64, 64}, RenderSize{1, 5}, RenderSize{33, 1}}) {
+            const float yaw = 0.3f;
+            const Mat4 viewProjection = testRelativeViewProjection(Vec3{}, yaw);
+            const std::vector<float> depths = wallDepths(random, size, viewProjection, yaw);
+            const DepthPyramid pyramid = buildDepthPyramid(depths, size, DepthReduction::Farthest);
+            const Vec2 screen{static_cast<float>(size.width), static_cast<float>(size.height)};
+
+            for (int round = 0; round < 600; ++round) {
+                const std::array<float, 4> sphere = sphereAhead(random, yaw);
+                ++tested;
+
+                if (!meshClusterHidden(pyramid, sphere, viewProjection)) {
+                    continue;
+                }
+
+                ++hidden;
+                const MeshClusterScreenBox box = meshClusterScreenBox(sphere, viewProjection, screen);
+                assert(box.onScreen);
+                const std::array<int, 4> pixels = meshClusterBoxPixels(box.box, static_cast<int>(size.width), static_cast<int>(size.height));
+                assert(pixels[0] <= pixels[2] && pixels[1] <= pixels[3]);
+
+                for (int y = pixels[1]; y <= pixels[3]; ++y) {
+                    for (int x = pixels[0]; x <= pixels[2]; ++x) {
+                        assert(depths[static_cast<std::size_t>(y) * size.width + static_cast<std::size_t>(x)] > box.nearestDepth);
+                    }
+                }
+
+                const std::uint32_t level = meshClusterPyramidLevel(pixels, static_cast<std::uint32_t>(pyramid.sizes.size()));
+                const int width = static_cast<int>(pyramid.sizes[level].width);
+                const int height = static_cast<int>(pyramid.sizes[level].height);
+                assert(pyramidCell(pixels[2], level, width) - pyramidCell(pixels[0], level, width) <= 1);
+                assert(pyramidCell(pixels[3], level, height) - pyramidCell(pixels[1], level, height) <= 1);
+            }
+        }
+
+        assert(hidden > 100 && hidden < tested / 2);
+
+        // Off screen, nothing is covered; a box's extent picks the level that spans it in two cells.
+        assert(meshClusterBoxPixels({-30.0f, 4.0f, -2.0f, 9.0f}, 64, 64)[0] > meshClusterBoxPixels({-30.0f, 4.0f, -2.0f, 9.0f}, 64, 64)[2]);
+        assert(meshClusterBoxPixels({10.0f, 70.0f, 20.0f, 90.0f}, 64, 64)[1] > meshClusterBoxPixels({10.0f, 70.0f, 20.0f, 90.0f}, 64, 64)[3]);
+        assert(meshClusterPyramidLevel({5, 5, 5, 5}, 8) == 0 && meshClusterPyramidLevel({5, 5, 6, 5}, 8) == 0);
+        assert(meshClusterPyramidLevel({5, 5, 7, 5}, 8) == 1 && meshClusterPyramidLevel({0, 0, 63, 2}, 8) == 6);
+        assert(meshClusterPyramidLevel({0, 0, 63, 2}, 4) == 3);
+    }
+
+    // A list's pairs as a sorted copy, for set tests.
+    std::vector<GpuMeshClusterItem> sortedItems(std::vector<GpuMeshClusterItem> items) {
+        std::sort(items.begin(), items.end(), [](const GpuMeshClusterItem& a, const GpuMeshClusterItem& b) {
+            return a.entry != b.entry ? a.entry < b.entry : a.cluster < b.cluster;
+        });
+        return items;
+    }
+
+    /*
+    * The two passes miss nothing: the early and late lists never share a pair and only hold what the frustum and facing
+    * keep; whatever they leave out this frame's pyramid hides (built from the early list's depth, farther than the whole
+    * frame's); the late list's candidates are the early list's leftovers. With no history the early list is everything
+    * and the late one empty; with occlusion off, the list is as before.
+    */
+    void testTwoPassesMissNothing() {
+        std::mt19937 random(23);
+        const RenderSize size{160, 90};
+        const Vec3 eye{0.0f, 2.0f, 0.0f};
+        std::uint32_t hiddenInAll = 0;
+        std::uint32_t lateInAll = 0;
+
+        for (int round = 0; round < 6; ++round) {
+            const PassScene scene = passScene(random);
+            const MeshClusterTables tables = scene.tables();
+            const Mat4 current = testRelativeViewProjection(eye, 0.0f);
+            const Mat4 previous = testRelativeViewProjection(eye, 0.04f);
+            // The early list's depth: the frame's walls but one (an occluder the early list hid), so never nearer.
+            // Last frame's depth: the same walls, seen from the camera turned a little.
+            std::mt19937 sameWalls = random;
+            std::mt19937 lastWalls = random;
+            const std::vector<float> whole = wallDepths(sameWalls, size, current, 0.0f);
+            const DepthPyramid lastFrame = buildDepthPyramid(wallDepths(lastWalls, size, previous, 0.04f), size, DepthReduction::Farthest);
+            const std::vector<float> partial = wallDepths(random, size, current, 0.0f, round % 6);
+
+            for (std::size_t pixel = 0; pixel < whole.size(); ++pixel) {
+                assert(partial[pixel] <= whole[pixel]);
+            }
+
+            const DepthPyramid thisFrame = buildDepthPyramid(partial, size, DepthReduction::Farthest);
+            const std::uint32_t room = 1u << 20;
+            const MeshClusterList plain = cullMeshClustersOnCpu(tables, scene.view, room);
+
+            MeshClusterOcclusionView occlusion{previous, current, eye, true, true, &lastFrame, &thisFrame, MESH_CLUSTER_EARLY};
+            const MeshClusterList early = cullMeshClustersOnCpu(tables, scene.view, room, &occlusion);
+            occlusion.list = MESH_CLUSTER_LATE;
+            const MeshClusterList late = cullMeshClustersOnCpu(tables, scene.view, room, &occlusion);
+            assert(early.tested == plain.tested && late.tested == plain.tested);
+            assert(late.candidates == plain.kept - early.kept && early.candidates == 0);
+
+            const std::vector<GpuMeshClusterItem> all = sortedItems(plain.items);
+            const std::vector<GpuMeshClusterItem> earlyItems = sortedItems(early.items);
+            const std::vector<GpuMeshClusterItem> lateItems = sortedItems(late.items);
+            std::vector<GpuMeshClusterItem> both;
+            std::set_intersection(earlyItems.begin(), earlyItems.end(), lateItems.begin(), lateItems.end(), std::back_inserter(both),
+                                  [](const GpuMeshClusterItem& a, const GpuMeshClusterItem& b) { return a.entry != b.entry ? a.entry < b.entry : a.cluster < b.cluster; });
+            assert(both.empty());
+
+            for (const MeshClusterList* list : {&early, &late}) {
+                std::uint32_t next = 0;
+
+                for (std::uint32_t style = 0; style < MESH_CLUSTER_STYLES; ++style) {
+                    assert(list->runFirst[style] == next);
+                    next += list->runCount[style];
+                }
+
+                assert(next == list->kept);
+
+                for (const GpuMeshClusterItem& item : list->items) {
+                    assert(std::binary_search(all.begin(), all.end(), item, [](const GpuMeshClusterItem& a, const GpuMeshClusterItem& b) {
+                        return a.entry != b.entry ? a.entry < b.entry : a.cluster < b.cluster;
+                    }));
+                }
+            }
+
+            for (const GpuMeshClusterItem& item : all) {
+                const auto before = [](const GpuMeshClusterItem& a, const GpuMeshClusterItem& b) { return a.entry != b.entry ? a.entry < b.entry : a.cluster < b.cluster; };
+
+                if (std::binary_search(earlyItems.begin(), earlyItems.end(), item, before) || std::binary_search(lateItems.begin(), lateItems.end(), item, before)) {
+                    continue;
+                }
+
+                ++hiddenInAll;
+                const GpuInstance& instance = scene.instances[scene.drawList[item.entry] & DRAW_LIST_INSTANCE_MASK];
+                const std::array<float, 4> world = meshClusterWorldSphere(scene.clusters[item.cluster], instance);
+                assert(meshClusterHidden(thisFrame, {world[0] - eye.x, world[1] - eye.y, world[2] - eye.z, world[3]}, current));
+            }
+
+            lateInAll += late.kept;
+
+            // No history: the early list is everything, the late one empty.
+            occlusion.history = false;
+            occlusion.list = MESH_CLUSTER_EARLY;
+            assert(cullMeshClustersOnCpu(tables, scene.view, room, &occlusion).items == plain.items);
+            occlusion.list = MESH_CLUSTER_LATE;
+            assert(cullMeshClustersOnCpu(tables, scene.view, room, &occlusion).kept == 0);
+
+            // Off: as before.
+            occlusion.on = false;
+            occlusion.history = true;
+            occlusion.list = MESH_CLUSTER_EARLY;
+            assert(cullMeshClustersOnCpu(tables, scene.view, room, &occlusion).items == plain.items);
+        }
+
+        assert(hiddenInAll > 0 && lateInAll > 0);
+    }
+
+    // The occlusion record: both matrices column-major, the camera, the pyramid's size and levels, and its flags.
+    void testOcclusionRecord() {
+        MeshClusterOcclusionView view{Mat4::translation(1.0f, 2.0f, 3.0f), Mat4::scaling(4.0f, 5.0f, 6.0f), Vec3{7.0f, 8.0f, 9.0f}, true, false, nullptr, nullptr,
+                                      MESH_CLUSTER_EARLY};
+        const GpuMeshClusterOcclusion packed = packMeshClusterOcclusion(view, RenderSize{640, 360}, 10);
+        assert(packed.previous[12] == 1.0f && packed.previous[13] == 2.0f && packed.previous[14] == 3.0f);
+        assert(packed.current[0] == 4.0f && packed.current[5] == 5.0f && packed.current[10] == 6.0f);
+        assert(packed.origin[0] == 7.0f && packed.origin[1] == 8.0f && packed.origin[2] == 9.0f);
+        assert(packed.pyramid[0] == 640 && packed.pyramid[1] == 360 && packed.pyramid[2] == 10 && packed.pyramid[3] == MESH_CLUSTER_OCCLUSION_ON);
+        view.history = true;
+        assert(packMeshClusterOcclusion(view, RenderSize{640, 360}, 10).pyramid[3] == (MESH_CLUSTER_OCCLUSION_ON | MESH_CLUSTER_OCCLUSION_HISTORY));
+        view.on = false;
+        assert(packMeshClusterOcclusion(view, RenderSize{640, 360}, 10).pyramid[3] == MESH_CLUSTER_OCCLUSION_HISTORY);
+    }
+
     // Compared as sets: the same pairs in another order agree; a pair one side lacks differs unless it is near an edge.
     void testComparison() {
         const std::vector<GpuMeshClusterItem> cpu{{1, 10}, {1, 11}, {2, 10}, {3, 12}};
@@ -379,6 +656,14 @@ namespace {
 
         const MeshClusterComparison edges = compareMeshClusterLists(gpu, cpu, [](const GpuMeshClusterItem&) { return true; });
         assert(edges.nearAnEdge == 2 && describeMeshClusterComparison(edges, 9, 4).find("agrees") != std::string::npos);
+
+        // With occlusion the GPU's lists may lack pairs (hidden), never add any.
+        const std::vector<GpuMeshClusterItem> fewer{{1, 10}, {3, 12}};
+        const MeshClusterComparison hidden = compareMeshClusterLists(fewer, cpu, never);
+        const std::string occluded = describeMeshClusterComparison(hidden, 9, 2, true);
+        assert(occluded.find("agrees") != std::string::npos && occluded.find("2 hidden by occlusion") != std::string::npos);
+        assert(describeMeshClusterComparison(hidden, 9, 2, false).find("DIFFERS") != std::string::npos);
+        assert(describeMeshClusterComparison(differ, 9, 4, true).find("DIFFERS") != std::string::npos);
     }
 
     // Each cluster-compare call asks for a comparison and shows the last one; it takes no arguments.
@@ -440,6 +725,13 @@ namespace {
         stats.meshClustersKept = 2100;
         stats.meshClusterTriangles = 250000;
         assert(renderStatsLines(stats)[1].find("CLUSTERS 2100/5000 250K") != std::string::npos);
+        assert(renderStatsLines(stats)[1].find("LATE") == std::string::npos);
+
+        // With occlusion: the late list's share of those kept, and what neither list drew.
+        stats.meshClusterOcclusion = true;
+        stats.meshClustersLate = 40;
+        stats.meshClustersHidden = 900;
+        assert(renderStatsLines(stats)[1].find("CLUSTERS 2100/5000 250K  LATE 40  HIDDEN 900") != std::string::npos);
     }
 }
 
@@ -452,6 +744,10 @@ void testMeshClusterCulling() {
     testACulledClusterHidesNothing();
     testADrawNotRigidKeepsEverything();
     testThePassesEqualAPlainWalk();
+    testScreenBoxHoldsTheSphere();
+    testOcclusionHidesNothingSeen();
+    testTwoPassesMissNothing();
+    testOcclusionRecord();
     testComparison();
     testCompareCommand();
     testTaskGroups();

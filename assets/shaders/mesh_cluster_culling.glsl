@@ -1,6 +1,7 @@
 // Mesh clusters culled a view, included with #include "mesh_cluster_culling.glsl": mirrors render/gpu/mesh_cluster_culling.h
 // (meshClusterLargestScale, meshClusterWorldSphere, meshClusterEyeInMesh, meshClusterFacesAway, meshClusterRigid,
-// meshClusterKept). Pure functions.
+// meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure
+// functions: the pyramid's reads are the passes' (mesh_cluster_pass.glsl, meshClusterHidden).
 #ifndef MESH_CLUSTER_CULLING_GLSL
 #define MESH_CLUSTER_CULLING_GLSL
 
@@ -8,6 +9,9 @@
 #include "render/gpu/mesh_cluster_culling_shared.h"
 #include "camera_culling.glsl"
 #include "instance_data.glsl"
+
+// pyramidCell, fartherDepth, ndcToPixel.
+#include "screen_reflections.glsl"
 
 // A cluster of a mesh in the pools (scene/mesh_clusters.h). Must match GpuMeshCluster.
 struct MeshCluster {
@@ -105,22 +109,77 @@ uint meshClusterTaskIndex(uvec3 group) {
     return group.y * MESH_CLUSTER_TASK_WIDTH + group.x;
 }
 
-bool meshClusterKept(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view) {
+/*
+* What the view makes of a cluster (meshClusterVisibility: MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): seen whole for a draw
+* not rigid; else hidden out of the frustum or, single-sided and not mirrored, facing away; else seen, its sphere holding.
+*/
+uint meshClusterVisibility(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view) {
     if (!meshClusterRigid(instance, entry, record, view)) {
-        return true;
+        return MESH_CLUSTER_SEEN;
     }
 
     if (!sphereInFrustum(view.frustum, meshClusterWorldSphere(cluster, instance.model))) {
-        return false;
+        return MESH_CLUSTER_HIDDEN;
     }
 
     float determinant = meshClusterDeterminant(instance.model);
 
     if ((record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0)) {
-        return true;
+        return MESH_CLUSTER_SPHERE;
     }
 
-    return !meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance.model, view.levels.eye.xyz, determinant));
+    return meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance.model, view.levels.eye.xyz, determinant)) ? MESH_CLUSTER_HIDDEN : MESH_CLUSTER_SPHERE;
+}
+
+bool meshClusterKept(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view) {
+    return meshClusterVisibility(cluster, instance, entry, record, view) != MESH_CLUSTER_HIDDEN;
+}
+
+// A sphere's box on screen (meshClusterScreenBox): the pixels it covers, least then most, and its nearest depth.
+struct MeshClusterScreenBox {
+    vec4 box;
+    float nearestDepth;
+    bool onScreen;
+};
+
+/*
+* A sphere (xyz centre measured from the camera, w radius) through a camera-relative view-projection: its box's eight
+* corners' pixels, least and most, and the nearest corner depth; not on screen when a corner is within
+* MESH_CLUSTER_SMALLEST_W of the camera's plane or behind it (meshClusterScreenBox).
+*/
+MeshClusterScreenBox meshClusterScreenBox(vec4 sphere, mat4 viewProjection, vec2 size) {
+    MeshClusterScreenBox result = MeshClusterScreenBox(vec4(3.4e38, 3.4e38, -3.4e38, -3.4e38), -3.4e38, false);
+
+    for (int corner = 0; corner < 8; ++corner) {
+        vec3 offset = vec3((corner & 1) != 0 ? sphere.w : -sphere.w, (corner & 2) != 0 ? sphere.w : -sphere.w, (corner & 4) != 0 ? sphere.w : -sphere.w);
+        vec4 clip = viewProjection * vec4(sphere.xyz + offset, 1.0);
+
+        if (!(clip.w > MESH_CLUSTER_SMALLEST_W)) {
+            return MeshClusterScreenBox(vec4(0.0), 0.0, false);
+        }
+
+        vec2 pixel = ndcToPixel(clip.xy / clip.w, size);
+        result.box.xy = min(result.box.xy, pixel);
+        result.box.zw = max(result.box.zw, pixel);
+        result.nearestDepth = max(result.nearestDepth, clip.z / clip.w);
+    }
+
+    result.onScreen = true;
+    return result;
+}
+
+// The pixels a box covers, clamped to the screen; empty (first past last) off screen (meshClusterBoxPixels).
+ivec4 meshClusterBoxPixels(vec4 box, ivec2 size) {
+    vec4 limits = vec4(size, size);
+    ivec4 whole = ivec4(floor(clamp(box, vec4(-1.0), limits)));
+    return ivec4(max(whole.xy, ivec2(0)), min(whole.zw, size - 1));
+}
+
+// The level where the pixels span at most two cells each way, within the levels (meshClusterPyramidLevel).
+int meshClusterPyramidLevel(ivec4 pixels, int levels) {
+    int extent = max(pixels.z - pixels.x, pixels.w - pixels.y);
+    int level = extent <= 1 ? 0 : findMSB(extent - 1) + 1;
+    return min(level, levels - 1);
 }
 
 #endif

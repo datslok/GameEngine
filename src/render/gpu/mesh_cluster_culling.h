@@ -1,11 +1,14 @@
 #pragma once
 
+#include "math/mat4.h"
+#include "math/vec2.h"
 #include "math/vec3.h"
 #include "render/gpu/camera_culling.h"
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/gpu/mesh_pool.h"
+#include "render/gpu/screen_reflections.h"
 #include "scene/mesh_clusters.h"
 
 #include <array>
@@ -91,8 +94,12 @@ bool meshClusterFacesAway(const GpuMeshCluster& cluster, const Vec3& eye);
 */
 bool meshClusterRigid(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view);
 
-// Whether the view draws the cluster: all of a draw not rigid; else its sphere in the frustum and, single-sided and not
-// mirrored, not facing away.
+// What the view makes of the cluster (MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): seen whole for a draw not rigid; else hidden
+// out of the frustum or, single-sided and not mirrored, facing away; else seen with its sphere holding.
+std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
+                                    const GpuCameraCull& view);
+
+// Whether the view draws the cluster, occlusion aside: its visibility not hidden.
 bool meshClusterKept(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                      const GpuCameraCull& view);
 
@@ -118,6 +125,63 @@ void packMeshClusterBuffers(const MeshClusterBuffers& buffers, std::uint32_t wor
 
 // The most survivors a list holds: a style's run in one draw stays within every GPU's 2^22 mesh shader workgroups.
 inline constexpr std::uint32_t largestMeshClusterRoom = 1u << 22;
+
+// ---- Occlusion (two passes: docs/research/OCCLUSION.md), mirrored by mesh_cluster_culling.glsl ----
+
+/*
+* What the passes test occlusion with (std430, mesh_cluster_pass.glsl's Occlusion): last frame's camera-relative
+* view-projection taking points measured from this frame's camera (the early list's, against last frame's pyramid), this
+* frame's as the depth was drawn (jittered; the late list's), this frame's camera, and the pyramid (its width, height,
+* levels and MESH_CLUSTER_OCCLUSION_* flags).
+*/
+struct GpuMeshClusterOcclusion {
+    float previous[16] = {};
+    float current[16] = {};
+    float origin[4] = {};
+    std::uint32_t pyramid[4] = {};
+};
+
+static_assert(sizeof(GpuMeshClusterOcclusion) == 160, "GpuMeshClusterOcclusion must match mesh_cluster_pass.glsl's Occlusion");
+
+// The view's occlusion on the CPU: its matrices and camera, whether it is tested and last frame's pyramid is there to
+// test against, last frame's pyramid (both lists read it: the late list's candidates are what it hid) and this frame's
+// (from the early list's depth; the late list's), and the list being made.
+struct MeshClusterOcclusionView {
+    Mat4 previous;
+    Mat4 current;
+    Vec3 origin;
+    bool on = false;
+    bool history = false;
+    const DepthPyramid* lastPyramid = nullptr;
+    const DepthPyramid* thisPyramid = nullptr;
+    std::uint32_t list = MESH_CLUSTER_EARLY;
+};
+
+GpuMeshClusterOcclusion packMeshClusterOcclusion(const MeshClusterOcclusionView& view, RenderSize pyramid, std::uint32_t levels);
+
+/*
+* A sphere (xyz centre measured from the camera, w radius) on screen through a camera-relative view-projection: the
+* pixels its box's eight corners land in, from the top-left (x y least, z w most), and the nearest depth of any corner
+* (reversed-Z: the largest). Not on screen when a corner is within MESH_CLUSTER_SMALLEST_W of the camera's plane or
+* behind it (it cannot be bounded so; never hidden).
+*/
+struct MeshClusterScreenBox {
+    std::array<float, 4> box{};
+    float nearestDepth = 0.0f;
+    bool onScreen = false;
+};
+
+MeshClusterScreenBox meshClusterScreenBox(const std::array<float, 4>& sphere, const Mat4& viewProjection, Vec2 size);
+
+// The pixels the box covers, clamped to the screen (x y first, z w last); empty (first past last) when it is off screen.
+std::array<int, 4> meshClusterBoxPixels(const std::array<float, 4>& box, int width, int height);
+
+// The pyramid level where the pixels span at most two cells each way: their extent's power of two, within the levels.
+std::uint32_t meshClusterPyramidLevel(const std::array<int, 4>& pixels, std::uint32_t levels);
+
+// Whether the pyramid (farthest depths) hides the sphere: every cell its box covers at its level farther than its
+// nearest point. Read by the passes in mesh_cluster_pass.glsl (meshClusterHidden).
+bool meshClusterHidden(const DepthPyramid& pyramid, const std::array<float, 4>& sphere, const Mat4& viewProjection);
 
 // ---- Sizes ----
 
@@ -153,6 +217,7 @@ struct MeshClusterList {
     std::uint32_t tested = 0;
     std::uint32_t kept = 0;
     std::uint32_t triangles = 0; // the written survivors' triangles
+    std::uint32_t candidates = 0; // the late list's: the pairs the early list's occlusion test hid
 };
 
 /*
@@ -174,9 +239,12 @@ MeshClusterPair meshClusterPairAt(const MeshClusterTables& tables, std::span<con
 
 /*
 * The list as the passes make it: the work, each block's survivors, their prefix sum, each survivor at its block's first
-* place plus those before it in the block, kept within room; the runs from their styles' first blocks.
+* place plus those before it in the block, kept within room; the runs from their styles' first blocks (from the list's
+* own first). With occlusion, the list it says: the early list keeps what last frame's pyramid does not hide (all, with
+* no history); the late list what it hid that this frame's pyramid does not.
 */
-MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const GpuCameraCull& view, std::uint32_t room);
+MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const GpuCameraCull& view, std::uint32_t room,
+                                      const MeshClusterOcclusionView* occlusion = nullptr);
 
 // ---- cluster-compare ----
 
@@ -192,8 +260,9 @@ struct MeshClusterComparison {
 MeshClusterComparison compareMeshClusterLists(std::span<const GpuMeshClusterItem> gpu, std::span<const GpuMeshClusterItem> cpu,
                                               const std::function<bool(const GpuMeshClusterItem&)>& nearEdge);
 
-// cluster-compare's reply: the comparison, the pairs tested and kept, and whether they agree (differences only near edges).
-std::string describeMeshClusterComparison(const MeshClusterComparison& comparison, std::uint32_t tested, std::uint32_t kept);
+// cluster-compare's reply: the comparison, the pairs tested and kept, and whether they agree (differences only near edges;
+// with occlusion, the GPU's lists may lack pairs, hidden, but never add any not near an edge).
+std::string describeMeshClusterComparison(const MeshClusterComparison& comparison, std::uint32_t tested, std::uint32_t kept, bool occlusion = false);
 
 // Whether the cluster's choice is within rounding of changing (its sphere within a millimetre of a plane, its cone's
 // test within 1e-4), where the GPU and the CPU may each be right.

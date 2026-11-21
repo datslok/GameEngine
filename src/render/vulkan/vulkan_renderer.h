@@ -843,7 +843,7 @@ private:
     // The coloured shadow maps at half the atlas's size, made the first frame that draws them and again when the atlas
     // changes size; made, they start cleared (white tint, no glass) and every tile is redrawn.
     void ensureGlassShadowMaps(const ShadowAtlasSize& atlas);
-    void drawDepthPrepass(FrameContext& frame, const PassDraws& mainDraws, VkDescriptorSet sceneSet);
+    void drawDepthPrepass(FrameContext& frame, const PassDraws& mainDraws, VkDescriptorSet sceneSet, bool late = false);
     // sampleProbes: the frame's light probes light the surfaces (the pipelines that sample them).
     // sky: the camera's rays when the frame has an atmosphere, whose sky is drawn over the background (none: the background alone),
     // with stars, when the frame has them, over it.

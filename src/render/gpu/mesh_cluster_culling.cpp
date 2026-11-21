@@ -1,8 +1,13 @@
 #include "render/gpu/mesh_cluster_culling.h"
+#include "render/gpu/column_major.h"
+#include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/instance_shared.h"
+#include "render/gpu/taa.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -21,11 +26,42 @@ namespace {
         return tables.commands[group].instanceCount * tables.groups[group].clusterCount;
     }
 
-    // Whether the pair is kept: its entry's draw's instance and record, and the cluster.
-    bool pairKept(const MeshClusterTables& tables, const MeshClusterPair& pair, const GpuCameraCull& view) {
+    // What a list makes of a pair: kept in it, and (the late list's) a candidate, hidden by last frame's pyramid.
+    struct PairChoice {
+        bool kept = false;
+        bool candidate = false;
+    };
+
+    /*
+    * The pair's choice, as mesh_cluster_pass.glsl's meshClusterPairKept makes it: hidden in neither list; seen whole, or
+    * with occlusion off, in the early list only; else the early list keeps what last frame's pyramid does not hide
+    * (everything, with no history), and the late list what it hid that this frame's pyramid does not.
+    */
+    PairChoice choosePair(const MeshClusterTables& tables, const MeshClusterPair& pair, const GpuCameraCull& view,
+                          const MeshClusterOcclusionView* occlusion) {
         const std::uint32_t entry = tables.drawList[pair.entry];
         const std::uint32_t draw = entry & DRAW_LIST_INSTANCE_MASK;
-        return meshClusterKept(tables.clusters[pair.cluster], tables.instances[draw], entry, tables.records[draw], view);
+        const GpuMeshCluster& cluster = tables.clusters[pair.cluster];
+        const std::uint32_t visibility = meshClusterVisibility(cluster, tables.instances[draw], entry, tables.records[draw], view);
+        const bool late = occlusion != nullptr && occlusion->list == MESH_CLUSTER_LATE;
+
+        if (visibility == MESH_CLUSTER_HIDDEN) {
+            return {};
+        }
+
+        if (visibility == MESH_CLUSTER_SEEN || occlusion == nullptr || !occlusion->on) {
+            return {!late, false};
+        }
+
+        const std::array<float, 4> world = meshClusterWorldSphere(cluster, tables.instances[draw]);
+        const std::array<float, 4> sphere{world[0] - occlusion->origin.x, world[1] - occlusion->origin.y, world[2] - occlusion->origin.z, world[3]};
+        const bool hiddenBefore = occlusion->history && meshClusterHidden(*occlusion->lastPyramid, sphere, occlusion->previous);
+
+        if (!late) {
+            return {!hiddenBefore, false};
+        }
+
+        return {hiddenBefore && !meshClusterHidden(*occlusion->thisPyramid, sphere, occlusion->current), hiddenBefore};
     }
 }
 
@@ -126,26 +162,121 @@ bool meshClusterRigid(const GpuInstance& instance, std::uint32_t entry, const Gp
     return !((view.flags & CAMERA_CULL_SWAY) != 0u && (record.flags & CULL_SWAYS) != 0u && swayReaches(record.bounds, eye, view.swayFadeEnd));
 }
 
-bool meshClusterKept(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
-                     const GpuCameraCull& view) {
+std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
+                                    const GpuCameraCull& view) {
     if (!meshClusterRigid(instance, entry, record, view)) {
-        return true;
+        return MESH_CLUSTER_SEEN;
     }
 
     const std::array<float, 4> sphere = meshClusterWorldSphere(cluster, instance);
 
     if (!sphereInFrustum(view.frustum, sphere.data())) {
-        return false;
+        return MESH_CLUSTER_HIDDEN;
     }
 
     const float determinant = meshClusterDeterminant(instance);
 
     if ((record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0f)) {
-        return true;
+        return MESH_CLUSTER_SPHERE;
     }
 
     const Vec3 eye{view.levels.eye[0], view.levels.eye[1], view.levels.eye[2]};
-    return !meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance, eye, determinant));
+    return meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance, eye, determinant)) ? MESH_CLUSTER_HIDDEN : MESH_CLUSTER_SPHERE;
+}
+
+bool meshClusterKept(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
+                     const GpuCameraCull& view) {
+    return meshClusterVisibility(cluster, instance, entry, record, view) != MESH_CLUSTER_HIDDEN;
+}
+
+GpuMeshClusterOcclusion packMeshClusterOcclusion(const MeshClusterOcclusionView& view, RenderSize pyramid, std::uint32_t levels) {
+    GpuMeshClusterOcclusion packed;
+    writeColumnMajor(view.previous, packed.previous);
+    writeColumnMajor(view.current, packed.current);
+    packed.origin[0] = view.origin.x;
+    packed.origin[1] = view.origin.y;
+    packed.origin[2] = view.origin.z;
+    packed.pyramid[0] = pyramid.width;
+    packed.pyramid[1] = pyramid.height;
+    packed.pyramid[2] = levels;
+    packed.pyramid[3] = (view.on ? MESH_CLUSTER_OCCLUSION_ON : 0u) | (view.history ? MESH_CLUSTER_OCCLUSION_HISTORY : 0u);
+    return packed;
+}
+
+/*
+* The sphere's box (a cube round it) holds it, and since every corner is in front of the camera the box's picture is the
+* hull of its corners' pictures: their least and most pixels bound the sphere's. Depth (z / w) along a segment in front
+* of the camera is monotonic, so the nearest point of the box is a corner too. A box is looser than the sphere's own
+* outline (Mara and McGuire 2013) but takes any view-projection, jittered or last frame's, with no view-space step.
+*/
+MeshClusterScreenBox meshClusterScreenBox(const std::array<float, 4>& sphere, const Mat4& viewProjection, Vec2 size) {
+    MeshClusterScreenBox result;
+    result.box = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
+                  std::numeric_limits<float>::lowest()};
+    result.nearestDepth = std::numeric_limits<float>::lowest();
+    const float radius = sphere[3];
+
+    for (int corner = 0; corner < 8; ++corner) {
+        const Vec4 point{sphere[0] + ((corner & 1) != 0 ? radius : -radius), sphere[1] + ((corner & 2) != 0 ? radius : -radius),
+                         sphere[2] + ((corner & 4) != 0 ? radius : -radius), 1.0f};
+        const Vec4 clip = viewProjection * point;
+
+        if (!(clip.w > static_cast<float>(MESH_CLUSTER_SMALLEST_W))) {
+            return MeshClusterScreenBox{};
+        }
+
+        const Vec2 pixel = ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, size);
+        result.box[0] = std::min(result.box[0], pixel.x);
+        result.box[1] = std::min(result.box[1], pixel.y);
+        result.box[2] = std::max(result.box[2], pixel.x);
+        result.box[3] = std::max(result.box[3], pixel.y);
+        result.nearestDepth = std::max(result.nearestDepth, clip.z / clip.w);
+    }
+
+    result.onScreen = true;
+    return result;
+}
+
+// Clamped a pixel past the screen before turning to whole pixels, so a huge box converts safely.
+std::array<int, 4> meshClusterBoxPixels(const std::array<float, 4>& box, int width, int height) {
+    const auto whole = [](float value, int size) { return static_cast<int>(std::floor(std::clamp(value, -1.0f, static_cast<float>(size)))); };
+    return {std::max(whole(box[0], width), 0), std::max(whole(box[1], height), 0), std::min(whole(box[2], width), width - 1),
+            std::min(whole(box[3], height), height - 1)};
+}
+
+// Pixels at most 2^level apart fall in at most two cells of that level (a cell is 2^level pixels, the last more).
+std::uint32_t meshClusterPyramidLevel(const std::array<int, 4>& pixels, std::uint32_t levels) {
+    const int extent = std::max(pixels[2] - pixels[0], pixels[3] - pixels[1]);
+    const std::uint32_t level = extent <= 1 ? 0u : static_cast<std::uint32_t>(std::bit_width(static_cast<unsigned>(extent - 1)));
+    return std::min(level, levels - 1);
+}
+
+bool meshClusterHidden(const DepthPyramid& pyramid, const std::array<float, 4>& sphere, const Mat4& viewProjection) {
+    const RenderSize size = pyramid.sizes[0];
+    const MeshClusterScreenBox box = meshClusterScreenBox(sphere, viewProjection, Vec2{static_cast<float>(size.width), static_cast<float>(size.height)});
+
+    if (!box.onScreen) {
+        return false;
+    }
+
+    const std::array<int, 4> pixels = meshClusterBoxPixels(box.box, static_cast<int>(size.width), static_cast<int>(size.height));
+
+    if (pixels[0] > pixels[2] || pixels[1] > pixels[3]) {
+        return false;
+    }
+
+    const std::uint32_t level = meshClusterPyramidLevel(pixels, static_cast<std::uint32_t>(pyramid.sizes.size()));
+    const int width = static_cast<int>(pyramid.sizes[level].width);
+    const int height = static_cast<int>(pyramid.sizes[level].height);
+    float farthest = gpuNearDepth;
+
+    for (int y = pyramidCell(pixels[1], level, height); y <= pyramidCell(pixels[3], level, height); ++y) {
+        for (int x = pyramidCell(pixels[0], level, width); x <= pyramidCell(pixels[2], level, width); ++x) {
+            farthest = fartherDepth(farthest, pyramid.at(level, x, y));
+        }
+    }
+
+    return box.nearestDepth < farthest;
 }
 
 // The segments are the still ones, then the moving draws' (CameraCullFrame::join's order).
@@ -219,7 +350,8 @@ MeshClusterPair meshClusterPairAt(const MeshClusterTables& tables, std::span<con
     return MeshClusterPair{true, tables.commands[group].firstInstance + within / culled.clusterCount, culled.firstCluster + within % culled.clusterCount};
 }
 
-MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const GpuCameraCull& view, std::uint32_t room) {
+MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const GpuCameraCull& view, std::uint32_t room,
+                                      const MeshClusterOcclusionView* occlusion) {
     std::array<std::uint32_t, MESH_CLUSTER_WORK_WORDS> work{};
     const std::vector<std::uint32_t> ends = meshClusterWorkEnds(tables, view, work);
     const std::uint32_t blocks = work[MESH_CLUSTER_WORK_END] / meshClusterGroupSize;
@@ -228,10 +360,13 @@ MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const Gpu
     std::vector<std::uint32_t> blockFirst(blocks + 1, 0);
     std::vector<MeshClusterPair> pairs(work[MESH_CLUSTER_WORK_END]);
     std::vector<bool> kept(pairs.size(), false);
+    std::uint32_t candidates = 0;
 
     for (std::uint32_t index = 0; index < pairs.size(); ++index) {
         pairs[index] = meshClusterPairAt(tables, ends, index);
-        kept[index] = pairs[index].real && pairKept(tables, pairs[index], view);
+        const PairChoice choice = pairs[index].real ? choosePair(tables, pairs[index], view, occlusion) : PairChoice{};
+        kept[index] = choice.kept;
+        candidates += choice.candidate ? 1u : 0u;
         blockFirst[index / meshClusterGroupSize + 1] += kept[index] ? 1u : 0u;
     }
 
@@ -242,6 +377,7 @@ MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const Gpu
     MeshClusterList list;
     list.tested = work[MESH_CLUSTER_WORK_REAL];
     list.kept = blockFirst[blocks];
+    list.candidates = candidates;
     list.items.resize(std::min(list.kept, room));
     std::uint32_t within = 0;
 
@@ -346,10 +482,11 @@ MeshClusterComparison compareMeshClusterLists(std::span<const GpuMeshClusterItem
     return comparison;
 }
 
-std::string describeMeshClusterComparison(const MeshClusterComparison& comparison, std::uint32_t tested, std::uint32_t kept) {
-    const bool agree = comparison.missing + comparison.extra == comparison.nearAnEdge;
+std::string describeMeshClusterComparison(const MeshClusterComparison& comparison, std::uint32_t tested, std::uint32_t kept, bool occlusion) {
+    const bool agree = occlusion ? comparison.extra <= comparison.nearAnEdge : comparison.missing + comparison.extra == comparison.nearAnEdge;
+    const std::string missing = occlusion ? std::to_string(comparison.missing) + " hidden by occlusion, " : std::to_string(comparison.missing) + " missing, ";
     return "Mesh clusters: " + std::to_string(tested) + " tested, " + std::to_string(kept) + " kept; " + std::to_string(comparison.entries) +
-           " on the CPU, " + std::to_string(comparison.matching) + " matching, " + std::to_string(comparison.missing) + " missing, " +
+           " on the CPU, " + std::to_string(comparison.matching) + " matching, " + missing +
            std::to_string(comparison.extra) + " extra (" + std::to_string(comparison.nearAnEdge) + " near an edge). " +
            (agree ? "The GPU's list agrees with the CPU's." : "The GPU's list DIFFERS from the CPU's.");
 }

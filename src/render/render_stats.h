@@ -28,11 +28,14 @@ struct RenderStats {
     std::size_t drawnCutOutTriangles = 0;
     std::size_t probeTriangles = 0;
 
-    // The camera's mesh clusters (render/gpu/mesh_cluster_culling.h), while culled: tested, kept, and the kept ones'
-    // triangles; none tested while off.
+    // The camera's mesh clusters (render/gpu/mesh_cluster_culling.h), while culled: tested, kept (both lists), and the
+    // kept ones' triangles; none tested while off. With occlusion: those the late list drew, and those neither drew.
     std::size_t meshClustersTested = 0;
     std::size_t meshClustersKept = 0;
     std::size_t meshClusterTriangles = 0;
+    bool meshClusterOcclusion = false;
+    std::size_t meshClustersLate = 0;
+    std::size_t meshClustersHidden = 0;
 
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;

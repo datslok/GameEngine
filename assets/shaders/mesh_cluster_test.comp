@@ -5,12 +5,14 @@
 * Mesh clusters' culling, pass 2 of 4 (render/vulkan/vulkan_mesh_cluster_culling.h): each pair of the work tested
 * (meshClusterPairKept), and each block's survivors counted. Dispatched indirectly, a workgroup a block of the work.
 */
+// After its 13 storage buffers.
+#define MESH_CLUSTER_PYRAMID_BINDING 13
 #include "mesh_cluster_pass.glsl"
 
 layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
 
 // Each block's survivors.
-layout(std430, set = 0, binding = 11) writeonly buffer BlockCounts {
+layout(std430, set = 0, binding = 12) writeonly buffer BlockCounts {
     uint blockCounts[];
 };
 
@@ -25,8 +27,9 @@ void main() {
 
     barrier();
     MeshClusterItem item;
+    bool candidate;
 
-    if (pair < work[MESH_CLUSTER_WORK_END] && meshClusterPairKept(pair, item)) {
+    if (pair < work[MESH_CLUSTER_WORK_END] && meshClusterPairKept(pair, item, candidate)) {
         atomicAdd(survivors, 1u);
     }
 
