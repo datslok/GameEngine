@@ -20,7 +20,7 @@ Finished items are kept to one line, with their branch names so they can be foun
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising, and keep graphics features that cost a lot (ray tracing, GI quality) as settings that scale down to typical GPUs.
 
-**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase), 20 (clouds and weather) and 17 (rendering), then 7 onwards, as the phases sit in this file.
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase; its shadow and level popping wait for 21), 21 (virtual geometry and shadows), 20 (clouds and weather) and 17 (rendering), then 7 onwards, as the phases sit in this file.
 
 ---
 
@@ -452,6 +452,21 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
   - [x] The golden views' scene in the slow tests (`golden-views-slow`)
 
 **Milestone:** with the typical GPU setup, the scale is felt from the valley's rim (pillars, floating islands and the Monolith layered into kilometres of haze), and walking down through the jungle to the Monolith's foot looks lush and alive (wind in leaves and vines, light through the canopy, mist in the valley) by day and at dusk, at a frame rate a mid-range GPU holds (measured on the laptop's RTX 4070, 8 GB).
+
+---
+
+## Phase 21: Virtual geometry and virtual shadow maps
+
+Added Nov 21 2026 (the user: AAA quality; the forest's shadows popped all over from the cascades' savings, and drawing every cascade every frame cost 15-25 ms of shadows walking). Cost grows with what is on screen, not with the valley (hard rule 11). Research in `docs/research/VIRTUALGEOMETRY.md`; each stage explained and measured at the forest's spots before the next, and built after the user's go.
+
+- [ ] 1. Clusters: meshes cut into small clusters (meshoptimizer), each culled a view (frustum, last frame's depth pyramid, facing) and drawn by the hardware rasteriser; prepass and main pass first, measured
+- [ ] 2. Cluster levels: groups simplified to half with their borders locked, a hierarchy (meshoptimizer's `clusterlod`), the cut chosen a view by projected error (about a pixel), two-pass occlusion; the rock's, terrain's and trunks' levels and cards retired
+- [ ] 3. Leaves as geometry: modelled leaves instanced along twigs and limbs (assemblies), pruned by a fixed rank inside the hierarchy with the survivors grown, clumps or voxels far (`docs/research/FARFOLIAGE.md`); wind as a rigid turn a part about its limb, stopped past a distance; the leaf cards, impostor cards and shadow stand-ins retired; the grass and floor cover stay as they are (already opaque, levels keeping their cover; the user, Nov 21 2026): stage 1 culls their patches by cluster, stage 4 decides their shadows (contact shadows instead, measured), stage 5 helps them most
+- [ ] 4. Virtual shadow maps for the sun: a clipmap of virtual maps in pages round the camera, pages marked from the depth buffer, one physical pool, clusters culled and drawn a page, pages kept until something in them moves; the cascades, their steps and thinning and the far map retired; then the lamps
+- [ ] 5. A visibility buffer and material pass, then a compute rasteriser for small clusters, if triangles still bound the frame
+- [ ] 6. Cluster pages streamed, when scenes outgrow memory
+
+**Milestone:** the forest walked and flown with no shadow or level popping, the sun's shadows costing what the screen needs, the frame measured on the laptop against today's.
 
 ---
 
