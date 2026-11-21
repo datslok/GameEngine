@@ -90,8 +90,13 @@ struct RenderSettings {
     bool depthPrepass = true;
 
     // The camera's mesh clusters culled one by one on the GPU after its draws (render/gpu/mesh_cluster_culling.h, ROADMAP
-    // phase 21): the frustum and facing, F4's CLUSTERS line, cluster-compare. Off until mesh shaders draw the lists.
+    // phase 21): the frustum and facing, F4's CLUSTERS line, cluster-compare; drawn by mesh shaders where the GPU has
+    // them. Off until it pays.
     bool meshClusters = false;
+
+    // With mesh clusters drawn and the depth prepass on: two-pass occlusion (docs/research/OCCLUSION.md), the early list
+    // tested against last frame's depth, the late list against this frame's, F4's LATE and HIDDEN.
+    bool meshClusterOcclusion = true;
 
     // Each pixel loops only over the lights listed for its cluster (render/gpu/clusters.h) instead of every light in the
     // frame; both add the same lights in the same order, so the picture is identical. Off is for comparing the timings.

@@ -4,40 +4,46 @@
 /*
 * Mesh clusters' culling, pass 4 of 4 (render/vulkan/vulkan_mesh_cluster_culling.h): each pair tested again (cheaper
 * than keeping a flag a pair), and each survivor written at its block's first place plus the survivors before it in the
-* block (a prefix sum), within the room; the written survivors' triangles added to the totals, once a workgroup.
+* block (a prefix sum), within the room, in the list's own run of the items (its number times the room); the written
+* survivors' triangles and the late list's candidates added to the list's totals, once a workgroup.
 * Dispatched as the test pass is. Mirrored by cullMeshClustersOnCpu.
 */
+// After its 15 storage buffers.
+#define MESH_CLUSTER_PYRAMID_BINDING 15
 #include "mesh_cluster_pass.glsl"
 
 layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
 
-layout(std430, set = 0, binding = 11) readonly buffer BlockFirst {
+layout(std430, set = 0, binding = 12) readonly buffer BlockFirst {
     uint blockFirst[];
 };
 
 // The survivors, setup.z at most.
-layout(std430, set = 0, binding = 12) writeonly buffer Items {
+layout(std430, set = 0, binding = 13) writeonly buffer Items {
     MeshClusterItem items[];
 };
 
 // MESH_CLUSTER_TOTAL_WORDS: the triangles added here.
-layout(std430, set = 0, binding = 13) buffer Totals {
+layout(std430, set = 0, binding = 14) buffer Totals {
     uint totals[];
 };
 
 shared uint sums[MESH_CLUSTER_GROUP_SIZE];
 shared uint triangles;
+shared uint candidates;
 
 void main() {
     uint local = gl_LocalInvocationIndex;
     uint pair = gl_GlobalInvocationID.x;
     MeshClusterItem item;
-    bool kept = pair < work[MESH_CLUSTER_WORK_END] && meshClusterPairKept(pair, item);
+    bool candidate = false;
+    bool kept = pair < work[MESH_CLUSTER_WORK_END] && meshClusterPairKept(pair, item, candidate);
     uint value = kept ? 1u : 0u;
     sums[local] = value;
 
     if (local == 0u) {
         triangles = 0u;
+        candidates = 0u;
     }
 
     barrier();
@@ -53,14 +59,22 @@ void main() {
         uint place = blockFirst[gl_WorkGroupID.x] + sums[local] - value;
 
         if (place < setup.z) {
-            items[place] = item;
+            items[pass.list * setup.z + place] = item;
             atomicAdd(triangles, clusters[item.cluster].counts >> MESH_CLUSTER_TRIANGLE_SHIFT);
         }
+    }
+
+    if (candidate) {
+        atomicAdd(candidates, 1u);
     }
 
     barrier();
 
     if (local == 0u && triangles > 0u) {
-        atomicAdd(totals[MESH_CLUSTER_TOTAL_TRIANGLES], triangles);
+        atomicAdd(totals[listTotals() + MESH_CLUSTER_TOTAL_TRIANGLES], triangles);
+    }
+
+    if (local == 0u && candidates > 0u) {
+        atomicAdd(totals[listTotals() + MESH_CLUSTER_TOTAL_CANDIDATES], candidates);
     }
 }

@@ -12,7 +12,7 @@
 layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
 
 // The test and write passes' indirect dispatch (x blocks, y 1, z 1), x raised here.
-layout(std430, set = 0, binding = 11) buffer Dispatch {
+layout(std430, set = 0, binding = 12) buffer Dispatch {
     uint dispatchSize[];
 };
 

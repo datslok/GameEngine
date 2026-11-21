@@ -156,7 +156,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     cullFrameViews.resize(framesInFlight);
     cullFrameDraws.resize(framesInFlight);
     cullCompares.resize(framesInFlight);
-    meshClusterCulling = std::make_unique<VulkanMeshClusterCulling>(device, framesInFlight);
+    meshClusterCulling = std::make_unique<VulkanMeshClusterCulling>(device, nearestLevelsSampler.get(), framesInFlight);
     meshClusterCompares.resize(framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
@@ -897,6 +897,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     fsr->ensureSize(width, height);
     dlss->ensureSize(width, height);
     reflections->ensureSize(scene);
+    meshClusterCulling->ensureSize(scene);
 
     if (mirroredLights && mirroredLights->hasImages()) {
         mirroredLights->ensureSize(scene);
@@ -1229,13 +1230,18 @@ void VulkanRenderer::takeMeshClusterCull(const VulkanMeshClusterCulling::Collect
 
     const MeshClusterTables tables{cameraCulled->mainCommands[0], compare->order, compare->groups, cameraCulled->mainEntries[0],
                                    compare->instances, compare->records, meshPool->getClusterRecords()};
+    // With occlusion the GPU's two lists together against the CPU's frustum and facing alone: the GPU may lack pairs
+    // (hidden), never add them.
     const MeshClusterList cpu = cullMeshClustersOnCpu(tables, compare->view, meshClusterCulling->getRoom());
-    const MeshClusterComparison comparison = compareMeshClusterLists(culled.items, cpu.items, [&](const GpuMeshClusterItem& item) {
+    std::vector<GpuMeshClusterItem> gpu = culled.items[MESH_CLUSTER_EARLY];
+    gpu.insert(gpu.end(), culled.items[MESH_CLUSTER_LATE].begin(), culled.items[MESH_CLUSTER_LATE].end());
+    const MeshClusterComparison comparison = compareMeshClusterLists(gpu, cpu.items, [&](const GpuMeshClusterItem& item) {
         const std::uint32_t entry = tables.drawList[item.entry];
         const std::uint32_t draw = entry & DRAW_LIST_INSTANCE_MASK;
         return nearAMeshClusterEdge(tables.clusters[item.cluster], tables.instances[draw], entry, tables.records[draw], compare->view);
     });
-    clusterCompareReport = describeMeshClusterComparison(comparison, culled.totals[MESH_CLUSTER_TOTAL_TESTED], culled.totals[MESH_CLUSTER_TOTAL_KEPT]);
+    const std::uint32_t kept = culled.totals[MESH_CLUSTER_EARLY][MESH_CLUSTER_TOTAL_KEPT] + culled.totals[MESH_CLUSTER_LATE][MESH_CLUSTER_TOTAL_KEPT];
+    clusterCompareReport = describeMeshClusterComparison(comparison, culled.totals[MESH_CLUSTER_EARLY][MESH_CLUSTER_TOTAL_TESTED], kept, culled.occlusion);
     compare.reset();
 }
 
@@ -1634,6 +1640,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // them, whose buffers' addresses go in the frame's uniform block (written below), so the list is made ready first.
     const bool cullsClusters = settings.meshClusters && cullFrame.drawOrder.pooled > 0;
     const bool drawsClusters = cullsClusters && device.supportsMeshShaders();
+
+    // Two-pass occlusion needs the clusters drawn by mesh shaders and their depth drawn first (docs/research/OCCLUSION.md).
+    const bool occludesClusters = drawsClusters && settings.meshClusterOcclusion && settings.depthPrepass;
     frameMeshClusterBuffers = MeshClusterBuffers{};
 
     if (cullsClusters) {
@@ -1652,9 +1661,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const std::size_t realDraws = description.draws.size() - std::min(description.stillEmptySlots, description.draws.size());
     stats.culled = realDraws - std::min(stats.drawn, realDraws);
     const bool clustersCulled = settings.meshClusters && lastMeshClusters;
-    stats.meshClustersTested = clustersCulled ? lastMeshClusters->totals[MESH_CLUSTER_TOTAL_TESTED] : 0;
-    stats.meshClustersKept = clustersCulled ? lastMeshClusters->totals[MESH_CLUSTER_TOTAL_KEPT] : 0;
-    stats.meshClusterTriangles = clustersCulled ? lastMeshClusters->totals[MESH_CLUSTER_TOTAL_TRIANGLES] : 0;
+    const auto clusterTotal = [&](std::uint32_t list, std::uint32_t word) -> std::size_t {
+        return clustersCulled ? lastMeshClusters->totals[list][word] : 0u;
+    };
+    stats.meshClustersTested = clusterTotal(MESH_CLUSTER_EARLY, MESH_CLUSTER_TOTAL_TESTED);
+    stats.meshClustersKept = clusterTotal(MESH_CLUSTER_EARLY, MESH_CLUSTER_TOTAL_KEPT) + clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_KEPT);
+    stats.meshClusterTriangles = clusterTotal(MESH_CLUSTER_EARLY, MESH_CLUSTER_TOTAL_TRIANGLES) + clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_TRIANGLES);
+    stats.meshClusterOcclusion = clustersCulled && lastMeshClusters->occlusion;
+    stats.meshClustersLate = clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_KEPT);
+    stats.meshClustersHidden = clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_CANDIDATES) - stats.meshClustersLate;
     cpuClock.lap(CpuStage::Frustum, profilerSeconds());
 
     // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
@@ -2023,6 +2038,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         inputs.clusters = meshPool->getClusters();
         inputs.pooled = cullFrame.drawOrder.pooled;
         inputs.pairBound = meshClusterPairBound(cullFrame);
+        inputs.occlusion = occludesClusters;
+        inputs.viewProjection = relativeViewProjection;
+        inputs.origin = cameraOrigin;
         meshClusterCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, inputs, clusterComparing);
         endGpuPass(frame, GpuPass::MeshCull);
 
@@ -2045,8 +2063,19 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     PassDraws mainPass = cameraCulling->mainDraws(frame.frameIndex, cullFrame, 0);
 
+    // The main pass draws both mesh cluster lists; the prepass the early list with everything else, then (with
+    // occlusion) the late list alone once its pyramid is built.
+    PassDraws earlyPrepass = mainPass;
+    PassDraws latePrepass = mainPass;
+
     if (drawsClusters) {
         mainPass.meshTasks = meshClusterCulling->getTaskCommands(frame.frameIndex);
+        mainPass.meshLists = occludesClusters ? (1u << MESH_CLUSTER_EARLY) | (1u << MESH_CLUSTER_LATE) : 1u << MESH_CLUSTER_EARLY;
+        earlyPrepass = mainPass;
+        earlyPrepass.meshLists = 1u << MESH_CLUSTER_EARLY;
+        latePrepass = mainPass;
+        latePrepass.meshLists = 1u << MESH_CLUSTER_LATE;
+        latePrepass.meshOnly = true;
     }
 
     for (std::size_t view = 0; view < captureViews.size(); ++view) {
@@ -2143,8 +2172,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (settings.depthPrepass) {
         beginGpuPass(frame, GpuPass::DepthPrepass);
-        drawDepthPrepass(frame, mainPass, sceneSet);
+        drawDepthPrepass(frame, earlyPrepass, sceneSet);
         endGpuPass(frame, GpuPass::DepthPrepass);
+    }
+
+    // Mesh cluster occlusion's second pass: what last frame's depth hid, tested against this frame's so far and its
+    // survivors' depth added; then the whole depth kept for the next frame's first pass.
+    if (occludesClusters) {
+        beginGpuPass(frame, GpuPass::MeshCullLate);
+        meshClusterCulling->cullLate(frame.commands, frame.descriptors, frame.frameIndex, depth);
+        endGpuPass(frame, GpuPass::MeshCullLate);
+        beginGpuPass(frame, GpuPass::DepthPrepassLate);
+        drawDepthPrepass(frame, latePrepass, sceneSet, true);
+        endGpuPass(frame, GpuPass::DepthPrepassLate);
+        beginGpuPass(frame, GpuPass::OcclusionPyramid);
+        meshClusterCulling->keepDepth(frame.commands, frame.descriptors, depth);
+        endGpuPass(frame, GpuPass::OcclusionPyramid);
     }
 
     reflections->forgetColourPyramid();
@@ -3126,14 +3169,17 @@ void VulkanRenderer::drawGlassShadows(FrameContext& frame, const ShadowDraws& sh
 * so the depth image ends up holding the nearest surface at every pixel, computed exactly as the main pass computes it.
 * The depth image starts cleared (its old contents discarded) and is stored for the main pass. The solid mask starts
 * cleared to 1 (solid) and the cut-outs, drawn last, write 0 where they are nearest (contact shadows pass over them).
+* The late mesh cluster list's prepass (late) adds its depth to both, kept from the early one's, and draws nothing else.
 */
-void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const PassDraws& mainDraws, VkDescriptorSet sceneSet) {
+void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const PassDraws& mainDraws, VkDescriptorSet sceneSet, bool late) {
     const VkCommandBuffer commands = frame.commands;
-    depth.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
-    solidMask.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
+    const ImageContents contents = late ? ImageContents::Keep : ImageContents::Discard;
+    const VkAttachmentLoadOp load = late ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth.transition(commands, ImageState::DepthTarget, contents);
+    solidMask.transition(commands, ImageState::ColourTarget, contents);
 
-    const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    const ColourAttachment solidTarget{solidMask.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {1.0f, 1.0f, 1.0f, 1.0f}};
+    const DepthAttachment depthTarget{depth.getView(), load, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+    const ColourAttachment solidTarget{solidMask.getView(), load, {1.0f, 1.0f, 1.0f, 1.0f}};
     beginRendering(commands, {sceneSize.width, sceneSize.height}, &solidTarget, &depthTarget);
     renderingOpen = true;
 
@@ -3148,7 +3194,10 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const PassDraws& main
     }
 
     stats.drawCalls += drawPassDraws(commands, mainDraws, pipelines);
-    stats.drawCalls += drawPlacedDraws(commands, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT}, 0u);
+
+    if (!late) {
+        stats.drawCalls += drawPlacedDraws(commands, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT}, 0u);
+    }
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
@@ -3568,8 +3617,8 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
         bindPools(commands, pipelines.previousShapes);
     }
 
-    // Each style's pooled groups: as the surviving mesh clusters, one mesh shader draw a style (its run of the list,
-    // which the mesh shader finds by the style pushed), or as the groups, one multi-draw a style.
+    // Each style's pooled groups: as the surviving mesh clusters, one mesh shader draw a style and list drawn (its run of
+    // the list, which the mesh shader finds by the style and list pushed), or as the groups, one multi-draw a style.
     BatchPipelines meshPipelines = pipelines;
     meshPipelines.plain = pipelines.meshPlain;
     meshPipelines.cutOut = pipelines.meshCutOut;
@@ -3582,9 +3631,16 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
 
         if (byClusters) {
             meshState.use(commands, (run & 2) != 0, (run & 1) != 0);
-            const std::uint32_t style = static_cast<std::uint32_t>(run);
-            vkCmdPushConstants(commands, pipelines.meshLayout, VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, sizeof(style), &style);
-            vkCmdDrawMeshTasksIndirectEXT(commands, draws.meshTasks, run * 3 * sizeof(std::uint32_t), 1, 3 * sizeof(std::uint32_t));
+            for (std::uint32_t list = 0; list < MESH_CLUSTER_LISTS; ++list) {
+                if ((draws.meshLists & (1u << list)) == 0) {
+                    continue;
+                }
+
+                const std::uint32_t drawn[2] = {static_cast<std::uint32_t>(run), list};
+                vkCmdPushConstants(commands, pipelines.meshLayout, VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, sizeof(drawn), drawn);
+                vkCmdDrawMeshTasksIndirectEXT(commands, draws.meshTasks, (list * MESH_CLUSTER_STYLES + run) * 3 * sizeof(std::uint32_t), 1,
+                                              3 * sizeof(std::uint32_t));
+            }
         } else {
             state.use(commands, (run & 2) != 0, (run & 1) != 0);
             vkCmdDrawIndexedIndirectCount(commands, draws.packed, (VkDeviceSize{draws.commandFirst} + order.runFirst[run]) * sizeof(GpuDrawCommand),
@@ -3592,6 +3648,11 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
         }
 
         ++calls;
+    }
+
+    // The late list's depth only: everything else was in the early list's prepass.
+    if (byClusters && draws.meshOnly) {
+        return calls;
     }
 
     for (std::size_t position = order.pooled; position < order.order.size(); ++position) {

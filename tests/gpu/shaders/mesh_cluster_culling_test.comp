@@ -18,6 +18,19 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_MESH_CLUSTER_SCREEN_BOX) {
+        // Inputs: the sphere, the view-projection's four columns, (width, height, levels). Outputs: the box, (nearest
+        // depth, on screen), its pixels, (their pyramid level).
+        vec4 size = testInput(5);
+        MeshClusterScreenBox box = meshClusterScreenBox(testInput(0), mat4(testInput(1), testInput(2), testInput(3), testInput(4)), size.xy);
+        ivec4 pixels = meshClusterBoxPixels(box.box, ivec2(size.xy));
+        testOutput(0, box.box);
+        testOutput(1, vec4(box.nearestDepth, box.onScreen ? 1.0 : 0.0, 0.0, 0.0));
+        testOutput(2, vec4(pixels));
+        testOutput(3, vec4(float(meshClusterPyramidLevel(pixels, int(size.z))), 0.0, 0.0, 0.0));
+        return;
+    }
+
     if (function == GPU_TEST_MESH_CLUSTER_KEPT) {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the

@@ -20,9 +20,11 @@ out gl_MeshPerVertexEXT {
 #include "triangle_vertex.glsl"
 #include "mesh_cluster_culling.glsl"
 
-// The style drawn (render/vulkan/scene_layout.h: after the vertex shaders' push constants).
+// The style drawn and its list (MESH_CLUSTER_EARLY or _LATE) (render/vulkan/scene_layout.h: after the vertex shaders'
+// push constants).
 layout(push_constant) uniform MeshClusterDraw {
     layout(offset = MESH_CLUSTER_PUSH_OFFSET) uint drawnStyle;
+    uint drawnList;
 };
 
 // The buffers, by the addresses frame_data.glsl's meshClusterBuffers holds.
@@ -44,16 +46,18 @@ layout(buffer_reference, std430) readonly buffer MeshVertexFloats {
 };
 
 void main() {
-    // The workgroup's pair within its style's run, the same for the whole workgroup; none past the run.
+    // The workgroup's pair within its style's run of its list, the same for the whole workgroup; none past the run.
     MeshClusterWords totals = MeshClusterWords(meshClusterBuffers[0].zw);
+    uint listTotals = drawnList * uint(MESH_CLUSTER_TOTAL_WORDS);
     uint inRun = meshClusterTaskIndex(gl_WorkGroupID);
 
-    if (inRun >= totals.words[MESH_CLUSTER_TOTAL_RUN_COUNT + drawnStyle]) {
+    if (inRun >= totals.words[listTotals + MESH_CLUSTER_TOTAL_RUN_COUNT + drawnStyle]) {
         SetMeshOutputsEXT(0u, 0u);
         return;
     }
 
-    MeshClusterItem item = MeshClusterItems(meshClusterBuffers[0].xy).items[totals.words[MESH_CLUSTER_TOTAL_RUN_FIRST + drawnStyle] + inRun];
+    uint place = totals.words[listTotals + MESH_CLUSTER_TOTAL_LIST_FIRST] + totals.words[listTotals + MESH_CLUSTER_TOTAL_RUN_FIRST + drawnStyle] + inRun;
+    MeshClusterItem item = MeshClusterItems(meshClusterBuffers[0].xy).items[place];
     MeshCluster cluster = MeshClusterRecords(meshClusterBuffers[1].xy).records[item.cluster];
     uint vertexCount = cluster.counts & 0xffu;
     uint triangleCount = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;

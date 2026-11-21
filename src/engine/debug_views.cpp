@@ -56,6 +56,10 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     if (stats.meshClustersTested > 0) {
         detail += "  CLUSTERS " + std::to_string(stats.meshClustersKept) + "/" + std::to_string(stats.meshClustersTested) + " " +
                   std::to_string(stats.meshClusterTriangles / 1000) + "K";
+
+        if (stats.meshClusterOcclusion) {
+            detail += "  LATE " + std::to_string(stats.meshClustersLate) + "  HIDDEN " + std::to_string(stats.meshClustersHidden);
+        }
     }
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled) +
                                 "  CALLS " + std::to_string(stats.shadowDrawCalls);

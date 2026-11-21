@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gpu/camera_culling.h"
+#include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_lasting_buffer.h"
@@ -31,8 +32,12 @@ struct PassDraws {
     std::uint32_t commandFirst = 0;
 
     // The camera's mesh clusters' draws (render/vulkan/vulkan_mesh_cluster_culling.h, a VkDrawMeshTasksIndirectCommandEXT a
-    // style), drawn by mesh shaders in place of the pooled groups' multi-draws; none to draw the groups.
+    // list and style), drawn by mesh shaders in place of the pooled groups' multi-draws; none to draw the groups.
+    // meshLists: the lists drawn, a bit each (1 << MESH_CLUSTER_EARLY, 1 << MESH_CLUSTER_LATE); meshOnly: nothing else
+    // (the late list's depth, after the early list's prepass drew the rest).
     VkBuffer meshTasks = VK_NULL_HANDLE;
+    std::uint32_t meshLists = 1u << MESH_CLUSTER_EARLY;
+    bool meshOnly = false;
 };
 
 /*

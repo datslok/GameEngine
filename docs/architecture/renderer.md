@@ -68,6 +68,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 10 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
 | 11 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |
 | 12 | Depth prepass [PREPASS] | `depthPrepass` (on) | here |
+| 12b | Occlusion [MESHLATE], [LATEDEPTH], [HIZ] | mesh cluster occlusion: the late list, its depth, the next frame's pyramid | `mesh-clusters.md` |
 | 13 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
 | 14-17 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
 | 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
@@ -124,7 +125,7 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 
 - **`PipelineCompiler`** (owned by `VulkanDevice`, stopped first in its teardown): one worker per core (`defaultWorkers`). `submit` → `PipelineFuture`; `take` waits and hands it over or rethrows; `progress`; `waitAll` rethrows the first unreported error. A future dropped untaken destroys its pipeline; a build whose future is gone before it starts is skipped. Holds nothing of the GPU, so `pipeline_compiler_test` uses stand-in handles.
 - **`VulkanPipeline`, `ComputePipeline`:** make their layouts at once (`DescriptorLayouts` is not thread-safe), hand the SPIR-V load and `vkCreate*Pipelines` to the compiler as a static build over copies of what it needs; the first `get()` waits for its own build.
-- **Loading screen:** `drawLoadingScreen` about 30 times a second while the `Application` loads (events handled, closing quits): "LOADING THE WORLD" and the first frame's "PREPARING THE SCENE" over a block sliding along the bar (`loadingSlideFrames`, work that cannot count), the meshes' "PREPARING THE SCENE n / m" and "BUILDING SHADERS n / m" over a filling bar (stages: `engine-core.md`, Start) (`LoadingProgress`, `layoutLoadingScreen`). Drawn by `vkCmdClearAttachments` alone in a 5 x 7 block font (`blockText`), since no pipeline may be ready.
+- **Loading screen:** `drawLoadingScreen` about 30 times a second while the `Application` loads (closing quits): a block sliding along the bar for work that cannot count (`loadingSlideFrames`), a filling bar for meshes and shaders (stages: `engine-core.md`, Start; `LoadingProgress`, `layoutLoadingScreen`). Drawn by `vkCmdClearAttachments` alone in a 5 x 7 block font (`blockText`), since no pipeline may be ready.
 - Not compiled this way: ImGui's own pipeline, the GPU tests' (built on first use).
 
 ## Kept from SDL_GPU
