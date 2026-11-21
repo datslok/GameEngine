@@ -126,4 +126,20 @@ void testAssetManager() {
     assert(throws([&] { assets.getMesh(drawnHandle); }));
     assert(throws([&] { assets.getDrawnMesh(cube); }));
     assert(throws([&] { assets.addDrawnMesh(IndexedMesh{}); }));
+
+    /*
+    * Cluster levels (ROADMAP phase 21, 2b-ii) only for meshes marked to use them, as Nanite's per-mesh switch: none by
+    * default, any mesh kind but a deforming one markable (its clusters are never built), a handle not added refused.
+    */
+    assert(!assets.hasClusterLevels(cube) && !assets.hasClusterLevels(drawnHandle));
+    assets.setClusterLevels(drawnHandle);
+    assert(assets.hasClusterLevels(drawnHandle) && !assets.hasClusterLevels(cube));
+    assets.setClusterLevels(cube);
+    assert(assets.hasClusterLevels(cube));
+    const MeshHandle cloth = assets.addDeformingMesh(Mesh::plane(1.0f));
+    assert(!assets.hasClusterLevels(cloth));
+    assert(throws([&] { assets.setClusterLevels(cloth); }));
+    assert(throws([&] { assets.setClusterLevels(MeshHandle{}); }));
+    assert(throws([&] { assets.setClusterLevels(MeshHandle{static_cast<std::uint32_t>(assets.getMeshCount())}); }));
+    assert(!assets.hasClusterLevels(MeshHandle{static_cast<std::uint32_t>(assets.getMeshCount() + 5)}));
 }

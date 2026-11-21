@@ -24,6 +24,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -1150,6 +1151,57 @@ namespace {
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(collectLighting(forest.world, 1.0f).fogLayers.empty());
     }
+
+    /*
+    * Cluster levels (ROADMAP phase 21, 2b-ii) only where the cut will use them: the rocks, the drifting rocks, the
+    * structures and the trees' bark; not the rocks' old levels, the leaves, the light strips, the terrain or anything
+    * else, so exactly those meshes are marked.
+    */
+    void testClusterLevelsWhereUsed() {
+        Forest forest;
+        std::set<std::uint32_t> expected;
+        const auto expectMarked = [&](MeshHandle mesh) {
+            assert(forest.assets.hasClusterLevels(mesh));
+            expected.insert(mesh.index);
+        };
+        const auto firstMesh = [&](Entity entity) { return forest.world.get<ModelRenderer>(entity).parts.front().mesh; };
+
+        for (const Entity rock : forest.game.getRockShapes()) {
+            expectMarked(firstMesh(rock));
+
+            for (const MeshLevel& level : forest.assets.getMeshLevels().at(firstMesh(rock).index)) {
+                assert(!level.mesh.isValid() || !forest.assets.hasClusterLevels(level.mesh));
+            }
+        }
+
+        for (const Entity rock : forest.game.getDriftingRocks()) {
+            expectMarked(firstMesh(rock));
+        }
+
+        for (const Entity structure : forest.game.getStructures()) {
+            expectMarked(firstMesh(structure));
+        }
+
+        for (const Entity strip : forest.game.getLightStrips()) {
+            assert(!forest.assets.hasClusterLevels(firstMesh(strip)));
+        }
+
+        assert(!forest.game.getTreeLooks().empty());
+
+        for (const PlantedKindLook& look : forest.game.getTreeLooks()) {
+            expectMarked(look.models.at(0).parts.front().mesh);
+            assert(!forest.assets.hasClusterLevels(look.models.at(1).parts.front().mesh));
+        }
+
+        assert(!forest.assets.hasClusterLevels(firstMesh(forest.game.getGround())));
+        std::size_t marked = 0;
+
+        for (std::uint32_t mesh = 0; mesh < forest.assets.getMeshCount(); ++mesh) {
+            marked += forest.assets.hasClusterLevels(MeshHandle{mesh}) ? 1 : 0;
+        }
+
+        assert(marked == expected.size());
+    }
 }
 
 void testForest() {
@@ -1170,6 +1222,7 @@ void testForest() {
     testCoarsePaintBlendsSofter();
     testLayerFilesAreFoundByRole();
     testTheGameBuildsTheValley();
+    testClusterLevelsWhereUsed();
     testTheStartAmongTheTrees();
     testTheStrataAreOneCake();
     testTheStrataStripHoldsTheBeds();

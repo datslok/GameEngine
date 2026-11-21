@@ -10,9 +10,9 @@ Covers: `src/render/vulkan/vulkan_renderer`, `src/render/vulkan/vulkan_device`, 
 |---|---|
 | constructor (`SDL_Window*`, `JobSystem&`, validation, frames in flight) | Device, layouts, every pipeline submitted to the compiler |
 | `pipelineProgress`, `finishPipelines`, `drawLoadingScreen` | The loading screen (below) |
-| `render(frame, settings, ui)` | One frame to the screen; false while minimised or out of date |
-| `capture` | A frame into an image read back (golden images), after warm-up frames (`drawFramesBeforeCapture`) |
-| `uploadMesh`, `uploadMeshes` (a batch, its clusters built on the job system: `mesh-clusters.md`), `uploadTexture`, `uploadCompressedTexture` (BC7, when `supportsBlockCompression`), counts | GPU copies in arrays indexed exactly like the handles |
+| `render(frame, settings, ui)` | One frame to the screen; false if minimised or out of date |
+| `capture` | A frame into an image read back (golden images), after warm-up (`drawFramesBeforeCapture`) |
+| `uploadMesh`, `uploadMeshes` (batches), `uploadTexture`, `uploadCompressedTexture` (BC7, when `supportsBlockCompression`), counts | GPU copies indexed like the handles |
 | `startDebugUi`, `beginDebugUiFrame`, `stopDebugUi` | ImGui's Vulkan backend |
 | `setPresentMode`, `setFramesInFlight` and getters | Applied live by `Application` |
 | `getLastFrameStats`, `getDisplayOutput`, `getFrameAspectRatio`, `getDeviceName` (the golden folder's name), `supportsRayQueries`, `upscalerSupport` | Queries |

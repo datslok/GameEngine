@@ -32,6 +32,15 @@
 
 namespace {
     /*
+    * A mesh given cluster levels (ROADMAP phase 21, 2b-ii), as it is added: the meshes the cut will draw coarser (the
+    * rocks, the structures, the trees' bark), not leaves, strips, terrain or the old levels.
+    */
+    MeshHandle withClusterLevels(AssetManager& assets, MeshHandle mesh) {
+        assets.setClusterLevels(mesh);
+        return mesh;
+    }
+
+    /*
     * The weights textures' sizes at the finest ground, one texture a ring over its own square: 2048 texels over the
     * walked-on ring's 1.28 km (one every 0.625 m; the layers' height maps make the borders finer still), then 1024 over
     * each coarser ring's square (5, 20 and 40 m), whose ground is that much farther away. One texture of 40 m texels for
@@ -509,7 +518,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         const bool isPillar = index < pillars.size();
         const Vec3 place = isPillar ? pillars[index].foot : islands[index - pillars.size()].rim;
         const float turn = isPillar ? pillars[index].turnRadians : islands[index - pillars.size()].turnRadians;
-        rockShapes.push_back(addShape(world, assets.addDrawnMeshWithLevels(std::move(shapes[index]), std::move(shapeLevels[index])), rock,
+        rockShapes.push_back(addShape(world, withClusterLevels(assets, assets.addDrawnMeshWithLevels(std::move(shapes[index]), std::move(shapeLevels[index]))), rock,
                                       Transform{.position = place, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, turn)}));
     }
 
@@ -557,7 +566,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
 
     for (std::size_t index = 0; index < drifting.size(); ++index) {
         const Transform pose = driftingRockPose(drifting[index], 0.0);
-        const Entity entity = addShape(world, assets.addDrawnMeshWithLevels(std::move(driftingShapes[index]), std::move(driftingLevels[index])), driftingRock, pose);
+        const Entity entity = addShape(world, withClusterLevels(assets, assets.addDrawnMeshWithLevels(std::move(driftingShapes[index]), std::move(driftingLevels[index]))), driftingRock, pose);
         world.add(entity, drifting[index]);
         world.add(entity, PreviousTransform{pose});
         setRenderStill(world, entity, false);
@@ -568,7 +577,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     // their own tone. It stands across the path, its centre at the ground there, so its lower half is buried.
     const Material coating = structureCoating(assets, getJobs(), structureSettings);
     appliedStructureSettings = structureSettings;
-    ring = addShape(world, assets.addMesh(ringSegmentsMesh(forestRingRadius, forestRingTubeRadius, forestShapeSeed(0, 43))), coating,
+    ring = addShape(world, withClusterLevels(assets, assets.addMesh(ringSegmentsMesh(forestRingRadius, forestRingTubeRadius, forestShapeSeed(0, 43)))), coating,
                     Transform{.position = onGround(forestRingPlace.x, forestRingPlace.y)});
     structures.push_back(ring);
 
@@ -577,7 +586,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     const Material concrete = bastionConcrete(assets, getJobs(), bastionSettings);
     appliedBastionSettings = bastionSettings;
     const auto addSolid = [&](Mesh mesh, const Transform& transform) {
-        const Entity entity = addShape(world, assets.addMesh(std::move(mesh)), concrete, transform, true);
+        const Entity entity = addShape(world, withClusterLevels(assets, assets.addMesh(std::move(mesh))), concrete, transform, true);
         staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(entity)), transform.getMatrix());
         monolith.push_back(entity);
         structures.push_back(entity);
@@ -598,7 +607,7 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         material.strataBottom = tower.foot.y - tower.sink;
         material.strataTop = tower.foot.y + tower.headTop;
         const Transform place{.position = tower.foot};
-        const Entity entity = addShape(world, assets.addMesh(bastionMesh(tower)), material, place, solid);
+        const Entity entity = addShape(world, withClusterLevels(assets, assets.addMesh(bastionMesh(tower))), material, place, solid);
 
         if (solid) {
             staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(entity)), place.getMatrix());
@@ -1214,7 +1223,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
         treeHeights[index] = std::max(treeBox.maximum.y, 1e-3f);
 
-        barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
+        barkMeshes.push_back(withClusterLevels(assets, assets.addDrawnMesh(std::move(variant.bark))));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
         shadowLeafMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowLeaves)));
         shadowBarkMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowBark)));

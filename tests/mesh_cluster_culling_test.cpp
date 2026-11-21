@@ -89,7 +89,7 @@ namespace {
     // Packed for the pools: every cluster's vertices and triangles as built, numbered from where they go.
     void testPackingKeepsEveryTriangle() {
         const IndexedMesh ball = buildIndexedMesh(Mesh::sphere(64, 32));
-        const MeshClusters built = buildMeshClusters(ball);
+        const MeshClusters built = buildMeshClusters(ball, ClusterLevels::One);
         const PackedMeshClusters packed = packMeshClusters(built, 1000, 50, 70);
         assert(packed.clusters.size() == built.clusters.size());
         assert(packed.vertices.size() == built.vertices.size());
@@ -132,7 +132,7 @@ namespace {
 
         for (int round = 0; round < 60; ++round) {
             const IndexedMesh& mesh = meshes[round % 2];
-            const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(mesh), 0, 0, 0);
+            const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(mesh, ClusterLevels::One), 0, 0, 0);
             const Vec3 eye{(unit(random) - 0.5f) * 100.0f, 2.0f + unit(random) * 10.0f, (unit(random) - 0.5f) * 100.0f};
             const float yaw = unit(random) * 2.0f * std::numbers::pi_v<float>;
             const GpuCameraCull view = testView(eye, yaw, false, 0.0f);
@@ -184,7 +184,7 @@ namespace {
     // A draw not rigid keeps every cluster, even one far out of view: terrain, an impostor, ground-following, a liana,
     // thinned cards, swaying within the sway's reach; past the reach a swaying draw is rigid again.
     void testADrawNotRigidKeepsEverything() {
-        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(buildIndexedMesh(Mesh::sphere(16, 8))), 0, 0, 0);
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(buildIndexedMesh(Mesh::sphere(16, 8)), ClusterLevels::One), 0, 0, 0);
         const GpuMeshCluster& cluster = packed.clusters.front();
         const GpuCameraCull view = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, true, 100.0f);
         const Vec3 behind{-40.0f, 2.0f, 0.0f};
@@ -242,7 +242,7 @@ namespace {
         std::vector<std::pair<std::uint32_t, std::uint32_t>> meshClusters;
 
         for (const IndexedMesh& mesh : meshes) {
-            const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(mesh), 0, 0, 0);
+            const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(mesh, ClusterLevels::One), 0, 0, 0);
             meshClusters.emplace_back(static_cast<std::uint32_t>(scene.clusters.size()), static_cast<std::uint32_t>(packed.clusters.size()));
             scene.clusters.insert(scene.clusters.end(), packed.clusters.begin(), packed.clusters.end());
         }

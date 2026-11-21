@@ -389,17 +389,18 @@ std::size_t Application::uploadNextMeshes() {
     converted.reserve(meshBatchMostMeshes); // never moved while the batch points into it
     std::vector<VulkanRenderer::MeshUpload> batch;
     std::size_t triangles = 0;
+    const auto levelsOf = [this](MeshHandle handle) { return assets.hasClusterLevels(handle) ? ClusterLevels::All : ClusterLevels::One; };
 
     for (std::size_t index = first; index < total && batch.size() < meshBatchMostMeshes && triangles < meshBatchTriangles; ++index) {
         const MeshHandle handle{static_cast<std::uint32_t>(index)};
 
         if (assets.isDrawnOnly(handle)) {
-            batch.push_back({&assets.getDrawnMesh(handle), false});
+            batch.push_back({&assets.getDrawnMesh(handle), false, levelsOf(handle)});
         } else if (assets.isDeforming(handle)) {
             batch.push_back({&assets.getDeformingTopology(handle).rest, true});
         } else {
             converted.push_back(buildIndexedMesh(assets.getMesh(handle)));
-            batch.push_back({&converted.back(), false});
+            batch.push_back({&converted.back(), false, levelsOf(handle)});
         }
 
         triangles += batch.back().mesh->indices.size() / 3;
