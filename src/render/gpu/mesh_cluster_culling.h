@@ -96,6 +96,29 @@ bool meshClusterRigid(const GpuInstance& instance, std::uint32_t entry, const Gp
 bool meshClusterKept(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                      const GpuCameraCull& view);
 
+// A style's survivors as mesh shader workgroups: a row of up to MESH_CLUSTER_TASK_WIDTH, then as many rows as it takes
+// (x y z, VkDrawMeshTasksIndirectCommandEXT); none for none.
+std::array<std::uint32_t, 3> meshClusterTaskGroups(std::uint32_t count);
+
+// A workgroup's survivor within its style's run; past the run's count in the last row, none.
+std::uint32_t meshClusterTaskIndex(std::uint32_t x, std::uint32_t y);
+
+// The mesh shaders' buffers by GPU address, in GpuFrameData::meshClusterBuffers's order.
+struct MeshClusterBuffers {
+    std::uint64_t items = 0;
+    std::uint64_t totals = 0;
+    std::uint64_t clusters = 0;
+    std::uint64_t clusterVertices = 0;
+    std::uint64_t triangleWords = 0;
+    std::uint64_t vertices = 0;
+};
+
+// Each address as its low and high words, as frame_data.glsl's meshClusterBuffers reads them.
+void packMeshClusterBuffers(const MeshClusterBuffers& buffers, std::uint32_t words[12]);
+
+// The most survivors a list holds: a style's run in one draw stays within every GPU's 2^22 mesh shader workgroups.
+inline constexpr std::uint32_t largestMeshClusterRoom = 1u << 22;
+
 // ---- Sizes ----
 
 // The room for pairs at first (8 MB); grown to what a frame needed when it overflows.

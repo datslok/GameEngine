@@ -5,7 +5,8 @@
 * Mesh clusters' culling, pass 3 of 4 (render/vulkan/vulkan_mesh_cluster_culling.h): one workgroup sums the blocks'
 * survivors into each block's first place (a prefix sum carried between rounds, the total after the last), then writes
 * the totals: pairs tested, survivors, and each style's run (from its first block's first place to the next style's),
-* cut to the room; the survivors' triangles started at none for the write pass. Mirrored by cullMeshClustersOnCpu.
+* cut to the room, and each run's mesh shader draw; the survivors' triangles started at none for the write pass. Mirrored
+* by cullMeshClustersOnCpu.
 */
 #include "mesh_cluster_pass.glsl"
 
@@ -23,6 +24,11 @@ layout(std430, set = 0, binding = 12) coherent buffer BlockFirst {
 // MESH_CLUSTER_TOTAL_WORDS.
 layout(std430, set = 0, binding = 13) writeonly buffer Totals {
     uint totals[];
+};
+
+// Each style's mesh shader draw (VkDrawMeshTasksIndirectCommandEXT: x y z workgroups).
+layout(std430, set = 0, binding = 14) writeonly buffer TaskCommands {
+    uint taskCommands[];
 };
 
 shared uint sums[MESH_CLUSTER_GROUP_SIZE];
@@ -70,7 +76,12 @@ void main() {
         uint firstBlock = min(work[MESH_CLUSTER_WORK_STYLE_FIRST + local] / MESH_CLUSTER_GROUP_SIZE, blocks);
         uint endBlock = min(work[MESH_CLUSTER_WORK_STYLE_FIRST + local + 1u] / MESH_CLUSTER_GROUP_SIZE, blocks);
         uint runFirst = min(blockFirst[firstBlock], room);
+        uint runCount = min(blockFirst[endBlock], room) - runFirst;
         totals[MESH_CLUSTER_TOTAL_RUN_FIRST + local] = runFirst;
-        totals[MESH_CLUSTER_TOTAL_RUN_COUNT + local] = min(blockFirst[endBlock], room) - runFirst;
+        totals[MESH_CLUSTER_TOTAL_RUN_COUNT + local] = runCount;
+        uvec3 groups = meshClusterTaskGroups(runCount);
+        taskCommands[3u * local] = groups.x;
+        taskCommands[3u * local + 1u] = groups.y;
+        taskCommands[3u * local + 2u] = groups.z;
     }
 }

@@ -1,0 +1,12 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_mesh_shader : require
+// The cluster records, list and vertex pool by address (frame_data.glsl's meshClusterBuffers).
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+// The main pass's mesh shader for the camera's mesh clusters: triangle.mesh with the motion vectors (render/gpu/taa.h)
+// the velocity image takes (mesh_cluster_draw.glsl).
+#define MAIN_MOTION
+
+#include "mesh_cluster_draw.glsl"

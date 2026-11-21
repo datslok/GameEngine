@@ -132,7 +132,31 @@ namespace {
     }
 }
 
+namespace {
+    // Counts from none to the most a run holds, and workgroups across the rows: whole numbers below 2^24, exact as floats.
+    void checkTasks(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{37};
+        std::vector<GpuVec4> inputs;
+
+        for (int index = 0; index < 400; ++index) {
+            const float count = index < 4 ? static_cast<float>(index) : std::floor(random.between(0.0f, static_cast<float>(largestMeshClusterRoom)));
+            inputs.push_back(gpuVec4(count, std::floor(random.between(0.0f, 32767.0f)), std::floor(random.between(0.0f, 127.0f))));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_TASKS, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const std::array<std::uint32_t, 3> groups = meshClusterTaskGroups(static_cast<std::uint32_t>(inputs[i][0]));
+            report.check("meshClusterTaskGroups", exactTolerance, Vec3{static_cast<float>(groups[0]), static_cast<float>(groups[1]), static_cast<float>(groups[2])},
+                         Vec3{outputs[i][0], outputs[i][1], outputs[i][2]});
+            const std::uint32_t index = meshClusterTaskIndex(static_cast<std::uint32_t>(inputs[i][1]), static_cast<std::uint32_t>(inputs[i][2]));
+            report.check("meshClusterTaskIndex", exactTolerance, static_cast<float>(index), outputs[i][3]);
+        }
+    }
+}
+
 void gpuTestMeshClusterCulling(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("mesh_cluster_culling.glsl");
     checkKept(runner, report);
+    checkTasks(runner, report);
 }

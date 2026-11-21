@@ -1,6 +1,6 @@
 # Mesh clusters
 
-Covers: `src/scene/mesh_clusters`, `src/render/gpu/mesh_cluster_culling`, `src/render/gpu/mesh_cluster_culling_shared.h`, `assets/shaders/mesh_cluster_culling.glsl`, `assets/shaders/mesh_cluster_pass.glsl`, `assets/shaders/mesh_cluster_count.comp`, `assets/shaders/mesh_cluster_test.comp`, `assets/shaders/mesh_cluster_scan.comp`, `assets/shaders/mesh_cluster_write.comp`, `src/render/vulkan/vulkan_mesh_cluster_culling`
+Covers: `src/scene/mesh_clusters`, `src/render/gpu/mesh_cluster_culling`, `src/render/gpu/mesh_cluster_culling_shared.h`, `assets/shaders/mesh_cluster_culling.glsl`, `assets/shaders/mesh_cluster_pass.glsl`, `assets/shaders/mesh_cluster_count.comp`, `assets/shaders/mesh_cluster_test.comp`, `assets/shaders/mesh_cluster_scan.comp`, `assets/shaders/mesh_cluster_write.comp`, `src/render/vulkan/vulkan_mesh_cluster_culling`, `src/scene/mesh_clusters_shared.h`, `assets/shaders/mesh_cluster_draw.glsl`, `assets/shaders/triangle.mesh`, `assets/shaders/triangle_motion.mesh`
 
 Meshes cut into small pieces culled one by one (ROADMAP phase 21, stage 1; research `docs/research/VIRTUALGEOMETRY.md`). Not the lights' clusters (`clustered-shading.md`). Cost grows with the camera's drawn instances times their clusters, not with the scene.
 
@@ -22,7 +22,7 @@ Meshes cut into small pieces culled one by one (ROADMAP phase 21, stage 1; resea
 - `MeshPlacement::firstCluster`, `clusterCount`; `GpuCullGroup` carries them (`placedCullGroup`), so the GPU finds a group's clusters.
 - The records are kept on the CPU too (`getClusterRecords`), for `cluster-compare`; F4's MESHES counts the cluster pools.
 
-## Culling (`engine.render` Passes "Mesh clusters", off by default until mesh shaders draw the list)
+## Culling (`engine.render` Passes "Mesh clusters", off by default until occlusion (stage 1d) makes it pay)
 
 After the camera's culling (`gpu-driven.md`), on its unpacked commands and draw list, as (draw list entry, cluster) pairs (`GpuMeshClusterItem`, 8 B):
 
@@ -40,6 +40,22 @@ After the camera's culling (`gpu-driven.md`), on its unpacked commands and draw 
 - **F4:** `CLUSTERS kept/tested trianglesK` on the levels line while on; MESHCULL in the GPU timings.
 - **`cluster-compare`:** the next frame's list read back, with the camera culling's commands and entries of the same frame, against `cullMeshClustersOnCpu` over copies of the view, groups, order, records and instances (`compareMeshClusterLists`, as sets; pairs near an edge, `nearAMeshClusterEdge`, may differ).
 
+## Drawing (mesh shaders, `VK_EXT_mesh_shader`)
+
+The same switch draws the list: the camera's prepass and main pass draw each style's pooled groups as its run of surviving clusters, one `vkCmdDrawMeshTasksIndirectEXT` a style, instead of one indexed multi-draw a style. Everything else (draws not pooled: deforming meshes, cloth; captures; shadows) draws as before.
+
+| Piece | What |
+|---|---|
+| Device (`VulkanDevice::supportsMeshShaders`) | optional extension; used only if a workgroup takes 64 vertices, 124 triangles, 32 threads, and a style's largest run (`largestMeshClusterRoom`, 2^22) fits one draw's workgroups. Without it the list is culled (F4, `cluster-compare`) but not drawn |
+| Scan pass | writes each style's `VkDrawMeshTasksIndirectCommandEXT` from its run's count (`meshClusterTaskGroups`: rows of `MESH_CLUSTER_TASK_WIDTH` 32768, since a dimension is only sure to take 65535) |
+| Buffers | by address (`buffer_reference`): `GpuFrameData::meshClusterBuffers` holds the list, totals, cluster records, vertex numbers, triangle words and vertex pool (`MeshClusterBuffers`, `packMeshClusterBuffers`); `VulkanMeshClusterCulling::prepare` makes the list ready before the frame's uniform block is written |
+| `mesh_cluster_draw.glsl` | one 32-thread workgroup a survivor: its place in the style's run (`meshClusterTaskIndex`; past the run's count, nothing), each vertex placed by `shadeVertex` (`triangle_vertex.glsl`, the vertex shaders' own body), triangles from the corner bytes. `triangle.mesh` (prepass, main), `triangle_motion.mesh` (main with motion vectors) |
+| Push constants | the style drawn, at `MESH_CLUSTER_PUSH_OFFSET` 112 (after the shadow and capture views), mesh stage only (`SceneLayout(meshShaders)`) |
+| Pipelines | `PipelineDescription::meshShader`; each prepass and main pipeline gets a mesh twin with the same fragment shader (`depthPrepass*MeshPipeline`, `mainMeshPipelines`); `drawPassDraws` uses them when `PassDraws::meshTasks` is set |
+
+- **Same depth bit for bit:** the main pass shades where depth equals the prepass's, so `gl_Position` is `invariant` in both, as in the vertex shaders.
+- **One vertex body:** `triangle_vertex.glsl`'s `shadeVertex` writes each output once through `VERTEX_OUT` macros (mesh shaders may not read their outputs back), so vertex and mesh shaders place and sway alike. A pooled mesh never deforms, so last frame's shape is its own.
+
 ## Tests
 
-`mesh_clusters_test` (every triangle once with its winding, limits, spheres hold their vertices, facing never culls a front, a fine sphere 47% culled from afar); `mesh_cluster_culling_test` (packing, a culled cluster hides nothing seen over random turned, uneven, mirrored and double-sided instances, draws not rigid keep everything, the passes' steps equal a plain walk with the room cut, the size bound, the comparison, the command, F4's line); GPU: `mesh_cluster_culling_gpu_test` (the test's choices, sphere and scale against the mirror).
+`mesh_clusters_test` (every triangle once with its winding, limits, spheres hold their vertices, facing never culls a front, a fine sphere 47% culled from afar); `mesh_cluster_culling_test` (packing, a culled cluster hides nothing seen over random turned, uneven, mirrored and double-sided instances, draws not rigid keep everything, the passes' steps equal a plain walk with the room cut, the size bound, the mesh shaders' workgroups reaching each survivor once and their buffer addresses, the comparison, the command, F4's line); GPU: `mesh_cluster_culling_gpu_test` (the test's choices, sphere and scale against the mirror).

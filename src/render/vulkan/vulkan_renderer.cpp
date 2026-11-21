@@ -313,7 +313,7 @@ void VulkanRenderer::createSamplers() {
 */
 void VulkanRenderer::createSceneLayout() {
     bindlessTextures = std::make_unique<BindlessTextures>(device, maxBindlessTextures);
-    sceneLayout = std::make_unique<SceneLayout>(device.getDevice(), bindlessTextures->getLayout());
+    sceneLayout = std::make_unique<SceneLayout>(device.getDevice(), bindlessTextures->getLayout(), device.supportsMeshShaders());
 }
 
 namespace {
@@ -386,6 +386,19 @@ namespace {
         return main;
     }
 
+    /*
+    * A camera pass pipeline's twin drawing mesh clusters (render/gpu/mesh_cluster_culling.h): the mesh shader of its
+    * vertex shader (triangle.mesh, or triangle_motion.mesh with the motion vectors), which makes its own vertices, so no
+    * vertex input; everything else the same.
+    */
+    PipelineDescription meshTwin(PipelineDescription description) {
+        const bool motion = std::string{description.vertexShader} == "assets/shaders/triangle_motion.vert.spv";
+        description.vertexShader = motion ? "assets/shaders/triangle_motion.mesh.spv" : "assets/shaders/triangle.mesh.spv";
+        description.meshShader = true;
+        description.vertices = VertexLayout{};
+        return description;
+    }
+
     std::size_t capturePipelineIndex(bool probes, bool cutOut, bool rays) {
         return (probes ? 1u : 0u) | (cutOut ? 2u : 0u) | (rays ? 4u : 0u);
     }
@@ -439,6 +452,11 @@ void VulkanRenderer::createPipelines() {
     prepassCutOut.fragmentShader = "assets/shaders/cut_out_prepass.frag.spv";
     prepassCutOut.colourWrites = true;
     depthPrepassCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepassCutOut);
+
+    if (device.supportsMeshShaders()) {
+        depthPrepassMeshPipeline = std::make_unique<VulkanPipeline>(device, layouts, meshTwin(prepass));
+        depthPrepassCutOutMeshPipeline = std::make_unique<VulkanPipeline>(device, layouts, meshTwin(prepassCutOut));
+    }
 
     PipelineDescription shadow;
     shadow.vertexShader = "assets/shaders/shadow.vert.spv";
@@ -563,8 +581,12 @@ void VulkanRenderer::createMainPipelines(bool glassRays, VkPipelineLayout layout
                         variant.fragmentConstants.push_back(1u); // MATERIAL_CUT_OUT_CONSTANT
                     }
 
-                    mainPipelines[mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays)] =
-                        std::make_unique<VulkanPipeline>(device, layouts, variant);
+                    const std::size_t index = mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays);
+                    mainPipelines[index] = std::make_unique<VulkanPipeline>(device, layouts, variant);
+
+                    if (device.supportsMeshShaders()) {
+                        mainMeshPipelines[index] = std::make_unique<VulkanPipeline>(device, layouts, meshTwin(variant));
+                    }
                 }
             }
         }
@@ -614,9 +636,14 @@ void VulkanRenderer::createRayTracing() {
     // The reflection probe's capture tracing the sun's shadow past its cascades, and the main pass tinting shadowed
     // lights through glass: the scene's sets and the ray tracing set, and the scene's push constants (each face's
     // view-projection; the main pass pushes none).
-    const VkPushConstantRange faceView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuCaptureView)};
+    // With mesh shaders, the main pass's mesh clusters push their style after it (render/vulkan/scene_layout.h).
+    const std::array<VkPushConstantRange, 2> faceView{
+        VkPushConstantRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuCaptureView)},
+        VkPushConstantRange{VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, MESH_CLUSTER_PUSH_BYTES},
+    };
     VkPipelineLayoutCreateInfo raysLayoutInfo = layoutInfo;
-    raysLayoutInfo.pPushConstantRanges = &faceView;
+    raysLayoutInfo.pushConstantRangeCount = device.supportsMeshShaders() ? 2u : 1u;
+    raysLayoutInfo.pPushConstantRanges = faceView.data();
     VkPipelineLayout createdRays = VK_NULL_HANDLE;
     vulkanCheck(vkCreatePipelineLayout(device.getDevice(), &raysLayoutInfo, nullptr, &createdRays), "Scene rays layout creation failed");
     sceneRaysLayout = OwnedHandle<VkPipelineLayout>{device.getDevice(), createdRays, vkDestroyPipelineLayout};
@@ -1603,6 +1630,21 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         description, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
         [this](MeshHandle mesh) { return mesh.index < meshes.size() && meshes[mesh.index] && meshes[mesh.index]->changedShape(); });
 
+    // The camera's mesh clusters, while switched on: culled after its draws, and drawn by mesh shaders where the GPU has
+    // them, whose buffers' addresses go in the frame's uniform block (written below), so the list is made ready first.
+    const bool cullsClusters = settings.meshClusters && cullFrame.drawOrder.pooled > 0;
+    const bool drawsClusters = cullsClusters && device.supportsMeshShaders();
+    frameMeshClusterBuffers = MeshClusterBuffers{};
+
+    if (cullsClusters) {
+        const VulkanMeshClusterCulling::ListAddresses list = meshClusterCulling->prepare(frame.frameIndex);
+
+        if (drawsClusters) {
+            frameMeshClusterBuffers = MeshClusterBuffers{list.items,  list.totals, meshPool->getClusterAddress(), meshPool->getClusterVertexAddress(),
+                                                         meshPool->getTriangleWordAddress(), meshPool->getVertexAddress()};
+        }
+    }
+
     const std::vector<std::size_t> glassSeen = visibleDraws(description.draws, cullFrame.glass, cameraFrustum);
     const std::vector<std::size_t> mirrorCandidates = visibleDraws(description.draws, cullFrame.flatFaced, cameraFrustum);
     stats.drawn = lastCameraCull.drawn + glassSeen.size();
@@ -1965,7 +2007,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // The camera's mesh clusters culled from its list, its view given the wind's sway (the camera culls without it), so
     // a draw swaying near the camera keeps every cluster.
-    if (settings.meshClusters && cullFrame.drawOrder.pooled > 0) {
+    if (cullsClusters) {
         beginGpuPass(frame, GpuPass::MeshCull);
         const VulkanCameraCulling::Outputs culled = cameraCulling->outputs(frame.frameIndex);
         VulkanMeshClusterCulling::Inputs inputs;
@@ -2001,7 +2043,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             cpuReferenceLists(description, cullFrame, cullViews, cameraFrustum, cameraLevels, captureViews, shadowDraws, settings.levelOfDetail);
     }
 
-    const PassDraws mainPass = cameraCulling->mainDraws(frame.frameIndex, cullFrame, 0);
+    PassDraws mainPass = cameraCulling->mainDraws(frame.frameIndex, cullFrame, 0);
+
+    if (drawsClusters) {
+        mainPass.meshTasks = meshClusterCulling->getTaskCommands(frame.frameIndex);
+    }
 
     for (std::size_t view = 0; view < captureViews.size(); ++view) {
         capturePasses[static_cast<std::size_t>(captureViews[view].capture)] = cameraCulling->mainDraws(frame.frameIndex, cullFrame, static_cast<std::uint32_t>(view + 1));
@@ -2495,6 +2541,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
     GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
                                            settings.clusterHeatmap, settings.shadows);
+    packMeshClusterBuffers(frameMeshClusterBuffers, frameData.meshClusterBuffers);
+
     if (!probes.empty()) {
         const GlobalIlluminationSettings& illumination = settings.globalIllumination;
         packProbeSampling(frameData, ProbeSampling{countCascadeProbes(probes), static_cast<int>(probes.size()), illumination.selfShadowBias,
@@ -3091,7 +3139,15 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const PassDraws& main
 
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     pushUnusedView(commands, sceneLayout->getPipelineLayout());
-    stats.drawCalls += drawPassDraws(commands, mainDraws, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
+    BatchPipelines pipelines{depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT};
+
+    if (depthPrepassMeshPipeline) {
+        pipelines.meshPlain = depthPrepassMeshPipeline->get();
+        pipelines.meshCutOut = depthPrepassCutOutMeshPipeline->get();
+        pipelines.meshLayout = sceneLayout->getPipelineLayout();
+    }
+
+    stats.drawCalls += drawPassDraws(commands, mainDraws, pipelines);
     stats.drawCalls += drawPlacedDraws(commands, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT}, 0u);
 
     vkCmdEndRendering(commands);
@@ -3151,7 +3207,16 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const PassDraws& mainDraw
         bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     }
     pushUnusedView(commands, pipeline.getLayout());
-    stats.drawCalls += drawPassDraws(commands, mainDraws, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT, true});
+    BatchPipelines pipelines{pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT, true};
+    const std::size_t cutOutIndex = mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, true, glassRays);
+
+    if (mainMeshPipelines[cutOutIndex]) {
+        pipelines.meshPlain = mainMeshPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, false, glassRays)]->get();
+        pipelines.meshCutOut = mainMeshPipelines[cutOutIndex]->get();
+        pipelines.meshLayout = pipeline.getLayout();
+    }
+
+    stats.drawCalls += drawPassDraws(commands, mainDraws, pipelines);
     stats.drawCalls += drawPlacedDraws(commands, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT, true}, 0u);
 
     /*
@@ -3497,19 +3562,35 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
     const CullDrawOrder& order = draws.groups->drawOrder;
     BatchState state{pipelines};
     std::size_t calls = 0;
+    const bool byClusters = draws.meshTasks != VK_NULL_HANDLE && pipelines.meshPlain != VK_NULL_HANDLE;
 
-    if (order.pooled > 0) {
+    if (order.pooled > 0 && !byClusters) {
         bindPools(commands, pipelines.previousShapes);
     }
+
+    // Each style's pooled groups: as the surviving mesh clusters, one mesh shader draw a style (its run of the list,
+    // which the mesh shader finds by the style pushed), or as the groups, one multi-draw a style.
+    BatchPipelines meshPipelines = pipelines;
+    meshPipelines.plain = pipelines.meshPlain;
+    meshPipelines.cutOut = pipelines.meshCutOut;
+    BatchState meshState{meshPipelines};
 
     for (std::size_t run = 0; run < cullStyles; ++run) {
         if (order.runCount[run] == 0) {
             continue;
         }
 
-        state.use(commands, (run & 2) != 0, (run & 1) != 0);
-        vkCmdDrawIndexedIndirectCount(commands, draws.packed, (VkDeviceSize{draws.commandFirst} + order.runFirst[run]) * sizeof(GpuDrawCommand), draws.counts,
-                                      (draws.countOffset + run) * sizeof(std::uint32_t), order.runCount[run], sizeof(GpuDrawCommand));
+        if (byClusters) {
+            meshState.use(commands, (run & 2) != 0, (run & 1) != 0);
+            const std::uint32_t style = static_cast<std::uint32_t>(run);
+            vkCmdPushConstants(commands, pipelines.meshLayout, VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, sizeof(style), &style);
+            vkCmdDrawMeshTasksIndirectEXT(commands, draws.meshTasks, run * 3 * sizeof(std::uint32_t), 1, 3 * sizeof(std::uint32_t));
+        } else {
+            state.use(commands, (run & 2) != 0, (run & 1) != 0);
+            vkCmdDrawIndexedIndirectCount(commands, draws.packed, (VkDeviceSize{draws.commandFirst} + order.runFirst[run]) * sizeof(GpuDrawCommand),
+                                          draws.counts, (draws.countOffset + run) * sizeof(std::uint32_t), order.runCount[run], sizeof(GpuDrawCommand));
+        }
+
         ++calls;
     }
 

@@ -49,8 +49,21 @@ public:
         std::uint64_t pairBound = 0;
     };
 
-    // Record the passes; readItems: copy the list back too (cluster-compare).
+    // Where the frame's list and totals will be, for the mesh shaders that draw them (frame_data.glsl): made before the
+    // frame's scene is written, so cull keeps them where they are.
+    struct ListAddresses {
+        VkDeviceAddress items = 0;
+        VkDeviceAddress totals = 0;
+    };
+
+    ListAddresses prepare(std::uint32_t frameIndex);
+
+    // Record the passes (after prepare); readItems: copy the list back too (cluster-compare).
     void cull(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, const Inputs& inputs, bool readItems);
+
+    // The frame's mesh shader draw for each style (VkDrawMeshTasksIndirectCommandEXT, MESH_CLUSTER_STYLES of them),
+    // written by the scan pass and ready for the indirect draws.
+    VkBuffer getTaskCommands(std::uint32_t frameIndex) const;
 
     // What a finished frame wrote: its totals (MESH_CLUSTER_TOTAL_*), and, when read, its pairs (within the room).
     struct Collected {
@@ -79,6 +92,7 @@ private:
         VulkanBuffer blockFirst;
         VulkanBuffer totals;
         VulkanBuffer items;
+        VulkanBuffer taskCommands;
 
         // Read-back memory: the totals, then the list when asked.
         VulkanBuffer readback;

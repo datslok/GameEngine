@@ -91,6 +91,20 @@ bool meshClusterRigid(InstanceData instance, uint entry, CullRecord record, Came
 * Whether the view draws a cluster of a drawn instance (meshClusterKept): every cluster of a draw that is not rigid;
 * else its sphere in the frustum, and, single-sided and not mirrored, not facing away from the eye.
 */
+/*
+* A style's survivors as mesh shader workgroups (meshClusterTaskGroups): a row of up to MESH_CLUSTER_TASK_WIDTH, then as
+* many rows as it takes; none for none.
+*/
+uvec3 meshClusterTaskGroups(uint count) {
+    return count == 0u ? uvec3(0u, 1u, 1u) : uvec3(min(count, MESH_CLUSTER_TASK_WIDTH), (count + MESH_CLUSTER_TASK_WIDTH - 1u) / MESH_CLUSTER_TASK_WIDTH, 1u);
+}
+
+// A workgroup's survivor within its style's run (meshClusterTaskIndex): rows of MESH_CLUSTER_TASK_WIDTH; past the run's
+// count in the last row, none.
+uint meshClusterTaskIndex(uvec3 group) {
+    return group.y * MESH_CLUSTER_TASK_WIDTH + group.x;
+}
+
 bool meshClusterKept(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view) {
     if (!meshClusterRigid(instance, entry, record, view)) {
         return true;

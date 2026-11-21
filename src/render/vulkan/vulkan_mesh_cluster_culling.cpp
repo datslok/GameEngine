@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <stdexcept>
 
 namespace {
     constexpr VkBufferUsageFlags storage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
@@ -39,7 +40,7 @@ VulkanMeshClusterCulling::VulkanMeshClusterCulling(const VulkanDevice& device, s
 {
     countPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/mesh_cluster_count.comp.spv", 12));
     testPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/mesh_cluster_test.comp.spv", 12));
-    scanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/mesh_cluster_scan.comp.spv", 14));
+    scanPass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/mesh_cluster_scan.comp.spv", 15));
     writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/mesh_cluster_write.comp.spv", 14));
     setFramesInFlight(framesInFlight);
 }
@@ -51,6 +52,26 @@ void VulkanMeshClusterCulling::setFramesInFlight(std::uint32_t count) {
 
 std::uint32_t VulkanMeshClusterCulling::getRoom() const {
     return room;
+}
+
+VkBuffer VulkanMeshClusterCulling::getTaskCommands(std::uint32_t frameIndex) const {
+    return frames.at(frameIndex).taskCommands.get();
+}
+
+/*
+* The list sized by the room as it stands (the room grows only between frames, in collect), the totals and the task
+* commands; the list and totals reached by address from the mesh shaders.
+*/
+VulkanMeshClusterCulling::ListAddresses VulkanMeshClusterCulling::prepare(std::uint32_t frameIndex) {
+    PerFrame& frame = frames.at(frameIndex);
+    const VmaAllocator allocator = device.getAllocator();
+    const VkBufferUsageFlags readable = storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    frame.room = room;
+    ensureBuffer(allocator, frame.items, VkDeviceSize{frame.room} * sizeof(GpuMeshClusterItem), readable, BufferMemory::Gpu);
+    ensureBuffer(allocator, frame.totals, MESH_CLUSTER_TOTAL_WORDS * sizeof(std::uint32_t), readable, BufferMemory::Gpu);
+    ensureBuffer(allocator, frame.taskCommands, MESH_CLUSTER_STYLES * 3 * sizeof(std::uint32_t), storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+                 BufferMemory::Gpu);
+    return ListAddresses{frame.items.getDeviceAddress(), frame.totals.getDeviceAddress()};
 }
 
 /*
@@ -65,7 +86,10 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     const VmaAllocator allocator = device.getAllocator();
     const std::uint64_t blocks = (inputs.pairBound + meshClusterGroupSize - 1) / meshClusterGroupSize;
     const std::uint32_t blockRoom = static_cast<std::uint32_t>(std::min<std::uint64_t>(blocks, 0xFFFFFFFEu));
-    frame.room = room;
+
+    if (frame.items.get() == VK_NULL_HANDLE) {
+        throw std::logic_error("Mesh cluster culling needs prepare before cull, each frame");
+    }
 
     ensureBuffer(allocator, frame.workEnds, VkDeviceSize{std::max(inputs.pooled, 1u)} * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.work, MESH_CLUSTER_WORK_WORDS * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
@@ -73,9 +97,7 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
                  storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.blockCounts, VkDeviceSize{std::max(blockRoom, 1u)} * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.blockFirst, (VkDeviceSize{blockRoom} + 1) * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(allocator, frame.totals, MESH_CLUSTER_TOTAL_WORDS * sizeof(std::uint32_t), storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
     const VkDeviceSize itemBytes = VkDeviceSize{frame.room} * sizeof(GpuMeshClusterItem);
-    ensureBuffer(allocator, frame.items, itemBytes, storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
     const VkDeviceSize totalBytes = MESH_CLUSTER_TOTAL_WORDS * sizeof(std::uint32_t);
     ensureBuffer(allocator, frame.readback, totalBytes + (readItems ? itemBytes : 0), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
 
@@ -129,7 +151,7 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
 
     // 3. The blocks' first places, the totals and runs. The totals' last copy (this frame in flight's previous frame) is
     // long finished.
-    bindComputeSet(commands, device.getDevice(), descriptors, *scanPass, bindings({frame.blockCounts.get(), frame.blockFirst.get(), frame.totals.get()}));
+    bindComputeSet(commands, device.getDevice(), descriptors, *scanPass, bindings({frame.blockCounts.get(), frame.blockFirst.get(), frame.totals.get(), frame.taskCommands.get()}));
     vkCmdDispatch(commands, 1, 1, 1);
     bufferBarrier(commands, frame.blockFirst.get(), computeWrite, computeRead);
     bufferBarrier(commands, frame.totals.get(), computeWrite, computeReadWrite);
@@ -138,14 +160,25 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     bindComputeSet(commands, device.getDevice(), descriptors, *writePass, bindings({frame.blockFirst.get(), frame.items.get(), frame.totals.get()}));
     vkCmdDispatchIndirect(commands, frame.dispatch.get(), 0);
 
+    // The list and totals for the mesh shaders that draw them (while the GPU has them) and the copies back; the task
+    // commands, finished by the scan, for the indirect draws.
+    BufferUse read{VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT};
+
+    if (device.supportsMeshShaders()) {
+        read.stages |= VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT;
+        read.access |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+    }
+
+    bufferBarrier(commands, frame.totals.get(), computeWrite, read);
+    bufferBarrier(commands, frame.items.get(), computeWrite, read);
+    bufferBarrier(commands, frame.taskCommands.get(), computeWrite, indirectRead);
+
     // Read back: the totals, and the list when asked.
-    bufferBarrier(commands, frame.totals.get(), computeWrite, transferRead);
     const VkBufferCopy totalCopy{0, 0, totalBytes};
     vkCmdCopyBuffer(commands, frame.totals.get(), frame.readback.get(), 1, &totalCopy);
     frame.itemsPending = readItems;
 
     if (readItems) {
-        bufferBarrier(commands, frame.items.get(), computeWrite, transferRead);
         const VkBufferCopy itemCopy{0, totalBytes, itemBytes};
         vkCmdCopyBuffer(commands, frame.items.get(), frame.readback.get(), 1, &itemCopy);
     }
@@ -170,7 +203,7 @@ std::optional<VulkanMeshClusterCulling::Collected> VulkanMeshClusterCulling::col
     const auto* words = static_cast<const std::uint32_t*>(frame.readback.getMapped());
     Collected collected;
     std::memcpy(collected.totals.data(), words, MESH_CLUSTER_TOTAL_WORDS * sizeof(std::uint32_t));
-    room = std::max(room, std::bit_ceil(collected.totals[MESH_CLUSTER_TOTAL_KEPT]));
+    room = std::min(std::max(room, std::bit_ceil(collected.totals[MESH_CLUSTER_TOTAL_KEPT])), largestMeshClusterRoom);
 
     if (frame.itemsPending) {
         frame.itemsPending = false;

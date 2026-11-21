@@ -74,7 +74,7 @@ GPU_TEST_OBJECTS := $(call objects_for,$(GPU_TEST_SOURCES))
 ALL_OBJECTS := $(ENGINE_OBJECTS) $(MAIN_OBJECT) $(TEST_OBJECTS) $(GPU_TEST_OBJECTS)
 
 # Find shader source files and their compiled output names.
-SHADER_SOURCES := $(wildcard assets/shaders/*.vert assets/shaders/*.frag assets/shaders/*.comp)
+SHADER_SOURCES := $(wildcard assets/shaders/*.vert assets/shaders/*.frag assets/shaders/*.comp assets/shaders/*.mesh)
 SHADER_BINARIES := $(addsuffix .spv,$(SHADER_SOURCES))
 # The GPU tests' compute shaders, which include the real shader libraries from assets/shaders.
 GPU_TEST_SHADER_SOURCES := $(wildcard tests/gpu/shaders/*.comp)

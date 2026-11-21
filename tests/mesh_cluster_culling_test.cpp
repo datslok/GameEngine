@@ -399,6 +399,39 @@ namespace {
         assert(second.ok && asked == 2 && second.text.find("agrees") != std::string::npos);
     }
 
+    /*
+    * A run's mesh shader workgroups reach each of its survivors exactly once (those past the count in the last row draw
+    * nothing), within one row's width and the most rows any GPU takes; none for none.
+    */
+    void testTaskGroups() {
+        for (const std::uint32_t count : {0u, 1u, 31u, MESH_CLUSTER_TASK_WIDTH - 1u, MESH_CLUSTER_TASK_WIDTH, MESH_CLUSTER_TASK_WIDTH + 1u,
+                                          5u * MESH_CLUSTER_TASK_WIDTH + 3u, largestMeshClusterRoom}) {
+            const std::array<std::uint32_t, 3> groups = meshClusterTaskGroups(count);
+            assert(groups[0] <= MESH_CLUSTER_TASK_WIDTH && groups[2] == 1);
+            std::uint64_t reached = 0;
+
+            for (std::uint32_t y = 0; y < groups[1]; ++y) {
+                for (std::uint32_t x = 0; x < groups[0]; ++x) {
+                    const std::uint32_t index = meshClusterTaskIndex(x, y);
+                    assert(index == static_cast<std::uint64_t>(y) * groups[0] + x || groups[1] == 1);
+                    reached += index < count ? 1u : 0u;
+                }
+            }
+
+            assert(reached == count);
+            assert(static_cast<std::uint64_t>(groups[0]) * groups[1] < static_cast<std::uint64_t>(count) + MESH_CLUSTER_TASK_WIDTH);
+        }
+    }
+
+    // Each address goes in as its low then high words, in the uniform block's order.
+    void testBufferAddresses() {
+        const MeshClusterBuffers buffers{0x1'0000'0002ull, 3, 0xFFFF'FFFF'FFFF'FFFFull, 0, 0x7'8000'0000ull, 9};
+        std::uint32_t words[12] = {};
+        packMeshClusterBuffers(buffers, words);
+        const std::uint32_t expected[12] = {2, 1, 3, 0, 0xFFFFFFFFu, 0xFFFFFFFFu, 0, 0, 0x80000000u, 7, 9, 0};
+        assert(std::equal(std::begin(words), std::end(words), std::begin(expected)));
+    }
+
     // F4's levels line shows the clusters kept of those tested and their triangles, only while they are culled.
     void testReadout() {
         RenderStats stats;
@@ -412,7 +445,7 @@ namespace {
 
 /*
 * Mesh clusters culled a view (render/gpu/mesh_cluster_culling.h): packing, the mirrored test hiding nothing seen, the
-* passes' steps equal to a plain walk, cluster-compare and its command, F4's line.
+* passes' steps equal to a plain walk, the mesh shaders' workgroups and addresses, cluster-compare and its command, F4's line.
 */
 void testMeshClusterCulling() {
     testPackingKeepsEveryTriangle();
@@ -421,5 +454,7 @@ void testMeshClusterCulling() {
     testThePassesEqualAPlainWalk();
     testComparison();
     testCompareCommand();
+    testTaskGroups();
+    testBufferAddresses();
     testReadout();
 }

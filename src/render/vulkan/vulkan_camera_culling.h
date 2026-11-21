@@ -29,6 +29,10 @@ struct PassDraws {
     VkBuffer counts = VK_NULL_HANDLE;
     std::uint32_t countOffset = 0;
     std::uint32_t commandFirst = 0;
+
+    // The camera's mesh clusters' draws (render/vulkan/vulkan_mesh_cluster_culling.h, a VkDrawMeshTasksIndirectCommandEXT a
+    // style), drawn by mesh shaders in place of the pooled groups' multi-draws; none to draw the groups.
+    VkBuffer meshTasks = VK_NULL_HANDLE;
 };
 
 /*

@@ -1,0 +1,9 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_mesh_shader : require
+// The cluster records, list and vertex pool by address (frame_data.glsl's meshClusterBuffers).
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+// The depth prepass's and main pass's mesh shader for the camera's mesh clusters (mesh_cluster_draw.glsl).
+
+#include "mesh_cluster_draw.glsl"

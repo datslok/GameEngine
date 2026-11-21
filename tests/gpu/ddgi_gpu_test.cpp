@@ -455,7 +455,7 @@ namespace {
             layouts(device.getDevice()),
             sampler(device.createSampler(clampedLinearSampler())),
             textures(device, 16),
-            sceneLayout(device.getDevice(), textures.getLayout()),
+            sceneLayout(device.getDevice(), textures.getLayout(), device.supportsMeshShaders()),
             buffers(device.getAllocator()),
             instances(device.getAllocator(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
             materials(device.getAllocator(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),

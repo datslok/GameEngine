@@ -95,6 +95,12 @@ struct BatchPipelines {
 
     // The pipelines also read each mesh's last shape, at vertex binding 1 (the main pass's motion vectors).
     bool previousShapes = false;
+
+    // Their mesh shader twins (the camera's mesh clusters), when the pass draws its pooled groups by clusters, and the
+    // layout they push the style drawn with.
+    VkPipeline meshPlain = VK_NULL_HANDLE;
+    VkPipeline meshCutOut = VK_NULL_HANDLE;
+    VkPipelineLayout meshLayout = VK_NULL_HANDLE;
 };
 
 /*
@@ -312,6 +318,12 @@ private:
     std::array<std::unique_ptr<VulkanPipeline>, 32> mainPipelines;
     std::unique_ptr<VulkanPipeline> depthPrepassPipeline;
     std::unique_ptr<VulkanPipeline> depthPrepassCutOutPipeline;
+
+    // Their twins drawing the camera's mesh clusters by mesh shaders (triangle.mesh, triangle_motion.mesh), the same
+    // index each, made only when the GPU has mesh shaders (render/gpu/mesh_cluster_culling.h).
+    std::array<std::unique_ptr<VulkanPipeline>, 32> mainMeshPipelines;
+    std::unique_ptr<VulkanPipeline> depthPrepassMeshPipeline;
+    std::unique_ptr<VulkanPipeline> depthPrepassCutOutMeshPipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
     std::unique_ptr<VulkanPipeline> shadowCutOutPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;
@@ -540,6 +552,9 @@ private:
     bool clusterCompareAsked = false;
     std::string clusterCompareReport;
     std::vector<GpuInstance> clusterCompareInstances;
+
+    // The mesh shaders' buffers by address this frame (all zero while they draw nothing), for the frame's uniform block.
+    MeshClusterBuffers frameMeshClusterBuffers;
 
     // The eye's adaptation (render/gpu/eye_adaptation.h): its passes and the last reading, for the readout. It snaps
     // to its target when it starts afresh (the first frame, or switched on again) and on every frame a capture draws.

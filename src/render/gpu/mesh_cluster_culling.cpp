@@ -353,3 +353,24 @@ std::string describeMeshClusterComparison(const MeshClusterComparison& compariso
            std::to_string(comparison.extra) + " extra (" + std::to_string(comparison.nearAnEdge) + " near an edge). " +
            (agree ? "The GPU's list agrees with the CPU's." : "The GPU's list DIFFERS from the CPU's.");
 }
+
+std::array<std::uint32_t, 3> meshClusterTaskGroups(std::uint32_t count) {
+    if (count == 0) {
+        return {0, 1, 1};
+    }
+
+    return {std::min(count, MESH_CLUSTER_TASK_WIDTH), (count + MESH_CLUSTER_TASK_WIDTH - 1) / MESH_CLUSTER_TASK_WIDTH, 1};
+}
+
+std::uint32_t meshClusterTaskIndex(std::uint32_t x, std::uint32_t y) {
+    return y * MESH_CLUSTER_TASK_WIDTH + x;
+}
+
+void packMeshClusterBuffers(const MeshClusterBuffers& buffers, std::uint32_t words[12]) {
+    const std::uint64_t addresses[6] = {buffers.items, buffers.totals, buffers.clusters, buffers.clusterVertices, buffers.triangleWords, buffers.vertices};
+
+    for (int buffer = 0; buffer < 6; ++buffer) {
+        words[2 * buffer] = static_cast<std::uint32_t>(addresses[buffer] & 0xFFFFFFFFu);
+        words[2 * buffer + 1] = static_cast<std::uint32_t>(addresses[buffer] >> 32u);
+    }
+}
