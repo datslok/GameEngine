@@ -1,3 +1,3 @@
-meshoptimizer v0.22 (commit 4affad0, Oct 24 2024), https://github.com/zeux/meshoptimizer
-src/*.cpp, src/meshoptimizer.h and the licence (MIT), unmodified. Used to simplify scanned meshes (the forest's understorey plants).
-To update: copy src/ from a newer tag and note it here.
+meshoptimizer v1.3 (tag object 9e1f07b, Sep 25 2026), https://github.com/zeux/meshoptimizer
+src/*.cpp, src/meshoptimizer.h, demo/clusterlod.h and the licence (MIT), unmodified. Used to simplify scanned meshes (the forest's understorey plants), cut meshes into clusters, and (clusterlod.h) build cluster levels.
+To update: replace the .cpp files with src/ from a newer tag (files come and go between versions), copy demo/clusterlod.h, and note it here.
