@@ -24,7 +24,7 @@ Covers: `makefile`, `tools/package_demo.py`
 
 ## Shaders
 
-- `glslc --target-env=vulkan1.3 -Isrc`: `.vert`, `.frag`, `.comp` in `assets/shaders/` → `.spv`.
+- `glslc --target-env=vulkan1.3 -Isrc`: `.vert`, `.frag`, `.comp`, `.mesh` in `assets/shaders/` → `.spv`.
 - glslc's `-MD` files in `build/obj/shaders/` rebuild a shader when an included file changes.
 - Shaders include the macro-only `*_shared.h` headers they share with C++ (rule: `.claude/rules/shader-mirror.md`).
 

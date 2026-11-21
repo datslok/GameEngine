@@ -26,7 +26,7 @@ std430, mirrored byte for byte in the shaders, each size checked by a `static_as
 
 ## Uniform block and push constants
 
-- **`GpuFrameData`** (432 bytes, std140, set 1 binding 0, vertex, fragment and compute): the camera-relative view-projection and `cameraOrigin`, ambient, light counts, the atlas texel size, the cluster grid (as `clusters.glsl`'s `ClusterGrid`), then option vectors each owned by a pass (probes, textures, mirrored light, AO, sky visibility, contact shadows, materials, levels). Made by `makeFrameData`; the renderer fills the options in `writeScene`. Stays well under the uniform limit (`src/render/CLAUDE.md`).
+- **`GpuFrameData`** (560 bytes, std140, set 1 binding 0, vertex, mesh, fragment and compute): the camera-relative view-projection and `cameraOrigin`, ambient, light counts, the atlas texel size, the cluster grid (as `clusters.glsl`'s `ClusterGrid`), then option vectors each owned by a pass (probes, textures, mirrored light, AO, sky visibility, contact shadows, materials, levels), the mesh clusters' buffer addresses (`mesh-clusters.md`). Made by `makeFrameData`; the renderer fills the options in `writeScene`. Stays well under the uniform limit (`src/render/CLAUDE.md`).
 - **`GpuShadowView`** (112 bytes, vertex push constant): a tile's world view-projection, clip plane, light place (position w 1, sun direction w 0), options (x: casters sway).
 - **`GpuCaptureView`** (96 bytes, `triangle.vert`'s push constant): a reflection probe face's or a mirror's camera-relative view-projection, clip plane and eye (w: thinning error a metre away). Passes that need none push an unused view.
 
