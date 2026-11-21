@@ -68,6 +68,8 @@ void main() {
     MeshVertexFloats vertices = MeshVertexFloats(meshClusterBuffers[2].zw);
 
     // Each vertex placed as the vertex shaders place it; a pooled mesh never deforms, so last frame's shape is its own.
+    // The pair's place stands for the draw's first instance too, so a placed plant's (from PLACED_INSTANCE_BASE) is
+    // built from its plant and part (drawnObject), as an indexed draw of it would be.
     for (uint slot = gl_LocalInvocationIndex; slot < vertexCount; slot += MESH_CLUSTER_MESH_THREADS) {
         uint number = vertexNumbers.words[cluster.firstVertex + slot];
         uint at = number * 12u;
@@ -75,7 +77,7 @@ void main() {
         vec3 normal = vec3(vertices.values[at + 3u], vertices.values[at + 4u], vertices.values[at + 5u]);
         vec2 uv = vec2(vertices.values[at + 6u], vertices.values[at + 7u]);
         vec4 tangent = vec4(vertices.values[at + 8u], vertices.values[at + 9u], vertices.values[at + 10u], vertices.values[at + 11u]);
-        shadeVertex(slot, position, normal, uv, tangent, position, item.entry, 0u, int(number - cluster.meshFirstVertex));
+        shadeVertex(slot, position, normal, uv, tangent, position, item.entry, item.entry, int(number - cluster.meshFirstVertex));
     }
 
     // Each triangle's three corner bytes, four to a word.

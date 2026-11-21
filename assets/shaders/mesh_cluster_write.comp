@@ -9,22 +9,22 @@
 * Dispatched as the test pass is. Mirrored by cullMeshClustersOnCpu.
 */
 // After its 15 storage buffers.
-#define MESH_CLUSTER_PYRAMID_BINDING 15
+#define MESH_CLUSTER_PYRAMID_BINDING (MESH_CLUSTER_PASS_BINDINGS + 3)
 #include "mesh_cluster_pass.glsl"
 
 layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
 
-layout(std430, set = 0, binding = 12) readonly buffer BlockFirst {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS) readonly buffer BlockFirst {
     uint blockFirst[];
 };
 
 // The survivors, setup.z at most.
-layout(std430, set = 0, binding = 13) writeonly buffer Items {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 1) writeonly buffer Items {
     MeshClusterItem items[];
 };
 
 // MESH_CLUSTER_TOTAL_WORDS: the triangles added here.
-layout(std430, set = 0, binding = 14) buffer Totals {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 2) buffer Totals {
     uint totals[];
 };
 

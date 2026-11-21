@@ -6,13 +6,13 @@
 * (meshClusterPairKept), and each block's survivors counted. Dispatched indirectly, a workgroup a block of the work.
 */
 // After its 13 storage buffers.
-#define MESH_CLUSTER_PYRAMID_BINDING 13
+#define MESH_CLUSTER_PYRAMID_BINDING (MESH_CLUSTER_PASS_BINDINGS + 1)
 #include "mesh_cluster_pass.glsl"
 
 layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
 
 // Each block's survivors.
-layout(std430, set = 0, binding = 12) writeonly buffer BlockCounts {
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS) writeonly buffer BlockCounts {
     uint blockCounts[];
 };
 

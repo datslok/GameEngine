@@ -45,22 +45,38 @@ public:
     void ensureSize(RenderSize render);
 
     /*
-    * What the passes read: the camera's view as its culling placed it (placeCullView), with the wind's sway; the camera
-    * culling's drawing order, groups, unpacked commands and records (render/vulkan/vulkan_camera_culling.h); the frame's
-    * draw list and instances; the cluster pool. pooled: the places in the drawing order's pooled runs; pairBound:
-    * meshClusterPairBound. occlusion: two lists; viewProjection: this frame's camera-relative view-projection as the
-    * depth is drawn (jittered), from origin.
+    * The camera's placed plants (render/vulkan/vulkan_placed_drawing.h), each buffer the passes' own record when there
+    * are none: the commands with the camera's first, the placed groups, every view's entries, the parts' instances and
+    * records, the slots' plants.
+    */
+    struct PlacedInputs {
+        VkBuffer commands = VK_NULL_HANDLE;
+        VkBuffer groups = VK_NULL_HANDLE;
+        VkBuffer entries = VK_NULL_HANDLE;
+        VkDescriptorBufferInfo partInstances{};
+        VkBuffer parts = VK_NULL_HANDLE;
+        VkBuffer plants = VK_NULL_HANDLE;
+    };
+
+    /*
+    * What the passes read: the camera's view as its culling placed it (placeCullView), with the wind's sway, its runs
+    * the order's; the order (meshClusterDrawOrder, uploaded here) over drawGroups of the camera culling's groups, whose
+    * groups, unpacked commands and records are given (render/vulkan/vulkan_camera_culling.h); the frame's draw list and
+    * instances; the cluster pool; the placed plants. pairBound: meshClusterPairBound and placedMeshClusterPairBound.
+    * occlusion: two lists; viewProjection: this frame's camera-relative view-projection as the depth is drawn
+    * (jittered), from origin.
     */
     struct Inputs {
         GpuCameraCull view{};
-        VkBuffer order = VK_NULL_HANDLE;
+        std::vector<std::uint32_t> order;
+        std::uint32_t drawGroups = 0;
         VkBuffer groups = VK_NULL_HANDLE;
         VkBuffer commands = VK_NULL_HANDLE;
         VkBuffer records = VK_NULL_HANDLE;
         VkBuffer drawList = VK_NULL_HANDLE;
         VkDescriptorBufferInfo instances{};
         VkBuffer clusters = VK_NULL_HANDLE;
-        std::uint32_t pooled = 0;
+        PlacedInputs placed;
         std::uint64_t pairBound = 0;
         bool occlusion = false;
         Mat4 viewProjection;
@@ -111,10 +127,13 @@ private:
         // What cull was given, for the late list's passes.
         Inputs inputs;
 
-        // Upload memory: the view, setup (places, room for block sums, room for pairs) and the occlusion record.
+        // Upload memory: the view, the order, setup (places, room for block sums, room for pairs, draw groups), the
+        // occlusion record, and one unused record for each placed buffer when there are no placed plants.
         VulkanBuffer view;
+        VulkanBuffer order;
         VulkanBuffer setup;
         VulkanBuffer occlusionRecord;
+        VulkanBuffer noPlaced;
 
         // GPU memory: the passes' working buffers, the dispatch, both lists' totals, items and task commands.
         VulkanBuffer workEnds;

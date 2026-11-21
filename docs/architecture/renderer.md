@@ -58,12 +58,12 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 1 | Cloth [CLOTH] | GPU cloths ticked | `cloth-gpu.md` |
 | 2 | Debug UI [UI] | F5 open: the UI into its own overlay image | `settings-and-commands.md` |
 | 3 | Culling [CULL] | always: the camera's, probe faces', mirror's and drawn shadow tiles' lists and commands | `gpu-driven.md` |
-| 3b | Mesh clusters [MESHCULL] | Passes "Mesh clusters" on: the camera's clusters culled from its list | `mesh-clusters.md` |
+| 3b | Planting [PLANTING], placed [PLACED] | cells made, or read back (`placement-compare`); every view's placed plants' lists while a field's looks draw some | `planting.md` |
+| 3c | Mesh clusters [MESHCULL] | Passes "Mesh clusters" on: the camera's clusters, its list's and placed plants' | `mesh-clusters.md` |
 | 4 | Ray scene [TLAS] | anything traces rays (probes, ray debug, probe capture, reflections, mirrored lights, glass shadows) | `ray-tracing.md` |
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
 | 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
 | 7 | Wind [WIND] | the wind field runs | wind (`render/gpu/wind`) |
-| 8 | Planting [PLANTING], placed [PLACED] | planting cells made, or read back (`placement-compare`); every view's placed plants' lists while a field's looks draw some (camera, probe faces, shadow tiles) | `planting.md` |
 | 9 | Clusters [CLUSTERS] | `clusteredShading` or `clusterHeatmap` | `clustered-shading.md` |
 | 10 | Shadows [SHADOW] | any tile redrawn; coloured shadow maps after | `lights-and-shadow-atlas.md`, `glass.md` |
 | 11 | Fog [FOG] | frame has a `Fog` layer and fog is on | `fog.md` |

@@ -9,6 +9,8 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/instance_shared.h"
 #include "render/gpu/mesh_cluster_culling.h"
+#include "render/gpu/placed_drawing.h"
+#include "render/gpu/planting_records.h"
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/taa.h"
 #include "render/render_stats.h"
@@ -523,6 +525,229 @@ namespace {
         }
     }
 
+    // The scene's draws as a pooled drawing order (its runs the view's, every place pooled).
+    CullDrawOrder passOrder(const PassScene& scene) {
+        CullDrawOrder order;
+        order.order = scene.drawOrder;
+
+        for (std::uint32_t style = 0; style < MESH_CLUSTER_STYLES; ++style) {
+            order.runFirst[style] = scene.view.runFirst[style];
+            order.runCount[style] = scene.view.runCount[style];
+        }
+
+        order.pooled = static_cast<std::uint32_t>(scene.drawOrder.size());
+        return order;
+    }
+
+    // The view drawing that order's runs.
+    GpuCameraCull viewOfOrder(GpuCameraCull view, const CullDrawOrder& order) {
+        for (std::uint32_t style = 0; style < MESH_CLUSTER_STYLES; ++style) {
+            view.runFirst[style] = order.runFirst[style];
+            view.runCount[style] = order.runCount[style];
+        }
+
+        return view;
+    }
+
+    /*
+    * The pass scene's draws as placed plants (render/gpu/placed_drawing.h): each draw a plant's part, a placed group a
+    * draw group with the same clusters and commands from placedInstanceBase. entities: the same scene with each
+    * instance and record placed from its plant and part as the vertex shaders and passes do, so both must cull alike.
+    */
+    struct PlacedPassScene {
+        PassScene entities;
+        std::vector<GpuDrawCommand> commands;
+        std::vector<GpuPlacedGroup> groups;
+        std::vector<GpuPlacedEntry> entries;
+        std::vector<GpuInstance> partInstances;
+        std::vector<GpuPlacedPart> parts;
+        std::vector<GpuPlacedPlant> plants;
+        CullDrawOrder order;
+
+        MeshClusterPlacedTables tables() const {
+            return MeshClusterPlacedTables{commands, groups, entries, partInstances, parts, plants};
+        }
+    };
+
+    PlacedPassScene placedPassScene(std::mt19937& random) {
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        PlacedPassScene placed;
+        placed.entities = passScene(random);
+        PassScene& scene = placed.entities;
+        placed.order = passOrder(scene);
+
+        for (std::size_t group = 0; group < scene.groups.size(); ++group) {
+            GpuPlacedGroup placedGroup;
+            placedGroup.firstCluster = scene.groups[group].firstCluster;
+            placedGroup.clusterCount = scene.groups[group].clusterCount;
+            placed.groups.push_back(placedGroup);
+            GpuDrawCommand command = scene.commands[group];
+            command.firstInstance += placedInstanceBase;
+            placed.commands.push_back(command);
+        }
+
+        for (std::size_t draw = 0; draw < scene.instances.size(); ++draw) {
+            const GpuPlacedPlant plant{{5.0f + unit(random) * 40.0f, unit(random) * 2.0f, (unit(random) - 0.5f) * 40.0f}, 0.6f + unit(random) * 0.8f,
+                                       unit(random) * 6.0f, 0.5f, 0, 0.0f};
+            const Vec3 offset{(unit(random) - 0.5f) * 2.0f, unit(random) * 2.0f, (unit(random) - 0.5f) * 2.0f};
+            GpuInstance part = placedInstance(Mat4::translation(offset.x, offset.y, offset.z) * Mat4::rotationY(unit(random) * 6.0f));
+            GpuPlacedPart placedPart;
+            placedPart.record = stillRecord(offset, 2.0f);
+            placedPart.record.flags = scene.records[draw].flags;
+            placed.partInstances.push_back(part);
+            placed.parts.push_back(placedPart);
+            placed.plants.push_back(plant);
+            placed.entries.push_back(
+                GpuPlacedEntry{static_cast<std::uint32_t>(draw) | (scene.drawList[draw] & ~DRAW_LIST_INSTANCE_MASK), static_cast<std::uint32_t>(draw)});
+            scene.instances[draw] = ::placedInstance(part, plant);
+            scene.records[draw] = placedCullRecord(placedPart.record, plant);
+        }
+
+        return placed;
+    }
+
+    // A list's items of one style.
+    std::vector<GpuMeshClusterItem> styleItems(const MeshClusterList& list, std::uint32_t style) {
+        const auto first = list.items.begin() + list.runFirst[style];
+        return std::vector<GpuMeshClusterItem>(first, first + list.runCount[style]);
+    }
+
+    /*
+    * The drawing order the passes walk: each style's run of the draws' pooled groups, then its run of the placed groups
+    * (numbered after the draws' groups); the draws' unpooled groups left out.
+    */
+    void testTheDrawingOrderTakesThePlacedGroups() {
+        CullDrawOrder draws;
+        draws.order = {4, 1, 0, 3, 2};
+        draws.runFirst = {0, 2, 2, 3};
+        draws.runCount = {2, 0, 1, 0};
+        draws.pooled = 3;
+        CullDrawOrder placed;
+        placed.order = {2, 0, 3, 1};
+        placed.runFirst = {0, 1, 2, 2};
+        placed.runCount = {1, 1, 0, 2};
+        placed.pooled = 4;
+        const CullDrawOrder both = meshClusterDrawOrder(draws, 5, placed);
+        assert((both.order == std::vector<std::uint32_t>{4, 1, 7, 5, 0, 8, 6}));
+        assert((both.runFirst == std::array<std::uint32_t, cullStyles>{0, 3, 4, 5}));
+        assert((both.runCount == std::array<std::uint32_t, cullStyles>{3, 1, 1, 2}));
+        assert(both.pooled == 7);
+
+        // Without placed plants, the draws' pooled runs alone.
+        const CullDrawOrder alone = meshClusterDrawOrder(draws, 5, CullDrawOrder{});
+        assert((alone.order == std::vector<std::uint32_t>{4, 1, 0}));
+        assert((alone.runCount == std::array<std::uint32_t, cullStyles>{2, 0, 1, 0}) && alone.pooled == 3);
+    }
+
+    /*
+    * A placed plant's part culls as a frame's draw placed where its plant puts it: alone, the same pairs from the placed
+    * entries (their places from placedInstanceBase); with the draws, each style's draws' pairs then its placed ones.
+    * Each pair's drawn instance, entry and record, and its edges, are the entity's.
+    */
+    void testPlacedPlantsCullAsTheirEntities() {
+        std::mt19937 random(23);
+
+        for (int round = 0; round < 4; ++round) {
+            const PlacedPassScene placed = placedPassScene(random);
+            const PassScene& scene = placed.entities;
+            const MeshClusterList asDraws = cullMeshClustersOnCpu(scene.tables(), scene.view, 1u << 20);
+            assert(asDraws.kept > 0 && asDraws.kept < asDraws.tested);
+
+            const CullDrawOrder placedOnly = meshClusterDrawOrder(CullDrawOrder{}, 0, placed.order);
+            MeshClusterTables alone{{}, placedOnly.order, {}, {}, {}, {}, scene.clusters, placed.tables()};
+            const GpuCameraCull aloneView = viewOfOrder(scene.view, placedOnly);
+            const MeshClusterList asPlaced = cullMeshClustersOnCpu(alone, aloneView, 1u << 20);
+            assert(asPlaced.items.size() == asDraws.items.size());
+            assert(asPlaced.tested == asDraws.tested && asPlaced.kept == asDraws.kept && asPlaced.triangles == asDraws.triangles);
+            assert(asPlaced.runFirst == asDraws.runFirst && asPlaced.runCount == asDraws.runCount);
+
+            for (std::size_t item = 0; item < asDraws.items.size(); ++item) {
+                const GpuMeshClusterItem& draw = asDraws.items[item];
+                const GpuMeshClusterItem& plant = asPlaced.items[item];
+                assert(plant.entry == draw.entry + placedInstanceBase && plant.cluster == draw.cluster);
+
+                const MeshClusterDrawn drawnAsDraw = meshClusterDrawnAt(scene.tables(), draw.entry);
+                const MeshClusterDrawn drawnAsPlant = meshClusterDrawnAt(alone, plant.entry);
+                assert(std::equal(std::begin(drawnAsDraw.instance.model), std::end(drawnAsDraw.instance.model), std::begin(drawnAsPlant.instance.model)));
+                assert(drawnAsDraw.entry == drawnAsPlant.entry && drawnAsDraw.entry == scene.drawList[draw.entry]);
+                assert(std::equal(std::begin(drawnAsDraw.record.bounds), std::end(drawnAsDraw.record.bounds), std::begin(drawnAsPlant.record.bounds)));
+                assert(nearAMeshClusterEdge(scene.tables(), draw, scene.view) == nearAMeshClusterEdge(alone, plant, aloneView));
+            }
+
+            const CullDrawOrder both = meshClusterDrawOrder(passOrder(scene), static_cast<std::uint32_t>(scene.groups.size()), placed.order);
+            MeshClusterTables together = scene.tables();
+            together.drawOrder = both.order;
+            together.placed = placed.tables();
+            const GpuCameraCull togetherView = viewOfOrder(scene.view, both);
+            const MeshClusterList asBoth = cullMeshClustersOnCpu(together, togetherView, 1u << 20);
+            assert(asBoth.tested == 2 * asDraws.tested && asBoth.kept == 2 * asDraws.kept && asBoth.triangles == 2 * asDraws.triangles);
+
+            for (std::uint32_t style = 0; style < MESH_CLUSTER_STYLES; ++style) {
+                std::vector<GpuMeshClusterItem> expected = styleItems(asDraws, style);
+                const std::vector<GpuMeshClusterItem> plants = styleItems(asPlaced, style);
+                expected.insert(expected.end(), plants.begin(), plants.end());
+                assert(styleItems(asBoth, style) == expected);
+            }
+
+            // The bound on pairs holds the placed ones too: the draws' own and the placed groups' at most.
+            CameraCullFrame frame;
+            frame.groups = scene.groups;
+
+            for (std::size_t group = 0; group < scene.groups.size(); ++group) {
+                frame.groups[group].firstSegment = static_cast<std::uint32_t>(frame.movingSegments.size());
+                frame.groups[group].segments = 1;
+                frame.movingSegments.push_back(GpuCullSegment{0, scene.commands[group].instanceCount, cullNoChunk, 0});
+            }
+
+            std::array<std::uint32_t, MESH_CLUSTER_WORK_WORDS> work{};
+            meshClusterWorkEnds(together, togetherView, work);
+            assert(2 * meshClusterPairBound(frame) >= work[MESH_CLUSTER_WORK_END]);
+        }
+    }
+
+    /*
+    * The placed plants' bound on pairs for a view: each of its items' blocks' plants (placedGroupSize of them) times the
+    * most any kind of the block's layer can test, every level slot of each of its parts (a plant draws at most two slots
+    * of a part, while fading, so this holds); other views' items left out.
+    */
+    void testThePlacedPairBound() {
+        PlacedTable table;
+        table.groups.resize(6);
+        const std::uint32_t clusters[6] = {10, 4, 7, 20, 5, 0};
+
+        for (std::size_t group = 0; group < 6; ++group) {
+            table.groups[group].clusterCount = clusters[group];
+        }
+
+        table.parts.resize(3);
+        table.parts[0].levels.levels = 1;
+        table.parts[0].firstGroup = 0;
+        table.parts[1].levels.levels = 0;
+        table.parts[1].firstGroup = 2;
+        table.parts[2].levels.levels = 2;
+        table.parts[2].firstGroup = 3;
+        table.kinds.resize(2 * static_cast<std::size_t>(plantingMostKinds));
+        table.kinds[0].parts = 2;
+        table.kinds[0].part[0] = 0;
+        table.kinds[0].part[1] = 1;
+        table.kinds[1].parts = 1;
+        table.kinds[1].part[0] = 2;
+        table.kinds[plantingMostKinds].parts = 1;
+        table.kinds[plantingMostKinds].part[0] = 1;
+
+        const std::vector<GpuPlacedBlock> blocks{GpuPlacedBlock{0, 0, 0, 0}, GpuPlacedBlock{64, 1, 0, static_cast<std::uint32_t>(plantingMostKinds)}};
+        const std::vector<GpuPlacedItem> items{GpuPlacedItem{0, 0}, GpuPlacedItem{1, 0}, GpuPlacedItem{0, 1}, GpuPlacedItem{0, 0}};
+        GpuPlacedView view;
+        view.firstItem = 0;
+        view.items = 2;
+        assert(placedMeshClusterPairBound(table, blocks, items, view) == placedGroupSize * (25 + 7));
+        view.firstItem = 2;
+        view.items = 2;
+        assert(placedMeshClusterPairBound(table, blocks, items, view) == placedGroupSize * (25 + 25));
+        view.items = 0;
+        assert(placedMeshClusterPairBound(table, blocks, items, view) == 0);
+    }
+
     // The way testViewProjection looks, at unit length.
     Vec3 testForward(float yaw) {
         return Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}.normalized();
@@ -894,6 +1119,9 @@ void testMeshClusterCulling() {
     testPackingKeepsTheCut();
     testTheCut();
     testThePassesEqualAPlainWalk();
+    testTheDrawingOrderTakesThePlacedGroups();
+    testPlacedPlantsCullAsTheirEntities();
+    testThePlacedPairBound();
     testScreenBoxHoldsTheSphere();
     testOcclusionHidesNothingSeen();
     testTwoPassesMissNothing();

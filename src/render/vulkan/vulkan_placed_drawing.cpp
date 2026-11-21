@@ -1,5 +1,6 @@
 #include "render/vulkan/vulkan_placed_drawing.h"
 #include "render/gpu/compute_dispatch.h"
+#include "render/gpu/mesh_cluster_culling.h"
 #include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/vulkan_device.h"
 #include "render/vulkan/vulkan_planting.h"
@@ -46,7 +47,17 @@ namespace {
 
     constexpr BufferUse computeReadWrite{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
     constexpr BufferUse computeRead{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
-    constexpr BufferUse vertexRead{VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
+    // What draws placed plants reads their entries and plants with: the vertex shaders, and where the GPU has them, the
+    // camera's mesh cluster passes (compute) and mesh shaders (phase 21, 2f).
+    BufferUse drawingRead(const VulkanDevice& device) {
+        BufferUse use{VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
+
+        if (device.supportsMeshShaders()) {
+            use.stages |= VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT;
+        }
+
+        return use;
+    }
     constexpr BufferUse indirectRead{VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT};
     constexpr BufferUse transferRead{VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT};
     constexpr BufferUse transferWrite{VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT};
@@ -233,7 +244,8 @@ void VulkanPlacedDrawing::record(VkCommandBuffer commands, FrameDescriptors& des
     // these passes and the vertex shaders read.
     bufferBarrier(commands, itemCounts.get(), computeReadWrite, computeReadWrite);
     bufferBarrier(commands, totals.get(), computeReadWrite, computeReadWrite);
-    bufferBarrier(commands, plants, computeReadWrite, {computeRead.stages | vertexRead.stages, computeRead.access});
+    const BufferUse drawnRead = drawingRead(device);
+    bufferBarrier(commands, plants, computeReadWrite, drawnRead);
     bufferBarrier(commands, counts, computeReadWrite, computeRead);
 
     std::vector<ComputeBinding> bindings(plantingBindings.begin(), plantingBindings.end());
@@ -268,10 +280,12 @@ void VulkanPlacedDrawing::record(VkCommandBuffer commands, FrameDescriptors& des
         dispatch(*writePass, itemColumns, itemRows);
     }
 
-    // Then the vertex shaders read the entries and the indirect draws the commands (and, for a comparison, copies).
+    // Then the vertex shaders (and the camera's mesh cluster passes and mesh shaders) read the entries, the indirect draws
+    // and the cluster passes the commands (and, for a comparison, copies).
     const bool reading = compareAsked;
-    const BufferUse entriesThen{vertexRead.stages | (reading ? transferRead.stages : 0), vertexRead.access | (reading ? transferRead.access : 0)};
-    const BufferUse commandsThen{indirectRead.stages | (reading ? transferRead.stages : 0), indirectRead.access | (reading ? transferRead.access : 0)};
+    const BufferUse entriesThen{drawnRead.stages | (reading ? transferRead.stages : 0), drawnRead.access | (reading ? transferRead.access : 0)};
+    const BufferUse commandsThen{indirectRead.stages | computeRead.stages | (reading ? transferRead.stages : 0),
+                                 indirectRead.access | computeRead.access | (reading ? transferRead.access : 0)};
     bufferBarrier(commands, frame.entries.get(), computeReadWrite, entriesThen);
     bufferBarrier(commands, frame.commands.get(), computeReadWrite, commandsThen);
     frame.readback.reset();
@@ -307,7 +321,7 @@ void VulkanPlacedDrawing::record(VkCommandBuffer commands, FrameDescriptors& des
     }
 
     // The slots go back to being read by the vertex shaders, and written by the next frame's planting.
-    bufferBarrier(commands, plants, transferRead, vertexRead);
+    bufferBarrier(commands, plants, transferRead, drawnRead);
     frame.readback = std::move(readback);
 }
 
@@ -316,9 +330,41 @@ VulkanPlacedDrawing::Draws VulkanPlacedDrawing::draws(std::uint32_t frameIndex, 
     return Draws{frame.commands.get(), static_cast<VkDeviceSize>(view) * frame.table.groups.size() * sizeof(GpuDrawCommand), &frame.table.order};
 }
 
+VulkanPlacedDrawing::ClusterInputs VulkanPlacedDrawing::clusterInputs(std::uint32_t frameIndex) const {
+    const PerFrame& frame = frames.at(frameIndex);
+    ClusterInputs inputs{frame.commands.get(), frame.groups.get(), frame.entries.get(), frame.parts.get(), &frame.table.order, 0};
+
+    if (!frame.views.views.empty()) {
+        inputs.pairBound = placedMeshClusterPairBound(frame.table, frame.blocks, frame.views.items, frame.views.views.front());
+    }
+
+    return inputs;
+}
+
 std::string VulkanPlacedDrawing::compare() {
-    compareAsked = true;
+    askReadback();
     return report;
+}
+
+void VulkanPlacedDrawing::askReadback() {
+    compareAsked = true;
+}
+
+std::optional<VulkanPlacedDrawing::ReadBack> VulkanPlacedDrawing::readBack(std::uint32_t frameIndex) {
+    std::optional<Readback>& readback = frames.at(frameIndex).readback;
+
+    if (!readback) {
+        return std::nullopt;
+    }
+
+    for (const VulkanBuffer* buffer : {&readback->entries, &readback->commands, &readback->plants}) {
+        buffer->invalidate();
+    }
+
+    const std::size_t commands = readback->views.views.size() * readback->table.groups.size();
+    return ReadBack{&readback->table, {static_cast<const GpuDrawCommand*>(readback->commands.getMapped()), commands},
+                    {static_cast<const GpuPlacedEntry*>(readback->entries.getMapped()), readback->entries.getSize() / sizeof(GpuPlacedEntry)},
+                    {static_cast<const GpuPlacedPlant*>(readback->plants.getMapped()), readback->plants.getSize() / sizeof(GpuPlacedPlant)}};
 }
 
 // A line a view: its name, then its comparison.

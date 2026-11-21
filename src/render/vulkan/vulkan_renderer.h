@@ -399,6 +399,9 @@ private:
     std::unique_ptr<VulkanPlacedDrawing> placedDrawing;
     std::optional<std::uint32_t> framePlaced;
 
+    // The camera's placed plants are drawn as mesh clusters this frame, so its passes skip their indexed draws.
+    bool framePlacedByClusters = false;
+
     struct PlacedViewNumbers {
         std::array<std::optional<std::uint32_t>, cubeFaceCount> faces{};
     };
@@ -553,12 +556,16 @@ private:
     * and the last frame's totals for F4. A comparison asked for (cluster-compare) keeps the frame's tables the CPU culls
     * from, to compare once the GPU's list and the camera culling's (read back with it) are in.
     */
+    // A frame's mesh cluster culling to compare: the passes' view, groups, order, records and instances, and with placed
+    // plants among the pairs (placed), their parts' instances (the rest read back with the frame's placed drawing).
     struct MeshClusterCompare {
         GpuCameraCull view;
         std::vector<GpuCullGroup> groups;
         std::vector<std::uint32_t> order;
         std::vector<GpuCullRecord> records;
         std::vector<GpuInstance> instances;
+        std::vector<GpuInstance> placedParts;
+        bool placed = false;
     };
 
     void takeMeshClusterCull(const VulkanMeshClusterCulling::Collected& culled, const VulkanCameraCulling::Collected* cameraCulled,
@@ -571,6 +578,7 @@ private:
     std::string clusterCompareReport;
     double meshClusterBuildSeconds = 0.0;
     std::vector<GpuInstance> clusterCompareInstances;
+    std::vector<GpuInstance> clusterComparePlacedParts;
 
     // The mesh shaders' buffers by address this frame (all zero while they draw nothing), for the frame's uniform block.
     MeshClusterBuffers frameMeshClusterBuffers;

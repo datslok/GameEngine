@@ -3,6 +3,7 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/instance_shared.h"
 #include "render/gpu/taa.h"
+#include "scene/planting.h"
 
 #include <algorithm>
 #include <bit>
@@ -29,9 +30,29 @@ namespace {
         return (pairs + meshClusterGroupSize - 1) / meshClusterGroupSize * meshClusterGroupSize;
     }
 
+    // A place's group in the drawing order: its command and its clusters (first, count), a draw group's or, numbered past
+    // the draw groups, a placed group's.
+    struct OrderedGroup {
+        GpuDrawCommand command;
+        std::uint32_t firstCluster = 0;
+        std::uint32_t clusterCount = 0;
+    };
+
+    OrderedGroup orderedGroup(const MeshClusterTables& tables, std::uint32_t group) {
+        const std::size_t drawGroups = tables.groups.size();
+
+        if (group < drawGroups) {
+            return OrderedGroup{tables.commands[group], tables.groups[group].firstCluster, tables.groups[group].clusterCount};
+        }
+
+        const std::size_t placed = group - drawGroups;
+        return OrderedGroup{tables.placed.commands[placed], tables.placed.groups[placed].firstCluster, tables.placed.groups[placed].clusterCount};
+    }
+
     // A group's pairs in its list: its drawn instances times its clusters.
     std::uint32_t groupPairs(const MeshClusterTables& tables, std::uint32_t group) {
-        return tables.commands[group].instanceCount * tables.groups[group].clusterCount;
+        const OrderedGroup ordered = orderedGroup(tables, group);
+        return ordered.command.instanceCount * ordered.clusterCount;
     }
 
     // What a list makes of a pair: kept in it, and (the late list's) a candidate, hidden by last frame's pyramid.
@@ -47,10 +68,9 @@ namespace {
     */
     PairChoice choosePair(const MeshClusterTables& tables, const MeshClusterPair& pair, const GpuCameraCull& view,
                           const MeshClusterOcclusionView* occlusion) {
-        const std::uint32_t entry = tables.drawList[pair.entry];
-        const std::uint32_t draw = entry & DRAW_LIST_INSTANCE_MASK;
+        const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, pair.entry);
         const GpuMeshCluster& cluster = tables.clusters[pair.cluster];
-        const std::uint32_t visibility = meshClusterVisibility(cluster, tables.instances[draw], entry, tables.records[draw], view);
+        const std::uint32_t visibility = meshClusterVisibility(cluster, drawn.instance, drawn.entry, drawn.record, view);
         const bool late = occlusion != nullptr && occlusion->list == MESH_CLUSTER_LATE;
 
         if (visibility == MESH_CLUSTER_HIDDEN) {
@@ -61,7 +81,7 @@ namespace {
             return {!late, false};
         }
 
-        const std::array<float, 4> world = meshClusterWorldSphere(cluster, tables.instances[draw]);
+        const std::array<float, 4> world = meshClusterWorldSphere(cluster, drawn.instance);
         const std::array<float, 4> sphere{world[0] - occlusion->origin.x, world[1] - occlusion->origin.y, world[2] - occlusion->origin.z, world[3]};
         const bool hiddenBefore = occlusion->history && meshClusterHidden(*occlusion->lastPyramid, sphere, occlusion->previous);
 
@@ -401,8 +421,78 @@ MeshClusterPair meshClusterPairAt(const MeshClusterTables& tables, std::span<con
     }
 
     const std::uint32_t within = pair - first;
-    const GpuCullGroup& culled = tables.groups[group];
-    return MeshClusterPair{true, tables.commands[group].firstInstance + within / culled.clusterCount, culled.firstCluster + within % culled.clusterCount};
+    const OrderedGroup ordered = orderedGroup(tables, group);
+    return MeshClusterPair{true, ordered.command.firstInstance + within / ordered.clusterCount, ordered.firstCluster + within % ordered.clusterCount};
+}
+
+// Each style's pooled draw groups, then its placed groups (all pooled: buildPlacedTable refuses the rest).
+CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t drawGroups, const CullDrawOrder& placed) {
+    CullDrawOrder both;
+
+    for (std::size_t style = 0; style < cullStyles; ++style) {
+        both.runFirst[style] = static_cast<std::uint32_t>(both.order.size());
+
+        for (std::uint32_t place = draws.runFirst[style]; place < draws.runFirst[style] + draws.runCount[style]; ++place) {
+            both.order.push_back(draws.order[place]);
+        }
+
+        for (std::uint32_t place = placed.runFirst[style]; place < placed.runFirst[style] + placed.runCount[style]; ++place) {
+            both.order.push_back(drawGroups + placed.order[place]);
+        }
+
+        both.runCount[style] = static_cast<std::uint32_t>(both.order.size()) - both.runFirst[style];
+    }
+
+    both.pooled = static_cast<std::uint32_t>(both.order.size());
+    return both;
+}
+
+MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32_t place) {
+    MeshClusterDrawn drawn;
+
+    if (place >= placedInstanceBase) {
+        const GpuPlacedEntry& placed = tables.placed.entries[place - placedInstanceBase];
+        const GpuPlacedPlant& plant = tables.placed.plants[placed.plant & DRAW_LIST_INSTANCE_MASK];
+        drawn.instance = placedInstance(tables.placed.partInstances[placed.part], plant);
+        drawn.record = placedCullRecord(tables.placed.parts[placed.part].record, plant);
+        drawn.entry = placed.plant;
+        return drawn;
+    }
+
+    drawn.entry = tables.drawList[place];
+    const std::uint32_t draw = drawn.entry & DRAW_LIST_INSTANCE_MASK;
+    drawn.instance = tables.instances[draw];
+    drawn.record = tables.records[draw];
+    return drawn;
+}
+
+// A part's level slots are firstGroup to firstGroup + levels; a block's layer is its first kind's.
+std::uint64_t placedMeshClusterPairBound(const PlacedTable& table, std::span<const GpuPlacedBlock> blocks, std::span<const GpuPlacedItem> items,
+                                         const GpuPlacedView& view) {
+    const std::size_t kindsPerLayer = static_cast<std::size_t>(plantingMostKinds);
+    std::vector<std::uint64_t> layerMost(table.kinds.size() / kindsPerLayer, 0);
+
+    for (std::size_t kind = 0; kind < table.kinds.size(); ++kind) {
+        std::uint64_t pairs = 0;
+
+        for (std::uint32_t part = 0; part < table.kinds[kind].parts; ++part) {
+            const GpuPlacedPart& placed = table.parts[table.kinds[kind].part[part]];
+
+            for (std::uint32_t slot = 0; slot <= placed.levels.levels; ++slot) {
+                pairs += table.groups[placed.firstGroup + slot].clusterCount;
+            }
+        }
+
+        layerMost[kind / kindsPerLayer] = std::max(layerMost[kind / kindsPerLayer], pairs);
+    }
+
+    std::uint64_t bound = 0;
+
+    for (std::uint32_t item = view.firstItem; item < view.firstItem + view.items; ++item) {
+        bound += placedGroupSize * layerMost[blocks[items[item].block].firstKind / kindsPerLayer];
+    }
+
+    return bound;
 }
 
 MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const GpuCameraCull& view, std::uint32_t room,
@@ -510,6 +600,11 @@ bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& inst
     const float distance = std::sqrt(toApex.dot(toApex));
     const float facing = toApex.dot(Vec3{cluster.axis[0], cluster.axis[1], cluster.axis[2]}) - cluster.cone[3] * distance;
     return std::fabs(facing) < 1e-4f * std::max(distance, 1.0f);
+}
+
+bool nearAMeshClusterEdge(const MeshClusterTables& tables, const GpuMeshClusterItem& item, const GpuCameraCull& view) {
+    const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, item.entry);
+    return nearAMeshClusterEdge(tables.clusters[item.cluster], drawn.instance, drawn.entry, drawn.record, view);
 }
 
 // Sorted, then walked together: equal pairs match, the rest are one side's only.
