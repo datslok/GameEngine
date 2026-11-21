@@ -459,3 +459,222 @@ std::vector<Vec2> clusterOutline(const ImageData& image, std::uint32_t column, s
 
     return polygon;
 }
+
+namespace {
+    // The grid the rows' heights are chosen on: this many steps from base to tip.
+    constexpr int leafRowSteps = 24;
+
+    // A cell's covered extent on each texel row, as half widths left and right of the midrib (0.5), in cell units;
+    // both 0 on a row with nothing covered.
+    struct LeafProfile {
+        std::vector<float> left;
+        std::vector<float> right;
+    };
+
+    // The shape's half widths at a height: between its knots (base, rows, tip) linearly, 0 outside base..tip.
+    void shapeWidthsAt(const LeafShape& shape, float up, float& left, float& right) {
+        left = 0.0f;
+        right = 0.0f;
+
+        if (up <= shape.base || up >= shape.tip) {
+            return;
+        }
+
+        LeafRow below{shape.base, 0.0f, 0.0f};
+
+        for (std::size_t knot = 0; knot <= shape.rows.size(); ++knot) {
+            const LeafRow above = knot < shape.rows.size() ? shape.rows[knot] : LeafRow{shape.tip, 0.0f, 0.0f};
+
+            if (up <= above.up) {
+                const float span = above.up - below.up;
+                const float share = span > 0.0f ? (up - below.up) / span : 0.0f;
+                left = below.left + (above.left - below.left) * share;
+                right = below.right + (above.right - below.right) * share;
+                return;
+            }
+
+            below = above;
+        }
+    }
+
+    // How well a shape matches the covered texels, row by row: the overlap over the union of their widths (1 a match).
+    float shapeMatch(const LeafShape& shape, const LeafProfile& profile) {
+        const float size = static_cast<float>(profile.left.size());
+        float overlap = 0.0f;
+        float joined = 0.0f;
+
+        for (std::size_t texelRow = 0; texelRow < profile.left.size(); ++texelRow) {
+            float left = 0.0f;
+            float right = 0.0f;
+            shapeWidthsAt(shape, (static_cast<float>(texelRow) + 0.5f) / size, left, right);
+            overlap += std::min(left, profile.left[texelRow]) + std::min(right, profile.right[texelRow]);
+            joined += std::max(left, profile.left[texelRow]) + std::max(right, profile.right[texelRow]);
+        }
+
+        return joined > 0.0f ? overlap / joined : 0.0f;
+    }
+
+    // A row at a height: the profile's widths on its texel row, pulled in by the inset.
+    LeafRow profileRow(const LeafProfile& profile, float up, float inset) {
+        const std::size_t count = profile.left.size();
+        const std::size_t texelRow = std::min(static_cast<std::size_t>(std::max(up, 0.0f) * static_cast<float>(count)), count - 1);
+        return LeafRow{up, std::max(profile.left[texelRow] - inset, 0.0f), std::max(profile.right[texelRow] - inset, 0.0f)};
+    }
+
+    // Every choice of rowCount heights from the grid's inner steps (ascending), keeping the best matching shape.
+    void chooseRows(const LeafProfile& profile, float inset, int rowCount, int firstStep, LeafShape& trial, LeafShape& best, float& bestMatch) {
+        if (static_cast<int>(trial.rows.size()) == rowCount) {
+            const float match = shapeMatch(trial, profile);
+
+            if (match > bestMatch) {
+                bestMatch = match;
+                best = trial;
+            }
+
+            return;
+        }
+
+        const int remaining = rowCount - static_cast<int>(trial.rows.size());
+
+        for (int step = firstStep; step <= leafRowSteps - remaining; ++step) {
+            const float up = trial.base + (trial.tip - trial.base) * static_cast<float>(step) / static_cast<float>(leafRowSteps);
+            trial.rows.push_back(profileRow(profile, up, inset));
+            chooseRows(profile, inset, rowCount, step + 1, trial, best, bestMatch);
+            trial.rows.pop_back();
+        }
+    }
+}
+
+LeafShape traceLeafShape(const ImageData& image, std::uint32_t column, std::uint32_t row, std::uint32_t cellTexels,
+                         std::uint8_t alphaCutoff, int rowCount, float insetTexels) {
+    const float size = static_cast<float>(cellTexels);
+    LeafProfile profile;
+    profile.left.assign(cellTexels, 0.0f);
+    profile.right.assign(cellTexels, 0.0f);
+    std::int64_t lowest = -1;
+    std::int64_t highest = -1;
+
+    for (std::uint32_t y = 0; y < cellTexels; ++y) {
+        std::int64_t first = -1;
+        std::int64_t last = -1;
+
+        for (std::uint32_t x = 0; x < cellTexels; ++x) {
+            const std::size_t texel = (static_cast<std::size_t>(row * cellTexels + y) * image.width + column * cellTexels + x) * 4 + 3;
+
+            if (image.pixels[texel] >= alphaCutoff) {
+                first = first < 0 ? x : first;
+                last = x;
+            }
+        }
+
+        if (first >= 0) {
+            profile.left[y] = std::max(0.5f - static_cast<float>(first) / size, 0.0f);
+            profile.right[y] = std::max(static_cast<float>(last + 1) / size - 0.5f, 0.0f);
+            lowest = lowest < 0 ? y : lowest;
+            highest = y;
+        }
+    }
+
+    const float inset = insetTexels / size;
+    LeafShape trial;
+    trial.base = lowest < 0 ? 0.0f : static_cast<float>(lowest) / size + inset;
+    trial.tip = lowest < 0 ? 0.0f : static_cast<float>(highest + 1) / size - inset;
+
+    if (trial.tip <= trial.base || rowCount < 1) {
+        return LeafShape{0.0f, 0.0f, {}};
+    }
+
+    LeafShape best = trial;
+    float bestMatch = -1.0f;
+    chooseRows(profile, inset, std::min(rowCount, leafRowSteps - 1), 1, trial, best, bestMatch);
+    return best;
+}
+
+float leafShapeArea(const LeafShape& shape) {
+    float area = 0.0f;
+    LeafRow below{shape.base, 0.0f, 0.0f};
+
+    for (std::size_t knot = 0; knot <= shape.rows.size() && !shape.rows.empty(); ++knot) {
+        const LeafRow above = knot < shape.rows.size() ? shape.rows[knot] : LeafRow{shape.tip, 0.0f, 0.0f};
+        area += (above.up - below.up) * (below.left + below.right + above.left + above.right) * 0.5f;
+        below = above;
+    }
+
+    return area;
+}
+
+bool insideLeafShape(const LeafShape& shape, const Vec2& point) {
+    float left = 0.0f;
+    float right = 0.0f;
+    shapeWidthsAt(shape, point.y, left, right);
+    const float across = point.x - 0.5f;
+    return !shape.rows.empty() && point.y > shape.base && point.y < shape.tip && across >= -left && across <= right;
+}
+
+/*
+* The vertices: the base, each row's left edge, midrib and right edge, the tip. A point x across the midrib and y up the
+* cell sits at foot + across x + towardsTip y + facing z (all times the side), where z raises each half by its distance
+* from the midrib times tan(fold) and drops the tip by curl t^2 (t from base to tip). across = towardsTip x facing, so
+* the triangles below (each checked counterclockwise with x right and y up) face the leaf's facing.
+*/
+void appendModelledLeaf(IndexedMesh& mesh, const LeafShape& shape, const ModelledLeafPlace& place) {
+    if (shape.rows.empty()) {
+        return;
+    }
+
+    const Vec3 across = place.towardsTip.cross(place.facing);
+    const float raise = std::tan(place.foldRadians);
+    const float length = std::max(shape.tip - shape.base, 1e-6f);
+    const std::uint32_t first = static_cast<std::uint32_t>(mesh.vertices.size());
+
+    const auto addPoint = [&](float x, float y) {
+        const float t = std::clamp((y - shape.base) / length, 0.0f, 1.0f);
+        const float z = std::abs(x) * raise - place.curl * t * t;
+        const Vec3 position = place.foot + (across * x + place.towardsTip * y + place.facing * z) * place.side;
+        const Vec2 uv{place.uvMin.x + (place.uvMax.x - place.uvMin.x) * (0.5f + x), place.uvMin.y + (place.uvMax.y - place.uvMin.y) * y};
+        mesh.vertices.push_back(MeshVertex{position, Vec3{}, uv, Vec4{across.x, across.y, across.z, 1.0f}});
+    };
+
+    addPoint(0.0f, shape.base);
+
+    for (const LeafRow& leafRow : shape.rows) {
+        addPoint(-leafRow.left, leafRow.up);
+        addPoint(0.0f, leafRow.up);
+        addPoint(leafRow.right, leafRow.up);
+    }
+
+    addPoint(0.0f, shape.tip);
+
+    const std::uint32_t rows = static_cast<std::uint32_t>(shape.rows.size());
+    const std::uint32_t base = first;
+    const std::uint32_t tip = first + 1 + 3 * rows;
+    const auto left = [first](std::uint32_t r) { return first + 1 + 3 * r; };
+    const auto middle = [first](std::uint32_t r) { return first + 2 + 3 * r; };
+    const auto right = [first](std::uint32_t r) { return first + 3 + 3 * r; };
+    const std::size_t firstIndex = mesh.indices.size();
+
+    mesh.indices.insert(mesh.indices.end(), {base, middle(0), left(0), base, right(0), middle(0)});
+
+    for (std::uint32_t r = 0; r + 1 < rows; ++r) {
+        mesh.indices.insert(mesh.indices.end(), {left(r), middle(r), middle(r + 1), left(r), middle(r + 1), left(r + 1)});
+        mesh.indices.insert(mesh.indices.end(), {middle(r), right(r), right(r + 1), middle(r), right(r + 1), middle(r + 1)});
+    }
+
+    mesh.indices.insert(mesh.indices.end(), {left(rows - 1), middle(rows - 1), tip, middle(rows - 1), right(rows - 1), tip});
+
+    // Each vertex's normal: its triangles' facings summed (so weighted by area), then made unit.
+    for (std::size_t index = firstIndex; index + 2 < mesh.indices.size(); index += 3) {
+        MeshVertex& a = mesh.vertices[mesh.indices[index]];
+        MeshVertex& b = mesh.vertices[mesh.indices[index + 1]];
+        MeshVertex& c = mesh.vertices[mesh.indices[index + 2]];
+        const Vec3 facing = (b.position - a.position).cross(c.position - a.position);
+        a.normal = a.normal + facing;
+        b.normal = b.normal + facing;
+        c.normal = c.normal + facing;
+    }
+
+    for (std::size_t vertex = first; vertex < mesh.vertices.size(); ++vertex) {
+        Vec3& normal = mesh.vertices[vertex].normal;
+        normal = normal.lengthSquared() > 1e-20f ? normal.normalized() : place.facing;
+    }
+}

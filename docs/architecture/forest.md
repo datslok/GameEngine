@@ -4,11 +4,11 @@ Covers: `src/games/forest/forest_game`, `src/games/forest/forest_terrain`, `src/
 
 `ForestGame` (`--game forest`, title "Forest"): a jungle valley at a scale meant to be felt. Rules for working here: `src/games/forest/CLAUDE.md`; research: `docs/research/JUNGLE.md`. North is -z.
 
-Other forest files: `forest-rock.md` (pillars, islands, what hangs from them, drifting rocks), `forest-trees.md` (trees, lianas, climbers, epiphytes), `forest-plants.md` (understorey, palms, grass, floor cover).
+Other forest files: `forest-rock.md` (pillars, islands, what hangs from them, drifting rocks), `forest-trees.md` (trees, lianas, climbers, epiphytes), `forest-twigs.md` (twigs of modelled leaves), `forest-plants.md` (understorey, palms, grass, floor cover).
 
 ## Start-up (`onInit`)
 
-In order: `buildGround`, `buildShapes`, `buildPlantingMaps` (the planting maps every plant reads: `forest-plants.md`), `buildTrees` (which plants every layer at once on the drawn ground, `plantThePatch`), `buildLianas`, `buildUnderstorey`, `buildPalms`, `buildGrass`, `buildFloorCover`; then the start, the body, the sun, the air entity (with the `PlantingSource` the GPU's planting cells read: `plantingField`, the maps and `forestPlantingLayers` with the grass's and floor's cover maps and layers after, and the trees', understorey's, palms' and ground cover's looks (`plantedLooks`), all there is of them: `forest-trees.md`, `forest-plants.md`) and `ProbeCascades`.
+In order: `buildGround`, `buildShapes`, `buildPlantingMaps` (the planting maps every plant reads: `forest-plants.md`), `buildTrees` (which plants every layer at once on the drawn ground, `plantThePatch`), `buildTwigs` (`forest-twigs.md`), `buildLianas`, `buildUnderstorey`, `buildPalms`, `buildGrass`, `buildFloorCover`; then the start, the body, the sun, the air entity (with the `PlantingSource` the GPU's planting cells read: `plantingField`, the maps and `forestPlantingLayers` with the grass's and floor's cover maps and layers after, and the trees', understorey's, palms' and ground cover's looks (`plantedLooks`), all there is of them: `forest-trees.md`, `forest-plants.md`) and `ProbeCascades`.
 
 - Generated meshes are built on the game's job system (`Game::getJobs`), each into its own slot, so the result does not depend on thread order; most are kept drawn-only (`AssetManager::addDrawnMesh`). Cluster levels (`withClusterLevels`, `mesh-clusters.md`) only for the rocks, drifting rocks, structures and trees' bark.
 - Scenery is `ModelRenderer::isStill` (`addShape`): its draws are kept between frames, so any change to its material or sway is announced with `markRenderChanged`.
@@ -105,7 +105,7 @@ F5 Forest groups: Sun, Atmosphere, Wind, Sway, Mist, Ground, Rock, Structures, H
 - **Start** (`ForestValleySettings::start`, `forest.valley.start`): `ForestStart::Rim` (the default, facing north) or `Trees` (`forestTreesStart`, `forest-trees.md`), set before the body spawns (`PlayerControls::setFirstPersonFeet`).
 - **Views** (`forestViews()`, `ForestView`): `rim` (from the start towards the Monolith), `ring` (the Ring from the path 230 m south), `wall` (up the Monolith from its foot).
 - **Flashlight** (`gameplay/flashlight`, `FlashlightSettings`, `forest.flashlight.on`): off at the start; F flips the setting, and each frame it is placed in the right hand and follows the setting, as in the light lab.
-- **Commands** (`addCommands`): `forest-view <name>` poses the free camera at a view; `forest-climber [n]` and `forest-epiphyte [n]` (`forest-trees.md`).
+- **Commands** (`addCommands`): `forest-view <name>` poses the free camera at a view; `forest-climber [n]` and `forest-epiphyte [n]` (`forest-trees.md`); `forest-twigs [off]` (`forest-twigs.md`).
 - **Golden views:** `rim`, `ring`, `wall` at 9:30 and `rim-dusk` at 17:48.
 
 ## Tests

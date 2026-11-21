@@ -4,6 +4,7 @@
 #include "core/pixel.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
+#include "scene/indexed_mesh.h"
 
 #include <cstdint>
 #include <vector>
@@ -88,3 +89,61 @@ LeafAtlas composeLeafClusters(const LeafAtlas& source, int cellTexels, float lea
 */
 std::vector<Vec2> clusterOutline(const ImageData& image, std::uint32_t column, std::uint32_t row, std::uint32_t cellTexels,
                                  std::uint8_t alphaCutoff, float marginTexels);
+
+/*
+* A modelled leaf's outline (docs/research/LEAFGEOMETRY.md; ROADMAP phase 21 stage 3a), in its atlas cell's units (0..1
+* across and up, the midrib up the middle at 0.5, the stem at the bottom): its base and tip on the midrib, and rows
+* across it between them, each its height and its half widths to the left and right of the midrib. Leaves grow along
+* the midrib, so rows across it follow them closely in few corners, and a bite or a lopsided leaf is one side narrower.
+*/
+struct LeafRow {
+    float up = 0.0f;
+    float left = 0.0f;
+    float right = 0.0f;
+};
+
+struct LeafShape {
+    float base = 0.0f;
+    float tip = 1.0f;
+    std::vector<LeafRow> rows;
+};
+
+/*
+* One atlas cell's leaf traced from its alpha (at least alphaCutoff a leaf) as rowCount rows: the base and tip at the
+* lowest and highest covered texels, each row's widths the covered extent on its texel row, everything pulled insetTexels
+* inside the alpha's edge (the mips' blur and the scan's background stay off the leaf). The rows' heights are the ones,
+* on a grid of steps between base and tip, whose shape best matches the leaf's covered area (the most overlap for the
+* least union, row by row). An empty shape (no rows, base = tip = 0) for a cell with nothing over the cutoff.
+*/
+LeafShape traceLeafShape(const ImageData& image, std::uint32_t column, std::uint32_t row, std::uint32_t cellTexels,
+                         std::uint8_t alphaCutoff, int rowCount, float insetTexels);
+
+// The shape's area, in the cell's units squared.
+float leafShapeArea(const LeafShape& shape);
+
+// Whether a point of the cell (its units) lies inside the shape.
+bool insideLeafShape(const LeafShape& shape, const Vec2& point);
+
+/*
+* Where a modelled leaf goes: its stem's foot (the cell's bottom middle), the way to its tip and its facing (square to
+* each other), its cell's side in metres (the shape's units times this), how far each half is raised about the midrib
+* (fold, radians) and how far its tip drops behind its plane (curl, a share of the side), and its atlas cell's texture
+* rectangle.
+*/
+struct ModelledLeafPlace {
+    Vec3 foot;
+    Vec3 towardsTip;
+    Vec3 facing;
+    float side = 1.0f;
+    float foldRadians = 0.0f;
+    float curl = 0.0f;
+    Vec2 uvMin;
+    Vec2 uvMax;
+};
+
+/*
+* A leaf as opaque geometry: its base, each row's left edge, midrib and right edge, and its tip, joined in triangles
+* (4 a row: 12 for three rows), wound counterclockwise seen from its facing, textured from its atlas cell, each vertex's
+* normal the mean of its triangles' (the fold shows as a soft ridge). Nothing for a shape with no rows.
+*/
+void appendModelledLeaf(IndexedMesh& mesh, const LeafShape& shape, const ModelledLeafPlace& place);

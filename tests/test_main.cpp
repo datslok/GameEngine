@@ -90,6 +90,8 @@ void testLevelOfDetail();
 void testLevelFade();
 void testTestProgress();
 void testCardThinning();
+void testLeafPruning();
+void testTwigs();
 void testTerrain();
 void testGroundFollow();
 void testImpostors();
@@ -434,6 +436,8 @@ const RoutineTest routineTests[] = {
     {"testLevelOfDetail", testLevelOfDetail},
     {"testLevelFade", testLevelFade},
     {"testCardThinning", testCardThinning},
+    {"testLeafPruning", testLeafPruning},
+    {"testTwigs", testTwigs},
     {"testTerrain", testTerrain},
     {"testGroundFollow", testGroundFollow},
     {"testImpostors", testImpostors},
@@ -585,6 +589,25 @@ int main(int argumentCount, char** arguments) {
 
     if (argumentCount > 1 && std::string_view{arguments[1]} == "--docs-report") {
         printDocsReport();
+        return 0;
+    }
+
+    // --only <name>...: just those routine tests, for watching a planted bug fire (the add-test skill) without the suite.
+    if (argumentCount > 2 && std::string_view{arguments[1]} == "--only") {
+        for (int argument = 2; argument < argumentCount; ++argument) {
+            const auto found = std::find_if(std::begin(routineTests), std::end(routineTests), [&](const auto& test) {
+                return std::string_view{test.name} == arguments[argument];
+            });
+
+            if (found == std::end(routineTests)) {
+                std::cout << "No routine test called " << arguments[argument] << "\n";
+                return 1;
+            }
+
+            found->run();
+        }
+
+        std::cout << "Those tests passed!\n";
         return 0;
     }
 

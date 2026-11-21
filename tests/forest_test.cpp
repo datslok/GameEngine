@@ -939,6 +939,47 @@ namespace {
         assert(!registry.execute("forest-view").ok);
     }
 
+    // forest-twigs shows every twig prototype's every level in front of the camera, facing it, and off hides them;
+    // they start hidden.
+    void testTwigsHaveAStand() {
+        Forest forest;
+        CommandRegistry registry;
+        forest.game.addCommands(registry, forest.world);
+        const std::vector<Entity>& stand = forest.game.getTwigStand();
+        std::size_t levels = 0;
+
+        for (const TwigPrototype& twig : forest.game.getTwigPrototypes()) {
+            levels += twig.levels.size();
+        }
+
+        assert(static_cast<int>(forest.game.getTwigPrototypes().size()) == forest.game.getTwigSettings().prototypes);
+        assert(!stand.empty() && stand.size() == levels);
+
+        for (const Entity entity : stand) {
+            assert(!forest.world.get<ModelRenderer>(entity).isVisible());
+        }
+
+        assert(registry.execute("forest-twigs").ok);
+        const Camera& camera = forest.game.getCamera();
+
+        for (const Entity entity : stand) {
+            assert(forest.world.get<ModelRenderer>(entity).isVisible());
+            const Transform& place = forest.world.get<Transform>(entity);
+            const Vec3 ahead = place.position - camera.getPosition();
+            assert(ahead.dot(camera.getForward()) > 1.0f && ahead.length() < 40.0f);
+            assert(place.rotation.rotate(Vec3{0.0f, 0.0f, 1.0f}).dot(ahead) < 0.0f);
+        }
+
+        assert(registry.execute("forest-twigs off").ok);
+
+        for (const Entity entity : stand) {
+            assert(!forest.world.get<ModelRenderer>(entity).isVisible());
+        }
+
+        assert(!registry.execute("forest-twigs on").ok);
+        assert(!registry.execute("forest-twigs off now").ok);
+    }
+
     // The valley never moves, so all of it is still (its draws kept from frame to frame) but for the drifting rocks.
     void testTheValleyIsStill() {
         Forest forest;
@@ -1230,6 +1271,7 @@ void testForest() {
     testStreaksAreMostlyClean();
     testThePillarsAreMadeOfTheStrata();
     testViewsHaveACommand();
+    testTwigsHaveAStand();
     testSettingsApplyEachFrame();
     testTheMistHasAFloorLayer();
     testTheValleyIsStill();

@@ -3,6 +3,7 @@
 #include "assets/asset_manager.h"
 #include "core/pixel.h"
 #include "core/settings_visitor.h"
+#include "games/forest/leaf_clusters.h"
 #include "scene/material.h"
 
 #include <array>
@@ -113,6 +114,16 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
 * cluster as a share of the cell.
 */
 Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare);
+
+// The trees' single-leaf atlas (LeafSet024: colour with the opacity in its alpha, normal and roughness), or the stand-in
+// leaves without the scan.
+LeafAtlas forestTreeLeafAtlas(const std::string& assetFolder);
+
+/*
+* The twigs' modelled leaves' material (games/forest/twigs.h): the single-leaf atlas itself, tinted, double-sided and
+* opaque (the leaves are cut to their outlines as geometry, so nothing is alpha tested in any pass).
+*/
+Material forestTwigLeafMaterial(AssetManager& assets, LeafAtlas atlas, Pixel tint);
 
 /*
 * Light through the leaves (docs/research/JUNGLE.md, Light through leaves; Material::diffuseTransmission): a leaf lets through

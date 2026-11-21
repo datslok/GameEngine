@@ -57,6 +57,7 @@ namespace {
     constexpr std::uint32_t treeVariantSeed = 0x4752'4f57u;
     constexpr std::uint32_t emergentVariantSeed = 0x454d'4752u;
     constexpr std::uint32_t midVariantSeed = 0x4d49'4447u;
+    constexpr std::uint32_t twigSeed = 0x5457'4947u;
     constexpr std::uint32_t palmVariantSeed = 0x5041'4c4du;
 
     // The day's hours for the golden views: mid-morning (the sun low in the east, light across the valley), and dusk.
@@ -384,6 +385,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildShapes(world, assets);
     buildPlantingMaps();
     buildTrees(assets);
+    buildTwigs(world, assets);
     buildLianas(assets);
     buildUnderstorey(assets);
     buildPalms(assets);
@@ -1637,6 +1639,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Forest floor", [&] {
         visit(floorSettings, visitor);
     });
+    visitor.group("Twigs", [&] {
+        visit(twigSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -1733,6 +1738,113 @@ void ForestGame::addCommands(CommandRegistry& registry, World& world) {
                      controls.poseFreeCamera(world, rosette + epiphyteOutward[*chosen] * distance + Vec3{0.0f, rise, 0.0f}, rosette);
                      return commandOk("Beside tree " + std::to_string(*chosen) + " of " + std::to_string(epiphyteViews.size()));
                  });
+
+    // The twig prototypes on a stand in front of the camera (games/forest/twigs.h), to judge their leaves and levels.
+    registry.add("forest-twigs", "forest-twigs [off]",
+                 "Shows the twig prototypes in front of the camera, a row each, their levels left to right; off hides them.",
+                 [this, &world](const CommandArguments& arguments) {
+                     if (arguments.size() > 1 || (arguments.size() == 1 && arguments.front() != "off")) {
+                         return commandError("Usage: forest-twigs [off]");
+                     }
+
+                     const bool shown = arguments.empty();
+                     showTwigStand(world, shown);
+                     return commandOk(shown ? std::to_string(twigPrototypes.size()) + " twigs shown" : "Twigs hidden");
+                 });
+}
+
+ForestTwigSettings& ForestGame::getTwigSettings() {
+    return twigSettings;
+}
+
+const std::vector<TwigPrototype>& ForestGame::getTwigPrototypes() const {
+    return twigPrototypes;
+}
+
+const std::vector<Entity>& ForestGame::getTwigStand() const {
+    return twigStand;
+}
+
+void ForestGame::buildTwigs(World& world, AssetManager& assets) {
+    LeafAtlas atlas = forestTreeLeafAtlas(assetFolder);
+    const TracedLeaves leaves = traceAtlasLeaves(atlas, twigSettings.leafRows, twigSettings.insetTexels);
+    twigPrototypes = buildTwigPrototypes(leaves, twigSettings, treeSettings.clusterSize, treeSettings.leafLength / treeSettings.clusterSize, twigSeed);
+    const Material leaf = withLeafLight(forestTwigLeafMaterial(assets, std::move(atlas), forestTreeLeafTint), leafLightSettings);
+    const Material stem = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
+
+    for (const TwigPrototype& twig : twigPrototypes) {
+        for (const TwigLevel& level : twig.levels) {
+            ModelRenderer renderer;
+            renderer.parts.push_back(RenderPart{assets.addDrawnMesh(level.leaves), leaf});
+
+            if (!level.stem.indices.empty()) {
+                renderer.parts.push_back(RenderPart{assets.addDrawnMesh(level.stem), stem});
+            }
+
+            const Entity entity = world.create();
+            world.add(entity, Transform{});
+            world.add(entity, std::move(renderer).withVisible(false).withStill(true));
+            twigStand.push_back(entity);
+        }
+    }
+}
+
+/*
+* The stand: a wall square to the camera's level look, far enough to fit its width or height in about the view; each
+* column one level, as wide as its widest grown twig needs, each row a prototype, the first on top. A twig's frame faces
+* +z, so it is turned about up until +z points back at the camera (and +x, its levels' way, to the camera's right).
+*/
+void ForestGame::showTwigStand(World& world, bool shown) {
+    if (!shown) {
+        for (const Entity entity : twigStand) {
+            setRenderVisible(world, entity, false);
+        }
+
+        return;
+    }
+
+    const Camera& camera = getCamera();
+    Vec3 forward{camera.getForward().x, 0.0f, camera.getForward().z};
+    forward = forward.lengthSquared() > 1e-8f ? forward.normalized() : Vec3{0.0f, 0.0f, -1.0f};
+    const Vec3 right{-forward.z, 0.0f, forward.x};
+    const Quat turn = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, std::atan2(-forward.x, -forward.z));
+    const float twigSize = treeSettings.clusterSize;
+
+    std::vector<float> widths;
+    float mostGrowth = 1.0f;
+
+    for (const TwigPrototype& twig : twigPrototypes) {
+        widths.resize(std::max(widths.size(), twig.levels.size()), 0.0f);
+
+        for (std::size_t level = 0; level < twig.levels.size(); ++level) {
+            widths[level] = std::max(widths[level], twigSize * (0.6f + 0.5f * twig.levels[level].growth));
+            mostGrowth = std::max(mostGrowth, twig.levels[level].growth);
+        }
+    }
+
+    float width = 0.0f;
+
+    for (const float column : widths) {
+        width += column;
+    }
+
+    const float rowHeight = twigSize * (1.0f + 0.3f * mostGrowth);
+    const float height = rowHeight * static_cast<float>(twigPrototypes.size());
+    const Vec3 centre = camera.getPosition() + forward * (0.9f * std::max(width, height) + 1.0f);
+    std::size_t entity = 0;
+
+    for (std::size_t prototype = 0; prototype < twigPrototypes.size(); ++prototype) {
+        float across = -0.5f * width;
+
+        for (std::size_t level = 0; level < twigPrototypes[prototype].levels.size(); ++level) {
+            const float up = 0.5f * height - static_cast<float>(prototype + 1) * rowHeight;
+            const Entity shownTwig = twigStand[entity++];
+            world.get<Transform>(shownTwig) = Transform{.position = centre + right * (across + 0.5f * widths[level]) + Vec3{0.0f, up, 0.0f}, .rotation = turn};
+            markRenderChanged(world, shownTwig);
+            setRenderVisible(world, shownTwig, true);
+            across += widths[level];
+        }
+    }
 }
 
 std::vector<GoldenView> ForestGame::goldenViews() const {

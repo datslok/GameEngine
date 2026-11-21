@@ -13,4 +13,4 @@ Folder rules and helpers: `tests/CLAUDE.md`.
 4. Register in `tests/test_main.cpp`: a forward declaration and an entry in `routineTests` (or `runSlowTests` if it takes many seconds and guards something rarely changed; `runParkedTests` for light probes and cloth).
 5. A command a feature adds is tested through `CommandRegistry::execute`.
 6. Write the test before the code. Run the suite (`powershell -File tools/visible_tests.ps1`) only before committing, not while iterating.
-7. **See it fail:** once it passes, plant a bug in the code it guards (flip a comparison, drop a term, skip a step), rebuild, watch the assert fire, then undo the bug by an edit (never `git checkout` a file holding other uncommitted work). A test no planted bug can fail is rewritten. Say in the reply which bug it caught.
+7. **See it fail:** once it passes, plant a bug in the code it guards (flip a comparison, drop a term, skip a step), rebuild, watch the assert fire (`build/tests.exe --only testThing`), then undo the bug by an edit (never `git checkout` a file holding other uncommitted work). A test no planted bug can fail is rewritten. Say in the reply which bug it caught.
