@@ -64,6 +64,22 @@ Alternatives [S]: ray-traced sun shadows with opacity micromaps (Indiana Jones, 
 - Our grass and floor cover already are what Epic moved to: opaque blades and leaves, levels keeping the cover (half the blades twice as wide, Ghost of Tsushima's); kept as they are. Their near cost is thin blades shaded in 2 x 2 pixel blocks, which a compute rasteriser addresses; swaying grass in virtual shadow pages would redraw them every frame, so Epic leaves grass to contact shadows.
 - Wind on clusters [I]: a rigid transform per part from its limb's pivot keeps bounds exact; sway only near the camera, so far pages stay cached; cost grows with what moves near the camera.
 
+## Building the hierarchy: when, and for which meshes
+
+| Engine | When built | Which meshes |
+|---|---|---|
+| Unreal (Nanite, 5.9 docs) [S] | At import or when enabled in the mesh editor: "converting geometry to Nanite requires some processing time for each mesh", "significant time" for detailed meshes; a shared Derived Data Cache advised for many Nanite assets | A per-mesh "Enable Nanite"; "wherever possible", the gain largest for many triangles, small triangles, many instances, big occluders, virtual-shadow casters; a sky sphere the example left out; no morph targets, limited WPO (displacement clamped), opaque and masked only |
+| Unreal, runtime [S, forum users] | Not in shipped builds: the builder module is editor-only; a 5.7 user reports a mesh built in under 200 ms and asks for it shipped (forums 2025) | Dynamic and procedural meshes converted to static meshes first, in the editor |
+| Bevy [S] | `MeshletMesh::from_mesh` "very slow, meant to be ran once ahead of time, and not during runtime"; saved as `.meshlet_mesh` (5 MB loads in 12 ms) | Meshes converted on purpose |
+| meshoptimizer `clusterlod` (zeux.io 2025) [S] | Offline: 1.64B triangles in 2 min 35 s on 16 cores (7950X), about 0.66M triangles a second a thread; 45-55 GB peak | All |
+
+How `clusterlod` was made fast (zeux.io 2025) [S]:
+
+- Parallel by mesh ("external": no shared data between threads), largest meshes first so one big mesh does not trail at the end; one mesh's levels stay on one thread (NVIDIA's `vk_lod_clusters` adds parallelism inside a mesh, for single huge meshes).
+- Clusterizing was the largest cost (two thirds of the ray tracing build); fixes: O(vertex count) clears removed from the sparse paths (9 min 20 s to 3 min 31 s), a per-thread allocation cache (Windows heap contention: 4 min 20 s to 2 min 38 s), triangles sorted spatially first (`meshopt_spatialSortTriangles`, 5%).
+
+Ours, measured (laptop, release, forest, nothing else running): 10.3M triangles in 2448 meshes; one level 5.6 s, every level 27.3 s (0.38M triangles a second, one thread, at load); start-up 32.8 s to 60.0 s. [I] Every engine above builds ahead of time and only meshes flagged for it; our forest is grown from seeds at start-up, so "ahead of time" here means a cache keyed by each mesh's bytes (the same seed and code give a hit, any change a miss, so nothing stale), and the build itself parallel by mesh, largest first.
+
 ## What it means here
 
 - Shadows' cost would follow pages on screen, not the forest: the steps, thinning, stand-ins and cascade edges go; swaying pages near the camera still redraw every frame, so sway stops past a distance.

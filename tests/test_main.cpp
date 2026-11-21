@@ -84,6 +84,7 @@ void testWindSway();
 void testWindHanging();
 void testSimplifyMesh();
 void testMeshClusters();
+void testMeshClusterLevels();
 void testMeshClusterCulling();
 void testLevelOfDetail();
 void testLevelFade();
@@ -428,6 +429,7 @@ const RoutineTest routineTests[] = {
     {"testWindHanging", testWindHanging},
     {"testSimplifyMesh", testSimplifyMesh},
     {"testMeshClusters", testMeshClusters},
+    {"testMeshClusterLevels", testMeshClusterLevels},
     {"testMeshClusterCulling", testMeshClusterCulling},
     {"testLevelOfDetail", testLevelOfDetail},
     {"testLevelFade", testLevelFade},

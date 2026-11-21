@@ -150,6 +150,10 @@ public:
     // last comparison's report (empty while none has finished).
     std::string compareMeshClusters();
 
+    // The time (wall clock, every thread together) spent building the uploaded meshes' clusters and their levels, for the
+    // start-up report.
+    double getMeshClusterBuildSeconds() const;
+
     // Waits for every pipeline asked for, rethrowing the first that failed to build.
     void finishPipelines();
 
@@ -193,6 +197,15 @@ public:
     // Returns where its per-vertex records begin: one past its first entry in the hanging vertices (IndexedMesh::hanging),
     // one past its header in the card thinning records (IndexedMesh::thinning); 0 for none.
     VertexEntries uploadMesh(const IndexedMesh& mesh, bool deforming = false);
+
+    // Many meshes uploaded as uploadMesh would one by one, in order, their clusters built first on every thread at once
+    // (buildMeshClusters); the entries in the same order.
+    struct MeshUpload {
+        const IndexedMesh* mesh = nullptr;
+        bool deforming = false;
+    };
+    std::vector<VertexEntries> uploadMeshes(const std::vector<MeshUpload>& batch);
+
     void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips = {});
     // The next texture already BC7-compressed (assets/texture_cooking.h), numbered as uploadTexture's are.
     void uploadCompressedTexture(const CompressedTexture& texture);
@@ -517,6 +530,9 @@ private:
     std::vector<std::vector<CullViewKind>> cullFrameViews;
     std::vector<std::size_t> cullFrameDraws;
 
+    // One mesh up (uploadMeshes), with its clusters when it goes into the pools.
+    VertexEntries uploadOneMesh(const IndexedMesh& mesh, bool deforming, const MeshClusters* clusters);
+
     void takeCameraCull(const VulkanCameraCulling::Collected& culled, std::uint32_t frameIndex);
 
     CameraCullTable cameraCullTable;
@@ -551,6 +567,7 @@ private:
     std::optional<VulkanMeshClusterCulling::Collected> lastMeshClusters;
     bool clusterCompareAsked = false;
     std::string clusterCompareReport;
+    double meshClusterBuildSeconds = 0.0;
     std::vector<GpuInstance> clusterCompareInstances;
 
     // The mesh shaders' buffers by address this frame (all zero while they draw nothing), for the frame's uniform block.

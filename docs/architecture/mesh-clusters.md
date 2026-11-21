@@ -6,19 +6,25 @@ Meshes cut into small pieces culled one by one (ROADMAP phase 21, stage 1; resea
 
 ## Building (`scene/mesh_clusters`)
 
-`buildMeshClusters` (meshoptimizer's builder):
+`buildMeshClusters` (meshoptimizer's `clusterlod`, Nanite's scheme) cuts a mesh into clusters, then builds levels over them (stage 2):
 
 | Piece | What |
 |---|---|
-| `MeshCluster` | at most `MESH_CLUSTER_MAX_VERTICES` 64 and `MESH_CLUSTER_MAX_TRIANGLES` 124 (a mesh-shader workgroup's output); a sphere holding its vertices; a cone of facing (apex, axis, cutoff) |
-| `MeshClusters` | the clusters; their vertices as the mesh's vertex numbers; their triangles as three local corner bytes, runs packed end to end |
+| `MeshCluster` | at most `MESH_CLUSTER_MAX_VERTICES` 64 and `MESH_CLUSTER_MAX_TRIANGLES` 124 (a mesh-shader workgroup's output); a sphere holding its vertices; a cone of facing (apex, axis, cutoff); `group` (simplified with), `refinedGroup` (made from; `meshClusterNoGroup` for the mesh's own triangles) |
+| `MeshClusterGroup` | about 16 clusters merged and simplified together: the error of what was made from them (mesh units; the largest float when nothing coarser was) and a sphere holding every group under it; its level |
+| `MeshClusters` | the clusters, the mesh's own first (`originalCount`), coarser levels after; their vertices as the mesh's vertex numbers (every level's corners are the mesh's own vertices); their triangles as three local corner bytes, runs packed end to end; the groups |
 
-- From triangles near each other and of like facing (cone weight 0.25), each triangle in exactly one with its winding, corners reordered for vertex reuse; deterministic.
+- **Levels:** neighbouring clusters grouped (fewest shared edges), simplified to half with the group's border locked, cut back into clusters, repeated until one is left or a group will not simplify; borders move level to level, so no seam stays locked. About twice the mesh's triangles in all.
+- **Simplification:** normals weighed 0.5 (`clusterlod`'s demo; raised only if levels change shading), UV seams kept (protected), sloppy simplification only when the regular one gets stuck (its error doubled).
+- **The cut** (drawn in 2c): a cluster whose group's error is too big and whose refined group's is small enough. One choice everywhere, since a group's error is at least, and its sphere holds, those of every group under it; watertight, since borders stay locked while a group is simplified.
+- **Many at once** (`buildMeshClusters(meshes, jobs)`): a mesh a job, the largest first (so a big mesh does not finish last), results in the order asked, each what building it alone gives. Forest, laptop: 10.3M triangles in 2448 meshes, 27.3 s on one thread, 3.9-4.2 s on the job system.
+- Deterministic.
 - `clusterFacesAway(cluster, eye)`: every triangle's back faces the eye (eye in the mesh's space; exact under any transform that does not mirror, since which side of a triangle the eye is on is the sign of a volume). A cutoff of 1 or more (facings spread past a half turn) never culls.
 
 ## In the pools (`render/gpu/mesh_cluster_culling`, `VulkanMeshPool`)
 
-- Every pooled mesh's clusters built as it is added (`VulkanMeshPool::addClusters`, timed: `getClusterBuildSeconds`), packed by `packMeshClusters` into three more pools grown as the others are: `GpuMeshCluster` records (64 B: sphere, cone, axis, runs, counts, its mesh's first vertex), vertex numbers (the vertex pool's own, so no offset is needed), triangle words (four corner bytes a word, each cluster's from a word).
+- Meshes go up in batches (`VulkanRenderer::uploadMeshes`; the loading screen's batches hold up to 1M triangles or 256 meshes): the pooled meshes' clusters built at once on the job system (timed, `getMeshClusterBuildSeconds`, logged after the start-up line), then each mesh added in order with its clusters (`VulkanMeshPool::add`).
+- Every level goes into the pools, but `MeshPlacement::clusterCount` holds only the mesh's own clusters until the cut (2c). Packed by `packMeshClusters` into three more pools grown as the others are: `GpuMeshCluster` records (64 B: sphere, cone, axis, runs, counts, its mesh's first vertex), vertex numbers (the vertex pool's own, so no offset is needed), triangle words (four corner bytes a word, each cluster's from a word).
 - `MeshPlacement::firstCluster`, `clusterCount`; `GpuCullGroup` carries them (`placedCullGroup`), so the GPU finds a group's clusters.
 - The records are kept on the CPU too (`getClusterRecords`), for `cluster-compare`; F4's MESHES counts the cluster pools.
 
@@ -77,4 +83,4 @@ The same switch draws the list: the camera's prepass and main pass draw each sty
 
 ## Tests
 
-`mesh_clusters_test` (every triangle once with its winding, limits, spheres hold their vertices, facing never culls a front, a fine sphere 47% culled from afar); `mesh_cluster_culling_test` (packing, a culled cluster hides nothing seen over random turned, uneven, mirrored and double-sided instances, draws not rigid keep everything, the passes' steps equal a plain walk with the room cut, the size bound, the mesh shaders' workgroups reaching each survivor once and their buffer addresses, the screen box holding its sphere, occlusion hiding nothing with a nearer pixel on odd and thin screens, the two lists disjoint and missing only what this frame's pyramid hides, the occlusion record, the comparison with and without occlusion, the command, F4's line); GPU: `mesh_cluster_culling_gpu_test` (the test's choices, sphere and scale, the screen box, pixels and level against the mirror).
+`mesh_clusters_test` (every triangle once with its winding, limits, spheres hold their vertices, facing never culls a front, a fine sphere over 40% culled from afar); `mesh_cluster_levels_test` (the hierarchy's shape, a group bounding every group under it, every cut closed, uniform and seen from eyes, the sphere's volume within its area times the cut's error, an open sheet's cuts open only on its border, one cluster's mesh one level, repeatable, many built at once as one by one); `mesh_cluster_culling_test` (packing, a culled cluster hides nothing seen over random turned, uneven, mirrored and double-sided instances, draws not rigid keep everything, the passes' steps equal a plain walk with the room cut, the size bound, the mesh shaders' workgroups reaching each survivor once and their buffer addresses, the screen box holding its sphere, occlusion hiding nothing with a nearer pixel on odd and thin screens, the two lists disjoint and missing only what this frame's pyramid hides, the occlusion record, the comparison with and without occlusion, the command, F4's line); GPU: `mesh_cluster_culling_gpu_test` (the test's choices, sphere and scale, the screen box, pixels and level against the mirror).

@@ -123,8 +123,8 @@ private:
     // Every mesh up to the GPU before the first frame, a slice between loading frames, counted ("PREPARING THE SCENE").
     void uploadMeshesBehindLoadingScreen();
 
-    // The next mesh the renderer lacks, uploaded with its bounds and flat faces.
-    void uploadNextMesh();
+    // The next meshes the renderer lacks, a batch, uploaded with their bounds and flat faces; how many.
+    std::size_t uploadNextMeshes();
 
     // The first frame's describeFrame and sky bake, behind the loading screen.
     FrameDescription describeFirstFrame(float alpha, float frameSeconds);

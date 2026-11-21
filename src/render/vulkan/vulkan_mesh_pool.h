@@ -23,8 +23,9 @@ class VulkanMeshPool {
 public:
     VulkanMeshPool(const VulkanDevice& device, ImmediateCommands& uploads);
 
-    // The mesh copied in after the last one, its clusters built and copied in after the last ones; its place.
-    MeshPlacement add(const IndexedMesh& mesh);
+    // The mesh copied in after the last one, its clusters (built by the caller, many meshes at once: buildMeshClusters)
+    // copied in after the last ones; its place.
+    MeshPlacement add(const IndexedMesh& mesh, const MeshClusters& clusters);
 
     VkBuffer getVertices() const;
     VkBuffer getIndices() const;
@@ -36,9 +37,6 @@ public:
     VkDeviceAddress getClusterVertexAddress() const;
     VkDeviceAddress getTriangleWordAddress() const;
     const std::vector<GpuMeshCluster>& getClusterRecords() const;
-
-    // Seconds spent building clusters, all meshes together (measured when meshes load).
-    double getClusterBuildSeconds() const;
 
     // The pools' GPU addresses, which move when a pool grows: read them when they are used.
     VkDeviceAddress getVertexAddress() const;
@@ -56,8 +54,8 @@ private:
     void ensure(VulkanBuffer& pool, std::uint64_t& capacity, std::uint64_t used, std::uint64_t needed, std::uint64_t smallest, VkDeviceSize elementBytes,
                 VkBufferUsageFlags usage);
 
-    // The mesh's clusters built, packed and copied in; their place.
-    void addClusters(const IndexedMesh& mesh, MeshPlacement& placement);
+    // The mesh's clusters packed and copied in; their place.
+    void addClusters(const MeshClusters& built, MeshPlacement& placement);
 
     const VulkanDevice& device;
     ImmediateCommands& uploads;
@@ -76,7 +74,6 @@ private:
     std::uint64_t clusterVertexCapacity = 0;
     std::uint64_t triangleWordCapacity = 0;
     std::vector<GpuMeshCluster> clusterRecords;
-    double clusterBuildSeconds = 0.0;
 };
 
 // After copying mesh data on the GPU: the copies made visible to everything that reads meshes (render/vulkan/vulkan_mesh_pool.cpp).

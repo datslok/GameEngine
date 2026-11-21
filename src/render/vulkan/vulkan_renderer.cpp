@@ -25,6 +25,7 @@
 #include "render/vulkan/vulkan_check.h"
 #include "render/window_display.h"
 #include "scene/culling.h"
+#include "scene/mesh_clusters.h"
 #include "scene/moon.h"
 
 #include "imgui/imgui.h"
@@ -32,6 +33,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <iterator>
@@ -1211,6 +1213,10 @@ std::string VulkanRenderer::compareCulling() {
 std::string VulkanRenderer::compareMeshClusters() {
     clusterCompareAsked = true;
     return clusterCompareReport;
+}
+
+double VulkanRenderer::getMeshClusterBuildSeconds() const {
+    return meshClusterBuildSeconds;
 }
 
 /*
@@ -4134,19 +4140,53 @@ SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
-// Uploads wait for the GPU with their own command buffer, so they must happen between frames. A texture takes its slot
-// in the bindless array at once (slots in-flight frames do not read may change while they run).
-// With ray tracing, each mesh also gets its acceleration structure, numbered like the mesh.
 VertexEntries VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
+    return uploadMeshes({MeshUpload{&mesh, deforming}}).front();
+}
+
+/*
+* The meshes going into the pools have their clusters built first, all at once on every thread (the build is the
+* uploads' largest cost, five times one level's with every level: docs/research/VIRTUALGEOMETRY.md), then every mesh
+* goes up in order on this thread, which owns the upload queue.
+*/
+std::vector<VertexEntries> VulkanRenderer::uploadMeshes(const std::vector<MeshUpload>& batch) {
     if (recording) {
         throw std::logic_error("Upload meshes before beginning a frame");
     }
 
+    std::vector<const IndexedMesh*> pooled;
+
+    for (const MeshUpload& upload : batch) {
+        if (meshPool && !upload.deforming) {
+            pooled.push_back(upload.mesh);
+        }
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    const std::vector<MeshClusters> clusters = buildMeshClusters(pooled, jobs);
+    meshClusterBuildSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+    std::vector<VertexEntries> entries;
+    entries.reserve(batch.size());
+    std::size_t nextClusters = 0;
+
+    for (const MeshUpload& upload : batch) {
+        const bool isPooled = meshPool && !upload.deforming;
+        entries.push_back(uploadOneMesh(*upload.mesh, upload.deforming, isPooled ? &clusters[nextClusters++] : nullptr));
+    }
+
+    return entries;
+}
+
+// Uploads wait for the GPU with their own command buffer, so they must happen between frames. A texture takes its slot
+// in the bindless array at once (slots in-flight frames do not read may change while they run).
+// With ray tracing, each mesh also gets its acceleration structure, numbered like the mesh.
+VertexEntries VulkanRenderer::uploadOneMesh(const IndexedMesh& mesh, bool deforming, const MeshClusters* clusters) {
     if (!mesh.hanging.empty() && mesh.hanging.size() != mesh.vertices.size()) {
         throw std::invalid_argument("A hanging mesh needs one hanging entry a vertex");
     }
 
-    meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh, deforming, meshPool.get()));
+    meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh, deforming, meshPool.get(), clusters));
 
     if (rayTracing) {
         rayTracing->addMesh(uploads, *meshes.back());

@@ -12,6 +12,7 @@
 class ImmediateCommands;
 class VulkanDevice;
 class VulkanMeshPool;
+struct MeshClusters;
 
 /*
 * A mesh in GPU memory: a vertex buffer of MeshVertex and an index buffer of 32-bit indices, three per triangle. The
@@ -23,11 +24,12 @@ class VulkanMeshPool;
 * indices never change, so they live in GPU memory as any mesh's. Every frame must either show a shape or hold.
 *
 * Given the shared mesh buffer (render/vulkan/vulkan_mesh_pool.h), a mesh that does not deform is copied into its pools
-* instead and keeps only its place there; its buffers are the pools'.
+* instead, with its clusters (built by the caller), and keeps only its place there; its buffers are the pools'.
 */
 class VulkanMesh {
 public:
-    VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming = false, VulkanMeshPool* pool = nullptr);
+    VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming = false, VulkanMeshPool* pool = nullptr,
+               const MeshClusters* clusters = nullptr);
 
     bool isDeforming() const;
 

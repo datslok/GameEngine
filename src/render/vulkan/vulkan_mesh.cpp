@@ -11,7 +11,8 @@
 * Into the pools when there are pools and the mesh does not deform; otherwise buffers of its own, copied in the same way
 * and made visible by the same barrier (meshUploadBarrier).
 */
-VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming, VulkanMeshPool* pool):
+VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming, VulkanMeshPool* pool,
+                       const MeshClusters* clusters):
     deforming(deforming)
 {
     checkMeshUpload(mesh);
@@ -20,8 +21,12 @@ VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, c
     placement = MeshPlacement{0, vertexCount, 0, indexCount, false};
 
     if (pool != nullptr && !deforming) {
+        if (clusters == nullptr) {
+            throw std::invalid_argument("A mesh going into the pools needs its clusters");
+        }
+
         this->pool = pool;
-        placement = pool->add(mesh);
+        placement = pool->add(mesh, *clusters);
         return;
     }
 

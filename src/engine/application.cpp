@@ -72,6 +72,12 @@ Application::Application(const char* title, int width, int height, Game& game, c
 constexpr Uint32 loadingFrameMilliseconds = 33;
 constexpr double loadingStepSeconds = 0.033;
 
+// A batch of meshes going up together, their clusters built on every thread at once: enough triangles to keep the threads
+// busy (about 0.4M a second a thread build them), few enough that a loading frame comes about every 0.2 s on a 16-thread
+// laptop; and at most so many meshes, since each upload waits for the GPU on its own.
+constexpr std::size_t meshBatchTriangles = 1'000'000;
+constexpr std::size_t meshBatchMostMeshes = 256;
+
 // One loading frame, the window shown with the first (Window::reveal), so it never shows black; the sliding block's frame
 // counted across every stage, so it moves on smoothly from one to the next.
 void Application::drawLoadingFrame(LoadingProgress progress) {
@@ -105,7 +111,7 @@ void Application::workBehindLoadingScreen(std::string_view title, const std::fun
 }
 
 /*
-* The world's meshes go up to the GPU before the first frame, counted on the loading screen: a slice of them between
+* The world's meshes go up to the GPU before the first frame, counted on the loading screen: a slice of batches between
 * frames (stepsWithinBudget), on this thread, since uploads and the screen share the GPU's queue.
 */
 void Application::uploadMeshesBehindLoadingScreen() {
@@ -117,7 +123,7 @@ void Application::uploadMeshesBehindLoadingScreen() {
             return;
         }
 
-        const std::size_t done = stepsWithinBudget(renderer.getMeshCount(), total, loadingStepSeconds, profilerSeconds, [this](std::size_t) { uploadNextMesh(); });
+        const std::size_t done = stepsWithinBudget(renderer.getMeshCount(), total, loadingStepSeconds, profilerSeconds, [this](std::size_t) { return uploadNextMeshes(); });
         drawLoadingFrame(LoadingProgress{.title = loadingSceneTitle, .done = done, .total = total});
     }
 }
@@ -371,34 +377,55 @@ void Application::applyMouseMode() {
 * a texture a job, then uploaded in handle order (docs/research/TEXTURECOMPRESSION.md).
 */
 /*
-* The next mesh the renderer lacks, converted to the render format once, as it first reaches the GPU; a deforming
-* mesh's rest shape is its topology's, built when it was added. A drawn-only mesh is in the render format already, and
-* is never a mirror (big rough scenery).
+* The next meshes the renderer lacks, a batch (their clusters built on every thread at once: VulkanRenderer::
+* uploadMeshes), each converted to the render format once, as it first reaches the GPU; a deforming mesh's rest shape
+* is its topology's, built when it was added. A drawn-only mesh is in the render format already, and is never a mirror
+* (big rough scenery). Returns how many went up.
 */
-void Application::uploadNextMesh() {
-    const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
+std::size_t Application::uploadNextMeshes() {
+    const std::size_t first = renderer.getMeshCount();
+    const std::size_t total = assets.getMeshCount();
+    std::vector<IndexedMesh> converted;
+    converted.reserve(meshBatchMostMeshes); // never moved while the batch points into it
+    std::vector<VulkanRenderer::MeshUpload> batch;
+    std::size_t triangles = 0;
 
-    if (assets.isDrawnOnly(next)) {
-        const IndexedMesh& drawn = assets.getDrawnMesh(next);
-        vertexEntriesByMesh.push_back(renderer.uploadMesh(drawn));
-        boundsByMesh.push_back(indexedMeshBounds(drawn));
-        flatFacesByMesh.push_back({});
-        return;
+    for (std::size_t index = first; index < total && batch.size() < meshBatchMostMeshes && triangles < meshBatchTriangles; ++index) {
+        const MeshHandle handle{static_cast<std::uint32_t>(index)};
+
+        if (assets.isDrawnOnly(handle)) {
+            batch.push_back({&assets.getDrawnMesh(handle), false});
+        } else if (assets.isDeforming(handle)) {
+            batch.push_back({&assets.getDeformingTopology(handle).rest, true});
+        } else {
+            converted.push_back(buildIndexedMesh(assets.getMesh(handle)));
+            batch.push_back({&converted.back(), false});
+        }
+
+        triangles += batch.back().mesh->indices.size() / 3;
     }
 
-    if (assets.isDeforming(next)) {
-        vertexEntriesByMesh.push_back(renderer.uploadMesh(assets.getDeformingTopology(next).rest, true));
-    } else {
-        vertexEntriesByMesh.push_back(renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next))));
+    const std::vector<VertexEntries> entries = renderer.uploadMeshes(batch);
+
+    for (std::size_t within = 0; within < batch.size(); ++within) {
+        const MeshHandle handle{static_cast<std::uint32_t>(first + within)};
+        vertexEntriesByMesh.push_back(entries[within]);
+
+        if (assets.isDrawnOnly(handle)) {
+            boundsByMesh.push_back(indexedMeshBounds(*batch[within].mesh));
+            flatFacesByMesh.push_back({});
+        } else {
+            boundsByMesh.push_back(meshBounds(assets.getMesh(handle)));
+            flatFacesByMesh.push_back(assets.isDeforming(handle) ? std::vector<FlatFace>{} : findFlatFaces(assets.getMesh(handle)));
+        }
     }
 
-    boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
-    flatFacesByMesh.push_back(assets.isDeforming(next) ? std::vector<FlatFace>{} : findFlatFaces(assets.getMesh(next)));
+    return batch.size();
 }
 
 void Application::prepareNewResources() {
     while (renderer.getMeshCount() < assets.getMeshCount()) {
-        uploadNextMesh();
+        uploadNextMeshes();
     }
 
     const std::size_t firstTexture = renderer.getTextureCount();
@@ -528,6 +555,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         window.reveal(); // in case no loading frame could be drawn
         startup.lap("first frame drawn", profilerSeconds());
         SDL_Log("%s", startup.describe("Start-up").c_str());
+        SDL_Log("Mesh clusters and their levels built in %.2f s (part of the start-up)", renderer.getMeshClusterBuildSeconds());
 
         // The first frame's renderer by stage (render/cpu_timing.h), where its one-off work shows.
         StartupClock stages{0.0};
