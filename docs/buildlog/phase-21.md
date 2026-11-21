@@ -41,3 +41,12 @@
   - **Tests caught 5 planted bugs:** levels built anyway, the reordering skipped (clusters differing from the marked path's), a batch losing the switch, the switch not stored, bark not marked.
   - **Docs budget:** 2b-i's follow-up docs commit left `renderer.md` 83 bytes over its 20 KB budget, failing the docs test on main; trimmed here. Docs-only commits now get the docs check before pushing.
   - **Start-up** (laptop, release, forest, idle; two runs): clusters 1.67 and 1.66 s (2b-i: 3.85-4.23 s; one level on one thread before stage 2: 5.6 s), the meshes stage 4.9 s (2b-i: 7.2-7.9 s), start-up 25.4 and 24.6 s (2b-i: 27.2-28.2 s; before stage 2: 32.8 s). 2b-iii's disk cache not needed.
+- `cluster-levels-2c` (Nov 21 2026): the cut chosen a cluster in the culling passes (the user's pick: 1 pixel by default, Nanite's, over 0.5).
+  - **Records 64 to 112 B:** each cluster carries its own and its parent group's sphere and error, the same memory a separate pool would take, without new bindings; the mesh shaders read only their fields.
+  - **One function both sides of a choice:** a group's error is measured once as a cluster's own and once as its children's parent; `precise` in GLSL keeps the two from rounding apart (fused products), which would crack or double a seam.
+  - **The cut for every draw, rigid or not:** swaying bark skips the sphere tests but would otherwise draw all its levels at once; distances to an inside sphere floored at a millimetre, so an error of 0 stays 0.
+  - **Tests caught 4 planted bugs:** the cluster's own sphere for its own error (a crack), the parent test dropped (levels drawn twice), the cut skipped for draws not rigid, the own error packed from the wrong group. Helpers for checking cuts moved to `tests/mesh_helpers.h`.
+  - **Seen (the user, laptop):** towers clearly coarser at 16 px, no cracks or shimmer; no visible change on foliage (not marked) or at 1 px.
+  - **Measured (laptop, release, hidden copy, three samples; 1 px / 0 px):** MESHCULL 0.04-0.10 ms, MESHLATE 0.07-0.09 ms at rim, ring, wall and trees with 5.6K-17.8K clusters tested; GPU 20.7-22.2 / 20.7-22.2 rim, 26.2-27.5 / 25.9-26.8 ring, 18.6 / 18.9-19.2 wall, 26.5-28.2 / 26.6-27.5 trees. 2d not needed.
+  - **Little gain yet:** kept clusters within 1% at 1 and 0 px (16 px at the ring: 7853 against 7971, triangles alike): the marked meshes are a small share of the views, and past a short distance the rocks' old levels (one level each) are drawn instead; 2e retires them.
+  - `cluster-compare` agrees at the wall and ring at 1 and 16 px (0 extra).

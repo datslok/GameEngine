@@ -1,6 +1,6 @@
 // Mesh clusters culled a view, included with #include "mesh_cluster_culling.glsl": mirrors render/gpu/mesh_cluster_culling.h
-// (meshClusterLargestScale, meshClusterWorldSphere, meshClusterEyeInMesh, meshClusterFacesAway, meshClusterRigid,
-// meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure
+// (meshClusterLargestScale, meshClusterPlacedSphere, meshClusterWorldSphere, meshClusterErrorPixels, meshClusterInCut,
+// meshClusterEyeInMesh, meshClusterFacesAway, meshClusterRigid, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure
 // functions: the pyramid's reads are the passes' (mesh_cluster_pass.glsl, meshClusterHidden).
 #ifndef MESH_CLUSTER_CULLING_GLSL
 #define MESH_CLUSTER_CULLING_GLSL
@@ -22,7 +22,13 @@ struct MeshCluster {
     uint firstTriangleWord; // its triangles' run in the triangle pool: three corner bytes each, four to a word
     uint counts;           // vertices, then triangles from MESH_CLUSTER_TRIANGLE_SHIFT
     uint meshFirstVertex;  // its mesh's first vertex in the vertex pool
-    uint unused;
+    float ownError;        // the cut, in the mesh's space: the group it was made from (0 for the mesh's own triangles)
+    vec4 ownSphere;        // and its sphere
+    vec4 parentSphere;     // the group it was simplified with: its sphere
+    float parentError;     // and the error of what was made from it (above MESH_CLUSTER_NEVER_COARSER: nothing was)
+    uint unused0;
+    uint unused1;
+    uint unused2;
 };
 
 // A (draw list entry, cluster) pair a list draws. Must match GpuMeshClusterItem.
@@ -39,9 +45,46 @@ float meshClusterLargestScale(mat4 model) {
     return sqrt(max(max(dot(x, x), dot(y, y)), dot(z, z)));
 }
 
-// The cluster's sphere in the world: its centre placed, its radius by the longest a unit can stretch (meshClusterWorldSphere).
+// A sphere in the mesh's space placed in the world: its centre moved, its radius by the longest a unit can stretch
+// (meshClusterPlacedSphere).
+vec4 meshClusterPlacedSphere(vec4 sphere, mat4 model) {
+    return vec4((model * vec4(sphere.xyz, 1.0)).xyz, sphere.w * meshClusterLargestScale(model));
+}
+
+// The cluster's sphere in the world (meshClusterWorldSphere).
 vec4 meshClusterWorldSphere(MeshCluster cluster, mat4 model) {
-    return vec4((model * vec4(cluster.sphere.xyz, 1.0)).xyz, cluster.sphere.w * meshClusterLargestScale(model));
+    return meshClusterPlacedSphere(cluster.sphere, model);
+}
+
+/*
+* How many pixels a group's error (mesh units) covers: stretched by the model's longest stretch, over the distance to
+* its placed sphere (at least MESH_CLUSTER_NEAREST_ERROR_DISTANCE), times the view's pixels a metre away; distance-free
+* in an orthographic view (meshClusterErrorPixels). precise: a cluster's own error and its children's parent error are
+* the same group's, so both sides of the choice must round alike, without fused products.
+*/
+float meshClusterErrorPixels(vec4 sphere, float error, mat4 model, LevelView levels) {
+    precise float pixels = error * meshClusterLargestScale(model) * levels.eye.w;
+
+    if ((levels.flags & CULL_LEVELS_ORTHOGRAPHIC) != 0u) {
+        return pixels;
+    }
+
+    precise vec4 placed = meshClusterPlacedSphere(sphere, model);
+    precise vec3 offset = placed.xyz - levels.eye.xyz;
+    precise float distance = max(sqrt(dot(offset, offset)) - placed.w, MESH_CLUSTER_NEAREST_ERROR_DISTANCE);
+    precise float result = pixels / distance;
+    return result;
+}
+
+// Whether the cut draws the cluster: its own error fits the view's pixel error and its parent's does not, or nothing
+// coarser was made (meshClusterInCut).
+bool meshClusterInCut(MeshCluster cluster, mat4 model, LevelView levels) {
+    if (meshClusterErrorPixels(cluster.ownSphere, cluster.ownError, model, levels) > levels.pixelError) {
+        return false;
+    }
+
+    return cluster.parentError > MESH_CLUSTER_NEVER_COARSER ||
+           meshClusterErrorPixels(cluster.parentSphere, cluster.parentError, model, levels) > levels.pixelError;
 }
 
 /*
@@ -110,10 +153,15 @@ uint meshClusterTaskIndex(uvec3 group) {
 }
 
 /*
-* What the view makes of a cluster (meshClusterVisibility: MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): seen whole for a draw
-* not rigid; else hidden out of the frustum or, single-sided and not mirrored, facing away; else seen, its sphere holding.
+* What the view makes of a cluster (meshClusterVisibility: MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): hidden out of the cut
+* (any draw); seen whole for a draw not rigid; else hidden out of the frustum or, single-sided and not mirrored, facing
+* away; else seen, its sphere holding.
 */
 uint meshClusterVisibility(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view) {
+    if (!meshClusterInCut(cluster, instance.model, view.levels)) {
+        return MESH_CLUSTER_HIDDEN;
+    }
+
     if (!meshClusterRigid(instance, entry, record, view)) {
         return MESH_CLUSTER_SEEN;
     }

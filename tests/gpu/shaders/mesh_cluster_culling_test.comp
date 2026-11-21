@@ -34,8 +34,9 @@ void main() {
     if (function == GPU_TEST_MESH_CLUSTER_KEPT) {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the
-        // record's bounds, the eye, then the frustum's six planes. Outputs: (kept, rigid, faces away from the eye
-        // brought into the mesh, largest scale), the world sphere.
+        // record's bounds, the eye, the frustum's six planes, the own sphere, the parent sphere, (own error, parent
+        // error, pixel error, level flags). Outputs: (kept, rigid, faces away from the eye brought into the mesh,
+        // largest scale), the world sphere, (in the cut, own error's pixels, parent error's pixels).
         MeshCluster cluster;
         cluster.sphere = testInput(0);
         cluster.cone = testInput(1);
@@ -44,7 +45,14 @@ void main() {
         cluster.firstTriangleWord = 0u;
         cluster.counts = 0u;
         cluster.meshFirstVertex = 0u;
-        cluster.unused = 0u;
+        cluster.ownSphere = testInput(17);
+        cluster.parentSphere = testInput(18);
+        vec4 errors = testInput(19);
+        cluster.ownError = errors.x;
+        cluster.parentError = errors.y;
+        cluster.unused0 = 0u;
+        cluster.unused1 = 0u;
+        cluster.unused2 = 0u;
 
         InstanceData instance;
         instance.model = mat4(testInput(3), testInput(4), testInput(5), testInput(6));
@@ -68,6 +76,8 @@ void main() {
 
         CameraCull view;
         view.levels.eye = testInput(10);
+        view.levels.pixelError = errors.z;
+        view.levels.flags = uint(errors.w);
         view.flags = uint(flags.z);
         view.swayFadeEnd = flags.w;
 
@@ -80,5 +90,8 @@ void main() {
         testOutput(0, vec4(meshClusterKept(cluster, instance, entry, record, view) ? 1.0 : 0.0, meshClusterRigid(instance, entry, record, view) ? 1.0 : 0.0,
                            away ? 1.0 : 0.0, meshClusterLargestScale(instance.model)));
         testOutput(1, meshClusterWorldSphere(cluster, instance.model));
+        testOutput(2, vec4(meshClusterInCut(cluster, instance.model, view.levels) ? 1.0 : 0.0,
+                           meshClusterErrorPixels(cluster.ownSphere, cluster.ownError, instance.model, view.levels),
+                           meshClusterErrorPixels(cluster.parentSphere, cluster.parentError, instance.model, view.levels), 0.0));
     }
 }

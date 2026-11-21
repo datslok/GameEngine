@@ -16,6 +16,14 @@ namespace {
         return Vec3{instance.model[4 * column], instance.model[4 * column + 1], instance.model[4 * column + 2]};
     }
 
+    // A group's sphere as a record's (xyz centre, w radius).
+    void writeGroupSphere(const MeshClusterGroup& group, float sphere[4]) {
+        sphere[0] = group.centre.x;
+        sphere[1] = group.centre.y;
+        sphere[2] = group.centre.z;
+        sphere[3] = group.radius;
+    }
+
     // The next block's first pair at or after a count of pairs.
     std::uint32_t roundUpToBlock(std::uint32_t pairs) {
         return (pairs + meshClusterGroupSize - 1) / meshClusterGroupSize * meshClusterGroupSize;
@@ -96,6 +104,16 @@ PackedMeshClusters packMeshClusters(const MeshClusters& built, std::uint32_t mes
         record.firstTriangleWord = firstTriangleWord + static_cast<std::uint32_t>(packed.triangleWords.size());
         record.counts = cluster.vertexCount | (cluster.triangleCount << MESH_CLUSTER_TRIANGLE_SHIFT);
         record.meshFirstVertex = meshFirstVertex;
+        writeGroupSphere(built.groups[cluster.group], record.parentSphere);
+        record.parentError = built.groups[cluster.group].error;
+
+        if (cluster.refinedGroup == meshClusterNoGroup) {
+            std::copy(std::begin(record.sphere), std::end(record.sphere), std::begin(record.ownSphere));
+        } else {
+            writeGroupSphere(built.groups[cluster.refinedGroup], record.ownSphere);
+            record.ownError = built.groups[cluster.refinedGroup].error;
+        }
+
         packed.clusters.push_back(record);
 
         for (std::uint32_t vertex = 0; vertex < cluster.vertexCount; ++vertex) {
@@ -122,10 +140,43 @@ float meshClusterLargestScale(const GpuInstance& instance) {
     return std::sqrt(std::max(std::max(x.dot(x), y.dot(y)), z.dot(z)));
 }
 
+std::array<float, 4> meshClusterPlacedSphere(const float sphere[4], const GpuInstance& instance) {
+    const Vec3 centre = modelColumn(instance, 0) * sphere[0] + modelColumn(instance, 1) * sphere[1] + modelColumn(instance, 2) * sphere[2] +
+                        modelColumn(instance, 3);
+    return {centre.x, centre.y, centre.z, sphere[3] * meshClusterLargestScale(instance)};
+}
+
 std::array<float, 4> meshClusterWorldSphere(const GpuMeshCluster& cluster, const GpuInstance& instance) {
-    const Vec3 centre = modelColumn(instance, 0) * cluster.sphere[0] + modelColumn(instance, 1) * cluster.sphere[1] +
-                        modelColumn(instance, 2) * cluster.sphere[2] + modelColumn(instance, 3);
-    return {centre.x, centre.y, centre.z, cluster.sphere[3] * meshClusterLargestScale(instance)};
+    return meshClusterPlacedSphere(cluster.sphere, instance);
+}
+
+/*
+* The error stretched by the longest a unit can stretch, so it is never under what the placed mesh strays; the distance
+* to the placed sphere's surface, so every point in it is at least that far.
+*/
+float meshClusterErrorPixels(const float sphere[4], float error, const GpuInstance& instance, const GpuCameraCull& view) {
+    const float scale = meshClusterLargestScale(instance);
+    const float pixels = error * scale * view.levels.eye[3];
+
+    if ((view.levels.flags & CULL_LEVELS_ORTHOGRAPHIC) != 0u) {
+        return pixels;
+    }
+
+    const std::array<float, 4> placed = meshClusterPlacedSphere(sphere, instance);
+    const Vec3 offset{placed[0] - view.levels.eye[0], placed[1] - view.levels.eye[1], placed[2] - view.levels.eye[2]};
+    const float distance = std::max(std::sqrt(offset.dot(offset)) - placed[3], static_cast<float>(MESH_CLUSTER_NEAREST_ERROR_DISTANCE));
+    return pixels / distance;
+}
+
+bool meshClusterInCut(const GpuMeshCluster& cluster, const GpuInstance& instance, const GpuCameraCull& view) {
+    const float budget = view.levels.pixelError;
+
+    if (meshClusterErrorPixels(cluster.ownSphere, cluster.ownError, instance, view) > budget) {
+        return false;
+    }
+
+    return cluster.parentError > static_cast<float>(MESH_CLUSTER_NEVER_COARSER) ||
+           meshClusterErrorPixels(cluster.parentSphere, cluster.parentError, instance, view) > budget;
 }
 
 float meshClusterDeterminant(const GpuInstance& instance) {
@@ -164,6 +215,10 @@ bool meshClusterRigid(const GpuInstance& instance, std::uint32_t entry, const Gp
 
 std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                                     const GpuCameraCull& view) {
+    if (!meshClusterInCut(cluster, instance, view)) {
+        return MESH_CLUSTER_HIDDEN;
+    }
+
     if (!meshClusterRigid(instance, entry, record, view)) {
         return MESH_CLUSTER_SEEN;
     }
@@ -411,6 +466,15 @@ MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const Gpu
 bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                           const GpuCameraCull& view) {
     const Vec3 eye{view.levels.eye[0], view.levels.eye[1], view.levels.eye[2]};
+    const float budget = view.levels.pixelError;
+    const auto nearTheBudget = [&](const float sphere[4], float error) {
+        return std::fabs(meshClusterErrorPixels(sphere, error, instance, view) - budget) <= 1e-4f * budget;
+    };
+
+    if (nearTheBudget(cluster.ownSphere, cluster.ownError) ||
+        (cluster.parentError <= static_cast<float>(MESH_CLUSTER_NEVER_COARSER) && nearTheBudget(cluster.parentSphere, cluster.parentError))) {
+        return true;
+    }
 
     if (record.bounds[3] >= 0.0f) {
         const Vec3 centre{record.bounds[0], record.bounds[1], record.bounds[2]};

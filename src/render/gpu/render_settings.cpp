@@ -68,6 +68,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);
         visitor.field("Mesh clusters", settings.meshClusters);
+        visitor.field("Mesh cluster error", settings.meshClusterErrorPixels, {.min = 0.0f, .max = 1000.0f, .sliderMin = 0.25f, .sliderMax = 16.0f, .unit = "px"});
         visitor.field("Mesh cluster occlusion", settings.meshClusterOcclusion);
         visitor.field("Clustered shading", settings.clusteredShading);
         visitor.field("Cluster heatmap", settings.clusterHeatmap);
