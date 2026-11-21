@@ -101,7 +101,7 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 
 - Scene colour `ColourTarget`, discarded and cleared to the sky background colour; then the velocity image, cleared to no motion (`anti-aliasing.md`).
 - After the prepass: depth kept and loaded, `EQUAL`, not written (`mainPassDepthState(true)`), so each pixel is shaded once whatever the draw order. Without it: cleared, `GREATER`, written.
-- `EQUAL` needs bit-identical depths: the prepass's `triangle.vert` and the main pass's `triangle_motion.vert` are one body (`triangle_vertex.glsl`), `gl_Position` `invariant`.
+- `EQUAL` needs bit-identical depths: the prepass's `triangle.vert` and the main pass's `triangle_motion.vert` (and their `.mesh` twins) are one body (`triangle_vertex.glsl`'s `shadeVertex`), `gl_Position` `invariant`.
 - `mainPipelines` indexed by `mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays)`: probes and cut-outs as fragment specialization constants (frames without them draw as plain); reflection surfaces add three targets after the velocity image (`triangle_surfaces.frag`); glass rays use `triangle_rays.frag` / `triangle_surfaces_rays.frag` in a layout with the ray tracing set. After the prepass a cut-out needs no discard (its holes have no depth to match), so no cut-out variant exists there.
 - Shading itself is `scene_surface.glsl` (`triangle.frag` only includes it); a light is skipped before its shadow lookups when `facesLight` says the surface faces away (same test as the shading, so no change to the picture).
 - The sky and stars draw in a block of their own after (they write the scene image alone); depth stored only when read later.

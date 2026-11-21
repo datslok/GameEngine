@@ -74,7 +74,7 @@ Dear ImGui is vendored unmodified (`external/imgui`, version in its `VERSION.txt
 
 ## Quality presets
 
-`render/gpu/quality_preset`: `QualityPreset` Low, Medium, High, Ultra (`qualityPresetNames`). One private table (`QualityValues`) feeds `applyQualityPreset` and `matchingQualityPreset`, so they cannot disagree. Taste (tone mapping, exposure, bloom strength, HDR, camera finish, upscaling) is never touched; neither is `RenderSettings::rayTracing`, so ray tracing stays its own choice.
+`render/gpu/quality_preset`: `QualityPreset` Low, Medium, High, Ultra (`qualityPresetNames`). One private table (`QualityValues`) feeds `applyQualityPreset` and `matchingQualityPreset`, so they cannot disagree. Taste (tone mapping, exposure, bloom strength, HDR, camera finish, upscaling) is never touched, nor `RenderSettings::rayTracing` (its own choice).
 
 - **Ultra** = `RenderSettings{}`, the default: read from the defaults, so retuning a default retunes Ultra.
 - **High** = Ultra without ray-traced reflections and mirrored lights, probe sharing 0.1, reflection probe 128, ambient occlusion 2 slices and 4 steps.
