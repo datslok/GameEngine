@@ -1,25 +1,13 @@
+#include "mesh_helpers.h"
 #include "scene/simplify_mesh.h"
 #include "scene/indexed_mesh.h"
 #include "scene/mesh.h"
 
 #include <cassert>
-#include <cmath>
 #include <cstdint>
 #include <vector>
 
 namespace {
-    // A sheet 1 m square of 40 x 40 squares, rippled so there is shape to keep: as a scanned leaf is, a curved surface
-    // with an open border.
-    IndexedMesh rippledSheet() {
-        IndexedMesh sheet = buildIndexedMesh(Mesh::grid(40, 40, 1.0f, 1.0f));
-
-        for (MeshVertex& vertex : sheet.vertices) {
-            vertex.position.z = 0.05f * std::sin(6.0f * vertex.position.x) * std::cos(4.0f * vertex.position.y);
-        }
-
-        return sheet;
-    }
-
     bool samePoint(const Vec3& a, const Vec3& b) {
         return a.x == b.x && a.y == b.y && a.z == b.z;
     }
