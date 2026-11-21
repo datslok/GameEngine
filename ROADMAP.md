@@ -367,6 +367,8 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
             - [x] 2. Trees cast into the four cascades, not the far map (the user's go, Nov 21 2026; the nearest two would have ended their shadows about 9 m away)
             - [ ] 2b. The far forest's shadow from a cheap caster in the far map (one a cell, or a canopy height field: Witcher 3, CryEngine)
             - [ ] 3. Placed plants in the probe faces only near the probe
+            - [ ] 4. Sun cascades as balls round the camera in coarse steps (1/16 of a box), so turning never redraws them and walking rarely (the user's go, Nov 21 2026; `docs/research/SHADOWCACHE.md`, Cascades while the camera moves) (`cascade-steps`)
+            - [ ] 5. Scrolling a stepped cascade's still copy, only the exposed strips' casters drawn (Insomniac) (`cascade-scrolling`)
           - [ ] e1b. The fade by distance over each set's last cell, by the level fades' dither
         - [ ] e2. Measured at the rim, the path and the meadow (F4), radii and levers tuned
     - [ ] 3. The far tier: one impostor a tree past about 1 km, casting into the far shadow map (`impostor-fields`)

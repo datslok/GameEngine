@@ -130,3 +130,23 @@ Gathered on Nov 14, 2026, after the jungle's canopy (`jungle-canopy`) cost 23 ms
   - 16384² a clipmap level, nested levels each twice the last's size, cut into 128² pages; only pages pixels look up drawn into a physical pool and kept until something in them moves. About one texel a pixel at every distance, no seams; still scenes nearly free.
   - Needs a page-marking pass from depth, a page table, GPU-driven culling and drawing per page (`GPUDRIVEN.md`, done), invalidation from moving casters.
   - For the valley (the user's question, Nov 14 2026): it would replace the cascades and the far map (whose 2.7 m texels drop drifting rocks under two texels). Foliage swaying in the wind invalidates pages constantly (`WORLDSCALE.md`: Unreal's fixes).
+
+# Cascades while the camera moves: research
+
+Gathered on Nov 21, 2026, after the user walked the forest at about 21 fps (laptop RTX 4070, 1430 lines): SHADOW 13.4 ms of 48, all five sun tiles redrawn every frame while moving (1-2 ms standing still). Each cascade's box follows its view slice, snapped to whole texels, so walking moves it every frame or two and turning moves it too.
+
+## What engines do
+
+| Technique | Who | Notes | Source |
+|---|---|---|---|
+| Scrolling a cached cascade | Insomniac (SIGGRAPH 2012) | the persistent map of "static" casters (not moved for about 5 s) shifted "like 2D bitmap scrolling" by the camera's step in the light's frame; the exposed edges cut into thin boxes ("slabs") and only static casters overlapping them drawn; copied into the frame's map and the moving casters drawn over it; "do not render ~70% of 'static' geometry into CSM"; 512² maps on PS3/360 | [slides](https://advances.realtimerendering.com/s2012/insomniac/Acton-CSM_Scrolling(Siggraph2012).pdf) (all read) |
+| Depth scrolling | Insomniac | motion along the light adds the step to every old depth; the cleared far value is kept unchanged ("no offset"); near clamps to 0 | same slides |
+| Scroll until the overlap is too small, then redraw whole | Unreal (CSM caching) | the cached static cascade scrolled, a full redraw under an overlap threshold; a few newly exposed static casters drawn meanwhile | [forum](https://forums.unrealengine.com/t/csm-caching-and-objects-culling-questions/2684008) **(unverified, forum)** |
+| Levels centred on the camera (clipmaps) | Unreal virtual shadow maps, StratusGFX, Blender EEVEE | each level twice the last round the camera's position, in light space: rotating changes nothing; moving the origin streams in only the border; StratusGFX wraps the addressing (`fract`) so nothing is copied; Blender uses clipmaps "for high field of view", cascades for shallow ones | [StratusGFX](https://ktstephano.github.io/rendering/stratusgfx/svsm), [Blender](https://developer.blender.org/docs/features/eevee/modules/shadow/) **(Blender from a summary)** |
+| Coarse steps | engine write-ups | cascades moved in steps of 1/32 of their width, about 6% of resolution lost, so walking or turning rarely redraws them | [a PR](https://github.com/Metallic-Club/studio/pull/120) **(unverified, a hobby engine)** |
+
+## What it means here
+
+- **Our slice spheres are wider than the camera's own ball:** a 70° 16:9 view's slice sphere has radius tan-diagonal × far = 1.43 far (`cascadeSphere`), a box about 2.9 far wide; a box round the camera holding everything within the far end needs radius far, 2 far wide: about 30% finer texels, and no redraw on turning (the box no longer depends on the look).
+- **Steps:** the camera-centred box's centre snapped to a grid of 1/k of its width (and its depth along the light likewise), the radius grown by the step so the ball always fits: a cascade is redrawn only when the camera crosses a step; k = 16 costs about 9% of texel size against the 30% gained.
+- **Scrolling** (Insomniac) then makes a step cheap: the still copy (step 1c's) shifted by the step's whole texels and depth, only the exposed strips' still casters drawn, the movers over it as now. Cost grows with the new ground a step uncovers, not with the cascade's forest.
