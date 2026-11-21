@@ -134,6 +134,8 @@ void testAssetManager() {
     assert(!assets.hasClusterLevels(cube) && !assets.hasClusterLevels(drawnHandle));
     assets.setClusterLevels(drawnHandle);
     assert(assets.hasClusterLevels(drawnHandle) && !assets.hasClusterLevels(cube));
+    // The flags by mesh number, for the draws (attachMeshLevels).
+    assert(assets.getClusterLevels().at(drawnHandle.index) == 1 && (assets.getClusterLevels().size() <= cube.index || assets.getClusterLevels()[cube.index] == 0));
     assets.setClusterLevels(cube);
     assert(assets.hasClusterLevels(cube));
     const MeshHandle cloth = assets.addDeformingMesh(Mesh::plane(1.0f));

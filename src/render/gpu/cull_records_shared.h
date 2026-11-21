@@ -15,6 +15,7 @@
 #define CULL_MOVED 128u       // its matrix changed since last frame (DrawItem::previousModel): the velocity pass redraws it
 #define CULL_SWAYS 256u       // it sways in the wind (DrawItem::sway not still), where the sway reaches
 #define CULL_FADES 512u       // its levels cross-fade in the camera's view (DrawItem::fadesLevels)
+#define CULL_CLUSTER_LEVELS 1024u // its mesh has cluster levels (DrawItem::clusterLevels): kept whole where a view draws them
 
 // The meshes a draw can be drawn with: its own and up to three levels (scene/mesh_level.h, meshLevelSlots).
 #define CULL_LEVEL_SLOTS 4
@@ -40,5 +41,6 @@
 #define CULL_LEVELS_ENABLED 1u
 #define CULL_LEVELS_IMPOSTORS 2u
 #define CULL_LEVELS_ORTHOGRAPHIC 4u
+#define CULL_LEVELS_CLUSTERS 8u // draws mesh clusters by their levels (LevelView::clusterLevels)
 
 #endif

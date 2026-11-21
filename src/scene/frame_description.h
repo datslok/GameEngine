@@ -71,6 +71,10 @@ struct DrawItem {
     // Its levels cross-faded in the camera's view (MeshLevelOptions::fadesLevels, set by attachMeshLevels).
     bool fadesLevels = false;
 
+    // Its mesh has cluster levels (AssetManager::setClusterLevels, set by attachMeshLevels): a view drawing them
+    // (LevelView::clusterLevels) keeps the mesh itself and leaves the coarsening to the hierarchy's cut.
+    bool clusterLevels = false;
+
     // Drawn by no view and met by no ray, but part of the static level (ModelRenderer::hidden).
     bool hidden = false;
 

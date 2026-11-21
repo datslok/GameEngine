@@ -22,8 +22,8 @@ namespace {
 
     /*
     * Choosing from the packed records gives the CPU's mesh for every draw, in perspective views near and far, with
-    * levels and impostors on and off, and orthographic (the sun's tiles); thins exactly the draws batchByMesh would; and
-    * fades the draws levelFade fades, with or without a band.
+    * levels and impostors on and off, and orthographic (the sun's tiles), drawing cluster levels or not; thins exactly
+    * the draws batchByMesh would; and fades the draws levelFade fades, with or without a band.
     */
     void testLevelsMatchTheCpu() {
         std::mt19937 random{29};
@@ -43,6 +43,7 @@ namespace {
             LevelView view = cameraLevelView(Vec3{(unit(random) - 0.5f) * 3000.0f, 2.0f + unit(random) * 200.0f, (unit(random) - 0.5f) * 3000.0f},
                                              1080.0f + unit(random) * 1080.0f, 0.6f + unit(random) * 0.8f, settings);
             view.orthographic = viewIndex % 5 == 4;
+            view.clusterLevels = viewIndex % 2 == 1;
 
             if (view.orthographic) {
                 view.pixelsPerMetre = 0.5f + unit(random) * 40.0f;
@@ -151,6 +152,14 @@ namespace {
         // Fading levels (DrawItem::fadesLevels).
         moving.fadesLevels = true;
         assert(packCullRecord(moving).flags == (CULL_CASTS_SHADOWS | CULL_SWAYS | CULL_FADES));
+
+        // Cluster levels of its own (DrawItem::clusterLevels), and a view drawing them (LevelView::clusterLevels).
+        moving.clusterLevels = true;
+        assert(packCullRecord(moving).flags == (CULL_CASTS_SHADOWS | CULL_SWAYS | CULL_FADES | CULL_CLUSTER_LEVELS));
+        LevelView clusterView;
+        assert((packLevelView(clusterView).flags & CULL_LEVELS_CLUSTERS) == 0u);
+        clusterView.clusterLevels = true;
+        assert((packLevelView(clusterView).flags & CULL_LEVELS_CLUSTERS) != 0u);
 
         const std::vector<MeshLevel> four(4, MeshLevel{MeshHandle{1}, 0.1f, false});
         bool refused = false;

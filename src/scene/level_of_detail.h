@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <vector>
 
@@ -68,6 +69,10 @@ struct LevelView {
 
     // The share of a switch's distance its draws that fade cross-fade over (LevelOfDetailSettings::fadeBand); 0 none.
     float fadeBand = 0.0f;
+
+    // The view draws mesh clusters by their levels (the camera's, with mesh shaders; ROADMAP phase 21, 2e): a draw whose
+    // mesh has cluster levels (DrawItem::clusterLevels) keeps the mesh itself, never its old levels, however far.
+    bool clusterLevels = false;
 };
 
 // The widest fade band: past it the band's start would come too near the eye to mean anything.
@@ -125,7 +130,8 @@ LevelFade levelFade(const DrawItem& draw, const LevelView& view);
 // How many of the chosen draws draw each level in this view (the F4 readout's); a fading draw counts both its levels.
 std::array<std::size_t, meshLevelSlots> levelsChosen(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, const LevelView& view);
 
-// Give each draw its mesh's levels and options, from tables indexed like MeshHandle (AssetManager::getMeshLevels and
-// getMeshLevelOptions; the levels must outlive the frame), the options' shared box placed by the draw's model matrix.
+// Give each draw its mesh's levels, options and cluster-levels flag, from tables indexed like MeshHandle
+// (AssetManager::getMeshLevels, getMeshLevelOptions and getClusterLevels; the levels must outlive the frame), the
+// options' shared box placed by the draw's model matrix. Shorter tables leave the last meshes without.
 void attachMeshLevels(std::span<DrawItem> draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
-                      const std::vector<MeshLevelOptions>& optionsByMesh = {});
+                      const std::vector<MeshLevelOptions>& optionsByMesh = {}, const std::vector<std::uint8_t>& clusterLevelsByMesh = {});

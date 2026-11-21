@@ -131,11 +131,11 @@ Glass is never a solid caster, nor a solid caster glass. Which views call these:
 Each view draws the coarsest of a mesh's levels whose error covers at most `pixelError` pixels. Options, impostors, card thinning: `level-of-detail.md`; research: `docs/research/LOD.md`.
 
 - **Levels:** `MeshLevel` {mesh, `errorMetres`, `sharesVertices`}, coarsest last, at most three (`meshLevelSlots` = 4 with the mesh); a last level without a mesh draws nothing (`levelsUntilCard`: a tree's levels finer than its card, then that).
-- **Attaching:** `attachMeshLevels` gives each draw its levels' span and options, `chooseBounds` placed by the draw's matrix into `levelBounds`. `DrawItem::mesh` stays the mesh for bounds, rays, flat faces, sky bake.
-- **`LevelView`:** eye, `pixelsPerMetre` = height / (2 tan(fov / 2)), `pixelError`, `enabled`, `impostors`, `orthographic` (sun tiles: distance ignored), `fadeBand`. `levelView(eye, heightPixels, fov, settings)`; `cameraLevelView` fades.
+- **Attaching:** `attachMeshLevels` gives each draw its levels' span, options and `clusterLevels`, `chooseBounds` placed by the draw's matrix into `levelBounds`. `DrawItem::mesh` stays the mesh for bounds, rays, flat faces, sky bake.
+- **`LevelView`:** eye, `pixelsPerMetre` = height / (2 tan(fov / 2)), `pixelError`, `enabled`, `impostors`, `orthographic` (sun tiles: distance ignored), `fadeBand`, `clusterLevels` (mesh-clusters.md). `levelView(eye, heightPixels, fov, settings)`; `cameraLevelView` fades.
 - **`errorInPixels`:** e · pixelsPerMetre / d (infinite at d ≤ 0); orthographic, e · pixelsPerMetre.
 - **`chooseLevel`:** walks the levels until one does not fit or (impostors off) has no mesh. Off: level 0.
-- **`levelDistance`:** to the sphere's surface (0 inside), so a big tree's near side is not coarse. `drawLevel` uses `levelBounds` when set, else `bounds`; unknown bounds keep the mesh.
+- **`levelDistance`:** to the sphere's surface (0 inside): a big tree's near side is not coarse. `drawLevel` uses `levelBounds` when set, else `bounds`; unknown bounds keep the mesh.
 - **`chosenMesh`:** the drawn mesh, or an invalid handle where it draws nothing (an impostor too near, levels or impostors off; a tree past its last level). Batching skips those.
 - **`levelsChosen`:** counts per level for the readout's LEVELS (fading: both levels).
 - **`thinningErrorPerMetre`:** pixelError / pixelsPerMetre, card thinning's allowance (0 orthographic or off).
@@ -155,7 +155,7 @@ Each view draws the coarsest of a mesh's levels whose error covers at most `pixe
 
 **Each frame** (`Application::render`), with the game's debug view on:
 
-1. Only with `EngineSettings::debugBoundingBoxes` (off; `debugBoundingBoxes`, F5's "Debug bounding boxes": in a forest they hide the readout), `drawBoundingBoxes`: boxes only round what the camera draws (`visibleDraws` in its frustum, `chosenMesh` valid at last frame's output height), since boxing every draw of a big world cost most of a frame.
+1. Only with `EngineSettings::debugBoundingBoxes` (off; F5's "Debug bounding boxes"), `drawBoundingBoxes`: boxes only round what the camera draws (`visibleDraws` in its frustum, `chosenMesh` valid at last frame's output height), since boxing every draw of a big world cost most of a frame.
 2. With the same setting, `drawColliders`: every collider's query shape, orange, interpolated.
 3. The readout (below), `drawCameraReadout`, the profilers.
 
