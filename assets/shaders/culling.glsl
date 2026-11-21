@@ -15,6 +15,11 @@ struct CullRecord {
     int shadowCascades;    // the sun's nearest cascades it casts into (0 all)
 };
 
+// The nearest sun cascade a record casts into, from its flags (cullShadowFrom).
+int cullShadowFrom(uint flags) {
+    return int((flags >> CULL_SHADOW_FROM_SHIFT) & CULL_SHADOW_FROM_MASK);
+}
+
 // A view's six planes: inward normal xyz, distance w. Must match GpuFrustum.
 struct CullFrustum {
     vec4 planes[6];

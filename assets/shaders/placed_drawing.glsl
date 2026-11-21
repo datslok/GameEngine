@@ -53,7 +53,6 @@ struct PlacedItem {
 // A view's culling. Must match GpuPlacedView.
 struct PlacedView {
     CameraCull camera;
-    vec4 unused;
     uint firstItem; // its items, from here
     uint items;
     uint groups;

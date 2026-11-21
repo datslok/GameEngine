@@ -114,9 +114,10 @@ struct GpuCameraCull {
     std::uint32_t segmentBlocks = 0;          // workgroups of segments
     std::uint32_t segmentSlices[2] = {};      // CAMERA_CULL_SEGMENT_SLICE_*: its parts of the segment passes' buffers
     float thinning[2] = {0.0f, 0.0f};         // a sun cascade's thinning band (ShadowTile::thinStart, thinEnd)
+    float thinBall[4] = {0.0f, 0.0f, 0.0f, -1.0f}; // the ball it is measured from (xyz centre, w radius; below 0 thins nothing)
 };
 
-static_assert(sizeof(GpuCameraCull) == 256, "GpuCameraCull must match camera_culling.glsl's CameraCull");
+static_assert(sizeof(GpuCameraCull) == 272, "GpuCameraCull must match camera_culling.glsl's CameraCull");
 
 // What the passes count (CAMERA_CULL_COUNTS words): draws by level slot, the camera's and the velocity pass's totals.
 struct GpuCameraCullCounts {
@@ -210,8 +211,9 @@ bool shadowTakes(const GpuCullRecord& record, const GpuCameraCull& view);
 
 /*
 * The share of casters like this one a sun cascade keeps: 1 unless the cascade is the last the caster is limited to
-* (GpuCullRecord::shadowCascades) and has a thinning band (thinning x above y); then 1 from x in from the box's sides
-* (measured in radii, as cascadeEdgeDistance's sides), falling evenly to 0 at y.
+* (GpuCullRecord::shadowCascades) and has a thinning band (thinning x above y) and ball (thinBall); then 1 from x in from
+* the ball's edge, falling evenly to 0 at y, in radii, the distance from its centre measured across the sun's plane (the
+* box's near plane), so a caster anywhere along a sun ray, and so its shadow, gets the same share.
 */
 float shadowThinShare(const GpuCullRecord& record, const GpuCameraCull& view);
 
@@ -353,6 +355,11 @@ struct CameraCullFrame {
     std::vector<std::size_t> glass;
     std::vector<std::size_t> flatFaced;
 
+    // The sun's cascades some draw is limited to last (lastCascadeBit), still or moving: only those thin (ShadowTile::
+    // thinsCasters). The still draws' are gathered as they are packed and never cleared until a full build, so a draw
+    // that lost its limit may leave its bit set a while (a cascade then keyed on its ball for nothing, never the reverse).
+    std::uint32_t lastCascades = 0;
+
     // Changes whenever the still records, chunks, candidates or segments do, by one a frame that changed them.
     std::uint64_t stillGeneration = 0;
 
@@ -378,6 +385,10 @@ struct CameraCullFrame {
     Joined join() const;
     CullTables tables(const Joined& joined) const;
 };
+
+// The bit of the sun's cascade a caster is limited to last (bit c for GpuCullRecord::shadowCascades c + 1), 0 for one
+// free of the limit: the cascades whose thinning can take it (CameraCullFrame::lastCascades).
+std::uint32_t lastCascadeBit(const GpuCullRecord& record);
 
 /*
 * The still draws' culling tables kept from frame to frame, and the moving draws' made each frame. The still candidates
@@ -427,6 +438,7 @@ private:
     std::vector<GpuMeshLevels> stillLevels;
     std::vector<std::size_t> stillGlass;
     std::vector<std::size_t> stillFlatFaced;
+    std::uint32_t stillLastCascades = 0;
     std::uint64_t packedVersion = 0;
     std::uint64_t generation = 0;
     std::size_t stillBuilds = 0;

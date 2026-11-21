@@ -878,9 +878,10 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 40 && counter.live == 0);
-        // The trees cast into the sun's four cascades, not the far map past them (the far map is the cascade after the last).
-        assert(visited.shadowCascades == 4);
+        assert(counter.fields == 41 && counter.live == 0);
+        // The trees cast into the sun's four cascades, not the far map past them (the far map is the cascade after the last),
+        // their seen bark and leaves into the nearest two, the stand-ins from there on.
+        assert(visited.shadowCascades == 4 && visited.seenShadowCascades == 2);
         assert(settings.shadowBarkShare > 0.0f && settings.shadowBarkShare <= 0.2f);
 
         // Four times the first patch's crown cover (the user, Nov 14 2026): more trees, their crowns interlocking.
@@ -1041,14 +1042,17 @@ namespace {
             const ModelRenderer& card = look.models[2];
             const ModelRenderer& shadows = look.models[3];
 
-            // The leaves and bark seen cast no shadow; their stand-ins cast it and are never seen: the shadow leaves and
-            // the shadow bark, two parts of one shadows-only model.
-            assert(!leaves.castsShadows && !leaves.shadowOnly && !bark.castsShadows && !bark.shadowOnly);
-            assert(shadows.castsShadows && shadows.shadowOnly && shadows.parts.size() == 2);
-            // The stand-ins cast into the nearest cascades their kind's settings name.
+            // The leaves and bark seen cast into the nearest cascades, handing their shadow on to their stand-ins, which
+            // cast from there and are never seen: the shadow leaves and the shadow bark, two parts of one shadows-only model.
             const ForestTreeSettings& kind = look.layer == static_cast<int>(ForestLayer::Emergent) ? game.getEmergentSettings()
                                              : look.layer == static_cast<int>(ForestLayer::Mid)    ? game.getMidSettings()
                                                                                                    : game.getTreeSettings();
+            for (const ModelRenderer* seen : {&leaves, &bark}) {
+                assert(seen->castsShadows && seen->shadowHandedOn && seen->shadowCascades == kind.seenShadowCascades && !seen->shadowOnly);
+            }
+
+            assert(shadows.castsShadows && shadows.shadowOnly && shadows.parts.size() == 2 && shadows.shadowFromCascade == kind.seenShadowCascades);
+            // The stand-ins cast into the nearest cascades their kind's settings name.
             assert(shadows.shadowCascades == kind.shadowCascades);
             assert(isCutOut(shadows.parts[0].material) && !isCutOut(shadows.parts[1].material));
             assert(assets.isDrawnOnly(bark.parts.front().mesh) && !isCutOut(bark.parts.front().material));

@@ -97,7 +97,6 @@ static_assert(sizeof(GpuPlacedItem) == 8, "GpuPlacedItem must match placed_drawi
 */
 struct GpuPlacedView {
     GpuCameraCull camera{};
-    float unused[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     std::uint32_t firstItem = 0;
     std::uint32_t items = 0;
     std::uint32_t groups = 0;
@@ -215,6 +214,10 @@ GpuCullRecord placedChangeRecord(std::span<const GpuCullChunk> chunks);
 
 // What the cached shadow tiles depend on in the table: its parts' records and levels, its kinds and groups.
 std::uint64_t placedTableSignature(const PlacedTable& table);
+
+// The sun's cascades the table's parts are limited to last (lastCascadeBit), joined with CameraCullFrame::lastCascades
+// to say which cascades thin (ShadowTile::thinsCasters).
+std::uint32_t placedLastCascades(const PlacedTable& table);
 
 // ---- Mirrored by placed_drawing.glsl ----
 

@@ -802,20 +802,24 @@ namespace {
     }
 
     /*
-    * A plant's variant as a look of the GPU's cells (scene/planting_cells.h): its seen mesh, casting no shadow; its
-    * shadow's stand-in, drawn into the nearest shadowCascades only; and its card, drawn only far away, casting none (the
-    * stand-in keeps its shadow). The first two sway as plants by sway from the start (and swayers, by their look's place
-    * in looks, for applySway); the card, far off, does not.
+    * A plant's variant as a look of the GPU's cells (scene/planting_cells.h): its seen mesh, casting into the nearest
+    * seenCascades only and handing its shadow on; its shadow's stand-in, drawn from there into the nearest shadowCascades
+    * only (docs/research/FOLIAGESHADOWS.md); and its card, drawn only far away, casting none (the stand-in keeps its
+    * shadow). The first two sway as plants by sway from the start (and swayers, by their look's place in looks, for
+    * applySway); the card, far off, does not.
     */
     template <typename LookSwayer>
-    void addPlantLook(const PlantVariant& variant, int layer, int kind, int variantNumber, int shadowCascades, const ForestSwaySettings& sway,
-                      std::vector<PlantedKindLook>& looks, std::vector<LookSwayer>& swayers) {
+    void addPlantLook(const PlantVariant& variant, int layer, int kind, int variantNumber, int shadowCascades, int seenCascades,
+                      const ForestSwaySettings& sway, std::vector<PlantedKindLook>& looks, std::vector<LookSwayer>& swayers) {
         PlantedKindLook look{.layer = layer, .kind = kind, .variant = variantNumber, .models = {}};
         ModelRenderer seen = makeMeshRenderer(variant.leaves, variant.material);
-        seen.castsShadows = false;
+        seen.castsShadows = seenCascades > 0;
+        seen.shadowCascades = seenCascades;
+        seen.shadowHandedOn = seenCascades > 0;
         ModelRenderer shadow = makeMeshRenderer(variant.shadow, variant.material);
         shadow.shadowOnly = true;
         shadow.shadowCascades = shadowCascades;
+        shadow.shadowFromCascade = seenCascades;
         ModelRenderer card = makeMeshRenderer(variant.card, variant.cardMaterial);
         card.castsShadows = false;
 
@@ -890,7 +894,7 @@ void ForestGame::buildUnderstorey(AssetManager& assets) {
 
         for (std::size_t variant = 0; variant < each.size(); ++variant) {
             addPlantLook(each[variant], static_cast<int>(ForestLayer::Understorey), kind, static_cast<int>(variant), understoreySettings.shadowCascades,
-                         swaySettings, plantLooks, plantLookSwayers);
+                         understoreySettings.seenShadowCascades, swaySettings, plantLooks, plantLookSwayers);
         }
     }
 }
@@ -920,8 +924,8 @@ void ForestGame::buildPalms(AssetManager& assets) {
 
     // A palm's variant is its kind in the layer.
     for (std::size_t variant = 0; variant < variants.size(); ++variant) {
-        addPlantLook(variants[variant], static_cast<int>(ForestLayer::Palms), static_cast<int>(variant), 0, palmSettings.shadowCascades, swaySettings,
-                     plantLooks, plantLookSwayers);
+        addPlantLook(variants[variant], static_cast<int>(ForestLayer::Palms), static_cast<int>(variant), 0, palmSettings.shadowCascades,
+                     palmSettings.seenShadowCascades, swaySettings, plantLooks, plantLookSwayers);
     }
 }
 
@@ -1265,10 +1269,12 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
     }
 
     /*
-    * Each variant's parts, as one look (scene/planting_cells.h), which the GPU's cells draw the trees with. Bark, leaves
-    * and card cast no shadow; the shadow's stand-ins (the shadow leaves and the shadow bark, one shadows-only model) cast
-    * it, into the nearest cascades the settings name (shadowCascades: not the far map); the climbers' stems and leaves and the epiphytes' rosettes and moss cast into the nearest cascades. All but the
-    * card sway as trees (treeLookSwayers, applySway); the climbers' and epiphytes' models are listed for their tests.
+    * Each variant's parts, as one look (scene/planting_cells.h), which the GPU's cells draw the trees with. Bark and
+    * leaves cast into the nearest seenShadowCascades, handing their shadow on to the shadow's stand-ins (the shadow
+    * leaves and the shadow bark, one shadows-only model), which cast from there into the nearest cascades the settings
+    * name (shadowCascades: not the far map; docs/research/FOLIAGESHADOWS.md); the card casts none; the climbers' stems
+    * and leaves and the epiphytes' rosettes and moss cast into the nearest cascades. All but the card sway as trees
+    * (treeLookSwayers, applySway); the climbers' and epiphytes' models are listed for their tests.
     */
     for (std::size_t variant = 0; variant < grown.size(); ++variant) {
         PlantedKindLook look{.layer = static_cast<int>(layer), .kind = static_cast<int>(variant), .models = {}};
@@ -1284,11 +1290,15 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
 
             look.models.push_back(std::move(model));
         };
-        seen(barkMeshes[variant], bark, false, 0, false);
-        seen(leafMeshes[variant], leaf, false, 0, true);
+        const int seenCascades = settings.seenShadowCascades;
+        seen(barkMeshes[variant], bark, seenCascades > 0, seenCascades, false);
+        look.models.back().shadowHandedOn = seenCascades > 0;
+        seen(leafMeshes[variant], leaf, seenCascades > 0, seenCascades, true);
+        look.models.back().shadowHandedOn = seenCascades > 0;
         seen(cardMeshes[variant], cardMaterials[variant], false, 0, std::nullopt);
         seen(shadowLeafMeshes[variant], leaf, true, settings.shadowCascades, true);
         look.models.back().shadowOnly = true;
+        look.models.back().shadowFromCascade = seenCascades;
         look.models.back().parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
 
         if (climberStemMeshes[variant].isValid()) {

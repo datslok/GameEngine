@@ -82,7 +82,7 @@ A mesh of cards (leaf clusters, palm leaflets) fades into its coarser level one 
 - `uploadMesh` packs a thinned mesh's header (card size, growth, least share) and a record a vertex (`packCardThinning`, `GpuThinningRecord`, 16 bytes) into scene set 1 binding 42, copied whole when new ones arrive (`updateVertexRecords`), and returns the entry in `VertexEntries`; `attachVertexEntries` sets `DrawItem::thinningEntry`, packed into `GpuInstance::hanging[2]`.
 - `batchByMesh` marks a draw drawn with the mesh itself or a vertex-sharing level of a thinned mesh (`BatchedDraws::marks`); `appendDrawList` sets `DRAW_LIST_THINNED_BIT` in its draw list entry (`drawnInstance` strips it).
 - `thinnedVertex` (`card_thinning_data.glsl`) shapes marked instances' vertices in `triangle.vert` (allowance `GpuFrameData::levelOptions.x` for the camera, `GpuCaptureView::eye.w` for a probe face or the mirror) and `triangle_motion.vert` (the main pass, last frame's position too).
-- Shadow tiles never mark entries: a thinned mesh must cast no shadow (its shadow stand-in does).
+- Shadow tiles never mark entries: a thinned mesh casts whole, so the forest's trees' and palms' leaves cast only into the nearest cascades (`seenShadowCascades`, sun-shadows.md), whose fine texels choose the full mesh, as the camera sees it close; their shadow stand-ins cast beyond.
 
 ## Level fades
 

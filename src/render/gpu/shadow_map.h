@@ -82,10 +82,23 @@ struct ShadowSettings {
     float cascadeBlendBand = 0.1f;
 
     // Casters limited to the nearest cascades (DrawItem::shadowCascades: the forest's small plants) thin out across
-    // their last cascade instead of stopping at its edge: from this far from its side (a share of its radius) a growing
-    // share of them, chosen by a fixed random number each, is left out, until none is left at the blend band. At or
-    // below the blend band nothing thins.
+    // their last cascade instead of stopping at its edge: from this far in from its ball's edge (a share of its radius)
+    // a growing share of them, chosen by a fixed random number each, is left out, until none is left at the blend band.
+    // At or below the blend band nothing thins.
     float limitedCasterThinStart = 0.5f;
+
+    // In the nearest this many cascades the thinning is round the camera's own ball, so walking drops casters one by
+    // one, but such a cascade redraws every frame the camera walks; further out it is round the box's own ball, which
+    // moves only when the box steps, re-deciding a band of casters at once. Walking in the forest on the laptop, shadows
+    // took 1.3-1.9 ms with none, 3.6-4.5 ms with 2 (the 9 m cascade about 2.5 ms a redraw), 7-8 ms with all 4 (the
+    // 200 m one about 14 ms a redraw): 0 until steps are cheap (ROADMAP e1c 5).
+    int cascadesThinRoundCamera = 0;
+
+    // How much further towards the sun leaves (materials letting light through) look up their sun shadow (metres,
+    // foliageShadowLift): a plant casts from coarser meshes than the leaves seen (its levels, its shadow stand-in), whose
+    // polygons poke a few centimetres round them and shadowed them in hard shapes, worst where the caster changed at a
+    // cascade's edge. 0 lifts nothing; more loses some of a plant's shadow on itself.
+    float foliageShadowLift = 0.15f;
 
     // How the handover looks (see CascadeTransition).
     CascadeTransition cascadeTransition = CascadeTransition::Blend;
@@ -260,11 +273,20 @@ struct ShadowTile {
     // lights' tiles. Casters limited to the nearest cascades (DrawItem::shadowCascades) stay out of the others.
     int sunCascade = -1;
 
-    // A sun cascade's band (distances from its sides, in radii) where the casters it is the last cascade of thin out:
-    // all kept from thinStart in, none from thinEnd out (ShadowSettings::limitedCasterThinStart, cascadeBlendBand;
-    // shadowThinKeeps). thinStart at or below thinEnd thins nothing.
+    // A sun cascade's band (distances from its ball's edge across the sun's plane, in radii) where the casters it is the
+    // last cascade of thin out: all kept from thinStart in, none from thinEnd out (ShadowSettings::limitedCasterThinStart,
+    // cascadeBlendBand; shadowThinKeeps). thinStart at or below thinEnd thins nothing; so does a ball of negative radius.
+    // In the nearest cascadesThinRoundCamera cascades the ball is the camera's (cascadeBall), so the band slides as the
+    // camera walks rather than jumping a step with the box; further out, the box's own (its centre, the same radius). A
+    // held cascade keeps the ball it was drawn with.
     float thinStart = 0.0f;
     float thinEnd = 0.0f;
+    BoundingSphere thinBall{};
+
+    // Whether any caster is limited to this cascade last, so the ball matters (the renderer sets it a frame from
+    // CameraCullFrame::lastCascades and the placed parts): a cascade thinning nothing keys its cache without the ball, so
+    // only a step moves it.
+    bool thinsCasters = true;
 };
 
 // A tile's square in the coloured shadow map: its place and size in the atlas, halved.

@@ -274,6 +274,18 @@ namespace {
         assert(sunShadowBias(0.01f, 0.3f) > sunShadowBias(0.01f, 0.6f));
     }
 
+    /*
+    * Leaves (a material letting light through) look their sun shadow up the lift further towards the sun, so their own
+    * plant's coarser caster, within that of them along the ray, cannot shadow them in its polygons; anything else none.
+    */
+    void testLeavesLiftTheirSunShadow() {
+        assert(foliageShadowLift(0.8f, 0.15f) == 0.15f);
+        assert(foliageShadowLift(0.001f, 0.15f) == 0.15f);
+        assert(foliageShadowLift(0.0f, 0.15f) == 0.0f);
+        assert(foliageShadowLift(0.8f, 0.0f) == 0.0f);
+        assert(foliageShadowLift(0.8f, -1.0f) == 0.0f);
+    }
+
     ShadowDistanceFit fitFrom(float farthestSurface) {
         return fitShadowDistance(ShadowDistanceFit{}, farthestSurface);
     }
@@ -491,7 +503,8 @@ namespace {
         assert(cascadeBox(sunlight, BoundingSphere{Vec3{0.0f, 0.0f, 0.0f}, 10.0f}, 30.0f, 1024).halfWidth == 10.0f);
     }
 
-    // Wherever the ball has moved to, all of it, and the caster reach towards the light, lies inside the stepped box.
+    // Wherever the ball has moved to, all of it, and the caster reach towards the light, lies inside the stepped box; the
+    // box's centre (CascadeBox::centre) is the middle of its square, within half a step of the ball's across the light.
     void testSteppedBoxHoldsItsBall() {
         const Vec3 sunlight = Vec3{0.4f, -1.0f, -0.6f}.normalized();
         const Vec3 directions[] = {
@@ -513,6 +526,12 @@ namespace {
 
             const Vec3 towardsLight = project(box.matrix, ball.centre - sunlight * (ball.radius + 49.0f));
             assert(towardsLight.z > 0.0f && towardsLight.z < 1.0f);
+
+            const Vec3 middle = project(box.matrix, box.centre);
+            assert(std::abs(middle.x) < 1e-4f && std::abs(middle.y) < 1e-4f && middle.z > 0.0f && middle.z < 1.0f);
+            const Vec3 offset = ball.centre - box.centre;
+            const float across = (offset - sunlight * offset.dot(sunlight)).length();
+            assert(across <= std::sqrt(2.0f) * 32.0f * box.texelSize + 1e-3f);
         }
     }
 
@@ -575,6 +594,7 @@ void testCascades() {
     testTheFitGrowsAtOnceAndShrinksLate();
     testMovingTowardsTheSunKeepsThePlaceInEveryCascade();
     testSunBiasGrowsWithTheSlope();
+    testLeavesLiftTheirSunShadow();
     testSplitsRunFromNearToFar();
     testLambdaBlendsEvenAndLogarithmicSplits();
     testSphereHoldsItsSlice();

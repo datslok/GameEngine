@@ -237,6 +237,7 @@ namespace {
             plan.tiles.back().sunCascade = cascade;
             plan.tiles.back().thinStart = settings.limitedCasterThinStart;
             plan.tiles.back().thinEnd = settings.cascadeBlendBand;
+            plan.tiles.back().thinBall = cascade < settings.cascadesThinRoundCamera ? ball : BoundingSphere{box.centre, ball.radius};
         }
     }
 
@@ -662,6 +663,8 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Cascade split blend", settings.cascadeSplitLambda, {.min = 0.0f, .max = 1.0f, .unit = "(0 even, 1 logarithmic)"});
     visitor.field("Cascade blend band", settings.cascadeBlendBand, {.min = 0.0f, .max = 0.5f, .unit = "of a radius"});
     visitor.field("Limited casters thin from", settings.limitedCasterThinStart, {.min = 0.0f, .max = 1.0f, .unit = "of a radius"});
+    visitor.field("Thin round the camera", settings.cascadesThinRoundCamera, {.min = 0, .max = maxShadowCascades, .unit = "nearest cascades"});
+    visitor.field("Foliage shadow lift", settings.foliageShadowLift, {.min = 0.0f, .max = 2.0f, .sliderMax = 0.5f, .unit = "m"});
     visitor.choice("Cascade transition", settings.cascadeTransition, cascadeTransitionNames);
     visitor.choice("Cascade resolution", settings.cascadeResolution, cascadeResolutionNames);
     visitor.field("Cascade stagger", settings.cascadeStagger, {.min = 1, .max = 8, .unit = "frames"});

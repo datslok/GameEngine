@@ -37,8 +37,8 @@ A component: `parts` (`RenderPart`: mesh, material, local transform) moved by th
 |---|---|
 | `isVisible()` | Off: no draws built |
 | `castsShadows` | Blocks light in shadow maps |
-| `shadowOnly` | Drawn into shadow maps only; no camera view, no ray: a cheap stand-in caster |
-| `shadowCascades` | Casts into the sun's nearest n cascades only (0 all) |
+| `shadowOnly` | Shadow maps only (no camera, no ray): a stand-in |
+| `shadowCascades`, `shadowFromCascade`, `shadowHandedOn` | Sun cascades from..n (0 all); handed on: unthinned, no lamps |
 | `isStatic` | Part of the level: probes and the sky bake treat it as solid |
 | `hidden` | Drawn by no view, no shadow, no ray, but still static level (the forest's walked-on ground) |
 | `isStill()` | Never moves or changes: draws kept between frames (below). Independent of `isStatic` |
@@ -120,7 +120,7 @@ After `renderer.render`, `giveBackStillDraws` returns the list. Golden captures 
 | `visibleDraws(draws, frustum)` | Camera views: skips `shadowOnly` and `hidden` |
 | `shadowCasters(draws, frustum)` | Opaque casters in a light's view; never use the camera's frustum (off-screen casters shadow the view) |
 | `castersInReach(draws, reach)` | Casters touching a light's sphere of reach, before a point light's six faces |
-| `castersForCascade(draws, casters, cascade)` | Drops casters whose `shadowCascades` stops before this sun cascade |
+| `castersForCascade(draws, casters, cascade)` | The casters a sun cascade (lamp: -1) takes |
 | `castersAtLeast(draws, candidates, radius)` | The far shadow map's: drops what is too small for its texels |
 | `glassInReach(draws, reach)`, `glassInReach(draws, candidates, reach)` | Glass a light reaches, for coloured shadow maps (any `castsShadows`); of a list only (the GPU culling's cached glass) |
 

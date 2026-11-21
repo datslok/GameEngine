@@ -95,8 +95,8 @@ void main() {
             return;
         }
 
-        // Four more inputs: (mesh changes shape, the candidate's slot, the sway's fade end, the view's flags), a shadow
-        // tile's reach, (its smallest caster, its cascade, the record's cascades), (its thinning band). Output: (the candidate's flags, whether
+        // Five more inputs: (mesh changes shape, the candidate's slot, the sway's fade end, the view's flags), a shadow
+        // tile's reach, (its smallest caster, its cascade, the record's cascades), (its thinning band), its thinning's ball. Output: (the candidate's flags, whether
         // the sway reaches it, whether a shadow tile takes it, its fade field).
         vec4 camera = testInput(13);
         levels.changesShape = uint(camera.x);
@@ -119,6 +119,7 @@ void main() {
         cull.segmentBlocks = 0u;
         cull.segmentSlices = uvec2(0u);
         cull.thinning = testInput(16).xy;
+        cull.thinBall = testInput(17);
         testOutput(0, vec4(float(cameraCandidateFlags(record, levels, cull, uint(camera.y))), swayReaches(record.bounds, view.eye.xyz, camera.z) ? 1.0 : 0.0,
                            shadowTakes(record, cull) ? 1.0 : 0.0, float(cameraCandidateFade(record, levels, cull, uint(camera.y)))));
     }

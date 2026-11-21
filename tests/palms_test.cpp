@@ -384,18 +384,20 @@ namespace {
         ForestPalmSettings settings;
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 24 && counter.live == 0);
+        assert(counter.fields == 25 && counter.live == 0);
         assert(settings.shortest >= 1.5f && settings.tallest <= 6.0f && settings.shortest < settings.tallest);
         assert(settings.leastFronds <= settings.mostFronds && settings.variants >= 4);
-        // Shadows in every cascade (0), as the understorey's, so they do not pop in as one walks up.
-        assert(settings.shadowCascades == 0);
+        // Shadows in every cascade (0), as the understorey's, so they do not pop in as one walks up; the seen mesh casts
+        // into the nearest two, as the understorey's.
+        assert(settings.shadowCascades == 0 && settings.seenShadowCascades == 2);
         // Its card takes over a few tens of metres away: under half a metre's error, about 200 m at 2 pixels.
         assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < 0.5f);
     }
 
     /*
-    * The game draws them on the GPU: a look a variant (the layer's kinds), each its seen mesh (casting no shadow,
-    * swaying), its shadow's stand-in (shadows only, in the cascades its settings name) and its card, with levels ending
+    * The game draws them on the GPU: a look a variant (the layer's kinds), each its seen mesh (casting into the nearest
+    * cascades, handing on, swaying), its shadow's stand-in (shadows only, from there to the cascades its settings name)
+    * and its card, with levels ending
     * where the card begins; an opaque, double-sided leaf letting light through; no entity a palm.
     */
     void testTheGamePlantsThePalms() {
@@ -414,8 +416,10 @@ namespace {
             const ModelRenderer& seen = look.models[0];
             const ModelRenderer& shadow = look.models[1];
             const ModelRenderer& card = look.models[2];
-            assert(!seen.castsShadows && !seen.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
-            assert(shadow.shadowCascades == ForestPalmSettings{}.shadowCascades);
+            const ForestPalmSettings settings;
+            assert(seen.castsShadows && seen.shadowHandedOn && seen.shadowCascades == settings.seenShadowCascades && !seen.shadowOnly);
+            assert(shadow.castsShadows && shadow.shadowOnly && shadow.shadowFromCascade == settings.seenShadowCascades);
+            assert(shadow.shadowCascades == settings.shadowCascades);
             assert(seen.sway.kind != SwayKind::Still && shadow.sway.kind == seen.sway.kind && card.sway.kind == SwayKind::Still);
 
             const Material& leaf = seen.parts.front().material;

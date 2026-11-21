@@ -109,6 +109,7 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
     frame.shadingOptions[1] = clusterHeatmap ? 1 : 0;
     frame.cascadeOptions[0] = shadows.cascadeBlendBand;
     frame.cascadeOptions[1] = shadows.cascadeTransition == CascadeTransition::Dither ? 1.0f : 0.0f;
+    frame.cascadeOptions[3] = shadows.foliageShadowLift;
     return frame;
 }
 

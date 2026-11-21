@@ -176,6 +176,7 @@ void visit(ForestPalmSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Leaflet growth", settings.leafletGrowth, {.min = 0.05f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Droop", settings.droopDegrees, {.min = 0.0f, .max = 150.0f, .sliderMax = 120.0f, .unit = "deg", .applies = FieldApplies::AtStartup});
     visitor.field("Shadow cascades", settings.shadowCascades, {.min = 0, .max = 4, .applies = FieldApplies::AtStartup});
+    visitor.field("Seen shadow cascades", settings.seenShadowCascades, {.min = 0, .max = 4, .applies = FieldApplies::AtStartup});
     visitor.field("Impostor error", settings.impostorErrorMetres, {.min = 0.001f, .max = 10.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Impostor frames", settings.impostorFrames, {.min = 2, .max = 32, .sliderMax = 16, .applies = FieldApplies::AtStartup});
     visitor.field("Impostor texels", settings.impostorTexels, {.min = 8, .max = 512, .sliderMax = 256, .applies = FieldApplies::AtStartup});

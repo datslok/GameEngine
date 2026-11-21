@@ -192,7 +192,13 @@ CascadeBox cascadeBox(const Vec3& lightDirection, const BoundingSphere& sphere, 
     const Mat4 box = Mat4::orthographic(-radius, radius, -radius, radius, -radius - casterReach, radius);
     const Mat4 toCentre = Mat4::translation(-snappedX, -snappedY, centreDistance);
 
-    return CascadeBox{toGpuDepthRange(box) * toCentre * rotation, 2.0f * radius + casterReach, texel, radius};
+    // The rotation is orthonormal, so its transpose takes the light's frame back to the world.
+    const auto backToWorld = [&rotation, snappedX, snappedY, centreDistance](int axis) {
+        return rotation.values[0][axis] * snappedX + rotation.values[1][axis] * snappedY - rotation.values[2][axis] * centreDistance;
+    };
+    const Vec3 centre{backToWorld(0), backToWorld(1), backToWorld(2)};
+
+    return CascadeBox{toGpuDepthRange(box) * toCentre * rotation, 2.0f * radius + casterReach, texel, radius, centre};
 }
 
 float cascadeEdgeDistance(const Vec3& projected, float depthRangeOverRadius) {
@@ -227,4 +233,8 @@ float sunShadowBias(float baseOffset, float nDotL) {
     const float facing = std::clamp(nDotL, 0.0f, 1.0f);
     const float slope = std::sqrt(1.0f - facing * facing) / std::max(facing, 1e-6f);
     return baseOffset * (1.0f + std::min(slope, maxSunBiasSlope));
+}
+
+float foliageShadowLift(float transmission, float lift) {
+    return transmission > 0.0f ? std::max(lift, 0.0f) : 0.0f;
 }

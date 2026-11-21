@@ -232,7 +232,10 @@ struct ForestTreeSettings {
     // How many of the sun's cascades its shadow stand-ins are drawn into, nearest first (ModelRenderer::shadowCascades; 0
     // all, the far shadow map too). 4, the cascades and not the far map past them (with the default 4 cascades), thinning
     // out across the last: a far tile holding the valley's trees redrew kilometres of them whenever the camera changed cell.
+    // The bark and leaves seen cast into the nearest seenShadowCascades themselves, the stand-ins only past them, as the
+    // understorey's (ForestUnderstoreySettings::seenShadowCascades).
     int shadowCascades = 4;
+    int seenShadowCascades = 2;
     int impostorFrames = 8;
     int impostorTexels = 128;
 };

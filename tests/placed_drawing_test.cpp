@@ -801,7 +801,8 @@ namespace {
 
     /*
     * A cell made or dropped stands for its boxes in the shadow tiles' tests: one casting sphere holding every casting
-    * layer's box (none casting: it touches no tile). The table's signature changes with its parts, kinds or region.
+    * layer's box (none casting: it touches no tile). The table's signature changes with its parts, kinds or region; its
+    * parts name the cascades they are limited to last.
     */
     void testTheChanges() {
         const TestKinds kinds = testKinds();
@@ -835,6 +836,18 @@ namespace {
         TestKinds casting = testKinds();
         casting.parts[0].castsShadows = true;
         assert(placedTableSignature(buildPlacedTable(casting.parts, casting.kinds, 3, testPlacement)) != signature);
+
+        // The sun's cascades a part is limited to last (placedLastCascades), for the cascades that thin.
+        std::uint32_t lastCascades = 0;
+
+        for (const DrawItem& part : kinds.parts) {
+            lastCascades |= part.shadowCascades > 0 ? 1u << (part.shadowCascades - 1) : 0u;
+        }
+
+        assert(placedLastCascades(table) == lastCascades);
+        TestKinds limited = testKinds();
+        limited.parts[0].shadowCascades = 3;
+        assert((placedLastCascades(buildPlacedTable(limited.parts, limited.kinds, 3, testPlacement)) & 0b100u) != 0u);
     }
 
     /*

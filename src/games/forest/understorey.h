@@ -59,6 +59,11 @@ struct ForestUnderstoreySettings {
     // up; with the shadows culled and cached on the GPU, all four cost about 0.2 ms more of the shadow pass walking or turning.
     int shadowCascades = 0;
 
+    // How many of the nearest cascades the leaves seen cast into themselves, the stand-in only past them
+    // (ModelRenderer::shadowFromCascade): the stand-in's coarse cards poked out round the seen leaves and shadowed them
+    // in polygons close up. 2, about 9 m, as Horizon Zero Dawn's (docs/research/FOLIAGESHADOWS.md); 0 the stand-in alone.
+    int seenShadowCascades = 2;
+
     // The card past the levels (scene/impostor.h, docs/research/LOD.md), as the trees': the error, in metres, from which a plant is
     // drawn as its card (a plant a twentieth of a tree's height, so about that share of the trees' 1.5 m: a 1.5 m plant
     // turns into its card some 20 m away at 2 pixels on a 1080-line screen), its frames a side and each frame's texels

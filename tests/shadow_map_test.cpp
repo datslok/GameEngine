@@ -327,12 +327,15 @@ namespace {
     /*
     * Walking a metre in centimetre moves, each cascade's box moves only when the camera crosses one of its steps
     * (ShadowSettings::cascadeStepShare of its width): at most about three times a step walked, plus one an axis for
-    * where the walk began, and the 200 m cascade, whose steps are metres long, hardly ever.
+    * where the walk began, and the 200 m cascade, whose steps are metres long, hardly ever. The ball limited casters thin
+    * round follows the camera in the nearest cascadesThinRoundCamera cascades, and in the rest is the box's own, moving
+    * only with it, so walking redraws those no more often for their thinning.
     */
     void testWalkingRarelyMovesTheSunCascades() {
         FrameLighting lighting;
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
-        const ShadowSettings settings;
+        ShadowSettings settings;
+        settings.cascadesThinRoundCamera = 2;
         const auto view = [](const Vec3& position) {
             return Camera{position, position + Vec3{0.0f, -0.1f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2217f, 16.0f / 9.0f, 0.1f, 1000.0f};
         };
@@ -344,7 +347,17 @@ namespace {
 
             for (std::size_t cascade = 0; cascade < moves.size(); ++cascade) {
                 // The world box (the shader's is measured from the camera, so it changes with every move).
-                if (!(plan.tiles[cascade].matrix == previous.tiles[cascade].matrix)) {
+                const bool boxMoved = !(plan.tiles[cascade].matrix == previous.tiles[cascade].matrix);
+                const Vec3 ballMove = plan.tiles[cascade].thinBall.centre - previous.tiles[cascade].thinBall.centre;
+                assert(plan.tiles[cascade].thinBall.radius > 0.0f);
+
+                if (static_cast<int>(cascade) < settings.cascadesThinRoundCamera) {
+                    assert(ballMove.length() > 0.005f);
+                } else {
+                    assert(boxMoved || ballMove.length() == 0.0f);
+                }
+
+                if (boxMoved) {
                     ++moves[cascade];
                 }
             }
@@ -1293,8 +1306,9 @@ namespace {
     */
     /*
     * Each sun tile knows its cascade, nearest first, the far map one past the last; a lamp's tiles none (-1). The
-    * cascades carry the band their limited casters thin out over (limitedCasterThinStart down to the blend band); the far
-    * map and the lamps none.
+    * cascades carry the band their limited casters thin out over (limitedCasterThinStart down to the blend band) and the
+    * ball it is measured from (cascadeBall: round the camera, growing cascade by cascade, inside its box); the far map
+    * and the lamps none.
     */
     void testTilesKnowTheirCascade() {
         ShadowSettings settings;
@@ -1302,19 +1316,25 @@ namespace {
         settings.cascadeBlendBand = 0.15f;
         FrameLighting lighting = sunOnly();
         lighting.pointLights.push_back(pointLightAt(Vec3{10.0f, 2.0f, 15.0f}, true, 10.0f));
-        const ShadowPlan plan = planShadows(lighting, makeFarCamera(Vec3{10.0f, 2.0f, 20.0f}), settings);
+        const Vec3 eye{10.0f, 2.0f, 20.0f};
+        const ShadowPlan plan = planShadows(lighting, makeFarCamera(eye), settings);
         const LightShadow& sun = plan.directional[0];
+        float lastRadius = 0.0f;
 
         for (int cascade = 0; cascade < settings.cascadeCount; ++cascade) {
             const ShadowTile& tile = plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)];
+            const ShadowTileData& data = plan.tileData[static_cast<std::size_t>(sun.firstTile + cascade)];
             assert(tile.sunCascade == cascade);
             assert(tile.thinStart == 0.6f && tile.thinEnd == 0.15f);
+            assert(tile.thinsCasters && tile.thinBall.radius > lastRadius && tile.thinBall.radius <= data.lens[3]);
+            assert((tile.thinBall.centre - eye).length() <= tile.thinBall.radius);
+            lastRadius = tile.thinBall.radius;
         }
 
         const ShadowTile& far = plan.tiles[static_cast<std::size_t>(sun.farTile)];
         const ShadowTile& lamp = plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)];
-        assert(far.sunCascade == settings.cascadeCount && far.thinStart == 0.0f && far.thinEnd == 0.0f);
-        assert(lamp.sunCascade == -1 && lamp.thinStart == 0.0f && lamp.thinEnd == 0.0f);
+        assert(far.sunCascade == settings.cascadeCount && far.thinStart == 0.0f && far.thinEnd == 0.0f && far.thinBall.radius < 0.0f);
+        assert(lamp.sunCascade == -1 && lamp.thinStart == 0.0f && lamp.thinEnd == 0.0f && lamp.thinBall.radius < 0.0f);
     }
 
     void testTheSunNamesItsFarTileForDistantOccluders() {

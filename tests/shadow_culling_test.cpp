@@ -52,26 +52,60 @@ namespace {
         if (unit(random) < 0.7f) {
             tile.thinStart = 0.3f + unit(random) * 0.6f;
             tile.thinEnd = unit(random) * 0.25f;
+            tile.thinBall = BoundingSphere{place + forward * 300.0f, 50.0f + unit(random) * 400.0f};
         }
 
         return tile;
     }
 
+    // A frame of the test scene: its first stillDraws kept from the frame before (version), built ranges announced.
+    FrameDescription frameOf(const std::vector<DrawItem>& draws, std::size_t stillDraws, std::uint64_t version, std::uint64_t previous,
+                             std::vector<DrawRange> built = {}) {
+        FrameDescription frame{.camera = Camera{Vec3{0.0f, 1.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f}};
+        frame.draws = draws;
+        frame.stillDraws = stillDraws;
+        frame.stillVersion = version;
+        frame.stillPreviousVersion = previous;
+        frame.builtStillDraws = std::move(built);
+        return frame;
+    }
+
+    // A sun cascade's box straight down over place, half wide, its ball (the camera's) round ball.
+    ShadowTile cascadeDownOver(const Vec3& place, float half, const BoundingSphere& ball) {
+        ShadowTile tile;
+        tile.matrix = toGpuDepthRange(Mat4::orthographic(-half, half, -half, half, 0.0f, 1500.0f)) *
+                      Mat4::lookAt(place, place + Vec3{0.0f, -1.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f});
+        tile.lightPlace = Vec4{0.0f, 1.0f, 0.0f, 0.0f};
+        tile.sunCascade = 1;
+        tile.thinStart = 0.5f;
+        tile.thinEnd = 0.1f;
+        tile.thinBall = ball;
+        return tile;
+    }
+
+    // A small caster limited to the nearest two cascades.
+    GpuCullRecord limitedCaster(float x, float y, float z) {
+        GpuCullRecord record{};
+        record.bounds[0] = x;
+        record.bounds[1] = y;
+        record.bounds[2] = z;
+        record.bounds[3] = 0.3f;
+        record.flags = CULL_CASTS_SHADOWS;
+        record.shadowCascades = 2;
+        return record;
+    }
+
     /*
-    * In a sun cascade's tile, casters limited to no further cascades thin out across its band: all kept deeper in than
-    * thinStart, none nearer a side than thinEnd, the share kept falling evenly between; a caster's choice never changes.
-    * Casters free of the limit or limited to further cascades, a lamp's tile and an empty band keep every one, and
+    * In a sun cascade's tile, casters limited to no further cascades thin out across a band round its ball (the camera's,
+    * measured across the sun's plane): all kept within thinStart of a radius from the ball's edge, none within thinEnd,
+    * the share kept falling evenly between; a caster's choice never changes. Casters free of the limit or limited to
+    * further cascades, a lamp's tile, an empty band, a tile without a ball and one that thins nothing keep every one, and
     * shadowTakes leaves out what the thinning does.
     */
     void testLimitedCastersThinOut() {
         const float half = 20.0f;
-        const Vec3 place{0.0f, 100.0f, 0.0f};
-        ShadowTile tile;
-        tile.matrix = toGpuDepthRange(Mat4::orthographic(-half, half, -half, half, 0.0f, 1500.0f)) *
-                      Mat4::lookAt(place, place + Vec3{0.0f, -1.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f});
-        tile.sunCascade = 1;
-        tile.thinStart = 0.5f;
-        tile.thinEnd = 0.1f;
+        const BoundingSphere ball{Vec3{1.0f, 1.5f, -2.0f}, 18.0f};
+        const ShadowTile tile = cascadeDownOver(Vec3{0.0f, 100.0f, 0.0f}, half, ball);
         const LevelOfDetailSettings settings;
         const GpuCameraCull view = packShadowCull(tile, settings);
 
@@ -79,8 +113,12 @@ namespace {
         lamp.sunCascade = -1;
         ShadowTile empty = tile;
         empty.thinStart = 0.1f;
-        const GpuCameraCull lampView = packShadowCull(lamp, settings);
-        const GpuCameraCull emptyView = packShadowCull(empty, settings);
+        ShadowTile noBall = tile;
+        noBall.thinBall = BoundingSphere{};
+        ShadowTile thinsNothing = tile;
+        thinsNothing.thinsCasters = false;
+        const std::array<GpuCameraCull, 4> keepAll{packShadowCull(lamp, settings), packShadowCull(empty, settings), packShadowCull(noBall, settings),
+                                                   packShadowCull(thinsNothing, settings)};
 
         std::mt19937 random{29};
         std::uniform_real_distribution<float> across{-half, half};
@@ -89,18 +127,15 @@ namespace {
         std::array<int, bins> seen{};
 
         for (int index = 0; index < 40000; ++index) {
-            GpuCullRecord record{};
-            record.bounds[0] = across(random);
-            record.bounds[1] = 0.0f;
-            record.bounds[2] = across(random);
-            record.bounds[3] = 0.3f;
-            record.flags = CULL_CASTS_SHADOWS;
-            record.shadowCascades = 2;
-            const float edge = 1.0f - std::max(std::abs(record.bounds[0]), std::abs(record.bounds[2])) / half;
+            GpuCullRecord record = limitedCaster(across(random), 0.0f, across(random));
+            const float edge = 1.0f - std::hypot(record.bounds[0] - ball.centre.x, record.bounds[2] - ball.centre.z) / ball.radius;
             const bool keeps = shadowThinKeeps(record, view);
             assert(keeps == shadowThinKeeps(record, view));
             assert(shadowTakes(record, view) == keeps);
-            assert(shadowThinKeeps(record, lampView) && shadowThinKeeps(record, emptyView));
+
+            for (const GpuCameraCull& other : keepAll) {
+                assert(shadowThinKeeps(record, other));
+            }
 
             if (edge > 0.5001f) {
                 assert(keeps);
@@ -124,6 +159,168 @@ namespace {
             assert(seen[at] > 500);
             assert(std::abs(share - (static_cast<float>(bin) + 0.5f) / static_cast<float>(bins)) < 0.06f);
         }
+    }
+
+    /*
+    * The band is the ball's, not the box's: the box stepping (moved and a little wider round the same ball) changes no
+    * caster's share; a caster anywhere along a sun ray keeps its share (its shadow lands where it is across the sun's
+    * plane), here a slanting sun too; and the camera's ball moving a little moves each share at most as far as the
+    * band's slope allows, so walking drops casters one by one, never a batch.
+    */
+    void testThinningFollowsTheBall() {
+        const BoundingSphere ball{Vec3{3.0f, 2.0f, -4.0f}, 100.0f};
+        const GpuCameraCull view = packShadowCull(cascadeDownOver(Vec3{0.0f, 300.0f, 0.0f}, 107.0f, ball), LevelOfDetailSettings{});
+        const GpuCameraCull stepped = packShadowCull(cascadeDownOver(Vec3{6.7f, 300.0f, -6.7f}, 110.0f, ball), LevelOfDetailSettings{});
+        const float slope = 1.0f / ((0.5f - 0.1f) * ball.radius);
+
+        // A slanting sun's box round the same ball.
+        const Vec3 towardsSun = Vec3{0.4f, 1.0f, 0.3f}.normalized();
+        ShadowTile slanting = cascadeDownOver(Vec3{0.0f, 300.0f, 0.0f}, 107.0f, ball);
+        const Vec3 above = ball.centre + towardsSun * 600.0f;
+        slanting.matrix = toGpuDepthRange(Mat4::orthographic(-107.0f, 107.0f, -107.0f, 107.0f, 0.0f, 1500.0f)) *
+                          Mat4::lookAt(above, ball.centre, Vec3{0.0f, 0.0f, 1.0f});
+        const GpuCameraCull slantingView = packShadowCull(slanting, LevelOfDetailSettings{});
+
+        std::mt19937 random{31};
+        std::uniform_real_distribution<float> across{-100.0f, 100.0f};
+        std::size_t between = 0;
+
+        for (int index = 0; index < 4000; ++index) {
+            const GpuCullRecord record = limitedCaster(ball.centre.x + across(random), across(random) * 0.2f, ball.centre.z + across(random));
+            const float share = shadowThinShare(record, view);
+            assert(std::abs(shadowThinShare(record, stepped) - share) < 1e-4f);
+            between += share > 0.0f && share < 1.0f ? 1 : 0;
+
+            const GpuCullRecord higher = limitedCaster(record.bounds[0], record.bounds[1] + 40.0f, record.bounds[2]);
+            assert(std::abs(shadowThinShare(higher, view) - share) < 1e-4f);
+
+            const float along = across(random) * 0.5f;
+            const GpuCullRecord onItsRay = limitedCaster(record.bounds[0] + towardsSun.x * along, record.bounds[1] + towardsSun.y * along,
+                                                         record.bounds[2] + towardsSun.z * along);
+            assert(std::abs(shadowThinShare(onItsRay, slantingView) - shadowThinShare(record, slantingView)) < 1e-3f);
+
+            for (const float walked : {0.05f, 0.5f}) {
+                GpuCameraCull moved = view;
+                moved.thinBall[0] += walked;
+                assert(std::abs(shadowThinShare(record, moved) - share) <= walked * slope + 1e-4f);
+            }
+        }
+
+        assert(between > 1000);
+    }
+
+    /*
+    * A plant's seen mesh casts into its nearest cascades and its stand-in from there on (Horizon Zero Dawn's split,
+    * docs/research/FOLIAGESHADOWS.md): a caster from a first cascade (cullShadowFromBits) is taken by no nearer one; a
+    * caster handing its shadow on (CULL_SHADOW_HANDED_ON) is taken whole by its last, never thinned, and names no last
+    * cascade (lastCascadeBit 0), since nothing of it ends there. A lamp's tile takes the stand-in alone, as before the
+    * split, so a plant casts there once.
+    */
+    void testCastersStartAtTheirFirstCascade() {
+        const ShadowTile tile = cascadeDownOver(Vec3{0.0f, 100.0f, 0.0f}, 20.0f, BoundingSphere{Vec3{0.0f, 1.5f, 0.0f}, 18.0f});
+        const LevelOfDetailSettings settings;
+        std::mt19937 random{43};
+        std::uniform_real_distribution<float> across{-20.0f, 20.0f};
+
+        for (int index = 0; index < 2000; ++index) {
+            GpuCullRecord standIn = limitedCaster(across(random), 0.0f, across(random));
+            standIn.shadowCascades = index % 2 == 0 ? 0 : 4;
+            standIn.flags |= cullShadowFromBits(2);
+            assert(cullShadowFrom(standIn.flags) == 2);
+
+            GpuCullRecord seen = limitedCaster(standIn.bounds[0], 0.0f, standIn.bounds[2]);
+            seen.flags |= CULL_SHADOW_HANDED_ON;
+            assert(cullShadowFrom(seen.flags) == 0 && lastCascadeBit(seen) == 0u && lastCascadeBit(standIn) == (standIn.shadowCascades == 4 ? 0b1000u : 0u));
+
+            for (int cascade = 0; cascade <= 4; ++cascade) {
+                ShadowTile each = tile;
+                each.sunCascade = cascade;
+                const GpuCameraCull view = packShadowCull(each, settings);
+                const bool standInCasts = cascade >= 2 && (standIn.shadowCascades == 0 || cascade < standIn.shadowCascades);
+                assert(standInCasts ? shadowTakes(standIn, view) || cascade == 3 : !shadowTakes(standIn, view));
+                assert(shadowTakes(seen, view) == (cascade < 2));
+                assert(shadowThinShare(seen, view) == 1.0f);
+            }
+
+            ShadowTile lamp = tile;
+            lamp.sunCascade = -1;
+            const GpuCameraCull lampView = packShadowCull(lamp, settings);
+            assert(shadowTakes(standIn, lampView) && !shadowTakes(seen, lampView));
+        }
+
+        // The CPU's casters by cascade say the same (castersForCascade).
+        std::vector<DrawItem> draws(2);
+        draws[0].shadowCascades = 2;
+        draws[0].shadowHandedOn = true;
+        draws[1].shadowFromCascade = 2;
+        draws[1].shadowCascades = 4;
+        const std::vector<std::size_t> both{0, 1};
+        assert((castersForCascade(draws, both, 1) == std::vector<std::size_t>{0}));
+        assert((castersForCascade(draws, both, 2) == std::vector<std::size_t>{1}));
+        assert((castersForCascade(draws, both, 4).empty()));
+        assert((castersForCascade(draws, both, -1) == std::vector<std::size_t>{1}));
+        assert(cullShadowFrom(packCullRecord(draws[1]).flags) == 2 && (packCullRecord(draws[0]).flags & CULL_SHADOW_HANDED_ON) != 0u);
+    }
+
+    /*
+    * A cascade that thins (ShadowTile::thinsCasters) keys its cache on its ball, so it is redrawn as the camera walks
+    * within a step; one that thins nothing keeps its key, so it is redrawn only when its box steps.
+    */
+    void testThinningCascadesKeyOnTheirBall() {
+        std::mt19937 random{37};
+        const CullScene scene = randomCullScene(random, 200);
+        CameraCullTable table;
+        const CameraCullFrame culled = table.update(frameOf(scene.draws, scene.draws.size(), 1, 0), shadowTestPlacement, [](MeshHandle) { return false; });
+        const LevelOfDetailSettings settings;
+        const ShadowTileMemory memory;
+
+        ShadowTile tile = cascadeDownOver(Vec3{0.0f, 300.0f, 0.0f}, 107.0f, BoundingSphere{Vec3{0.0f, 1.5f, 0.0f}, 100.0f});
+        ShadowTile walked = tile;
+        walked.thinBall.centre = walked.thinBall.centre + Vec3{0.3f, 0.0f, 0.0f};
+        const auto key = [&](const ShadowTile& each) {
+            return shadowTileNeeds(each, settings, culled, scene.draws, {}, false, 1, memory, {}).key;
+        };
+
+        assert(key(tile) == key(tile) && key(tile) != key(walked));
+        tile.thinsCasters = false;
+        walked.thinsCasters = false;
+        assert(key(tile) == key(walked));
+    }
+
+    /*
+    * The cascades some caster is limited to last (CameraCullFrame::lastCascades): bit c for a caster limited to the
+    * nearest c + 1, still or moving; a still draw rebuilt in place adds its own; one free of the limit adds none.
+    */
+    void testTheTableListsTheLastCascades() {
+        std::mt19937 random{41};
+        CullScene scene = randomCullScene(random, 400);
+        constexpr std::size_t stillDraws = 300;
+        std::uint32_t expected = 0;
+
+        for (DrawItem& draw : scene.draws) {
+            draw.shadowCascades = std::min(draw.shadowCascades, 2);
+            expected |= draw.shadowCascades > 0 && !draw.shadowHandedOn ? 1u << (draw.shadowCascades - 1) : 0u;
+        }
+
+        assert(expected == 0b11u);
+        CameraCullTable table;
+        assert(table.update(frameOf(scene.draws, stillDraws, 1, 0), shadowTestPlacement, [](MeshHandle) { return false; }).lastCascades == expected);
+
+        scene.draws[7].shadowCascades = 4;
+        assert(table.update(frameOf(scene.draws, stillDraws, 2, 1, {DrawRange{7, 1}}), shadowTestPlacement, [](MeshHandle) { return false; }).lastCascades ==
+               (expected | 0b1000u));
+
+        scene.draws[350].shadowCascades = 3;
+        assert(table.update(frameOf(scene.draws, stillDraws, 2, 1), shadowTestPlacement, [](MeshHandle) { return false; }).lastCascades & 0b100u);
+
+        std::vector<DrawItem> free = scene.draws;
+
+        for (DrawItem& draw : free) {
+            draw.shadowCascades = 0;
+        }
+
+        CameraCullTable freeTable;
+        assert(freeTable.update(frameOf(free, stillDraws, 1, 0), shadowTestPlacement, [](MeshHandle) { return false; }).lastCascades == 0u);
     }
 
     std::vector<std::uint32_t> orderOf(const BatchedDraws& batched) {
@@ -171,18 +368,6 @@ namespace {
         }
 
         assert(drawn > 1000 && moved > 0);
-    }
-
-    // A frame of the test scene: its first stillDraws kept from the frame before (version), built ranges announced.
-    FrameDescription frameOf(const std::vector<DrawItem>& draws, std::size_t stillDraws, std::uint64_t version, std::uint64_t previous,
-                             std::vector<DrawRange> built = {}) {
-        FrameDescription frame{.camera = Camera{Vec3{0.0f, 1.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f}};
-        frame.draws = draws;
-        frame.stillDraws = stillDraws;
-        frame.stillVersion = version;
-        frame.stillPreviousVersion = previous;
-        frame.builtStillDraws = std::move(built);
-        return frame;
     }
 
     // Today's rule: the tile's fingerprint over all its still casters (shadow_cache), the reference the new rule must cover.
@@ -470,6 +655,10 @@ namespace {
 void testShadowCulling() {
     testShadowListsMatchTheCpu();
     testLimitedCastersThinOut();
+    testThinningFollowsTheBall();
+    testThinningCascadesKeyOnTheirBall();
+    testCastersStartAtTheirFirstCascade();
+    testTheTableListsTheLastCascades();
     testShadowCacheCoversTheFingerprint();
     testShadowEdges();
     testCascadesKeepTheirMoversApart();

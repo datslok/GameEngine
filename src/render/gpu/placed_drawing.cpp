@@ -443,6 +443,17 @@ GpuCullRecord placedChangeRecord(std::span<const GpuCullChunk> chunks) {
     return record;
 }
 
+// A few dozen parts at most, so walked each frame.
+std::uint32_t placedLastCascades(const PlacedTable& table) {
+    std::uint32_t cascades = 0;
+
+    for (const GpuPlacedPart& part : table.parts) {
+        cascades |= lastCascadeBit(part.record);
+    }
+
+    return cascades;
+}
+
 std::uint64_t placedTableSignature(const PlacedTable& table) {
     std::uint64_t hash = 14695981039346656037ull;
     hash = mixSpan(hash, std::span<const GpuPlacedPart>{table.parts});

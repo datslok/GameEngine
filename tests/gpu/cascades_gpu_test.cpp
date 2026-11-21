@@ -28,19 +28,22 @@ namespace {
         }
     }
 
-    // Surfaces from facing the sun to edge-on and beyond: (base offset, cosine of the angle to the sun).
+    // Surfaces from facing the sun to edge-on and beyond: (base offset, cosine of the angle to the sun, a material's light
+    // through it (sometimes none), the leaves' lift (sometimes none)).
     void checkSunBias(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{23};
         std::vector<GpuVec4> inputs;
 
         for (int i = 0; i < 300; ++i) {
-            inputs.push_back(gpuVec4(random.between(0.001f, 2.0f), random.between(-0.2f, 1.0f)));
+            inputs.push_back(gpuVec4(random.between(0.001f, 2.0f), random.between(-0.2f, 1.0f), i % 3 == 0 ? 0.0f : random.between(0.0f, 1.0f),
+                                     i % 7 == 0 ? 0.0f : random.between(-0.1f, 0.5f)));
         }
 
         const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_SUN_SHADOW_BIAS, inputs, 1, 1);
 
         for (std::size_t i = 0; i < inputs.size(); ++i) {
             report.check("sunShadowBias", arithmeticTolerance, sunShadowBias(inputs[i][0], inputs[i][1]), outputs[i][0]);
+            report.check("foliageShadowLift", exactTolerance, foliageShadowLift(inputs[i][2], inputs[i][3]), outputs[i][1]);
         }
     }
 

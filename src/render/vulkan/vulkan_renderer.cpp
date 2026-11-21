@@ -1657,7 +1657,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway.
     validateWind(settings.wind);
     const WindSettings* sway = description.wind && settings.wind.enabled && settings.wind.sway ? &settings.wind : nullptr;
-    ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
+
+    // Only a cascade some caster is limited to last thins, so only it keys its cache on the camera's ball.
+    const std::uint32_t lastCascades = cullFrame.lastCascades | (drawsPlaced ? placedLastCascades(placedDrawing->getTable(frame.frameIndex)) : 0u);
+
+    for (ShadowTile& tile : shadows.tiles) {
+        tile.thinsCasters = tile.sunCascade >= 0 && tile.sunCascade < 32 && ((lastCascades >> static_cast<std::uint32_t>(tile.sunCascade)) & 1u) != 0u;
+    }
+
+    ShadowDraws shadowDraws =prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
                                                  placedDrawing->getShadowChanges());
     stats.shadowDrawn += lastCameraCull.shadowDrawn;
     stats.shadowCulled += lastCameraCull.shadowCulled;

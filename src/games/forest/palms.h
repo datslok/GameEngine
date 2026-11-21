@@ -57,8 +57,10 @@ struct ForestPalmSettings {
     float droopDegrees = 70.0f;
 
     // How many of the sun's cascades its shadows are drawn into, nearest first (ModelRenderer::shadowCascades; 0 all), as
-    // the understorey's (ForestUnderstoreySettings::shadowCascades).
+    // the understorey's (ForestUnderstoreySettings::shadowCascades); the seen mesh in the nearest seenShadowCascades,
+    // as the understorey's (ForestUnderstoreySettings::seenShadowCascades).
     int shadowCascades = 0;
+    int seenShadowCascades = 2;
 
     // The card past the levels (scene/impostor.h, docs/research/LOD.md), as the understorey's: the error from which a palm is
     // drawn as its card, its frames a side and each frame's texels.

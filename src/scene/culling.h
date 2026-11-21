@@ -34,8 +34,9 @@ std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const
 
 // The shadow casters a light can reach: those whose sphere touches its reach (its range around it; a negative radius
 // reaches everything, as for a directional light). One cheap test per caster before a point light's six face frustums.
-// The casters a sun tile of this cascade draws (ShadowTile::sunCascade; -1 for other lights, which keep them all): those
-// whose shadowCascades is 0 or above the cascade.
+// The casters a sun tile of this cascade draws (ShadowTile::sunCascade): those whose shadowCascades is 0 or above the
+// cascade and whose shadowFromCascade is not past it. Other lights' tiles (-1) keep all but those handing their shadow
+// on (DrawItem::shadowHandedOn), whose stand-in casts there instead.
 std::vector<std::size_t> castersForCascade(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, int cascade);
 
 std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach);

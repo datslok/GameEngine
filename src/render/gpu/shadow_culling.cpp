@@ -43,12 +43,21 @@ GpuCameraCull packShadowCull(const ShadowTile& tile, const LevelOfDetailSettings
     view.cascade = tile.sunCascade;
     view.thinning[0] = tile.thinStart;
     view.thinning[1] = tile.thinEnd;
+
+    if (tile.thinsCasters && tile.thinBall.radius > 0.0f) {
+        view.thinBall[0] = tile.thinBall.centre.x;
+        view.thinBall[1] = tile.thinBall.centre.y;
+        view.thinBall[2] = tile.thinBall.centre.z;
+        view.thinBall[3] = tile.thinBall.radius;
+    }
+
     return view;
 }
 
 /*
 * The movers it takes are found from their records (shadowTakes, the GPU's own test), the changed still draws likewise
-* where they were and where they are; the key is the movers' and glass's fingerprint with the tile's levels mixed in.
+* where they were and where they are; the key is the movers' and glass's fingerprint with the tile's levels and thinning
+* mixed in (its ball only where it thins: packShadowCull leaves it out elsewhere).
 */
 ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSettings& settings, const CameraCullFrame& table, const std::vector<DrawItem>& draws,
                                 const std::vector<std::size_t>& glass, bool sways, std::uint64_t frame, const ShadowTileMemory& memory,
@@ -69,7 +78,7 @@ ShadowTileNeeds shadowTileNeeds(const ShadowTile& tile, const LevelOfDetailSetti
 
     const LevelView levels = tileLevelView(tile, settings);
     const std::uint64_t fingerprint = tintedShadowSignature(draws, needs.movers.still, glass, &levels);
-    needs.key = swayingShadowSignature(mixBytes(mixBytes(fingerprint, view.levels), view.thinning), sways, frame);
+    needs.key = swayingShadowSignature(mixBytes(mixBytes(mixBytes(fingerprint, view.levels), view.thinning), view.thinBall), sways, frame);
 
     const auto takes = [&view](const GpuCullRecord& record) {
         return shadowTakes(record, view);

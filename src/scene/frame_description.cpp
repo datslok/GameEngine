@@ -67,6 +67,8 @@ DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const
     draw.isStatic = renderer.isStatic;
     draw.shadowOnly = renderer.shadowOnly;
     draw.shadowCascades = renderer.shadowCascades;
+    draw.shadowFromCascade = renderer.shadowFromCascade;
+    draw.shadowHandedOn = renderer.shadowHandedOn;
     draw.hidden = renderer.hidden;
     draw.followsGround = renderer.followsGround;
     draw.sway = renderer.sway;

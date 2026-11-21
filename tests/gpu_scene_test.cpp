@@ -303,15 +303,17 @@ namespace {
         const GpuFrameData looped = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, false, true);
         assert(looped.shadingOptions[0] == 0 && looped.shadingOptions[1] == 1);
     }
-    // The cascades' blend band and whether to dither between them instead reach the shader through the frame's block.
+    // The cascades' blend band, whether to dither between them instead and the leaves' lift reach the shader through the
+    // frame's block.
     void testFrameDataCarriesTheCascadeTransition() {
         const Camera camera{Vec3{1.0f, 2.0f, 3.0f}, Vec3{-4.0f, 0.0f, -2.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.1f, 1.6f, 0.1f, 100.0f};
         const ClusterGrid grid = makeClusterGrid(camera, 1280, 800);
 
         ShadowSettings shadows;
         shadows.cascadeBlendBand = 0.2f;
+        shadows.foliageShadowLift = 0.25f;
         const GpuFrameData blended = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true, false, shadows);
-        assert(blended.cascadeOptions[0] == 0.2f && blended.cascadeOptions[1] == 0.0f);
+        assert(blended.cascadeOptions[0] == 0.2f && blended.cascadeOptions[1] == 0.0f && blended.cascadeOptions[3] == 0.25f);
 
         shadows.cascadeTransition = CascadeTransition::Dither;
         const GpuFrameData dithered = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true, false, shadows);

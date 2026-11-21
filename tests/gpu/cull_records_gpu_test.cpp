@@ -26,11 +26,12 @@ namespace {
         float swayFadeEnd = 0.0f;
         std::uint32_t cameraFlags = 0;
 
-        // A shadow tile's (shadowTakes): its reach, smallest caster, cascade and thinning band.
+        // A shadow tile's (shadowTakes): its reach, smallest caster, cascade, thinning band and the ball it is measured from.
         float reach[4] = {0.0f, 0.0f, 0.0f, -1.0f};
         float smallestCaster = 0.0f;
         std::int32_t cascade = -1;
         float thinning[2] = {0.0f, 0.0f};
+        float thinBall[4] = {0.0f, 0.0f, 0.0f, -1.0f};
     };
 
     // The case's camera record (GpuCameraCull) for cameraCandidateFlags.
@@ -45,6 +46,7 @@ namespace {
         view.cascade = c.cascade;
         view.thinning[0] = c.thinning[0];
         view.thinning[1] = c.thinning[1];
+        std::copy(std::begin(c.thinBall), std::end(c.thinBall), std::begin(view.thinBall));
         return view;
     }
 
@@ -75,6 +77,8 @@ namespace {
             draw.sway.kind = i % 3 == 1 ? SwayKind::Plant : SwayKind::Still;
             draw.castsShadows = i % 7 != 3;
             draw.shadowCascades = i % 5 == 1 ? 1 + i % 3 : 0;
+            draw.shadowFromCascade = i % 7 == 2 ? 1 + i % 3 : 0;
+            draw.shadowHandedOn = i % 9 == 4;
             draw.fadesLevels = i % 3 != 2;
 
             if (i % 8 == 2) {
@@ -126,6 +130,10 @@ namespace {
             if (i % 7 != 0) {
                 c.thinning[0] = random.between(0.3f, 0.9f);
                 c.thinning[1] = random.between(0.0f, 0.25f);
+                c.thinBall[0] = eye.x + random.between(-50.0f, 50.0f);
+                c.thinBall[1] = eye.y;
+                c.thinBall[2] = eye.z + random.between(-50.0f, 50.0f);
+                c.thinBall[3] = i % 11 == 5 ? -1.0f : random.between(50.0f, 2500.0f);
             }
 
             cases.push_back(c);
@@ -159,7 +167,7 @@ namespace {
     }
 
     // A candidate's flags, the sway's reach, the shadow tiles' test and its fade field, against the C++ mirror, case by
-    // case (the draw cases plus four inputs).
+    // case (the draw cases plus five inputs).
     void checkCandidates(GpuFunctionRunner& runner, GpuCheckReport& report) {
         const std::vector<Case> cases = randomCases();
         std::vector<GpuVec4> inputs;
@@ -170,9 +178,10 @@ namespace {
             inputs.push_back(GpuVec4{c.reach[0], c.reach[1], c.reach[2], c.reach[3]});
             inputs.push_back(gpuVec4(c.smallestCaster, static_cast<float>(c.cascade), static_cast<float>(c.record.shadowCascades)));
             inputs.push_back(gpuVec4(c.thinning[0], c.thinning[1]));
+            inputs.push_back(GpuVec4{c.thinBall[0], c.thinBall[1], c.thinBall[2], c.thinBall[3]});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CAMERA_CANDIDATE, inputs, 17, 1);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CAMERA_CANDIDATE, inputs, 18, 1);
 
         for (std::size_t i = 0; i < cases.size(); ++i) {
             if (nearAThreshold(cases[i])) {

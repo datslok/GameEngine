@@ -58,6 +58,15 @@ struct ModelRenderer {
     // understorey casts into the first two only: 10,000 plants redrawn into every cascade as the camera turned.
     int shadowCascades = 0;
 
+    // The nearest cascade it casts into (0 the first): a plant's stand-in starts where its seen mesh, casting into the
+    // cascades before, hands its shadow on (shadowHandedOn), so the coarse stand-in never shadows the leaves seen close
+    // up in polygons (docs/research/FOLIAGESHADOWS.md, Horizon Zero Dawn's split).
+    int shadowFromCascade = 0;
+
+    // Its shadow goes on past its last cascade (shadowCascades) in another caster (the stand-in): its last cascade takes
+    // it whole, not thinned out across its edge.
+    bool shadowHandedOn = false;
+
     // Part of the level that never moves (floors, walls): global illumination's probes move out of it at start-up, and
     // only things not marked static wake sleeping probes. Unmarked things count as moving, which costs only some probe
     // work, while a mover marked static would leave probes asleep beside it.

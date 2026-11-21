@@ -140,22 +140,23 @@ namespace {
 
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 23 && counter.live == 0);
+        assert(counter.fields == 24 && counter.live == 0);
 
         // Its cards (scene/impostor.h) take over a few tens of metres away (under 15 cm's error: about 60 m at 2 pixels),
         // and its frames have fewer texels than a tree's, never big on screen.
         assert(settings.impostorErrorMetres > 0.0f && settings.impostorErrorMetres < 0.15f);
         assert(settings.impostorFrames >= 4 && settings.impostorTexels > 0 && settings.impostorTexels < ForestTreeSettings{}.impostorTexels);
 
-        // Its shadows in every cascade (0): stopped at the nearest two, they popped in plant by plant about 20 m away.
-        assert(settings.shadowCascades == 0);
+        // Its shadows in every cascade (0): stopped at the nearest two, they popped in plant by plant about 20 m away. The
+        // leaves seen cast into the nearest two (about 9 m), where the stand-in's coarse cards shadowed them in polygons.
+        assert(settings.shadowCascades == 0 && settings.seenShadowCascades == 2);
     }
 
     /*
     * The game draws them on the GPU (stand-ins without the scans): a look for each kind's variant, in the variants'
-    * order, the layer's pick choosing among them as each plant's did; each its leaves, seen and casting no shadow,
-    * swaying, its shadow's stand-in, drawn into shadows only, and its card, still, taking over far away; no entity a
-    * plant. The plants themselves clear of every tree's trunk.
+    * order, the layer's pick choosing among them as each plant's did; each its leaves, seen and casting into the
+    * nearest cascades only (handing the shadow on), swaying, its shadow's stand-in, drawn into shadows only from there
+    * on, and its card, still, taking over far away; no entity a plant. The plants themselves clear of every tree's trunk.
     */
     void testTheGamePlantsTheUnderstorey() {
         TestForest forest;
@@ -175,8 +176,10 @@ namespace {
             const ModelRenderer& leaves = look.models[0];
             const ModelRenderer& shadow = look.models[1];
             const ModelRenderer& card = look.models[2];
-            assert(!leaves.castsShadows && !leaves.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
-            assert(shadow.shadowCascades == ForestUnderstoreySettings{}.shadowCascades);
+            const ForestUnderstoreySettings settings;
+            assert(leaves.castsShadows && leaves.shadowHandedOn && leaves.shadowCascades == settings.seenShadowCascades && !leaves.shadowOnly);
+            assert(shadow.castsShadows && shadow.shadowOnly && !shadow.shadowHandedOn && shadow.shadowFromCascade == settings.seenShadowCascades);
+            assert(shadow.shadowCascades == settings.shadowCascades);
             assert(leaves.sway.kind != SwayKind::Still && shadow.sway.kind == leaves.sway.kind && card.sway.kind == SwayKind::Still);
 
             // The leaves seen have two coarser levels (docs/research/LOD.md): simplified further, then the shadow's own stand-in,

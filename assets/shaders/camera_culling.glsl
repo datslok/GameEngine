@@ -85,6 +85,7 @@ struct CameraCull {
     uint segmentBlocks;   // workgroups of segments
     uvec2 segmentSlices;  // CAMERA_CULL_SEGMENT_SLICE_* (x offsets and visible list, y block sums)
     vec2 thinning;        // a sun cascade's thinning band: x where it starts, y where none is left (shadowThinKeeps)
+    vec4 thinBall;        // the ball it is measured from (xyz centre, w radius; below 0 thins nothing)
 };
 
 // Whether a box may be inside all six planes: its corner farthest along each plane's normal tested (boxInFrustum).
@@ -129,31 +130,21 @@ bool chunkInView(CullChunk chunk, CameraCull view) {
 
 /*
 * The share of casters like this one a sun cascade keeps (shadowThinShare): 1 unless the cascade is the last the caster
-* is limited to and has a thinning band; then 1 from thinning.x in from the box's sides, falling evenly to 0 at
-* thinning.y. The box is a parallel projection, so a pair of opposite planes' distances add up to its width.
+* is limited to and has a thinning band and ball; then 1 from thinning.x in from the ball's edge, falling evenly to 0 at
+* thinning.y, in radii, measured across the sun's plane (the offset crossed with the box's unit near-plane normal).
 */
 float shadowThinShare(CullRecord record, CameraCull view) {
     float start = view.thinning.x;
     float end = view.thinning.y;
+    float radius = view.thinBall.w;
 
-    if (view.cascade < 0 || record.shadowCascades <= 0 || view.cascade != record.shadowCascades - 1 || record.bounds.w < 0.0 || start <= end) {
+    if (view.cascade < 0 || record.shadowCascades <= 0 || view.cascade != record.shadowCascades - 1 || record.bounds.w < 0.0 || start <= end ||
+        radius <= 0.0 || (record.flags & CULL_SHADOW_HANDED_ON) != 0u) {
         return 1.0;
     }
 
-    float edge = 1.0;
-
-    for (int axis = 0; axis < 2; ++axis) {
-        vec4 low = view.frustum.planes[2 * axis];
-        vec4 high = view.frustum.planes[2 * axis + 1];
-        float fromLow = low.x * record.bounds.x + low.y * record.bounds.y + low.z * record.bounds.z + low.w;
-        float fromHigh = high.x * record.bounds.x + high.y * record.bounds.y + high.z * record.bounds.z + high.w;
-        float width = fromLow + fromHigh;
-
-        if (width > 0.0) {
-            edge = min(edge, 2.0 * min(fromLow, fromHigh) / width);
-        }
-    }
-
+    vec3 offset = record.bounds.xyz - view.thinBall.xyz;
+    float edge = 1.0 - length(cross(offset, view.frustum.planes[4].xyz)) / radius;
     return clamp((edge - end) / (start - end), 0.0, 1.0);
 }
 
@@ -198,7 +189,12 @@ bool shadowTakes(CullRecord record, CameraCull view) {
         return false;
     }
 
-    if (view.cascade >= 0 && record.shadowCascades > 0 && view.cascade >= record.shadowCascades) {
+    if (view.cascade >= 0 && ((record.shadowCascades > 0 && view.cascade >= record.shadowCascades) || view.cascade < cullShadowFrom(record.flags))) {
+        return false;
+    }
+
+    // A lamp's tile takes the stand-in a seen mesh hands its shadow on to, not both.
+    if (view.cascade < 0 && (record.flags & CULL_SHADOW_HANDED_ON) != 0u) {
         return false;
     }
 

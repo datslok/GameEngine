@@ -128,6 +128,7 @@ struct CascadeBox {
     float depthRange = 0.0f;
     float texelSize = 0.0f;
     float halfWidth = 0.0f;
+    Vec3 centre{};   // the middle of its square across the light, at the middle of its sphere's depth (world space)
 };
 
 /*
@@ -170,6 +171,14 @@ inline constexpr float maxSunBiasSlope = static_cast<float>(MAX_SUN_BIAS_SLOPE);
 * nDotL is the cosine of that angle.
 */
 float sunShadowBias(float baseOffset, float nDotL);
+
+/*
+* How much further towards the sun leaves look their sun shadow up (ShadowSettings::foliageShadowLift), added to the
+* bias: lift for a material letting light through (transmission above 0: the forest's leaves and cards), else 0. A
+* plant's coarser shadow caster pokes a few centimetres round the leaves seen; lifted past it, they are not shadowed in
+* its polygons (the usual foliage bias; docs/research/FOLIAGESHADOWS.md). Along the rays, so edges stay put.
+*/
+float foliageShadowLift(float transmission, float lift);
 
 /*
 * Distant occluders (docs/research/SHADOWCACHE.md): a cascade takes casters only ShadowSettings::directionalCasterReach towards the

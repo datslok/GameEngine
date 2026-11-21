@@ -322,6 +322,9 @@ vec3 positionStepDown;
 // (impostor_sampling.glsl, ImpostorSample::point), so a sun fleck's edge crosses the plant rather than its flat card.
 vec3 sunShadowPoint;
 
+// How much further towards the sun its cascades are read on leaves (foliageShadowLift), set once the material is known.
+float sunShadowLift = 0.0;
+
 // Texel i holds the value at i / (size - 1); a linear sampler places it at (i + 0.5) / size.
 vec2 sampleBrdfTable(float nDotV, float roughness) {
     vec2 grid = vec2(nDotV, roughness) * float(BRDF_TABLE_SIZE - 1);
@@ -547,7 +550,7 @@ vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float
 
     for (int cascade = 0; cascade < cascades; ++cascade) {
         int tile = firstTile + cascade;
-        vec3 position = sunShadowPoint + toLight * sunShadowBias(shadowTiles[tile].offset.y, nDotL);
+        vec3 position = sunShadowPoint + toLight * (sunShadowBias(shadowTiles[tile].offset.y, nDotL) + sunShadowLift);
         float edge = sunCascadeEdge(tile, position);
 
         if (edge <= 0.0) {
@@ -567,7 +570,7 @@ vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float
         vec3 nextPosition = position;
 
         if (!last) {
-            nextPosition = sunShadowPoint + toLight * sunShadowBias(shadowTiles[nextTile].offset.y, nDotL);
+            nextPosition = sunShadowPoint + toLight * (sunShadowBias(shadowTiles[nextTile].offset.y, nDotL) + sunShadowLift);
 
             if (sunCascadeEdge(nextTile, nextPosition) <= 0.0) {
                 return sunTileShadow(tile, position, tanAngularRadius, toLight, farTile, distantReach);
@@ -900,6 +903,7 @@ void main() {
     vec2 gradientDown = uvStepDown * exp2(mipBias);
 
     MaterialData material = materials[materialIndex];
+    sunShadowLift = foliageShadowLift(material.diffuseTransmission.w, cascadeOptions.w);
 
     // The back of a double-sided surface is shaded as the front's mirror image: its normal and tangent frame turned round.
     // The capture's cube faces are mirror images, which swaps which side the GPU calls the front.

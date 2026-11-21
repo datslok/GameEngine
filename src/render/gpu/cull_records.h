@@ -68,6 +68,11 @@ static_assert(sizeof(GpuFrustum) == 96, "GpuFrustum must match culling.glsl's");
 
 GpuCullRecord packCullRecord(const DrawItem& draw);
 
+// The flag bits naming the nearest sun cascade a caster casts into (held to CULL_SHADOW_FROM_MASK), and back. Mirrored
+// by culling.glsl.
+std::uint32_t cullShadowFromBits(int cascade);
+int cullShadowFrom(std::uint32_t flags);
+
 inline constexpr std::uint32_t cullNoChunk = CULL_NO_CHUNK;
 
 /*

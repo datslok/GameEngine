@@ -25,11 +25,20 @@ GpuCullRecord packCullRecord(const DrawItem& draw) {
                    (isCutOut(draw.material) ? CULL_CUT_OUT : 0u) | (draw.material.doubleSided ? CULL_DOUBLE_SIDED : 0u) |
                    (draw.thinningEntry != 0 ? CULL_THINNABLE : 0u) |
                    (draw.previousModel && *draw.previousModel != draw.model ? CULL_MOVED : 0u) |
-                   (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u) | (draw.fadesLevels ? CULL_FADES : 0u);
+                   (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u) | (draw.fadesLevels ? CULL_FADES : 0u) |
+                   (draw.shadowHandedOn ? CULL_SHADOW_HANDED_ON : 0u) | cullShadowFromBits(draw.shadowFromCascade);
     record.mesh = draw.mesh.index;
     record.hiddenBelowError = draw.hiddenBelowError;
     record.shadowCascades = draw.shadowCascades;
     return record;
+}
+
+std::uint32_t cullShadowFromBits(int cascade) {
+    return static_cast<std::uint32_t>(std::clamp(cascade, 0, static_cast<int>(CULL_SHADOW_FROM_MASK))) << CULL_SHADOW_FROM_SHIFT;
+}
+
+int cullShadowFrom(std::uint32_t flags) {
+    return static_cast<int>((flags >> CULL_SHADOW_FROM_SHIFT) & CULL_SHADOW_FROM_MASK);
 }
 
 /*

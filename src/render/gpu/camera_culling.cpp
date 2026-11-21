@@ -301,7 +301,12 @@ bool shadowTakes(const GpuCullRecord& record, const GpuCameraCull& view) {
         return false;
     }
 
-    if (view.cascade >= 0 && record.shadowCascades > 0 && view.cascade >= record.shadowCascades) {
+    if (view.cascade >= 0 && ((record.shadowCascades > 0 && view.cascade >= record.shadowCascades) || view.cascade < cullShadowFrom(record.flags))) {
+        return false;
+    }
+
+    // A lamp's tile takes the stand-in a seen mesh hands its shadow on to, not both.
+    if (view.cascade < 0 && (record.flags & CULL_SHADOW_HANDED_ON) != 0u) {
         return false;
     }
 
@@ -309,32 +314,30 @@ bool shadowTakes(const GpuCullRecord& record, const GpuCameraCull& view) {
 }
 
 /*
-* A sun cascade's box is a parallel projection, so its left and right planes' distances add up to its width wherever the
-* point is: the nearer one over half of it is 1 at the middle and 0 on that side, as the shader's cascade edge is.
+* The box's near plane's normal is the sun's direction (unit, as every frustum plane), so the offset from the ball's
+* centre crossed with it is the offset across the sun's plane: a cross product, not |v|^2 - (v.n)^2, which cancels badly
+* for a caster far along the ray. edge is 1 at the centre and 0 on the ball's edge, in radii.
 */
 float shadowThinShare(const GpuCullRecord& record, const GpuCameraCull& view) {
     const float start = view.thinning[0];
     const float end = view.thinning[1];
+    const float radius = view.thinBall[3];
 
-    if (view.cascade < 0 || record.shadowCascades <= 0 || view.cascade != record.shadowCascades - 1 || record.bounds[3] < 0.0f || start <= end) {
+    if (view.cascade < 0 || record.shadowCascades <= 0 || view.cascade != record.shadowCascades - 1 || record.bounds[3] < 0.0f || start <= end ||
+        radius <= 0.0f || (record.flags & CULL_SHADOW_HANDED_ON) != 0u) {
         return 1.0f;
     }
 
-    float edge = 1.0f;
-
-    for (int axis = 0; axis < 2; ++axis) {
-        const float* low = view.frustum.planes[2 * axis];
-        const float* high = view.frustum.planes[2 * axis + 1];
-        const float fromLow = low[0] * record.bounds[0] + low[1] * record.bounds[1] + low[2] * record.bounds[2] + low[3];
-        const float fromHigh = high[0] * record.bounds[0] + high[1] * record.bounds[1] + high[2] * record.bounds[2] + high[3];
-        const float width = fromLow + fromHigh;
-
-        if (width > 0.0f) {
-            edge = std::min(edge, 2.0f * std::min(fromLow, fromHigh) / width);
-        }
-    }
-
+    const Vec3 sun{view.frustum.planes[4][0], view.frustum.planes[4][1], view.frustum.planes[4][2]};
+    const Vec3 offset{record.bounds[0] - view.thinBall[0], record.bounds[1] - view.thinBall[1], record.bounds[2] - view.thinBall[2]};
+    const float edge = 1.0f - offset.cross(sun).length() / radius;
     return std::clamp((edge - end) / (start - end), 0.0f, 1.0f);
+}
+
+// Past 32 cascades no bit: none are made (maxShadowCascades). A caster handing its shadow on ends in no cascade.
+std::uint32_t lastCascadeBit(const GpuCullRecord& record) {
+    const bool ends = record.shadowCascades > 0 && record.shadowCascades <= 32 && (record.flags & CULL_SHADOW_HANDED_ON) == 0u;
+    return ends ? 1u << static_cast<std::uint32_t>(record.shadowCascades - 1) : 0u;
 }
 
 float shadowThinNumber(const GpuCullRecord& record) {
@@ -669,8 +672,11 @@ CameraCullFrame CameraCullTable::update(const FrameDescription& frame, const std
     result.stillGeneration = generation;
     result.movingRecords.reserve(movingCount);
 
+    result.lastCascades = stillLastCascades;
+
     for (std::size_t draw = stillCount; draw < frame.draws.size(); ++draw) {
         result.movingRecords.push_back(packCullRecord(frame.draws[draw]));
+        result.lastCascades |= lastCascadeBit(result.movingRecords.back());
     }
 
     CullGroups moving = buildCullGroups(frame.draws, stillCount, movingCount, placement);
@@ -722,10 +728,12 @@ void CameraCullTable::buildStill(const FrameDescription& frame, const std::funct
     keys.clear();
     records.reserve(stillCount);
     keys.reserve(stillCount);
+    stillLastCascades = 0;
 
     for (std::size_t draw = 0; draw < stillCount; ++draw) {
         records.push_back(packCullRecord(frame.draws[draw]));
         keys.push_back(candidateKey(frame.draws[draw]));
+        stillLastCascades |= lastCascadeBit(records.back());
     }
 
     const std::size_t chunkCount = (stillCount + chunkSlots - 1) / chunkSlots;
@@ -820,6 +828,7 @@ bool CameraCullTable::repackRanges(const FrameDescription& frame, const std::fun
 
             records[draw] = packCullRecord(item);
             result.stillChanges.push_back(records[draw]);
+            stillLastCascades |= lastCascadeBit(records[draw]);
             const std::uint64_t key = candidateKey(item);
 
             if (draw >= had || key != keys[draw]) {

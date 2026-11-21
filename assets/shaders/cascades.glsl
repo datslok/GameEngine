@@ -37,6 +37,11 @@ float sunShadowBias(float baseOffset, float nDotL) {
     return baseOffset * (1.0 + min(slope, maxSunBiasSlope));
 }
 
+// How much further towards the sun leaves (a material letting light through) look their shadow up (foliageShadowLift).
+float foliageShadowLift(float transmission, float lift) {
+    return transmission > 0.0 ? max(lift, 0.0) : 0.0;
+}
+
 // Distant occluders: the point the far shadow map is read from inside the cascades, moved reach towards the sun, so only
 // blockers further than the cascades' caster reach count.
 vec3 distantOccluderPoint(vec3 position, vec3 toLight, float reach) {
