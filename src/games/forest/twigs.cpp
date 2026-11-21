@@ -177,6 +177,28 @@ TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& se
     return twig;
 }
 
+// Each level's vertices after the finer ones', its indices moved past them.
+TwigLeafMesh twigLeafMesh(const TwigPrototype& twig) {
+    TwigLeafMesh made;
+
+    for (std::size_t level = 0; level < twig.levels.size(); ++level) {
+        const IndexedMesh& leaves = twig.levels[level].leaves;
+        const auto first = static_cast<std::uint32_t>(made.mesh.vertices.size());
+        made.mesh.vertices.insert(made.mesh.vertices.end(), leaves.vertices.begin(), leaves.vertices.end());
+        std::vector<std::uint32_t>& indices = level == 0 ? made.mesh.indices : made.coarser.emplace_back().indices;
+
+        for (const std::uint32_t corner : leaves.indices) {
+            indices.push_back(first + corner);
+        }
+
+        if (level > 0) {
+            made.coarser.back().error = twig.levels[level].error;
+        }
+    }
+
+    return made;
+}
+
 std::vector<TwigPrototype> buildTwigPrototypes(const TracedLeaves& leaves, const ForestTwigSettings& settings, float twigSize, float leafShare,
                                                std::uint32_t seed) {
     std::vector<TwigPrototype> twigs;

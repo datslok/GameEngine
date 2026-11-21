@@ -25,7 +25,7 @@ Owns, in declaration order (destroyed in reverse):
 
 1. Settings, the window (made hidden, shown with the first loading frame: `Window::reveal`, so the renderer's seconds of start show no black window) and the renderer.
 2. `game.onInit` behind the loading screen ("LOADING THE WORLD") on a thread of its own (`workBehindLoadingScreen`, `runWhileWaiting` in `core/background_work`): safe since games are headless, the job system takes work from any thread and nothing else reads the world meanwhile.
-3. Every mesh up to the GPU, counted ("PREPARING THE SCENE n / m"), a 33 ms slice of batches between loading frames (`stepsWithinBudget`, a step a batch: their clusters built on the job system, `mesh-clusters.md`), on the main thread, since uploads share the GPU queue with the screen.
+3. Every mesh up to the GPU, counted ("PREPARING THE SCENE n / m"), a 33 ms slice of batches between loading frames (`stepsWithinBudget`, a step a batch: their clusters built on the job system, or from the levels a game gave (`getGivenClusterLevels`), `mesh-clusters.md`), on the main thread, since uploads share the GPU queue with the screen.
 4. `waitForPipelines` ("BUILDING SHADERS" until every pipeline is built), then the command server, so `--send` waits for a ready game.
 5. The first frame's `describeFrame` and sky bake (`bakeSkyVisibilityAhead`) behind the loading screen on a thread of its own (`describeFirstFrame`), the same work render() would do there.
 

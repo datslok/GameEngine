@@ -63,7 +63,7 @@ Owns every CPU-side mesh, image and imported model. Append-only, so "new since l
 | deforming | its topology's `rest`, in the batch as deforming | `meshBounds` (replaced each frame) | none |
 | drawn-only | as it is | `indexedMeshBounds` | none |
 
-- **Cluster levels** only for meshes marked with `setClusterLevels` (not deforming ones), read by `hasClusterLevels` as the mesh goes up and by the draws through `getClusterLevels` (`attachMeshLevels`; `mesh-clusters.md`).
+- **Cluster levels** only for meshes marked with `setClusterLevels` (not deforming ones), read by `hasClusterLevels` as the mesh goes up and by the draws through `getClusterLevels` (`attachMeshLevels`; `mesh-clusters.md`). Levels made by the caller (`setGivenClusterLevels`, drawn-only meshes, checked by building them once) are kept by mesh number and passed with the mesh as it goes up (`getGivenClusterLevels`).
 
 Textures: new ones are cooked together, a texture a job, then uploaded in handle order: `uploadCompressedTexture` for a compressed one, else `uploadTexture(width, height, pixels, encoding, mips)`. GPU side: [meshes.md](meshes.md) (mesh buffers), Colour and textures below.
 

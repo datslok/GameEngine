@@ -74,3 +74,9 @@
   - **Tests caught 6 planted bugs:** no bit reversal (levels not every 2^k-th), the row search keeping the worst fit, the inset pushing out, growth by count, the tip triangles wound backwards, the stand facing away.
   - `tests.exe --only <name>...` added, so a planted bug is seen without the whole suite.
   - **Seen (the user, laptop, `forest-twigs`):** looks great.
+- 3b reordered (Nov 21 2026): the user asked what scales best and how engines do it; GPU expansion beats a CPU bake on speed too (the same culling, the prototypes' few hundred KB of vertices staying in the caches against about 200 MB a variant streamed), so the old 3d moved into 3b and the bake was dropped; leaf tone from a hash in the shader (no texture memory), the normal blend a setting.
+- `twig-levels-3b-i` (Nov 21 2026): cluster levels given by the mesh's maker (`buildGivenClusterLevels`), a twig's pruned levels as a chain of groups.
+  - **Why not clusterlod:** it simplifies, and simplification erodes disjoint leaves; the twig's levels already are a hierarchy (errors rising, each level's own vertices), so only the groups' spheres had to be made.
+  - **Spheres:** a group holds its own clusters, the next level's (whose grown leaves reach further) and the group below; meshoptimizer's sphere of spheres is then grown to hold each exactly, since the cut needs strict nesting.
+  - **Only drawn-only meshes:** a converted `Mesh` may have its vertices reordered, which would break the given indices.
+  - **Tests caught 5 planted bugs:** groups missing the next level's clusters, a group carrying its own level's error, coarser clusters made from their own group, falling errors accepted, given levels not marking the mesh.

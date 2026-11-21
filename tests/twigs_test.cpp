@@ -239,6 +239,26 @@ namespace {
             assert(a.size() != b.size() || (a.front().position - b.front().position).lengthSquared() > 0.0f);
         }
 
+        // As one mesh for the cluster cut: a chain of a group a level, each with its level's error and triangles.
+        const TwigLeafMesh leafMesh = twigLeafMesh(first);
+        assert(leafMesh.coarser.size() + 1 == first.levels.size());
+        assert(leafMesh.mesh.indices.size() == first.levels.front().leaves.indices.size());
+        const MeshClusters built = buildGivenClusterLevels(leafMesh.mesh, leafMesh.coarser);
+        assert(built.groups.size() == first.levels.size());
+        std::vector<std::size_t> triangles(first.levels.size(), 0);
+
+        for (const MeshCluster& cluster : built.clusters) {
+            triangles[built.groups[cluster.group].level] += cluster.triangleCount;
+        }
+
+        for (std::size_t level = 0; level < first.levels.size(); ++level) {
+            assert(triangles[level] * 3 == first.levels[level].leaves.indices.size());
+
+            if (level + 1 < first.levels.size()) {
+                assert(built.groups[level].error == first.levels[level + 1].error);
+            }
+        }
+
         ForestTwigSettings counted;
         FieldCounter counter;
         visit(counted, counter);

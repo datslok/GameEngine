@@ -4216,7 +4216,7 @@ std::vector<VertexEntries> VulkanRenderer::uploadMeshes(const std::vector<MeshUp
 
     for (const MeshUpload& upload : batch) {
         if (meshPool && !upload.deforming) {
-            pooled.push_back({upload.mesh, upload.levels});
+            pooled.push_back({upload.mesh, upload.levels, upload.given});
         }
     }
 

@@ -205,6 +205,7 @@ public:
         const IndexedMesh* mesh = nullptr;
         bool deforming = false;
         ClusterLevels levels = ClusterLevels::One; // the cluster levels (AssetManager::hasClusterLevels)
+        const std::vector<GivenClusterLevel>* given = nullptr; // levels made by the mesh's maker (AssetManager::getGivenClusterLevels)
     };
     std::vector<VertexEntries> uploadMeshes(const std::vector<MeshUpload>& batch);
 
