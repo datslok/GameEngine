@@ -122,10 +122,15 @@ void AssetManager::setClusterLevels(MeshHandle mesh) {
     }
 
     clusterLevels[mesh.index] = 1;
+    ++levelsVersion; // the draws kept hold the flag (DrawItem::clusterLevels)
 }
 
 bool AssetManager::hasClusterLevels(MeshHandle mesh) const {
     return mesh.isValid() && mesh.index < clusterLevels.size() && clusterLevels[mesh.index] != 0;
+}
+
+const std::vector<std::uint8_t>& AssetManager::getClusterLevels() const {
+    return clusterLevels;
 }
 
 std::uint64_t AssetManager::getLevelsVersion() const {

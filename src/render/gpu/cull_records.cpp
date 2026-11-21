@@ -25,7 +25,8 @@ GpuCullRecord packCullRecord(const DrawItem& draw) {
                    (isCutOut(draw.material) ? CULL_CUT_OUT : 0u) | (draw.material.doubleSided ? CULL_DOUBLE_SIDED : 0u) |
                    (draw.thinningEntry != 0 ? CULL_THINNABLE : 0u) |
                    (draw.previousModel && *draw.previousModel != draw.model ? CULL_MOVED : 0u) |
-                   (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u) | (draw.fadesLevels ? CULL_FADES : 0u);
+                   (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u) | (draw.fadesLevels ? CULL_FADES : 0u) |
+                   (draw.clusterLevels ? CULL_CLUSTER_LEVELS : 0u);
     record.mesh = draw.mesh.index;
     record.hiddenBelowError = draw.hiddenBelowError;
     record.shadowCascades = draw.shadowCascades;
@@ -119,7 +120,7 @@ GpuLevelView packLevelView(const LevelView& view) {
     packed.eye[3] = view.pixelsPerMetre;
     packed.pixelError = view.pixelError;
     packed.flags = (view.enabled ? CULL_LEVELS_ENABLED : 0u) | (view.impostors ? CULL_LEVELS_IMPOSTORS : 0u) |
-                   (view.orthographic ? CULL_LEVELS_ORTHOGRAPHIC : 0u);
+                   (view.orthographic ? CULL_LEVELS_ORTHOGRAPHIC : 0u) | (view.clusterLevels ? CULL_LEVELS_CLUSTERS : 0u);
     packed.fadeBand = view.fadeBand;
     return packed;
 }
@@ -178,7 +179,8 @@ float levelSphereDistance(const float sphere[4], const Vec3& eye) {
 /*
 * chosenMesh's walk, step for step, under a budget: an impostor is drawn only where its own error fits (never with
 * levels or impostors off); then the levels walk coarser until one does not fit, or (impostors off) one draws nothing;
-* the slot it ends on may hold no mesh (a tree past its last level).
+* the slot it ends on may hold no mesh (a tree past its last level). No walk for a mesh with cluster levels in a view
+* drawing them.
 */
 int levelSlotWithin(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuLevelView& view, float budget) {
     const bool enabled = (view.flags & CULL_LEVELS_ENABLED) != 0u;
@@ -195,8 +197,10 @@ int levelSlotWithin(const GpuCullRecord& record, const GpuMeshLevels& levels, co
     }
 
     std::uint32_t chosen = 0;
+    // Where the view draws cluster levels, a mesh with its own keeps slot 0: the hierarchy's cut coarsens it.
+    const bool walks = (record.flags & CULL_CLUSTER_LEVELS) == 0u || (view.flags & CULL_LEVELS_CLUSTERS) == 0u;
 
-    if (enabled && levels.levels > 0 && record.levelSphere[3] >= 0.0f) {
+    if (enabled && walks && levels.levels > 0 && record.levelSphere[3] >= 0.0f) {
         const float distance = levelSphereDistance(record.levelSphere, eye);
 
         for (std::uint32_t level = 0; level < levels.levels; ++level) {

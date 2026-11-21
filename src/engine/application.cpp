@@ -694,7 +694,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
         attachBoundingSpheres(draws, boundsByMesh);
         attachFlatFaces(draws, flatFacesByMesh);
         attachVertexEntries(draws, vertexEntriesByMesh);
-        attachMeshLevels(draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
+        attachMeshLevels(draws, assets.getMeshLevels(), assets.getMeshLevelOptions(), assets.getClusterLevels());
         liftGroundDraws(draws, lifting);
     };
 

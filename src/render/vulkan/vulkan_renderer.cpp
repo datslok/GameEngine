@@ -1739,7 +1739,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // every switch a third closer (docs/research/LOD.md, Hiding the switches).
     validateLevelOfDetail(settings.levelOfDetail);
     cpuClock.lap(CpuStage::Lights, profilerSeconds());
-    const LevelView cameraLevels = cameraLevelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
+    // Drawn by mesh shaders, the meshes with cluster levels keep their own mesh and the cut coarsens them (ROADMAP phase
+    // 21, 2e); their old levels serve the shadows, the captures and GPUs without mesh shaders.
+    LevelView cameraLevels = cameraLevelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
+    cameraLevels.clusterLevels = drawsClusters;
     cameraThinning = thinningErrorPerMetre(cameraLevels);
     stats.drawnByLevel = lastCameraCull.levels;
     stats.drawnTriangles = lastCameraCull.triangles;

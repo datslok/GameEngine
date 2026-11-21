@@ -517,6 +517,58 @@ namespace {
         assert(settings.levelOfDetail.pixelError == 6.0f);
     }
 
+    /*
+    * A mesh with cluster levels of its own (AssetManager::setClusterLevels; ROADMAP phase 21, 2e) keeps its own mesh in a
+    * view that draws them (the camera's, with mesh shaders): the hierarchy's cut coarsens it there, so its old levels,
+    * a coarser mesh or one drawing nothing, are never chosen, however far. Every other view (a shadow tile, a capture, a
+    * GPU without mesh shaders) still walks them, and draws without cluster levels walk them in every view. An impostor's
+    * own error still decides where it is drawn.
+    */
+    void testClusterLevelsReplaceTheOldOnes() {
+        std::vector<DrawItem> draws{drawAt(Vec3{0.0f, 0.0f, -2000.0f}), drawAt(Vec3{0.0f, 0.0f, -2000.0f})};
+        const std::vector<std::vector<MeshLevel>> table{{}, {}, {}, twoLevels};
+        attachMeshLevels(draws, table, {}, std::vector<std::uint8_t>{0, 0, 0, 1});
+        assert(draws[0].clusterLevels && draws[1].clusterLevels);
+        draws[1].mesh = MeshHandle{5};
+        draws[1].clusterLevels = false;
+        draws[1].levels = twoLevels;
+
+        LevelView view = squareView(Vec3{}, 2.0f);
+        assert(!view.clusterLevels);
+        assert(chosenMesh(draws[0], view) == MeshHandle{8} && chosenMesh(draws[1], view) == MeshHandle{8});
+        view.clusterLevels = true;
+        assert(chosenMesh(draws[0], view) == MeshHandle{3} && drawLevel(draws[0], view) == 0);
+        assert(chosenMesh(draws[1], view) == MeshHandle{8});
+
+        // A last level drawing nothing is not chosen either: a trunk is never dropped where its tree's card begins.
+        DrawItem trunk = drawAt(Vec3{0.0f, 0.0f, -2000.0f});
+        const std::vector<MeshLevel> untilCard{MeshLevel{MeshHandle{7}, 0.01f}, MeshLevel{MeshHandle{}, 0.1f}};
+        trunk.levels = untilCard;
+        trunk.clusterLevels = true;
+        assert(chosenMesh(trunk, view) == MeshHandle{3});
+        view.clusterLevels = false;
+        assert(!chosenMesh(trunk, view).isValid());
+
+        // An impostor with cluster levels is still hidden near.
+        view.clusterLevels = true;
+        DrawItem card = drawAt(Vec3{0.0f, 0.0f, -3.0f});
+        card.hiddenBelowError = 0.1f;
+        card.clusterLevels = true;
+        assert(!chosenMesh(card, view).isValid());
+
+        // No fade for such a draw where its levels would have crossed one.
+        DrawItem fading = drawAt(Vec3{0.0f, 0.0f, -6.0f});
+        fading.fadesLevels = true;
+        fading.clusterLevels = true;
+        LevelView camera = cameraLevelView(Vec3{}, 1000.0f, 1.5707963f, LevelOfDetailSettings{.enabled = true, .pixelError = 2.0f});
+        camera.clusterLevels = true;
+
+        for (float distance = 1.0f; distance < 3000.0f; distance *= 1.1f) {
+            fading.bounds.centre = Vec3{0.0f, 0.0f, -distance};
+            assert(!levelFade(fading, camera).fading && chosenMesh(fading, camera) == MeshHandle{3});
+        }
+    }
+
     // The F4 readout (and the stats command) shows how many of the camera's draws drew each level, and the
     // thousands of triangles drawn.
     void testTheReadoutCountsEachLevel() {
@@ -536,6 +588,7 @@ void testLevelOfDetail() {
     testAFadingDrawCrossesTheBand();
     testAPlantFadesIntoItsCard();
     testTheReadoutCountsEachLevel();
+    testClusterLevelsReplaceTheOldOnes();
     testAnErrorCoversPixelsByDistance();
     testTheCoarsestLevelWithinTheBudgetIsChosen();
     testADrawPicksByItsNearestPoint();

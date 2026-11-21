@@ -78,12 +78,14 @@ public:
     * Give a mesh cluster levels (ROADMAP phase 21, 2b-ii; scene/mesh_clusters.h), as Nanite's per-mesh switch: only
     * meshes the cut will draw coarser (rocks, trunks, structures), set before the mesh first reaches the GPU. A mesh not
     * added, or a deforming one (its clusters are never built), throws std::invalid_argument. Whether a mesh has them
-    * (none by default; false for any handle not added).
+    * (none by default; false for any handle not added), and the flags by mesh number (1 with them) for the draws
+    * (attachMeshLevels), shorter when the last meshes have none.
     */
     void setClusterLevels(MeshHandle mesh);
     bool hasClusterLevels(MeshHandle mesh) const;
+    const std::vector<std::uint8_t>& getClusterLevels() const;
 
-    // Changes whenever a mesh's levels or options are named or named again, so draws kept from frame to frame, which
+    // Changes whenever a mesh's levels, options or cluster levels are named, so draws kept from frame to frame, which
     // hold spans of them (scene/still_draws.h), are built again.
     std::uint64_t getLevelsVersion() const;
 

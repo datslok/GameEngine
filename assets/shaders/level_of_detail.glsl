@@ -59,8 +59,10 @@ int levelSlotWithin(CullRecord record, MeshLevels levels, LevelView view, float 
     }
 
     uint chosen = 0u;
+    // Where the view draws cluster levels, a mesh with its own keeps slot 0: the hierarchy's cut coarsens it.
+    bool walks = (record.flags & CULL_CLUSTER_LEVELS) == 0u || (view.flags & CULL_LEVELS_CLUSTERS) == 0u;
 
-    if (enabled && levels.levels > 0u && record.levelSphere.w >= 0.0) {
+    if (enabled && walks && levels.levels > 0u && record.levelSphere.w >= 0.0) {
         float distance = levelSphereDistance(record.levelSphere, view.eye.xyz);
 
         for (uint level = 0u; level < levels.levels; ++level) {

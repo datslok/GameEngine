@@ -12,6 +12,7 @@
 #include "input/input.h"
 #include "math/closest_points.h"
 #include "scene/impostor.h"
+#include "scene/indexed_mesh.h"
 #include "scene/model_renderer.h"
 #include "scene/planting_cells.h"
 
@@ -1057,6 +1058,22 @@ namespace {
             // baked round, whose radius the card carries in its normals.
             const float cardRadius = assets.getDrawnMesh(card.parts.front().mesh).vertices.front().normal.x;
             const float cardError = impostorCardError(cardRadius, kind.impostorTexels, kind.cardErrorTexels);
+
+            // The card is the crown's alone (ROADMAP phase 21, 2e): baked round the box of the leaves, climbers and
+            // epiphytes, not the bark, which the camera draws by its cluster levels however far.
+            Aabb crown = indexedMeshBounds(assets.getDrawnMesh(leaves.parts.front().mesh));
+
+            for (std::size_t model = 4; model < look.models.size(); ++model) {
+                for (const RenderPart& part : look.models[model].parts) {
+                    crown = enclosing(crown, indexedMeshBounds(assets.getDrawnMesh(part.mesh)));
+                }
+            }
+
+            const Vec3 crownCentre = (crown.minimum + crown.maximum) * 0.5f;
+            const IndexedMesh& cardMesh = assets.getDrawnMesh(card.parts.front().mesh);
+            assert(std::abs(cardRadius - std::max(((crown.maximum - crown.minimum) * 0.5f).length(), 1e-4f)) < 1e-4f);
+            assert(std::abs(cardMesh.vertices.front().position.z - crownCentre.z) < 1e-4f);
+            assert(assets.hasClusterLevels(bark.parts.front().mesh));
 
             // The bark and leaves seen end where the card begins: their coarser levels finer than the card (the leaves'
             // first its own first vertices, thinned by the same records), the shadow's stand-in among them only if it is

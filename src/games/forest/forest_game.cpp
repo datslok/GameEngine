@@ -1159,7 +1159,6 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
     std::vector<Material> cardMaterials;
     const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
     // Copies, not references: adding each variant's atlases to the asset manager can move its textures.
-    const ImageData barkTexture = bark.texture.isValid() ? assets.getTexture(bark.texture) : ImageData{};
     const ImageData leafTexture = leaf.texture.isValid() ? assets.getTexture(leaf.texture) : ImageData{};
     const ImageData climberStemTexture = climbers != nullptr && climbers->stem.texture.isValid() ? assets.getTexture(climbers->stem.texture) : ImageData{};
     const ImageData climberLeafTexture = climbers != nullptr && climbers->leaf.texture.isValid() ? assets.getTexture(climbers->leaf.texture) : ImageData{};
@@ -1178,12 +1177,14 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         ClimberMeshes& climber = climbing[index];
         const bool climbed = climbers != nullptr && !climber.stems.vertices.empty() && !climber.leaves.vertices.empty();
         /*
-        * The impostor (scene/impostor.h), baked from the bark's first level and the leaves before they go to the asset
-        * manager: its atlases, its card round the tree's sphere. The tree's parts end on a level drawing nothing at its
-        * error, where the card begins, and all three choose by the tree's one box, so exactly one of them is drawn.
+        * The impostor (scene/impostor.h), the crown's alone (ROADMAP phase 21, 2e): baked from the leaves, climbers and
+        * epiphytes before they go to the asset manager, its atlases, its card round their sphere. The bark is not on it:
+        * the camera draws the bark by its cluster levels however far (the hierarchy's cut coarsens it). The leaves end on
+        * a level drawing nothing at the card's error, and all choose by the tree's one box, so exactly one of leaves and
+        * card is drawn. The bark's levels end there too, for the views without cluster levels (the shadows, captures,
+        * GPUs without mesh shaders), whose far trees then lose their trunks, a stand-in's loss until phase 21's stage 3.
         */
         std::vector<ImpostorPart> parts{
-            ImpostorPart{.mesh = &variant.barkLevel, .colour = bark.texture.isValid() ? &barkTexture : nullptr, .tint = bark.colour, .alphaCutoff = 0.0f},
             ImpostorPart{.mesh = &variant.leaves, .colour = leaf.texture.isValid() ? &leafTexture : nullptr, .tint = leaf.colour, .alphaCutoff = leaf.alphaCutoff}};
 
         // The climbers are on the card too, so the tree does not lose them far off.

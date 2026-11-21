@@ -95,6 +95,11 @@ namespace {
         return draw.levelBounds.radius >= 0.0f ? draw.levelBounds : draw.bounds;
     }
 
+    // Whether the view walks the draw's old levels: not where the hierarchy's cut coarsens its mesh instead.
+    bool walksLevels(const DrawItem& draw, const LevelView& view) {
+        return !draw.levels.empty() && !(draw.clusterLevels && view.clusterLevels);
+    }
+
     /*
     * The level a draw takes under a budget of pixels, as chooseLevel counts; -1 for an impostor (hiddenBelowError above
     * 0) not drawn there: it is drawn only where its error fits, which is where its tree's last level, drawing nothing, is
@@ -110,7 +115,7 @@ namespace {
             }
         }
 
-        if (draw.levels.empty() || sphere.radius < 0.0f) {
+        if (!walksLevels(draw, view) || sphere.radius < 0.0f) {
             return 0;
         }
 
@@ -149,7 +154,7 @@ float levelDistance(const BoundingSphere& bounds, const Vec3& eye) {
 std::size_t drawLevel(const DrawItem& draw, const LevelView& view) {
     const BoundingSphere& sphere = choosingSphere(draw);
 
-    if (draw.levels.empty() || sphere.radius < 0.0f) {
+    if (!walksLevels(draw, view) || sphere.radius < 0.0f) {
         return 0;
     }
 
@@ -226,11 +231,13 @@ std::array<std::size_t, meshLevelSlots> levelsChosen(const std::vector<DrawItem>
 }
 
 void attachMeshLevels(std::span<DrawItem> draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
-                      const std::vector<MeshLevelOptions>& optionsByMesh) {
+                      const std::vector<MeshLevelOptions>& optionsByMesh, const std::vector<std::uint8_t>& clusterLevelsByMesh) {
     for (DrawItem& draw : draws) {
         if (!draw.mesh.isValid()) {
             continue;
         }
+
+        draw.clusterLevels = draw.mesh.index < clusterLevelsByMesh.size() && clusterLevelsByMesh[draw.mesh.index] != 0;
 
         if (draw.mesh.index < levelsByMesh.size()) {
             draw.levels = levelsByMesh[draw.mesh.index];

@@ -10,9 +10,9 @@ Read by the camera's culling (below); `CULL_MOVED`, `CULL_SWAYS` and `GpuMeshLev
 
 | Record | Bytes | One per | Holds |
 |---|---|---|---|
-| `GpuCullRecord` | 48 | draw (the instance's index) | bounding sphere, level sphere (`levelBounds`, else bounds), `CULL_*` flags (shadow-only, hidden, transparent, casts shadows, cut-out, double-sided, thinnable, fades), mesh number, impostor's `hiddenBelowError` |
+| `GpuCullRecord` | 48 | draw (the instance's index) | bounding sphere, level sphere (`levelBounds`, else bounds), `CULL_*` flags (shadow-only, hidden, transparent, casts shadows, cut-out, double-sided, thinnable, fades, cluster levels), mesh number, impostor's `hiddenBelowError` |
 | `GpuMeshLevels` | 48 | mesh | four slots (the mesh, then its levels coarsest last; `CULL_NO_MESH` draws nothing), each slot's error, the level count, which slots share the mesh's vertices |
-| `GpuLevelView` | 32 | view | eye and pixels a metre away, pixel error, `CULL_LEVELS_*` (enabled, impostors, orthographic), fade band (0 none: every view but the camera) |
+| `GpuLevelView` | 32 | view | eye and pixels a metre away, pixel error, `CULL_LEVELS_*` (enabled, impostors, orthographic, clusters), fade band (0 none: every view but the camera) |
 | `GpuFrustum` | 96 | view | six inward planes |
 
 Packed by `packCullRecord`, `packMeshLevels` (throws past three levels), `packLevelView`, `packFrustum`.
