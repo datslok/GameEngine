@@ -878,7 +878,9 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 39 && counter.live == 0);
+        assert(counter.fields == 40 && counter.live == 0);
+        // The trees cast into the sun's four cascades, not the far map past them (the far map is the cascade after the last).
+        assert(visited.shadowCascades == 4);
         assert(settings.shadowBarkShare > 0.0f && settings.shadowBarkShare <= 0.2f);
 
         // Four times the first patch's crown cover (the user, Nov 14 2026): more trees, their crowns interlocking.
@@ -1043,14 +1045,16 @@ namespace {
             // the shadow bark, two parts of one shadows-only model.
             assert(!leaves.castsShadows && !leaves.shadowOnly && !bark.castsShadows && !bark.shadowOnly);
             assert(shadows.castsShadows && shadows.shadowOnly && shadows.parts.size() == 2);
+            // The stand-ins cast into the nearest cascades their kind's settings name.
+            const ForestTreeSettings& kind = look.layer == static_cast<int>(ForestLayer::Emergent) ? game.getEmergentSettings()
+                                             : look.layer == static_cast<int>(ForestLayer::Mid)    ? game.getMidSettings()
+                                                                                                   : game.getTreeSettings();
+            assert(shadows.shadowCascades == kind.shadowCascades);
             assert(isCutOut(shadows.parts[0].material) && !isCutOut(shadows.parts[1].material));
             assert(assets.isDrawnOnly(bark.parts.front().mesh) && !isCutOut(bark.parts.front().material));
 
             // The card's error is its texels' (scene/impostor.h, impostorCardError): its frames span the sphere it was
             // baked round, whose radius the card carries in its normals.
-            const ForestTreeSettings& kind = look.layer == static_cast<int>(ForestLayer::Emergent) ? game.getEmergentSettings()
-                                             : look.layer == static_cast<int>(ForestLayer::Mid)    ? game.getMidSettings()
-                                                                                                   : game.getTreeSettings();
             const float cardRadius = assets.getDrawnMesh(card.parts.front().mesh).vertices.front().normal.x;
             const float cardError = impostorCardError(cardRadius, kind.impostorTexels, kind.cardErrorTexels);
 

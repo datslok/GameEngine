@@ -1267,7 +1267,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
     /*
     * Each variant's parts, as one look (scene/planting_cells.h), which the GPU's cells draw the trees with. Bark, leaves
     * and card cast no shadow; the shadow's stand-ins (the shadow leaves and the shadow bark, one shadows-only model) cast
-    * it; the climbers' stems and leaves and the epiphytes' rosettes and moss cast into the nearest cascades. All but the
+    * it, into the nearest cascades the settings name (shadowCascades: not the far map); the climbers' stems and leaves and the epiphytes' rosettes and moss cast into the nearest cascades. All but the
     * card sway as trees (treeLookSwayers, applySway); the climbers' and epiphytes' models are listed for their tests.
     */
     for (std::size_t variant = 0; variant < grown.size(); ++variant) {
@@ -1287,7 +1287,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         seen(barkMeshes[variant], bark, false, 0, false);
         seen(leafMeshes[variant], leaf, false, 0, true);
         seen(cardMeshes[variant], cardMaterials[variant], false, 0, std::nullopt);
-        seen(shadowLeafMeshes[variant], leaf, true, 0, true);
+        seen(shadowLeafMeshes[variant], leaf, true, settings.shadowCascades, true);
         look.models.back().shadowOnly = true;
         look.models.back().parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
 

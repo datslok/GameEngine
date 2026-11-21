@@ -25,6 +25,16 @@ namespace {
         }
     }
 
+    // A buffer every frame in flight uses (not one a frame), grown as ensureBuffer grows one, once the GPU is done with
+    // the old one: a frame still in flight may be reading it. Growing doubles, so this waits only a few times a run.
+    void ensureSharedBuffer(const VulkanDevice& device, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory) {
+        if (buffer.get() != VK_NULL_HANDLE && buffer.getSize() < std::max(bytes, smallestBytes)) {
+            device.waitIdle();
+        }
+
+        ensureBuffer(device, buffer, bytes, usage, memory);
+    }
+
     // An upload buffer holding a span's elements (grown to fit), written and flushed.
     template<typename Element>
     void upload(const VulkanDevice& device, VulkanBuffer& buffer, std::span<const Element> elements) {
@@ -224,8 +234,8 @@ void VulkanPlacedDrawing::record(VkCommandBuffer commands, FrameDescriptors& des
     const auto items = static_cast<std::uint32_t>(frame.views.items.size());
     const auto views = static_cast<std::uint32_t>(frame.views.views.size());
     const auto groups = static_cast<std::uint32_t>(table.groups.size());
-    ensureBuffer(device, itemCounts, static_cast<VkDeviceSize>(items) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, totals, 2 * static_cast<VkDeviceSize>(views) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureSharedBuffer(device, itemCounts, static_cast<VkDeviceSize>(items) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureSharedBuffer(device, totals, 2 * static_cast<VkDeviceSize>(views) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     const std::array<ComputeBinding, PLANTING_BINDINGS> plantingBindings = planting.getBindings(heights, frameIndex);
     const VkBuffer plants = plantingBindings[PLANTING_PLANTS_BINDING].buffer.buffer;
     const VkBuffer counts = plantingBindings[PLANTING_COUNTS_BINDING].buffer.buffer;

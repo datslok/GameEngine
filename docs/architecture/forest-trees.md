@@ -51,7 +51,7 @@ Engine side: `level-of-detail.md`. Per variant (`plantTrees` in `forest_game`):
 |---|---|---|---|
 | Leaves | the cards, casting none | thinned card by card to `levelCardShare` (0.5), survivors grown by share^-`levelCardGrowth` (0.5), the level the mesh's first cards (`ClusterCardRun`, `nodeCardStride`); then the shadow leaves; then nothing at the card's error | — |
 | Bark | the tubes, casting none | simplified to `levelBarkShare` (0.3); then the shadow bark; then nothing | — |
-| Shadow stand-ins | never (`shadowOnly`, one model of two parts) | | shadow leaves: `shadowCardsPerNode` 1, `shadowFillCards` 8, `shadowCardScale` 2 (about a sixth of the cards); shadow bark: `shadowBarkShare` (0.1) by meshoptimizer |
+| Shadow stand-ins | never (`shadowOnly`, one model of two parts) | | shadow leaves: `shadowCardsPerNode` 1, `shadowFillCards` 8, `shadowCardScale` 2 (about a sixth of the cards); shadow bark: `shadowBarkShare` (0.1) by meshoptimizer; into the nearest `shadowCascades` (4: the cascades, not the far map, thinning out across the last) |
 | Card | far away only | hidden below its error, `cardErrorTexels` (2) of its texels (`impostorCardError`: about 115 m for a mid tree, 300 m canopy, 370 m emergent); the tree's levels no finer than it dropped (`levelsUntilCard`), so the stand-ins are seen only where finer than the card | none (the stand-ins keep casting) |
 
 - The impostor is baked from the bark's first level, the leaves, and the variant's climbers and epiphytes (`impostorFrames` 8, `impostorTexels` 128); every part chooses by the tree's one box, so exactly one of tree and card is drawn.

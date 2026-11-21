@@ -228,6 +228,11 @@ struct ForestTreeSettings {
     // tree, 370 m for an emergent. Its atlas: frames a side over the hemisphere, texels a frame (8 x 128: 1024 square,
     // Fortnite's trees 12 x 12 in 2048); more texels make a sharper card, switched to farther off.
     float cardErrorTexels = 2.0f;
+
+    // How many of the sun's cascades its shadow stand-ins are drawn into, nearest first (ModelRenderer::shadowCascades; 0
+    // all, the far shadow map too). 4, the cascades and not the far map past them (with the default 4 cascades), thinning
+    // out across the last: a far tile holding the valley's trees redrew kilometres of them whenever the camera changed cell.
+    int shadowCascades = 4;
     int impostorFrames = 8;
     int impostorTexels = 128;
 };
