@@ -37,7 +37,8 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 
 /*
 * Nine lines of text, in the same colour as the bounding boxes: the camera's view (and a line of how many of its draws drew each level
-* of detail, the meshes themselves first, and the thousands of triangles drawn: all, the cut-outs', the probe's), all shadow views together (each
+* of detail, the meshes themselves first, and the thousands of triangles drawn: all, the cut-outs', the probe's; while mesh clusters are
+* culled, those kept of those tested and the kept ones' thousands of triangles), all shadow views together (each
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
 * tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
@@ -47,10 +48,15 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled) +
                                "  CALLS " + std::to_string(stats.drawCalls);
-    const std::string detail = "LEVELS " + std::to_string(stats.drawnByLevel[0]) + " " +
-                               std::to_string(stats.drawnByLevel[1]) + " " + std::to_string(stats.drawnByLevel[2]) + " " + std::to_string(stats.drawnByLevel[3]) +
-                               "  TRIS " + std::to_string(stats.drawnTriangles / 1000) + "K  CUT " + std::to_string(stats.drawnCutOutTriangles / 1000) +
-                               "K  PROBE " + std::to_string(stats.probeTriangles / 1000) + "K";
+    std::string detail = "LEVELS " + std::to_string(stats.drawnByLevel[0]) + " " +
+                         std::to_string(stats.drawnByLevel[1]) + " " + std::to_string(stats.drawnByLevel[2]) + " " + std::to_string(stats.drawnByLevel[3]) +
+                         "  TRIS " + std::to_string(stats.drawnTriangles / 1000) + "K  CUT " + std::to_string(stats.drawnCutOutTriangles / 1000) +
+                         "K  PROBE " + std::to_string(stats.probeTriangles / 1000) + "K";
+
+    if (stats.meshClustersTested > 0) {
+        detail += "  CLUSTERS " + std::to_string(stats.meshClustersKept) + "/" + std::to_string(stats.meshClustersTested) + " " +
+                  std::to_string(stats.meshClusterTriangles / 1000) + "K";
+    }
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled) +
                                 "  CALLS " + std::to_string(stats.shadowDrawCalls);
     std::string tiles = "TILES DRAWN " + std::to_string(stats.shadowTilesDrawn) + "  CACHED " + std::to_string(stats.shadowTilesCached) +

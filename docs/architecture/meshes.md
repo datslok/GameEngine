@@ -1,6 +1,6 @@
 # Meshes
 
-Covers: `src/scene/mesh`, `src/scene/indexed_mesh`, `src/scene/mesh_clusters`, `src/scene/smooth_normals`, `src/scene/tangents`, `src/scene/deforming_mesh`, `src/scene/deforming_mesh_shared.h`, `src/render/gpu/deforming_slots`, `assets/shaders/deform.glsl`
+Covers: `src/scene/mesh`, `src/scene/indexed_mesh`, `src/scene/smooth_normals`, `src/scene/tangents`, `src/scene/deforming_mesh`, `src/scene/deforming_mesh_shared.h`, `src/render/gpu/deforming_slots`, `assets/shaders/deform.glsl`
 
 The import format, the render format, normals and tangents, and meshes whose vertices move. Loading and handles: [assets.md](assets.md). UV origin rules: `src/assets/CLAUDE.md`.
 
@@ -35,18 +35,7 @@ Vertex numbering and error cases: the header.
 - Optional per-vertex records riding along: `hanging` (`HangingVertex`, see `docs/research/WIND.md`), `thinning` and `thinningCards` (`scene/card_thinning.h`). Each list is one entry a vertex or empty.
 - `meshPrefix`, `thinnedLevel`: a mesh's first vertices and indices as a level of its own (levels sharing vertices; `docs/research/LOD.md`). `simplifyMesh`, `simplifiedLevels` (`scene/simplify_mesh`, meshoptimizer) make coarser levels.
 - `indexedMeshBounds`: the box, as `meshBounds` gives a `Mesh`'s.
-
-## Mesh clusters
-
-`buildMeshClusters` (`scene/mesh_clusters`, meshoptimizer): a render mesh cut into pieces culled on their own (ROADMAP phase 21; research `docs/research/VIRTUALGEOMETRY.md`). Not the lights' clusters (`clustered-shading.md`).
-
-| Piece | What |
-|---|---|
-| `MeshCluster` | at most `MESH_CLUSTER_MAX_VERTICES` 64 and `MESH_CLUSTER_MAX_TRIANGLES` 124 (a mesh-shader workgroup's output); a sphere holding its vertices; a cone of facing (apex, axis, cutoff) |
-| `MeshClusters` | the clusters; their vertices as the mesh's vertex numbers (the mesh's vertex buffer serves); their triangles as three local corner bytes, runs packed end to end |
-
-- Built from triangles near each other and of like facing (cone weight 0.25), each triangle in exactly one with its winding, corners reordered for vertex reuse; deterministic; cost grows with the mesh's triangles, once a mesh.
-- `clusterFacesAway(cluster, eye)`: every triangle's back faces the eye (eye in the mesh's space; exact under any transform that does not mirror, since which side of a triangle the eye is on is the sign of a volume). A cutoff of 1 or more (facings spread past a half turn) never culls.
+- Cut into clusters culled one by one: [mesh-clusters.md](mesh-clusters.md).
 
 ## Normals
 
@@ -128,4 +117,4 @@ In `Application::describeFrame`, one mesh a job (`parallelFor`):
 
 ## Tests
 
-`indexed_mesh_test`, `smooth_normals_test`, `tangents_test` (regenerates NormalTangentMirrorTest's exported tangents: at least 99% of corners match, signs included), `sphere_mesh_test`, `lathe_mesh_test`, `simplify_mesh_test`, `mesh_clusters_test` (every triangle once with its winding, limits, spheres hold their vertices, facing never culls a front from random eyes, a fine sphere 47% culled from afar), `deforming_mesh_test`, `deforming_slots_test` (every order of new and held frames).
+`indexed_mesh_test`, `smooth_normals_test`, `tangents_test` (regenerates NormalTangentMirrorTest's exported tangents: at least 99% of corners match, signs included), `sphere_mesh_test`, `lathe_mesh_test`, `simplify_mesh_test`, `deforming_mesh_test`, `deforming_slots_test` (every order of new and held frames).

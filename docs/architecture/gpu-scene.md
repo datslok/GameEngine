@@ -35,6 +35,7 @@ std430, mirrored byte for byte in the shaders, each size checked by a `static_as
 Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `docs/research/MESHPOOL.md`): `MeshVertex`es in one GPU buffer, `uint32` indices in another, each mesh a run of each (`MeshPlacement`), its indices its own (the draw's `vertexOffset` adds its first vertex).
 
 - **Added only**, between frames (`uploadMesh`): `MeshPoolLayout::place` after the last; a pool too small is doubled (`poolCapacity`, from 1M vertices and 4M indices, under 4 GB), the GPU waited for, the old one copied over on the GPU.
+- Each mesh's clusters too, in three more pools grown alike (`ensure`): [mesh-clusters.md](mesh-clusters.md).
 - `VulkanMesh` with the pool keeps only its placement: its buffers are the pools', its addresses the pools' plus its start. Deforming meshes (cloth) keep buffers of their own (`pooled` false), drawn alone.
 - **Vertex shaders** read per-vertex records by `gl_VertexIndex - gl_BaseVertexARB` (the mesh's own vertex number; `shaderDrawParameters`).
 - F4's VRAM line: `MESHES used OF held MB`.

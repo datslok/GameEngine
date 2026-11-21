@@ -25,6 +25,19 @@ namespace {
         return (style.cutOut ? 2 : 0) + (style.doubleSided ? 1 : 0);
     }
 
+    // A group of a mesh where it is: its indices for the indirect command, its clusters for the mesh clusters' culling;
+    // its segments from firstSegment (the caller counts them).
+    GpuCullGroup placedCullGroup(const MeshPlacement& placed, std::uint32_t firstSegment) {
+        GpuCullGroup group;
+        group.firstSegment = firstSegment;
+        group.indexCount = placed.indexCount;
+        group.firstIndex = placed.firstIndex;
+        group.vertexOffset = static_cast<std::int32_t>(placed.firstVertex);
+        group.firstCluster = placed.firstCluster;
+        group.clusterCount = placed.clusterCount;
+        return group;
+    }
+
     // What decides a still draw's candidates and lists: its mesh, way of drawing, glass and flat faces.
     std::uint64_t candidateKey(const DrawItem& draw) {
         return (static_cast<std::uint64_t>(draw.mesh.index) << 8u) | (isTransparent(draw.material) ? 1u : 0u) | (draw.flatFaces.empty() ? 0u : 2u) |
@@ -115,12 +128,8 @@ CullGroups buildCullGroups(std::span<const DrawItem> draws, std::size_t first, s
         if (position == 0 || key.style != keyed[position - 1].style || key.mesh != keyed[position - 1].mesh) {
             const MeshHandle mesh{key.mesh};
             const MeshPlacement placed = placement(mesh);
-            GpuCullGroup group;
-            group.firstSegment = static_cast<std::uint32_t>(groups.segments.size());
+            GpuCullGroup group = placedCullGroup(placed, static_cast<std::uint32_t>(groups.segments.size()));
             group.segments = 1;
-            group.indexCount = placed.indexCount;
-            group.firstIndex = placed.firstIndex;
-            group.vertexOffset = static_cast<std::int32_t>(placed.firstVertex);
             groups.groups.push_back(group);
             groups.styles.push_back(CullGroupStyle{mesh, (key.style & 2) != 0, (key.style & 1) != 0, placed.pooled});
             groups.segments.push_back(GpuCullSegment{static_cast<std::uint32_t>(position), 0, cullNoChunk, 0});
@@ -962,12 +971,7 @@ void CameraCullTable::buildSegments(const std::function<MeshPlacement(MeshHandle
             const int style = static_cast<int>(key >> 32u);
             const MeshHandle mesh{static_cast<std::uint32_t>(key & 0xFFFFFFFFu)};
             const MeshPlacement placed = placement(mesh);
-            GpuCullGroup group;
-            group.firstSegment = static_cast<std::uint32_t>(segments.size());
-            group.indexCount = placed.indexCount;
-            group.firstIndex = placed.firstIndex;
-            group.vertexOffset = static_cast<std::int32_t>(placed.firstVertex);
-            groups.push_back(group);
+            groups.push_back(placedCullGroup(placed, static_cast<std::uint32_t>(segments.size())));
             styles.push_back(CullGroupStyle{mesh, (style & 2) != 0, (style & 1) != 0, placed.pooled});
         }
 

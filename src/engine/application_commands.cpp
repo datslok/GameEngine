@@ -49,6 +49,9 @@ void Application::registerCommands() {
     addPlacementCompareCommand(commands, [this] {
         return renderer.comparePlacement();
     });
+    addClusterCompareCommand(commands, [this] {
+        return renderer.compareMeshClusters();
+    });
     game.addCommands(commands, world);
 
     commands.add("screenshot", "screenshot <file.png> [width height]",

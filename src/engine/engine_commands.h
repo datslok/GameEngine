@@ -63,3 +63,9 @@ void addCullCompareCommand(CommandRegistry& registry, std::function<std::string(
 * and planted again on the CPU, and returns the last comparison's report (empty when none has finished).
 */
 void addPlacementCompareCommand(CommandRegistry& registry, std::function<std::string()> compare);
+
+/*
+* cluster-compare (render/gpu/mesh_cluster_culling.h): compare asks for the next frame's camera mesh cluster list to be
+* compared with the CPU's and returns the last comparison's report (empty when none has finished).
+*/
+void addClusterCompareCommand(CommandRegistry& registry, std::function<std::string()> compare);

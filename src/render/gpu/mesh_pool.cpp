@@ -33,6 +33,27 @@ MeshPlacement MeshPoolLayout::place(std::uint32_t vertexCount, std::uint32_t ind
     return placement;
 }
 
+ClusterPlacement MeshPoolLayout::placeClusters(std::uint32_t clusterCount, std::uint32_t vertexCount, std::uint32_t triangleWordCount) {
+    const ClusterPlacement placement{static_cast<std::uint32_t>(clusters), static_cast<std::uint32_t>(clusterVertices),
+                                     static_cast<std::uint32_t>(triangleWords)};
+    clusters += clusterCount;
+    clusterVertices += vertexCount;
+    triangleWords += triangleWordCount;
+    return placement;
+}
+
+std::uint64_t MeshPoolLayout::getClusters() const {
+    return clusters;
+}
+
+std::uint64_t MeshPoolLayout::getClusterVertices() const {
+    return clusterVertices;
+}
+
+std::uint64_t MeshPoolLayout::getTriangleWords() const {
+    return triangleWords;
+}
+
 std::uint64_t MeshPoolLayout::getVertices() const {
     return vertices;
 }

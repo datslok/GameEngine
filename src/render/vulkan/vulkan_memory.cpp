@@ -245,6 +245,18 @@ VulkanImage::operator bool() const {
     return image != VK_NULL_HANDLE;
 }
 
+// Doubling keeps the growths a run few as a list grows a little each frame.
+bool ensureBuffer(VmaAllocator allocator, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory) {
+    bytes = std::max(bytes, smallestRecordBufferBytes);
+
+    if (buffer.getSize() >= bytes) {
+        return false;
+    }
+
+    buffer = VulkanBuffer{allocator, std::max(bytes, 2 * buffer.getSize()), usage, memory};
+    return true;
+}
+
 void recordImageBarrier(VkCommandBuffer commands, const VkImageMemoryBarrier2& barrier) {
     VkDependencyInfo dependency{};
     dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;

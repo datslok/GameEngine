@@ -461,7 +461,7 @@ Added Nov 21 2026 (the user: AAA quality; the forest's shadows popped all over f
 
 - [ ] 1. Clusters: meshes cut into small clusters (meshoptimizer), each culled a view (frustum, last frame's depth pyramid, facing) and drawn by mesh shaders (the user's choice, Nov 21 2026, over a compute-written index buffer); prepass and main pass first, measured
   - [x] 1a. Clusters built from a render mesh (`buildMeshClusters`): up to 64 vertices and 124 triangles, a bounding sphere and a cone of facing each; every triangle in exactly one (`clusters`)
-  - [ ] 1b. Clusters built when a mesh reaches the GPU and kept beside the mesh pool; culled a view on the GPU after the objects: frustum and facing, in a fixed order, mirrored in a `.glsl` library and checked by `cluster-compare` (`clusters`)
+  - [x] 1b. Clusters built when a mesh reaches the GPU and kept beside the mesh pool; culled a view on the GPU after the objects: frustum and facing, in a fixed order, mirrored in a `.glsl` library and checked by `cluster-compare` (`clusters`)
   - [ ] 1c. Clusters drawn by mesh shaders (`VK_EXT_mesh_shader`) in the camera's prepass and main pass, behind `engine.render.clusters`, today's path for GPUs without them; lianas, cloth, grass and floor cover stay on today's path (`clusters`)
   - [ ] 1d. Two-pass occlusion: clusters hidden behind last frame's depth pyramid retested against this frame's; measured at the rim, path, trees and 157 m up (`clusters`)
 - [ ] 2. Cluster levels: groups simplified to half with their borders locked, a hierarchy (meshoptimizer's `clusterlod`, a newer meshoptimizer than our 0.22), the cut chosen a view by projected error (about a pixel); the rock's, terrain's and trunks' levels and cards retired

@@ -3,6 +3,7 @@
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_device.h"
 
+#include <chrono>
 #include <cstring>
 
 /*
@@ -21,30 +22,30 @@ VulkanMeshPool::VulkanMeshPool(const VulkanDevice& device, ImmediateCommands& up
 
     vertexUsage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | shared;
     indexUsage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | shared;
+    clusterUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+}
+
+void VulkanMeshPool::ensure(VulkanBuffer& pool, std::uint64_t& capacity, std::uint64_t used, std::uint64_t needed, std::uint64_t smallest,
+                            VkDeviceSize elementBytes, VkBufferUsageFlags usage) {
+    const std::uint64_t grown = poolCapacity(capacity, needed, smallest, elementBytes);
+
+    if (grown != capacity) {
+        grow(pool, used, grown, elementBytes, usage);
+        capacity = grown;
+    }
 }
 
 /*
 * Grown first where it does not fit, then copied in through an upload buffer; the barrier makes the copy visible to
-* everything that reads meshes later (meshUploadBarrier).
+* everything that reads meshes later (meshUploadBarrier). Then its clusters.
 */
 MeshPlacement VulkanMeshPool::add(const IndexedMesh& mesh) {
     checkMeshUpload(mesh);
     const std::uint64_t vertexCount = mesh.vertices.size();
     const std::uint64_t indexCount = mesh.indices.size();
-    const std::uint64_t neededVertices = poolCapacity(vertexCapacity, layout.getVertices() + vertexCount, smallestPoolVertices, sizeof(MeshVertex));
-    const std::uint64_t neededIndices = poolCapacity(indexCapacity, layout.getIndices() + indexCount, smallestPoolIndices, sizeof(std::uint32_t));
-
-    if (neededVertices != vertexCapacity) {
-        grow(vertices, layout.getVertices(), neededVertices, sizeof(MeshVertex), vertexUsage);
-        vertexCapacity = neededVertices;
-    }
-
-    if (neededIndices != indexCapacity) {
-        grow(indices, layout.getIndices(), neededIndices, sizeof(std::uint32_t), indexUsage);
-        indexCapacity = neededIndices;
-    }
-
-    const MeshPlacement placement = layout.place(static_cast<std::uint32_t>(vertexCount), static_cast<std::uint32_t>(indexCount));
+    ensure(vertices, vertexCapacity, layout.getVertices(), layout.getVertices() + vertexCount, smallestPoolVertices, sizeof(MeshVertex), vertexUsage);
+    ensure(indices, indexCapacity, layout.getIndices(), layout.getIndices() + indexCount, smallestPoolIndices, sizeof(std::uint32_t), indexUsage);
+    MeshPlacement placement = layout.place(static_cast<std::uint32_t>(vertexCount), static_cast<std::uint32_t>(indexCount));
     const VkDeviceSize vertexSize = vertexBytes(mesh);
     const VkDeviceSize indexSize = indexBytes(mesh);
 
@@ -62,7 +63,80 @@ MeshPlacement VulkanMeshPool::add(const IndexedMesh& mesh) {
         meshUploadBarrier(commands, device);
     });
 
+    addClusters(mesh, placement);
     return placement;
+}
+
+/*
+* Built here, once a mesh (cost growing with its triangles, timed for the load), packed with the vertex pool's numbers,
+* then copied in as the mesh was. The records are kept on the CPU too, for cluster-compare.
+*/
+void VulkanMeshPool::addClusters(const IndexedMesh& mesh, MeshPlacement& placement) {
+    const auto started = std::chrono::steady_clock::now();
+    const MeshClusters built = buildMeshClusters(mesh);
+    std::uint32_t words = 0;
+
+    for (const MeshCluster& cluster : built.clusters) {
+        words += meshClusterTriangleWords(cluster.triangleCount);
+    }
+
+    const std::uint64_t clusterCount = built.clusters.size();
+    ensure(clusters, clusterCapacity, layout.getClusters(), layout.getClusters() + clusterCount, smallestPoolClusters, sizeof(GpuMeshCluster), clusterUsage);
+    ensure(clusterVertices, clusterVertexCapacity, layout.getClusterVertices(), layout.getClusterVertices() + built.vertices.size(),
+           smallestPoolClusterVertices, sizeof(std::uint32_t), clusterUsage);
+    ensure(triangleWords, triangleWordCapacity, layout.getTriangleWords(), layout.getTriangleWords() + words, smallestPoolTriangleWords,
+           sizeof(std::uint32_t), clusterUsage);
+    const ClusterPlacement place =
+        layout.placeClusters(static_cast<std::uint32_t>(clusterCount), static_cast<std::uint32_t>(built.vertices.size()), words);
+    const PackedMeshClusters packed = packMeshClusters(built, placement.firstVertex, place.firstVertex, place.firstTriangleWord);
+    placement.firstCluster = place.firstCluster;
+    placement.clusterCount = static_cast<std::uint32_t>(clusterCount);
+    clusterRecords.insert(clusterRecords.end(), packed.clusters.begin(), packed.clusters.end());
+    clusterBuildSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+    if (clusterCount == 0) {
+        return;
+    }
+
+    const VkDeviceSize recordBytes = packed.clusters.size() * sizeof(GpuMeshCluster);
+    const VkDeviceSize vertexBytes = packed.vertices.size() * sizeof(std::uint32_t);
+    const VkDeviceSize wordBytes = packed.triangleWords.size() * sizeof(std::uint32_t);
+    VulkanBuffer staging{device.getAllocator(), recordBytes + vertexBytes + wordBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
+    auto* destination = static_cast<std::byte*>(staging.getMapped());
+    std::memcpy(destination, packed.clusters.data(), recordBytes);
+    std::memcpy(destination + recordBytes, packed.vertices.data(), vertexBytes);
+    std::memcpy(destination + recordBytes + vertexBytes, packed.triangleWords.data(), wordBytes);
+    staging.flush();
+
+    uploads.run([&](VkCommandBuffer commands) {
+        const VkBufferCopy recordCopy{0, VkDeviceSize{place.firstCluster} * sizeof(GpuMeshCluster), recordBytes};
+        vkCmdCopyBuffer(commands, staging.get(), clusters.get(), 1, &recordCopy);
+        const VkBufferCopy vertexCopy{recordBytes, VkDeviceSize{place.firstVertex} * sizeof(std::uint32_t), vertexBytes};
+        vkCmdCopyBuffer(commands, staging.get(), clusterVertices.get(), 1, &vertexCopy);
+        const VkBufferCopy wordCopy{recordBytes + vertexBytes, VkDeviceSize{place.firstTriangleWord} * sizeof(std::uint32_t), wordBytes};
+        vkCmdCopyBuffer(commands, staging.get(), triangleWords.get(), 1, &wordCopy);
+        meshUploadBarrier(commands, device);
+    });
+}
+
+VkBuffer VulkanMeshPool::getClusters() const {
+    return clusters.get();
+}
+
+VkBuffer VulkanMeshPool::getClusterVertices() const {
+    return clusterVertices.get();
+}
+
+VkBuffer VulkanMeshPool::getTriangleWords() const {
+    return triangleWords.get();
+}
+
+const std::vector<GpuMeshCluster>& VulkanMeshPool::getClusterRecords() const {
+    return clusterRecords;
+}
+
+double VulkanMeshPool::getClusterBuildSeconds() const {
+    return clusterBuildSeconds;
 }
 
 /*
@@ -101,11 +175,13 @@ VkDeviceAddress VulkanMeshPool::getIndexAddress() const {
 }
 
 std::uint64_t VulkanMeshPool::getUsedBytes() const {
-    return layout.getVertices() * sizeof(MeshVertex) + layout.getIndices() * sizeof(std::uint32_t);
+    return layout.getVertices() * sizeof(MeshVertex) + layout.getIndices() * sizeof(std::uint32_t) + layout.getClusters() * sizeof(GpuMeshCluster) +
+           (layout.getClusterVertices() + layout.getTriangleWords()) * sizeof(std::uint32_t);
 }
 
 std::uint64_t VulkanMeshPool::getHeldBytes() const {
-    return vertexCapacity * sizeof(MeshVertex) + indexCapacity * sizeof(std::uint32_t);
+    return vertexCapacity * sizeof(MeshVertex) + indexCapacity * sizeof(std::uint32_t) + clusterCapacity * sizeof(GpuMeshCluster) +
+           (clusterVertexCapacity + triangleWordCapacity) * sizeof(std::uint32_t);
 }
 
 /*

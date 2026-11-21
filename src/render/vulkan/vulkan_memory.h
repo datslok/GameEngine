@@ -120,6 +120,15 @@ private:
     void release() noexcept;
 };
 
+// A buffer of a frame's own records' smallest size: room for a few of any kind, so none is ever empty.
+inline constexpr VkDeviceSize smallestRecordBufferBytes = 256;
+
+/*
+* A frame's own buffer made at least bytes large (and smallestRecordBufferBytes): grown to twice its size, or what is
+* asked, when too small; true when made afresh, so its contents are gone. Only for a buffer no frame in flight still reads.
+*/
+bool ensureBuffer(VmaAllocator allocator, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory);
+
 // One image barrier, recorded on its own.
 void recordImageBarrier(VkCommandBuffer commands, const VkImageMemoryBarrier2& barrier);
 

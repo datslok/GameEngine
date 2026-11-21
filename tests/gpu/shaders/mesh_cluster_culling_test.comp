@@ -1,0 +1,63 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs mesh_cluster_culling.glsl's functions on the cases mesh_cluster_culling_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "mesh_cluster_culling.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_MESH_CLUSTER_KEPT) {
+        // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
+        // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the
+        // record's bounds, the eye, then the frustum's six planes. Outputs: (kept, rigid, faces away from the eye
+        // brought into the mesh, largest scale), the world sphere.
+        MeshCluster cluster;
+        cluster.sphere = testInput(0);
+        cluster.cone = testInput(1);
+        cluster.axis = testInput(2).xyz;
+        cluster.firstVertex = 0u;
+        cluster.firstTriangleWord = 0u;
+        cluster.counts = 0u;
+        cluster.meshFirstVertex = 0u;
+        cluster.unused = 0u;
+
+        InstanceData instance;
+        instance.model = mat4(testInput(3), testInput(4), testInput(5), testInput(6));
+        instance.normalMatrix = mat4(1.0);
+        instance.handedness = vec4(1.0);
+        vec4 kinds = testInput(8);
+        instance.material = uvec4(0u, 0u, uint(kinds.x), uint(kinds.y));
+        instance.sway = vec4(-1.0);
+        instance.hanging = uvec4(0u, 0u, 0u, uint(kinds.z));
+        instance.levelSphere = vec4(0.0);
+
+        vec4 flags = testInput(7);
+        uint entry = flags.x != 0.0 ? DRAW_LIST_THINNED_BIT : 0u;
+        CullRecord record;
+        record.bounds = testInput(9);
+        record.levelSphere = record.bounds;
+        record.flags = uint(flags.y);
+        record.mesh = 0u;
+        record.hiddenBelowError = 0.0;
+        record.shadowCascades = 0;
+
+        CameraCull view;
+        view.levels.eye = testInput(10);
+        view.flags = uint(flags.z);
+        view.swayFadeEnd = flags.w;
+
+        for (int plane = 0; plane < 6; ++plane) {
+            view.frustum.planes[plane] = testInput(11u + uint(plane));
+        }
+
+        float determinant = meshClusterDeterminant(instance.model);
+        bool away = determinant > 0.0 && meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance.model, view.levels.eye.xyz, determinant));
+        testOutput(0, vec4(meshClusterKept(cluster, instance, entry, record, view) ? 1.0 : 0.0, meshClusterRigid(instance, entry, record, view) ? 1.0 : 0.0,
+                           away ? 1.0 : 0.0, meshClusterLargestScale(instance.model)));
+        testOutput(1, meshClusterWorldSphere(cluster, instance.model));
+    }
+}

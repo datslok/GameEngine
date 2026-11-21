@@ -28,6 +28,12 @@ struct RenderStats {
     std::size_t drawnCutOutTriangles = 0;
     std::size_t probeTriangles = 0;
 
+    // The camera's mesh clusters (render/gpu/mesh_cluster_culling.h), while culled: tested, kept, and the kept ones'
+    // triangles; none tested while off.
+    std::size_t meshClustersTested = 0;
+    std::size_t meshClustersKept = 0;
+    std::size_t meshClusterTriangles = 0;
+
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
 

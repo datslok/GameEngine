@@ -73,6 +73,7 @@ Seven passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers a
 - **Stays on the CPU:** glass (its cached list tested against the frustum and sorted), the mirror's choice (flat-faced draws only), which shadow tiles to draw (below).
 - **F4:** DRAWN, levels, triangles and the probe faces' triangles from the counts and commands read back a frame or two late.
 - **`cull-compare`:** asks for the next frame's CPU lists too (`cpuReferenceLists`), reads the GPU's back and reports each list's (camera, each probe face drawn, mirror, shadow tiles) matching, missing and extra entries per (mesh, style), differences near an edge apart (`compareCullList`); each call shows the last report.
+- **After it:** the camera's groups carry their mesh's clusters (`placedCullGroup`); `VulkanCameraCulling::outputs` and `placedView` hand its buffers and placed view to the mesh clusters' culling ([mesh-clusters.md](mesh-clusters.md)).
 - Tests: `camera_culling_test` (lists, capture views, slices, groups, kept table, chunks, changed chunks alone, comparison, edges, no setting, command); `shadow_culling_test` (tiles, both forms); `gpu_scene_test` (the draw list's layout); `cull_records_gpu_test` (`chunkInView`, `boxInFrustum`, cases within 1 cm of a plane or the reach left out).
 
 ## Shadow tiles (`gpu-cull-shadows`)

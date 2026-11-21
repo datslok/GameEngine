@@ -1,0 +1,38 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Mesh clusters' culling, pass 2 of 4 (render/vulkan/vulkan_mesh_cluster_culling.h): each pair of the work tested
+* (meshClusterPairKept), and each block's survivors counted. Dispatched indirectly, a workgroup a block of the work.
+*/
+#include "mesh_cluster_pass.glsl"
+
+layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
+
+// Each block's survivors.
+layout(std430, set = 0, binding = 11) writeonly buffer BlockCounts {
+    uint blockCounts[];
+};
+
+shared uint survivors;
+
+void main() {
+    uint pair = gl_GlobalInvocationID.x;
+
+    if (gl_LocalInvocationIndex == 0u) {
+        survivors = 0u;
+    }
+
+    barrier();
+    MeshClusterItem item;
+
+    if (pair < work[MESH_CLUSTER_WORK_END] && meshClusterPairKept(pair, item)) {
+        atomicAdd(survivors, 1u);
+    }
+
+    barrier();
+
+    if (gl_LocalInvocationIndex == 0u) {
+        blockCounts[gl_WorkGroupID.x] = survivors;
+    }
+}

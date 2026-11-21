@@ -143,6 +143,7 @@ void gpuTestLiana(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCardThinning(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestFacetVariation(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestMeshClusterCulling(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestLevelFade(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCameraFinish(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestMotionBlur(GpuFunctionRunner& runner, GpuCheckReport& report);

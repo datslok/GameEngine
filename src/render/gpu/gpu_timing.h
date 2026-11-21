@@ -15,6 +15,7 @@ enum class GpuPass {
     Cloth,
     DebugUi,
     CameraCull,   // every view's lists built on the GPU (render/gpu/camera_culling.h): the camera, velocity pass, captures, shadow tiles
+    MeshCull,     // the camera's mesh clusters culled one by one (render/gpu/mesh_cluster_culling.h), while meshClusters is on
     RayScene,
     Atmosphere,
     Probes,
