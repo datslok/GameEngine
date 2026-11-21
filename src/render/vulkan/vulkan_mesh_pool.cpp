@@ -87,7 +87,7 @@ void VulkanMeshPool::addClusters(const MeshClusters& built, MeshPlacement& place
         layout.placeClusters(static_cast<std::uint32_t>(clusterCount), static_cast<std::uint32_t>(built.vertices.size()), words);
     const PackedMeshClusters packed = packMeshClusters(built, placement.firstVertex, place.firstVertex, place.firstTriangleWord);
     placement.firstCluster = place.firstCluster;
-    placement.clusterCount = built.originalCount; // the levels wait in the pool for the cut (phase 21, stage 2c)
+    placement.clusterCount = static_cast<std::uint32_t>(clusterCount); // every level: the culling passes' cut picks among them
     clusterRecords.insert(clusterRecords.end(), packed.clusters.begin(), packed.clusters.end());
 
     if (clusterCount == 0) {

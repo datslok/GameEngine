@@ -44,6 +44,12 @@
 #define MESH_CLUSTER_OCCLUSION_ON 1u
 #define MESH_CLUSTER_OCCLUSION_HISTORY 2u
 
+// The cut (stage 2c): a parent error above this means nothing coarser was made (the builder's largest float), so the
+// cluster is drawn however far; a group's sphere is taken as at least this far (metres), so an eye inside it sees its
+// error huge but finite (and an error of 0 stays 0).
+#define MESH_CLUSTER_NEVER_COARSER 3.0e38
+#define MESH_CLUSTER_NEAREST_ERROR_DISTANCE 0.001
+
 // A box corner nearer the camera's plane than this (clip w) cannot be projected: the cluster is never hidden.
 #define MESH_CLUSTER_SMALLEST_W 0.001
 

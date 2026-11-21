@@ -28,14 +28,18 @@ namespace {
     };
 
     // Clusters of a sphere placed round random eyes: turned, scaled unevenly, some mirrored, some swaying, thinned,
-    // double-sided or of another kind, so every branch of meshClusterKept is reached.
+    // double-sided or of another kind, half from every level under several pixel errors (some views orthographic), so
+    // every branch of meshClusterKept and the cut is reached.
     std::vector<Case> cases() {
-        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(buildIndexedMesh(Mesh::sphere(48, 24)), ClusterLevels::One), 0, 0, 0);
+        const IndexedMesh ball = buildIndexedMesh(Mesh::sphere(48, 24));
+        const PackedMeshClusters one = packMeshClusters(buildMeshClusters(ball, ClusterLevels::One), 0, 0, 0);
+        const PackedMeshClusters all = packMeshClusters(buildMeshClusters(ball, ClusterLevels::All), 0, 0, 0);
         CaseRandom random{31};
         std::vector<Case> made;
 
         for (int index = 0; index < 1500; ++index) {
             Case c;
+            const PackedMeshClusters& packed = index % 2 == 0 ? one : all;
             c.cluster = packed.clusters[static_cast<std::size_t>(random.between(0.0f, static_cast<float>(packed.clusters.size()) - 0.01f))];
             const Vec3 eye{random.between(-500.0f, 500.0f), random.between(1.0f, 40.0f), random.between(-500.0f, 500.0f)};
             const float yaw = random.between(0.0f, 6.28f);
@@ -43,6 +47,9 @@ namespace {
             const Mat4 look = Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
             LevelView levels;
             levels.eye = eye;
+            levels.pixelsPerMetre = 1200.0f;
+            levels.pixelError = index % 3 == 0 ? 0.5f : index % 3 == 1 ? 1.0f : 4.0f;
+            levels.orthographic = index % 11 == 3;
             c.view = packCameraCull(Frustum::fromClipMatrix(projection * look, ClipDepth::OneToZero), levels, false, index % 3 == 0, random.between(5.0f, 60.0f));
 
             const Vec3 place = eye + Vec3{random.between(-40.0f, 40.0f), random.between(-10.0f, 10.0f), random.between(-40.0f, 40.0f)};
@@ -86,13 +93,18 @@ namespace {
             inputs.push_back(gpuVec4(plane[0], plane[1], plane[2], plane[3]));
         }
 
+        inputs.push_back(gpuVec4(c.cluster.ownSphere[0], c.cluster.ownSphere[1], c.cluster.ownSphere[2], c.cluster.ownSphere[3]));
+        inputs.push_back(gpuVec4(c.cluster.parentSphere[0], c.cluster.parentSphere[1], c.cluster.parentSphere[2], c.cluster.parentSphere[3]));
+        inputs.push_back(gpuVec4(c.cluster.ownError, c.cluster.parentError, c.view.levels.pixelError, static_cast<float>(c.view.levels.flags)));
+
         return inputs;
     }
 
     /*
     * The choices equal the mirror's, cases within rounding of a plane, the cone's edge or the sway's reach left out
     * (nearAMeshClusterEdge: the GPU's square roots and fused products may round either way there); the scale and
-    * sphere within arithmetic rounding.
+    * sphere within arithmetic rounding, and the errors' pixels within the square root's and division's (a parent never
+    * made coarser is not measured: its pixels are past the largest float).
     */
     void checkKept(GpuFunctionRunner& runner, GpuCheckReport& report) {
         const std::vector<Case> all = cases();
@@ -103,16 +115,23 @@ namespace {
             inputs.insert(inputs.end(), one.begin(), one.end());
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_KEPT, inputs, 17, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_KEPT, inputs, 20, 3);
 
         for (std::size_t i = 0; i < all.size(); ++i) {
             const Case& c = all[i];
-            const GpuVec4& choice = outputs[2 * i];
-            const GpuVec4& sphere = outputs[2 * i + 1];
+            const GpuVec4& choice = outputs[3 * i];
+            const GpuVec4& sphere = outputs[3 * i + 1];
+            const GpuVec4& cut = outputs[3 * i + 2];
             const std::array<float, 4> expected = meshClusterWorldSphere(c.cluster, c.instance);
             report.check("meshClusterLargestScale", arithmeticTolerance, meshClusterLargestScale(c.instance), choice[3]);
             report.check("meshClusterWorldSphere", arithmeticTolerance, Vec3{expected[0], expected[1], expected[2]}, Vec3{sphere[0], sphere[1], sphere[2]});
             report.check("meshClusterWorldSphere radius", arithmeticTolerance, expected[3], sphere[3]);
+            report.check("meshClusterErrorPixels own", arithmeticTolerance, meshClusterErrorPixels(c.cluster.ownSphere, c.cluster.ownError, c.instance, c.view), cut[1]);
+
+            if (c.cluster.parentError <= static_cast<float>(MESH_CLUSTER_NEVER_COARSER)) {
+                report.check("meshClusterErrorPixels parent", arithmeticTolerance,
+                             meshClusterErrorPixels(c.cluster.parentSphere, c.cluster.parentError, c.instance, c.view), cut[2]);
+            }
 
             if (nearAMeshClusterEdge(c.cluster, c.instance, c.entry, c.record, c.view)) {
                 continue;
@@ -121,6 +140,7 @@ namespace {
             const float determinant = meshClusterDeterminant(c.instance);
             const Vec3 eye{c.view.levels.eye[0], c.view.levels.eye[1], c.view.levels.eye[2]};
             const bool away = determinant > 0.0f && meshClusterFacesAway(c.cluster, meshClusterEyeInMesh(c.instance, eye, determinant));
+            report.check("meshClusterInCut", exactTolerance, meshClusterInCut(c.cluster, c.instance, c.view) ? 1.0f : 0.0f, cut[0]);
             report.check("meshClusterKept", exactTolerance, meshClusterKept(c.cluster, c.instance, c.entry, c.record, c.view) ? 1.0f : 0.0f, choice[0]);
             report.check("meshClusterRigid", exactTolerance, meshClusterRigid(c.instance, c.entry, c.record, c.view) ? 1.0f : 0.0f, choice[1]);
 

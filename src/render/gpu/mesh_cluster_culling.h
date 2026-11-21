@@ -38,10 +38,18 @@ struct GpuMeshCluster {
     std::uint32_t firstTriangleWord = 0; // its triangles' run in the triangle pool, four corner bytes a word
     std::uint32_t counts = 0;            // vertices, then triangles from MESH_CLUSTER_TRIANGLE_SHIFT
     std::uint32_t meshFirstVertex = 0;   // its mesh's first vertex in the vertex pool
-    std::uint32_t unused = 0;
+
+    // The cut (stage 2c), in the mesh's space: the group it was made from (its error, 0 for the mesh's own triangles, and
+    // sphere) and the group it was simplified with (its sphere, and the error of what was made from it: above
+    // MESH_CLUSTER_NEVER_COARSER when nothing was).
+    float ownError = 0.0f;
+    float ownSphere[4] = {};
+    float parentSphere[4] = {};
+    float parentError = 0.0f;
+    std::uint32_t unused[3] = {};
 };
 
-static_assert(sizeof(GpuMeshCluster) == 64, "GpuMeshCluster must match mesh_cluster_culling.glsl's MeshCluster");
+static_assert(sizeof(GpuMeshCluster) == 112, "GpuMeshCluster must match mesh_cluster_culling.glsl's MeshCluster");
 
 // A pair the camera draws: the draw list entry's place (the instance index the vertex shaders read) and the cluster's number.
 // Must match mesh_cluster_culling.glsl's MeshClusterItem.
@@ -88,14 +96,35 @@ Vec3 meshClusterEyeInMesh(const GpuInstance& instance, const Vec3& eye, float de
 // Every triangle's back faces the eye (in the mesh's space): clusterFacesAway on the record's cone.
 bool meshClusterFacesAway(const GpuMeshCluster& cluster, const Vec3& eye);
 
+// A sphere in the mesh's space (xyz centre, w radius) placed in the world: its centre moved, its radius by the longest
+// a unit can stretch.
+std::array<float, 4> meshClusterPlacedSphere(const float sphere[4], const GpuInstance& instance);
+
+/*
+* How many pixels a group's error (mesh units) covers in the view: stretched as far as the model stretches anything,
+* over the distance from the eye to the group's placed sphere (at least MESH_CLUSTER_NEAREST_ERROR_DISTANCE), times the
+* view's pixels a metre away (view.levels.eye's w); distance-free in an orthographic view. One function for a cluster's
+* own error and its parent's, so the two sides of a choice round alike.
+*/
+float meshClusterErrorPixels(const float sphere[4], float error, const GpuInstance& instance, const GpuCameraCull& view);
+
+/*
+* Whether the cut draws the cluster (Nanite's, ROADMAP phase 21, 2c): its own error fits the view's pixel error
+* (view.levels.pixelError) and its parent's does not (or nothing coarser was made). A group's error and sphere bound
+* those of every group under it, so exactly one cluster on every path from the mesh's own triangles to the coarsest
+* is drawn: watertight, since group borders stay locked while simplified.
+*/
+bool meshClusterInCut(const GpuMeshCluster& cluster, const GpuInstance& instance, const GpuCameraCull& view);
+
 /*
 * Whether the draw's vertices are where its mesh has them, moved only by its matrix: not a terrain patch, an impostor's
 * card, ground-following, a liana, cards thinned in this view (the entry's bit), or swaying where the view's sway reaches.
 */
 bool meshClusterRigid(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view);
 
-// What the view makes of the cluster (MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): seen whole for a draw not rigid; else hidden
-// out of the frustum or, single-sided and not mirrored, facing away; else seen with its sphere holding.
+// What the view makes of the cluster (MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): hidden out of the cut (any draw); seen whole
+// for a draw not rigid; else hidden out of the frustum or, single-sided and not mirrored, facing away; else seen with
+// its sphere holding.
 std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                                     const GpuCameraCull& view);
 
@@ -264,7 +293,7 @@ MeshClusterComparison compareMeshClusterLists(std::span<const GpuMeshClusterItem
 // with occlusion, the GPU's lists may lack pairs, hidden, but never add any not near an edge).
 std::string describeMeshClusterComparison(const MeshClusterComparison& comparison, std::uint32_t tested, std::uint32_t kept, bool occlusion = false);
 
-// Whether the cluster's choice is within rounding of changing (its sphere within a millimetre of a plane, its cone's
-// test within 1e-4), where the GPU and the CPU may each be right.
+// Whether the cluster's choice is within rounding of changing (its own or parent's error within 1e-4 of the pixel error,
+// its sphere within a millimetre of a plane, its cone's test within 1e-4), where the GPU and the CPU may each be right.
 bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                           const GpuCameraCull& view);

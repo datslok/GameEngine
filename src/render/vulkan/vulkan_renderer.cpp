@@ -2035,6 +2035,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         inputs.view = cameraCulling->placedView(frame.frameIndex, 0);
         inputs.view.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
         inputs.view.swayFadeEnd = settings.wind.swayFadeEnd;
+        inputs.view.levels.pixelError = settings.meshClusterErrorPixels;
         inputs.order = culled.order;
         inputs.groups = culled.groups;
         inputs.commands = culled.mainCommands;

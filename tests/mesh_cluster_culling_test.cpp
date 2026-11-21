@@ -218,6 +218,154 @@ namespace {
         assert(!meshClusterKept(cluster, plain, 0u, swaying, shortReach));
     }
 
+    // A view for the cut: testView's, with 1080 rows' pixels a metre away (its 0.9 radians tall) and the pixel error.
+    GpuCameraCull cutView(const Vec3& eye, float yaw, float pixelError) {
+        GpuCameraCull view = testView(eye, yaw, false, 0.0f);
+        view.levels.eye[3] = 1080.0f / (2.0f * std::tan(0.45f));
+        view.levels.pixelError = pixelError;
+        return view;
+    }
+
+    // The clusters the cut draws, by number.
+    std::vector<std::uint32_t> cutClusters(const PackedMeshClusters& packed, const GpuInstance& instance, const GpuCameraCull& view) {
+        std::vector<std::uint32_t> drawn;
+
+        for (std::uint32_t number = 0; number < packed.clusters.size(); ++number) {
+            if (meshClusterInCut(packed.clusters[number], instance, view)) {
+                drawn.push_back(number);
+            }
+        }
+
+        return drawn;
+    }
+
+    // Whether a packed sphere is a built one.
+    bool sameSphere(const float packed[4], const Vec3& centre, float radius) {
+        return packed[0] == centre.x && packed[1] == centre.y && packed[2] == centre.z && packed[3] == radius;
+    }
+
+    /*
+    * Packed for the cut: each record's own error and sphere are those of the group it was made from (0 and its own
+    * sphere for the mesh's own triangles), its parent's those of the group it was simplified with.
+    */
+    void testPackingKeepsTheCut() {
+        const MeshClusters built = buildMeshClusters(buildIndexedMesh(Mesh::sphere(64, 32)), ClusterLevels::All);
+        const PackedMeshClusters packed = packMeshClusters(built, 0, 0, 0);
+        assert(built.groups.size() > 1 && built.clusters.size() > built.originalCount);
+
+        for (std::size_t index = 0; index < built.clusters.size(); ++index) {
+            const MeshCluster& cluster = built.clusters[index];
+            const GpuMeshCluster& record = packed.clusters[index];
+            const MeshClusterGroup& parent = built.groups[cluster.group];
+            assert(record.parentError == parent.error && sameSphere(record.parentSphere, parent.centre, parent.radius));
+
+            if (cluster.refinedGroup == meshClusterNoGroup) {
+                assert(record.ownError == 0.0f && sameSphere(record.ownSphere, cluster.centre, cluster.radius));
+            } else {
+                const MeshClusterGroup& own = built.groups[cluster.refinedGroup];
+                assert(record.ownError == own.error && sameSphere(record.ownSphere, own.centre, own.radius));
+            }
+        }
+    }
+
+    /*
+    * The cut of a sphere with levels, placed turned, scaled unevenly or mirrored, seen from inside it to far away under
+    * several pixel errors: always closed and within its error of the sphere's volume (so no part drawn at two levels);
+    * with almost no error allowed the mesh's own clusters exactly, far away only the coarsest; never more triangles as
+    * the eye backs away from outside. A mesh with one level draws everything however far; a draw not rigid keeps
+    * exactly the cut.
+    */
+    void testTheCut() {
+        const IndexedMesh ball = buildIndexedMesh(Mesh::sphere(96, 48));
+        const MeshClusters built = buildMeshClusters(ball, ClusterLevels::All);
+        const PackedMeshClusters packed = packMeshClusters(built, 0, 0, 0);
+        const std::vector<std::uint32_t> numbers = positionNumbers(ball);
+        std::vector<std::uint32_t> originals(built.originalCount);
+        std::vector<std::uint32_t> coarsest;
+
+        for (std::uint32_t number = 0; number < packed.clusters.size(); ++number) {
+            if (number < built.originalCount) {
+                originals[number] = number;
+            }
+
+            if (packed.clusters[number].parentError > static_cast<float>(MESH_CLUSTER_NEVER_COARSER)) {
+                coarsest.push_back(number);
+            }
+        }
+
+        const float volume = enclosedVolume(ball, built, originals);
+        const float area = 4.0f * std::numbers::pi_v<float>;
+        std::mt19937 random(5);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        std::vector<std::uint32_t> triangleCounts;
+
+        for (int round = 0; round < 12; ++round) {
+            Vec3 direction{unit(random) - 0.5f, unit(random) - 0.5f, unit(random) - 0.5f};
+            direction = direction * (1.0f / direction.length());
+            const Vec3 place{(unit(random) - 0.5f) * 200.0f, unit(random) * 20.0f, (unit(random) - 0.5f) * 200.0f};
+            const float scales[3] = {(round % 5 == 3 ? -1.0f : 1.0f) * (0.5f + 3.0f * unit(random)), 0.5f + 3.0f * unit(random), 0.5f + 3.0f * unit(random)};
+            const GpuInstance instance = placedInstance(Mat4::translation(place.x, place.y, place.z) * Mat4::rotationY(unit(random) * 6.0f) *
+                                                        Mat4::rotationX(unit(random) * 6.0f) * Mat4::scaling(scales[0], scales[1], scales[2]));
+            const float largest = meshClusterLargestScale(instance);
+            const float pixelError = round % 3 == 0 ? 0.25f : round % 3 == 1 ? 1.0f : 4.0f;
+            const float yaw = unit(random) * 6.0f;
+
+            assert(cutClusters(packed, instance, cutView(place + direction * 0.2f, yaw, 1e-6f)) == originals);
+            std::uint32_t previous = 0xFFFFFFFFu;
+
+            for (float distance = 0.2f; distance < 2e5f; distance *= 1.6f) {
+                const std::vector<std::uint32_t> drawn = cutClusters(packed, instance, cutView(place + direction * distance, yaw, pixelError));
+                assert(!drawn.empty());
+                assert(openEdges(ball, built, numbers, drawn).empty());
+                std::uint32_t triangles = 0;
+                float largestError = 0.0f;
+
+                for (std::uint32_t number : drawn) {
+                    triangles += packed.clusters[number].counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
+                    largestError = std::max(largestError, packed.clusters[number].ownError);
+                }
+
+                assert(std::abs(enclosedVolume(ball, built, drawn) - volume) <= area * largestError + 1e-4f * volume);
+
+                if (distance > 1.2f * largest) {
+                    assert(triangles <= previous);
+                    previous = triangles;
+                }
+
+                if (std::find(triangleCounts.begin(), triangleCounts.end(), triangles) == triangleCounts.end()) {
+                    triangleCounts.push_back(triangles);
+                }
+            }
+
+            assert(cutClusters(packed, instance, cutView(place + direction * 1e6f, yaw, pixelError)) == coarsest);
+        }
+
+        // The cut meets many levels on the way out.
+        assert(triangleCounts.size() >= 4);
+
+        // One level: everything, near or far.
+        const PackedMeshClusters one = packMeshClusters(buildMeshClusters(ball, ClusterLevels::One), 0, 0, 0);
+        const GpuInstance still = placedInstance(Mat4::translation(0.0f, 0.0f, -10.0f));
+
+        for (float distance : {0.0f, 3.0f, 1e6f}) {
+            assert(cutClusters(one, still, cutView(Vec3{0.0f, 0.0f, distance}, 0.0f, 1.0f)).size() == one.clusters.size());
+        }
+
+        // A draw not rigid (a liana's, behind the eye) keeps exactly its cut.
+        GpuInstance liana = placedInstance(Mat4::translation(-60.0f, 2.0f, 0.0f));
+        liana.hanging[3] = 1;
+        const GpuCameraCull view = cutView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, 1.0f);
+        const GpuCullRecord record = stillRecord(Vec3{-60.0f, 2.0f, 0.0f}, 1.0f);
+        std::size_t kept = 0;
+
+        for (const GpuMeshCluster& cluster : packed.clusters) {
+            assert(meshClusterKept(cluster, liana, 0u, record, view) == meshClusterInCut(cluster, liana, view));
+            kept += meshClusterKept(cluster, liana, 0u, record, view) ? 1u : 0u;
+        }
+
+        assert(kept > 0 && kept < built.originalCount);
+    }
+
     // A small scene for the passes: three meshes' clusters in one pool, groups of them in four styles' runs (one empty),
     // instances in rows before the eye, each group's commands' instances a run of the draw list.
     struct PassScene {
@@ -743,6 +891,8 @@ void testMeshClusterCulling() {
     testPackingKeepsEveryTriangle();
     testACulledClusterHidesNothing();
     testADrawNotRigidKeepsEverything();
+    testPackingKeepsTheCut();
+    testTheCut();
     testThePassesEqualAPlainWalk();
     testScreenBoxHoldsTheSphere();
     testOcclusionHidesNothingSeen();

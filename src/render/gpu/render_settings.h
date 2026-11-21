@@ -94,6 +94,10 @@ struct RenderSettings {
     // them. On: the path the cluster levels (stage 2) build on; off draws every pooled mesh whole, for comparing.
     bool meshClusters = true;
 
+    // The cut through marked meshes' cluster levels (phase 21, 2c): each place drawn at the coarsest level whose error
+    // covers at most this many pixels (Nanite's 1). More draws fewer triangles and shows the levels switching.
+    float meshClusterErrorPixels = 1.0f;
+
     // With mesh clusters drawn and the depth prepass on: two-pass occlusion (docs/research/OCCLUSION.md), the early list
     // tested against last frame's depth, the late list against this frame's, F4's LATE and HIDDEN.
     bool meshClusterOcclusion = true;

@@ -37,7 +37,7 @@ struct ClusterPlacement {
 inline constexpr std::uint64_t smallestPoolVertices = 1ull << 20;
 inline constexpr std::uint64_t smallestPoolIndices = 1ull << 22;
 
-// The cluster pools' smallest sizes, in elements: 4 MB of cluster records, 4 MB of their vertex numbers, 4 MB of triangle
+// The cluster pools' smallest sizes, in elements: 7 MB of cluster records, 4 MB of their vertex numbers, 4 MB of triangle
 // words (about the clusters of 4 million triangles).
 inline constexpr std::uint64_t smallestPoolClusters = 1ull << 16;
 inline constexpr std::uint64_t smallestPoolClusterVertices = 1ull << 20;
