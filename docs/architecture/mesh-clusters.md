@@ -22,7 +22,7 @@ Meshes cut into small pieces culled one by one (ROADMAP phase 21, stage 1; resea
 - `MeshPlacement::firstCluster`, `clusterCount`; `GpuCullGroup` carries them (`placedCullGroup`), so the GPU finds a group's clusters.
 - The records are kept on the CPU too (`getClusterRecords`), for `cluster-compare`; F4's MESHES counts the cluster pools.
 
-## Culling (`engine.render` Passes "Mesh clusters", off by default until it pays)
+## Culling (`engine.render` Passes "Mesh clusters", on)
 
 After the camera's culling (`gpu-driven.md`), on its unpacked commands and draw list, as (draw list entry, cluster) pairs (`GpuMeshClusterItem`, 8 B):
 

@@ -20,4 +20,8 @@
   - **Never pops by construction:** the early list's mistakes (turns, movers tested at their current place, no history) only cost late draws, since a depth from fewer draws is never nearer. No camera-cut handling needed.
   - **Found while building:** random holes in a test's partial depth made a farthest pyramid hide nothing (leaky occluders, as the research said), so the test leaves whole walls out; GPU pass names must be letters only (`LATEDEPTH`).
   - **Seen (forest, debug, laptop):** `CLUSTERS 5772/8808, LATE 17, HIDDEN 2560` (29% of what frustum and facing kept); `cluster-compare` agrees (2557 hidden, 0 extra); validation clean. The user: no popping new since yesterday.
-  - **Open:** release timings at the rim, path, trees and 157 m up decide whether Passes "Mesh clusters" turns on by default.
+- `clusters-default` (Nov 21 2026): Passes "Mesh clusters" on by default (the user's choice: the path stage 2 builds on), measured first.
+  - **Measured (laptop, release, hidden copy, medians of three; GPU ms off / on / on with occlusion):** rim 20.43 / 20.55 / 20.35, path (the Ring view) 26.03 / 26.01 / 25.82, wall 18.94 / 18.90 / 18.58, trees (`forest-climber`) 26.27 / 26.13 / 26.22, 157 m above the rim 16.14 / 16.43 / 16.23.
+  - **Occlusion cut the clusters' triangles** by 36% at the rim, 54% on the path, 56% at the wall, 4% among the trees and 17% up high, yet the frame moved at most 0.36 ms: the frame is bound by shading and shadows, not triangles, as `occlusion-measure` found. Clusters with occlusion are never slower than off beyond noise (about 0.2 ms); the gains wait for stage 2's levels and stage 4's shadows.
+  - **Closed:** 1c's UI timer (0.28 ms on, 0.02 off) did not come back: 0.26 ms in every mode.
+  - **Found while measuring:** `set` takes `<key> <value>`, not `key=value`; the first run's switches silently did nothing, so the script now logs each reply.
