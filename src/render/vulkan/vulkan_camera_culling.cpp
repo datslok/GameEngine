@@ -8,21 +8,6 @@
 #include <stdexcept>
 
 namespace {
-    // Room for a few records of any kind before the first growth: no buffer is ever empty.
-    constexpr VkDeviceSize smallestBytes = 256;
-
-    // Grown (to twice its size, or what is asked) when too small; true when made afresh, so its contents are gone.
-    bool ensureBuffer(const VulkanDevice& device, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory) {
-        bytes = std::max(bytes, smallestBytes);
-
-        if (buffer.getSize() >= bytes) {
-            return false;
-        }
-
-        buffer = VulkanBuffer{device.getAllocator(), std::max(bytes, 2 * buffer.getSize()), usage, memory};
-        return true;
-    }
-
     // Copies a span's bytes into an upload buffer at a byte offset.
     template<typename Element>
     void writeAt(VulkanBuffer& buffer, VkDeviceSize offset, std::span<const Element> elements) {
@@ -113,10 +98,10 @@ void VulkanCameraCulling::upload(VkCommandBuffer commands, std::uint32_t frameIn
     segments->write(commands, frameIndex, segmentWrites);
     heldGeneration = table.stillGeneration;
 
-    ensureBuffer(device, frame.levels, table.meshLevels.size() * sizeof(GpuMeshLevels), storage, BufferMemory::Upload);
-    ensureBuffer(device, frame.groups, table.groups.size() * sizeof(GpuCullGroup), storage, BufferMemory::Upload);
-    ensureBuffer(device, frame.views, views.size_bytes(), storage, BufferMemory::Upload);
-    ensureBuffer(device, frame.order, table.drawOrder.order.size() * sizeof(std::uint32_t), storage, BufferMemory::Upload);
+    ensureBuffer(device.getAllocator(), frame.levels, table.meshLevels.size() * sizeof(GpuMeshLevels), storage, BufferMemory::Upload);
+    ensureBuffer(device.getAllocator(), frame.groups, table.groups.size() * sizeof(GpuCullGroup), storage, BufferMemory::Upload);
+    ensureBuffer(device.getAllocator(), frame.views, views.size_bytes(), storage, BufferMemory::Upload);
+    ensureBuffer(device.getAllocator(), frame.order, table.drawOrder.order.size() * sizeof(std::uint32_t), storage, BufferMemory::Upload);
     writeAt(frame.levels, 0, std::span<const GpuMeshLevels>{table.meshLevels});
     writeAt(frame.groups, 0, std::span<const GpuCullGroup>{table.groups});
     writeAt(frame.views, 0, views);
@@ -129,6 +114,15 @@ void VulkanCameraCulling::upload(VkCommandBuffer commands, std::uint32_t frameIn
 
 std::size_t VulkanCameraCulling::getCopiedBytes() const {
     return records->getCopiedBytes() + chunks->getCopiedBytes() + candidates->getCopiedBytes() + segments->getCopiedBytes();
+}
+
+VulkanCameraCulling::Outputs VulkanCameraCulling::outputs(std::uint32_t frameIndex) const {
+    const PerFrame& frame = frames.at(frameIndex);
+    return Outputs{frame.views.get(), frame.order.get(), frame.groups.get(), frame.mainCommands.get(), frame.motionCommands.get(), records->get()};
+}
+
+const GpuCameraCull& VulkanCameraCulling::placedView(std::uint32_t frameIndex, std::uint32_t view) const {
+    return frames.at(frameIndex).placed.at(view);
 }
 
 
@@ -177,30 +171,31 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
     const std::uint32_t segmentBlocks = views[0].segmentBlocks;
     const std::uint32_t groupBlocks = (groupCount + cameraCullGroupSize - 1) / cameraCullGroupSize;
     upload(commands, frameIndex, table, views);
+    frame.placed = views;
 
     const CullViewSizes sizes = cullViewSizes(viewCount, candidateCount, segmentCount, table.drawOrder);
     const VkBufferUsageFlags commandUsage = storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     const VkDeviceSize commandBytes = static_cast<VkDeviceSize>(sizes.commands) * sizeof(GpuDrawCommand);
     const VkDeviceSize countBytes = static_cast<VkDeviceSize>(viewCount) * sizeof(GpuCameraCullCounts);
     const VkBufferUsageFlags drawUsage = storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-    ensureBuffer(device, frame.segmentOffsets, static_cast<VkDeviceSize>(sizes.segments) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.visibleSegments, static_cast<VkDeviceSize>(sizes.segments) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.segmentBlockSums, static_cast<VkDeviceSize>(sizes.segmentBlocks) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.work, static_cast<VkDeviceSize>(viewCount) * sizeof(GpuCullViewWork), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.dispatches, static_cast<VkDeviceSize>(batches) * dispatchStride, storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    ensureBuffer(device.getAllocator(), frame.segmentOffsets, static_cast<VkDeviceSize>(sizes.segments) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.visibleSegments, static_cast<VkDeviceSize>(sizes.segments) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.segmentBlockSums, static_cast<VkDeviceSize>(sizes.segmentBlocks) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.work, static_cast<VkDeviceSize>(viewCount) * sizeof(GpuCullViewWork), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.dispatches, static_cast<VkDeviceSize>(batches) * dispatchStride, storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                  BufferMemory::Gpu);
-    ensureBuffer(device, frame.flags, static_cast<VkDeviceSize>(sizes.flags) * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.offsets, static_cast<VkDeviceSize>(sizes.flags) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.blockSums, static_cast<VkDeviceSize>(sizes.blocks) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.counts, countBytes, storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
-    ensureBuffer(device, frame.mainCommands, commandBytes, commandUsage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.motionCommands, commandBytes, commandUsage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.places, static_cast<VkDeviceSize>(sizes.places) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.packedMain, commandBytes, drawUsage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.packedMotion, commandBytes, drawUsage, BufferMemory::Gpu);
-    ensureBuffer(device, frame.drawCounts, static_cast<VkDeviceSize>(viewCount) * CAMERA_CULL_DRAW_COUNTS * sizeof(std::uint32_t), drawUsage,
+    ensureBuffer(device.getAllocator(), frame.flags, static_cast<VkDeviceSize>(sizes.flags) * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.offsets, static_cast<VkDeviceSize>(sizes.flags) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.blockSums, static_cast<VkDeviceSize>(sizes.blocks) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.counts, countBytes, storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.mainCommands, commandBytes, commandUsage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.motionCommands, commandBytes, commandUsage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.places, static_cast<VkDeviceSize>(sizes.places) * 2 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.packedMain, commandBytes, drawUsage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.packedMotion, commandBytes, drawUsage, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.drawCounts, static_cast<VkDeviceSize>(viewCount) * CAMERA_CULL_DRAW_COUNTS * sizeof(std::uint32_t), drawUsage,
                  BufferMemory::Gpu);
-    ensureBuffer(device, frame.readback, countBytes + 2 * commandBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
+    ensureBuffer(device.getAllocator(), frame.readback, countBytes + 2 * commandBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
 
     // The previous copy of the counts (its frame finished) before they are cleared; cleared before the passes add to them.
     bufferBarrier(commands, frame.counts.get(), transferRead, transferWrite);
@@ -365,7 +360,7 @@ void VulkanCameraCulling::cull(VkCommandBuffer commands, FrameDescriptors& descr
     // For a comparison: each view's two lists, each as long as the draws.
     if (frame.listsPending) {
         const VkDeviceSize listBytes = static_cast<VkDeviceSize>(entriesEach) * sizeof(std::uint32_t);
-        ensureBuffer(device, frame.listReadback, 2 * viewCount * listBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
+        ensureBuffer(device.getAllocator(), frame.listReadback, 2 * viewCount * listBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
         std::vector<VkBufferCopy> lists;
 
         for (std::uint32_t view = 0; view < viewCount; ++view) {

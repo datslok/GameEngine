@@ -10,6 +10,8 @@ const char* gpuPassName(GpuPass pass) {
         return "UI";
     case GpuPass::CameraCull:
         return "CULL";
+    case GpuPass::MeshCull:
+        return "MESHCULL";
     case GpuPass::RayScene:
         return "TLAS";
     case GpuPass::Atmosphere:

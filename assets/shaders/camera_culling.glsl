@@ -16,16 +16,16 @@ struct CullCandidate {
     uint slot;
 };
 
-// A group: its run of segments and its mesh's indices where they are. Must match GpuCullGroup.
+// A group: its run of segments, its mesh's indices where they are and its mesh's clusters. Must match GpuCullGroup.
 struct CullGroup {
     uint firstSegment;
     uint segments;
     uint indexCount;
     uint firstIndex;
     int vertexOffset;
-    uint unused0;
-    uint unused1;
-    uint unused2;
+    uint firstCluster;
+    uint clusterCount;
+    uint unused;
 };
 
 // A group's candidates in one chunk: a run of the candidates, and the chunk (CULL_NO_CHUNK: always tested one by one).

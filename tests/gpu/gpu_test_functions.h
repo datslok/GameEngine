@@ -303,4 +303,7 @@
 #define GPU_TEST_PLACED_INSTANCE 2
 #define GPU_TEST_PLACED_KIND_SLOT 3
 
+// mesh_cluster_culling_test.comp
+#define GPU_TEST_MESH_CLUSTER_KEPT 0
+
 #endif

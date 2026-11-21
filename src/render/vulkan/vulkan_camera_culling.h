@@ -83,6 +83,22 @@ public:
     // Bytes the last cull copied into the kept records and candidates.
     std::size_t getCopiedBytes() const;
 
+    // What a frame's cull wrote and read that later passes read too (the mesh clusters' culling): the views, the drawing
+    // order, the groups, both lists' unpacked commands, every draw's record.
+    struct Outputs {
+        VkBuffer views = VK_NULL_HANDLE;
+        VkBuffer order = VK_NULL_HANDLE;
+        VkBuffer groups = VK_NULL_HANDLE;
+        VkBuffer mainCommands = VK_NULL_HANDLE;
+        VkBuffer motionCommands = VK_NULL_HANDLE;
+        VkBuffer records = VK_NULL_HANDLE;
+    };
+
+    Outputs outputs(std::uint32_t frameIndex) const;
+
+    // A view as the frame's cull placed it (its runs and slices filled in).
+    const GpuCameraCull& placedView(std::uint32_t frameIndex, std::uint32_t view) const;
+
 private:
     struct PerFrame {
         // Upload memory: the levels, groups, views and drawing order.
@@ -112,6 +128,8 @@ private:
         // Read-back memory: counts, then the commands; the lists when asked.
         VulkanBuffer readback;
         VulkanBuffer listReadback;
+        // The views as placed this frame (placeCullView).
+        std::vector<GpuCameraCull> placed;
         std::uint32_t groupCount = 0;
         std::uint32_t viewCount = 0;
         std::uint32_t listEntries = 0;

@@ -64,6 +64,7 @@
 #include "render/vulkan/vulkan_planting.h"
 #include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_camera_culling.h"
+#include "render/vulkan/vulkan_mesh_cluster_culling.h"
 #include "render/vulkan/vulkan_lasting_buffer.h"
 #include "render/vulkan/vulkan_mesh_pool.h"
 #include "render/vulkan/vulkan_sky_visibility.h"
@@ -138,6 +139,10 @@ public:
     // placement-compare: asks for the next frame's planting cells to be read back and planted again on the CPU, and
     // returns the last comparison's report (empty while none has finished).
     std::string comparePlacement();
+
+    // cluster-compare: asks for the next frame's camera mesh cluster list to be compared with the CPU's, and returns the
+    // last comparison's report (empty while none has finished).
+    std::string compareMeshClusters();
 
     // Waits for every pipeline asked for, rethrowing the first that failed to build.
     void finishPipelines();
@@ -512,6 +517,29 @@ private:
     CameraCullCounts lastCameraCull;
     bool cullCompareAsked = false;
     std::string cullCompareReport;
+
+    /*
+    * The camera's mesh clusters culled from its list (render/vulkan/vulkan_mesh_cluster_culling.h), while switched on,
+    * and the last frame's totals for F4. A comparison asked for (cluster-compare) keeps the frame's tables the CPU culls
+    * from, to compare once the GPU's list and the camera culling's (read back with it) are in.
+    */
+    struct MeshClusterCompare {
+        GpuCameraCull view;
+        std::vector<GpuCullGroup> groups;
+        std::vector<std::uint32_t> order;
+        std::vector<GpuCullRecord> records;
+        std::vector<GpuInstance> instances;
+    };
+
+    void takeMeshClusterCull(const VulkanMeshClusterCulling::Collected& culled, const VulkanCameraCulling::Collected* cameraCulled,
+                             std::uint32_t frameIndex);
+
+    std::unique_ptr<VulkanMeshClusterCulling> meshClusterCulling;
+    std::vector<std::optional<MeshClusterCompare>> meshClusterCompares;
+    std::optional<VulkanMeshClusterCulling::Collected> lastMeshClusters;
+    bool clusterCompareAsked = false;
+    std::string clusterCompareReport;
+    std::vector<GpuInstance> clusterCompareInstances;
 
     // The eye's adaptation (render/gpu/eye_adaptation.h): its passes and the last reading, for the readout. It snaps
     // to its target when it starts afresh (the first frame, or switched on again) and on every frame a capture draws.

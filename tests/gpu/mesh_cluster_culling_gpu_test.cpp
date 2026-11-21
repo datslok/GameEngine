@@ -1,0 +1,138 @@
+#include "gpu_check.h"
+#include "gpu_test_functions.h"
+
+#include "math/frustum.h"
+#include "math/mat4.h"
+#include "render/gpu/column_major.h"
+#include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/instance_shared.h"
+#include "render/gpu/mesh_cluster_culling.h"
+#include "scene/indexed_mesh.h"
+#include "scene/mesh.h"
+#include "scene/mesh_clusters.h"
+
+#include <cmath>
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace {
+    const std::string shader = gpuTestShader("mesh_cluster_culling_test");
+
+    struct Case {
+        GpuMeshCluster cluster;
+        GpuInstance instance{};
+        std::uint32_t entry = 0;
+        GpuCullRecord record;
+        GpuCameraCull view{};
+    };
+
+    // Clusters of a sphere placed round random eyes: turned, scaled unevenly, some mirrored, some swaying, thinned,
+    // double-sided or of another kind, so every branch of meshClusterKept is reached.
+    std::vector<Case> cases() {
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(buildIndexedMesh(Mesh::sphere(48, 24))), 0, 0, 0);
+        CaseRandom random{31};
+        std::vector<Case> made;
+
+        for (int index = 0; index < 1500; ++index) {
+            Case c;
+            c.cluster = packed.clusters[static_cast<std::size_t>(random.between(0.0f, static_cast<float>(packed.clusters.size()) - 0.01f))];
+            const Vec3 eye{random.between(-500.0f, 500.0f), random.between(1.0f, 40.0f), random.between(-500.0f, 500.0f)};
+            const float yaw = random.between(0.0f, 6.28f);
+            const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.9f, 16.0f / 9.0f, 0.1f, 800.0f));
+            const Mat4 look = Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
+            LevelView levels;
+            levels.eye = eye;
+            c.view = packCameraCull(Frustum::fromClipMatrix(projection * look, ClipDepth::OneToZero), levels, false, index % 3 == 0, random.between(5.0f, 60.0f));
+
+            const Vec3 place = eye + Vec3{random.between(-40.0f, 40.0f), random.between(-10.0f, 10.0f), random.between(-40.0f, 40.0f)};
+            const float mirror = index % 9 == 4 ? -1.0f : 1.0f;
+            const Mat4 model = Mat4::translation(place.x, place.y, place.z) * Mat4::rotationY(random.between(0.0f, 6.28f)) *
+                               Mat4::rotationX(random.between(0.0f, 6.28f)) *
+                               Mat4::scaling(mirror * random.between(0.3f, 4.0f), random.between(0.3f, 4.0f), random.between(0.3f, 4.0f));
+            writeColumnMajor(model, c.instance.model);
+            c.instance.material[2] = index % 37 == 5 ? 1u : 0u;
+            c.instance.material[3] = index % 41 == 6 ? INSTANCE_KIND_IMPOSTOR : index % 43 == 7 ? INSTANCE_KIND_FOLLOWS_GROUND : INSTANCE_KIND_PLAIN;
+            c.instance.hanging[3] = index % 47 == 8 ? 1u : 0u;
+            c.entry = index % 23 == 9 ? DRAW_LIST_THINNED_BIT : 0u;
+            c.record.bounds[0] = place.x;
+            c.record.bounds[1] = place.y;
+            c.record.bounds[2] = place.z;
+            c.record.bounds[3] = 5.0f;
+            c.record.flags = (index % 4 == 1 ? CULL_SWAYS : 0u) | (index % 7 == 2 ? CULL_DOUBLE_SIDED : 0u);
+            made.push_back(c);
+        }
+
+        return made;
+    }
+
+    std::vector<GpuVec4> inputsOf(const Case& c) {
+        const float* m = c.instance.model;
+        std::vector<GpuVec4> inputs{
+            gpuVec4(c.cluster.sphere[0], c.cluster.sphere[1], c.cluster.sphere[2], c.cluster.sphere[3]),
+            gpuVec4(c.cluster.cone[0], c.cluster.cone[1], c.cluster.cone[2], c.cluster.cone[3]),
+            gpuVec4(c.cluster.axis[0], c.cluster.axis[1], c.cluster.axis[2]),
+            gpuVec4(m[0], m[1], m[2], m[3]),
+            gpuVec4(m[4], m[5], m[6], m[7]),
+            gpuVec4(m[8], m[9], m[10], m[11]),
+            gpuVec4(m[12], m[13], m[14], m[15]),
+            gpuVec4(c.entry != 0u ? 1.0f : 0.0f, static_cast<float>(c.record.flags), static_cast<float>(c.view.flags), c.view.swayFadeEnd),
+            gpuVec4(static_cast<float>(c.instance.material[2]), static_cast<float>(c.instance.material[3]), static_cast<float>(c.instance.hanging[3])),
+            gpuVec4(c.record.bounds[0], c.record.bounds[1], c.record.bounds[2], c.record.bounds[3]),
+            gpuVec4(c.view.levels.eye[0], c.view.levels.eye[1], c.view.levels.eye[2], c.view.levels.eye[3]),
+        };
+
+        for (const auto& plane : c.view.frustum.planes) {
+            inputs.push_back(gpuVec4(plane[0], plane[1], plane[2], plane[3]));
+        }
+
+        return inputs;
+    }
+
+    /*
+    * The choices equal the mirror's, cases within rounding of a plane, the cone's edge or the sway's reach left out
+    * (nearAMeshClusterEdge: the GPU's square roots and fused products may round either way there); the scale and
+    * sphere within arithmetic rounding.
+    */
+    void checkKept(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const std::vector<Case> all = cases();
+        std::vector<GpuVec4> inputs;
+
+        for (const Case& c : all) {
+            const std::vector<GpuVec4> one = inputsOf(c);
+            inputs.insert(inputs.end(), one.begin(), one.end());
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_KEPT, inputs, 17, 2);
+
+        for (std::size_t i = 0; i < all.size(); ++i) {
+            const Case& c = all[i];
+            const GpuVec4& choice = outputs[2 * i];
+            const GpuVec4& sphere = outputs[2 * i + 1];
+            const std::array<float, 4> expected = meshClusterWorldSphere(c.cluster, c.instance);
+            report.check("meshClusterLargestScale", arithmeticTolerance, meshClusterLargestScale(c.instance), choice[3]);
+            report.check("meshClusterWorldSphere", arithmeticTolerance, Vec3{expected[0], expected[1], expected[2]}, Vec3{sphere[0], sphere[1], sphere[2]});
+            report.check("meshClusterWorldSphere radius", arithmeticTolerance, expected[3], sphere[3]);
+
+            if (nearAMeshClusterEdge(c.cluster, c.instance, c.entry, c.record, c.view)) {
+                continue;
+            }
+
+            const float determinant = meshClusterDeterminant(c.instance);
+            const Vec3 eye{c.view.levels.eye[0], c.view.levels.eye[1], c.view.levels.eye[2]};
+            const bool away = determinant > 0.0f && meshClusterFacesAway(c.cluster, meshClusterEyeInMesh(c.instance, eye, determinant));
+            report.check("meshClusterKept", exactTolerance, meshClusterKept(c.cluster, c.instance, c.entry, c.record, c.view) ? 1.0f : 0.0f, choice[0]);
+            report.check("meshClusterRigid", exactTolerance, meshClusterRigid(c.instance, c.entry, c.record, c.view) ? 1.0f : 0.0f, choice[1]);
+
+            // The facing's edge is measured only for rigid draws (the others never use it).
+            if (meshClusterRigid(c.instance, c.entry, c.record, c.view)) {
+                report.check("meshClusterFacesAway", exactTolerance, away ? 1.0f : 0.0f, choice[2]);
+            }
+        }
+    }
+}
+
+void gpuTestMeshClusterCulling(GpuFunctionRunner& runner, GpuCheckReport& report) {
+    report.section("mesh_cluster_culling.glsl");
+    checkKept(runner, report);
+}

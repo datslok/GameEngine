@@ -11,34 +11,23 @@
 #include <utility>
 
 namespace {
-    // Room for a few records of any kind before the first growth: no buffer is ever empty.
-    constexpr VkDeviceSize smallestBytes = 256;
     constexpr std::uint32_t pushBytes = 16;
     constexpr VkBufferUsageFlags storage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-    // Grown (to twice its size, or what is asked) when too small.
-    void ensureBuffer(const VulkanDevice& device, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory) {
-        bytes = std::max(bytes, smallestBytes);
-
-        if (buffer.getSize() < bytes) {
-            buffer = VulkanBuffer{device.getAllocator(), std::max(bytes, 2 * buffer.getSize()), usage, memory};
-        }
-    }
 
     // A buffer every frame in flight uses (not one a frame), grown as ensureBuffer grows one, once the GPU is done with
     // the old one: a frame still in flight may be reading it. Growing doubles, so this waits only a few times a run.
     void ensureSharedBuffer(const VulkanDevice& device, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory) {
-        if (buffer.get() != VK_NULL_HANDLE && buffer.getSize() < std::max(bytes, smallestBytes)) {
+        if (buffer.get() != VK_NULL_HANDLE && buffer.getSize() < std::max(bytes, smallestRecordBufferBytes)) {
             device.waitIdle();
         }
 
-        ensureBuffer(device, buffer, bytes, usage, memory);
+        ensureBuffer(device.getAllocator(), buffer, bytes, usage, memory);
     }
 
     // An upload buffer holding a span's elements (grown to fit), written and flushed.
     template<typename Element>
     void upload(const VulkanDevice& device, VulkanBuffer& buffer, std::span<const Element> elements) {
-        ensureBuffer(device, buffer, elements.size_bytes(), storage, BufferMemory::Upload);
+        ensureBuffer(device.getAllocator(), buffer, elements.size_bytes(), storage, BufferMemory::Upload);
 
         if (!elements.empty()) {
             std::memcpy(buffer.getMapped(), elements.data(), elements.size_bytes());
@@ -202,8 +191,8 @@ void VulkanPlacedDrawing::setViews(std::span<const GpuCameraCull> views, std::ve
     frame.views = placedViews(views, frame.runs, frame.chunks, frame.table);
     frame.names = std::move(names);
     const VkDeviceSize entryBytes = static_cast<VkDeviceSize>(frame.views.entries) * sizeof(GpuPlacedEntry);
-    ensureBuffer(device, frame.entries, entryBytes, storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
-    ensureBuffer(device, frame.commands, views.size() * frame.table.groups.size() * sizeof(GpuDrawCommand),
+    ensureBuffer(device.getAllocator(), frame.entries, entryBytes, storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
+    ensureBuffer(device.getAllocator(), frame.commands, views.size() * frame.table.groups.size() * sizeof(GpuDrawCommand),
                  storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
 }
 

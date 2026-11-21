@@ -89,6 +89,10 @@ struct RenderSettings {
     // depth test as it is drawn, for comparing the two in the GPU timings.
     bool depthPrepass = true;
 
+    // The camera's mesh clusters culled one by one on the GPU after its draws (render/gpu/mesh_cluster_culling.h, ROADMAP
+    // phase 21): the frustum and facing, F4's CLUSTERS line, cluster-compare. Off until mesh shaders draw the lists.
+    bool meshClusters = false;
+
     // Each pixel loops only over the lights listed for its cluster (render/gpu/clusters.h) instead of every light in the
     // frame; both add the same lights in the same order, so the picture is identical. Off is for comparing the timings.
     bool clusteredShading = true;

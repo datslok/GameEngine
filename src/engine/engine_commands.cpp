@@ -358,6 +358,13 @@ void addCullCompareCommand(CommandRegistry& registry, std::function<std::string(
                       "Compares every list the GPU builds (camera, velocity pass, captures, shadow tiles) with the CPU's on the next frame.", std::move(compare));
 }
 
+void addClusterCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
+    addCompareCommand(registry, "cluster-compare",
+                      "Compares the camera's mesh cluster list the GPU culls (with engine.render.passes meshClusters on) with the CPU's on the next "
+                      "frame, from the same draw list.",
+                      std::move(compare));
+}
+
 void addPlacementCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
     addCompareCommand(registry, "placement-compare",
                       "Reads the planting cells round the camera back from the GPU on the next frame they run (with engine.render.planting.enabled on) and "

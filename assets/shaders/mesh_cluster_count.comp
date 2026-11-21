@@ -1,0 +1,71 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Mesh clusters' culling, pass 1 of 4 (render/vulkan/vulkan_mesh_cluster_culling.h): the pairs to test. One workgroup
+* walks the drawing order's runs style by style, each style from a block's first pair: each place's end is a prefix sum
+* of the groups' pairs (drawn instances times clusters), carried between rounds. Writes the work words and raises the
+* test and write passes' dispatch to the blocks. Mirrored by meshClusterWorkEnds.
+*/
+#include "mesh_cluster_pass.glsl"
+
+layout(local_size_x = MESH_CLUSTER_GROUP_SIZE) in;
+
+// The test and write passes' indirect dispatch (x blocks, y 1, z 1), x raised here.
+layout(std430, set = 0, binding = 11) buffer Dispatch {
+    uint dispatchSize[];
+};
+
+shared uint sums[MESH_CLUSTER_GROUP_SIZE];
+
+uint roundUpToBlock(uint pairs) {
+    return (pairs + MESH_CLUSTER_GROUP_SIZE - 1u) / MESH_CLUSTER_GROUP_SIZE * MESH_CLUSTER_GROUP_SIZE;
+}
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+    CameraCull view = views[0];
+    uint carried = 0u;
+    uint real = 0u;
+
+    // The loops' bounds are the same for the whole workgroup, so its barriers are reached by every invocation.
+    for (uint style = 0u; style < MESH_CLUSTER_STYLES; ++style) {
+        carried = roundUpToBlock(carried);
+
+        if (local == 0u) {
+            work[MESH_CLUSTER_WORK_STYLE_FIRST + style] = carried;
+        }
+
+        uint runFirst = view.runFirst[style];
+        uint runEnd = runFirst + view.runCount[style];
+
+        for (uint first = runFirst; first < runEnd; first += MESH_CLUSTER_GROUP_SIZE) {
+            uint place = first + local;
+            uint value = place < runEnd ? groupPairs(drawOrder[place]) : 0u;
+            sums[local] = value;
+            barrier();
+
+            for (uint offset = 1u; offset < MESH_CLUSTER_GROUP_SIZE; offset *= 2u) {
+                uint before = local >= offset ? sums[local - offset] : 0u;
+                barrier();
+                sums[local] += before;
+                barrier();
+            }
+
+            if (place < runEnd) {
+                workEnds[place] = carried + sums[local];
+            }
+
+            carried += sums[MESH_CLUSTER_GROUP_SIZE - 1u];
+            real += sums[MESH_CLUSTER_GROUP_SIZE - 1u];
+            barrier();
+        }
+    }
+
+    if (local == 0u) {
+        uint end = roundUpToBlock(carried);
+        work[MESH_CLUSTER_WORK_END] = end;
+        work[MESH_CLUSTER_WORK_REAL] = real;
+        dispatchSize[0] = min(end / MESH_CLUSTER_GROUP_SIZE, setup.y);
+    }
+}

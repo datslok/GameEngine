@@ -47,6 +47,7 @@ int main() {
             gpuTestFacetVariation(runner, report);
             gpuTestWindowMask(runner, report);
             gpuTestCullRecords(runner, report);
+            gpuTestMeshClusterCulling(runner, report);
             gpuTestLevelFade(runner, report);
             gpuTestCameraFinish(runner, report);
             gpuTestMotionBlur(runner, report);

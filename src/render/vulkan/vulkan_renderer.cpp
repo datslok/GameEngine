@@ -156,6 +156,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     cullFrameViews.resize(framesInFlight);
     cullFrameDraws.resize(framesInFlight);
     cullCompares.resize(framesInFlight);
+    meshClusterCulling = std::make_unique<VulkanMeshClusterCulling>(device, framesInFlight);
+    meshClusterCompares.resize(framesInFlight);
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
     placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
@@ -993,8 +995,14 @@ FrameContext VulkanRenderer::beginFrame() {
         lastEyeAdaptation = adapted;
     }
 
-    if (const std::optional<VulkanCameraCulling::Collected> culled = cameraCulling->collect(frameIndex)) {
+    const std::optional<VulkanCameraCulling::Collected> culled = cameraCulling->collect(frameIndex);
+
+    if (culled) {
         takeCameraCull(*culled, frameIndex);
+    }
+
+    if (const std::optional<VulkanMeshClusterCulling::Collected> clusters = meshClusterCulling->collect(frameIndex)) {
+        takeMeshClusterCull(*clusters, culled ? &*culled : nullptr, frameIndex);
     }
 
     planting->collect(frameIndex, jobs);
@@ -1170,6 +1178,38 @@ void VulkanRenderer::finishGpuTimings(FrameContext& context) {
 std::string VulkanRenderer::compareCulling() {
     cullCompareAsked = true;
     return cullCompareReport;
+}
+
+std::string VulkanRenderer::compareMeshClusters() {
+    clusterCompareAsked = true;
+    return clusterCompareReport;
+}
+
+/*
+* The totals kept for F4. A frame compared culls again on the CPU from what the GPU read: its own copy of the view,
+* groups, order, records and instances, the camera culling's commands and list read back from the same frame, and the
+* pool's cluster records; pairs near an edge may differ either way.
+*/
+void VulkanRenderer::takeMeshClusterCull(const VulkanMeshClusterCulling::Collected& culled, const VulkanCameraCulling::Collected* cameraCulled,
+                                         std::uint32_t frameIndex) {
+    lastMeshClusters = culled;
+    std::optional<MeshClusterCompare>& compare = meshClusterCompares.at(frameIndex);
+
+    if (!compare || !culled.itemsRead || cameraCulled == nullptr || !cameraCulled->lists || cameraCulled->mainCommands.empty()) {
+        compare.reset();
+        return;
+    }
+
+    const MeshClusterTables tables{cameraCulled->mainCommands[0], compare->order, compare->groups, cameraCulled->mainEntries[0],
+                                   compare->instances, compare->records, meshPool->getClusterRecords()};
+    const MeshClusterList cpu = cullMeshClustersOnCpu(tables, compare->view, meshClusterCulling->getRoom());
+    const MeshClusterComparison comparison = compareMeshClusterLists(culled.items, cpu.items, [&](const GpuMeshClusterItem& item) {
+        const std::uint32_t entry = tables.drawList[item.entry];
+        const std::uint32_t draw = entry & DRAW_LIST_INSTANCE_MASK;
+        return nearAMeshClusterEdge(tables.clusters[item.cluster], tables.instances[draw], entry, tables.records[draw], compare->view);
+    });
+    clusterCompareReport = describeMeshClusterComparison(comparison, culled.totals[MESH_CLUSTER_TOTAL_TESTED], culled.totals[MESH_CLUSTER_TOTAL_KEPT]);
+    compare.reset();
 }
 
 std::string VulkanRenderer::comparePlacement() {
@@ -1569,6 +1609,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The cells' empty slots are no draws (scene/still_draws.h).
     const std::size_t realDraws = description.draws.size() - std::min(description.stillEmptySlots, description.draws.size());
     stats.culled = realDraws - std::min(stats.drawn, realDraws);
+    const bool clustersCulled = settings.meshClusters && lastMeshClusters;
+    stats.meshClustersTested = clustersCulled ? lastMeshClusters->totals[MESH_CLUSTER_TOTAL_TESTED] : 0;
+    stats.meshClustersKept = clustersCulled ? lastMeshClusters->totals[MESH_CLUSTER_TOTAL_KEPT] : 0;
+    stats.meshClusterTriangles = clustersCulled ? lastMeshClusters->totals[MESH_CLUSTER_TOTAL_TRIANGLES] : 0;
     cpuClock.lap(CpuStage::Frustum, profilerSeconds());
 
     // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
@@ -1912,9 +1956,39 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         kinds.push_back(CullViewKind{-1, true, shadowDraws.tiles[tile].still});
     }
 
-    cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, cullFrame, cullViews, frames[frame.frameIndex].scene->drawList.describe().buffer,
-                        comparing);
+    const bool clusterComparing = clusterCompareAsked && settings.meshClusters;
+    clusterCompareAsked = false;
+    const VkBuffer drawListBuffer = frames[frame.frameIndex].scene->drawList.describe().buffer;
+    cameraCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, cullFrame, cullViews, drawListBuffer, comparing || clusterComparing);
     endGpuPass(frame, GpuPass::CameraCull);
+    meshClusterCompares[frame.frameIndex].reset();
+
+    // The camera's mesh clusters culled from its list, its view given the wind's sway (the camera culls without it), so
+    // a draw swaying near the camera keeps every cluster.
+    if (settings.meshClusters && cullFrame.drawOrder.pooled > 0) {
+        beginGpuPass(frame, GpuPass::MeshCull);
+        const VulkanCameraCulling::Outputs culled = cameraCulling->outputs(frame.frameIndex);
+        VulkanMeshClusterCulling::Inputs inputs;
+        inputs.view = cameraCulling->placedView(frame.frameIndex, 0);
+        inputs.view.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
+        inputs.view.swayFadeEnd = settings.wind.swayFadeEnd;
+        inputs.order = culled.order;
+        inputs.groups = culled.groups;
+        inputs.commands = culled.mainCommands;
+        inputs.records = culled.records;
+        inputs.drawList = drawListBuffer;
+        inputs.instances = lastingInstances->describe();
+        inputs.clusters = meshPool->getClusters();
+        inputs.pooled = cullFrame.drawOrder.pooled;
+        inputs.pairBound = meshClusterPairBound(cullFrame);
+        meshClusterCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, inputs, clusterComparing);
+        endGpuPass(frame, GpuPass::MeshCull);
+
+        if (clusterComparing) {
+            meshClusterCompares[frame.frameIndex] = MeshClusterCompare{inputs.view, cullFrame.groups, cullFrame.drawOrder.order, cullFrame.join().records,
+                                                                      std::move(clusterCompareInstances)};
+        }
+    }
     stats.stillCells = description.stillCells;
     stats.stillSlots = description.stillDraws;
     stats.lastingCopiedBytes = lastingCopiedBytes + cameraCulling->getCopiedBytes();
@@ -2556,6 +2630,14 @@ void VulkanRenderer::writeLastingRecords(const FrameContext& frame, const std::v
     appendLastingWrites(instanceWrites, lastingInstances->reserve(drawCount) ? everyStill : repacked, stillRecords, 0);
     appendLastingWrites(instanceWrites, movingRange, std::span<const GpuInstance>{records.moving}, stillCount);
     lastingInstances->write(frame.commands, frame.frameIndex, instanceWrites);
+
+    // A cluster-compare asked for culls these on the CPU too, as the GPU reads them.
+    clusterCompareInstances.clear();
+
+    if (clusterCompareAsked) {
+        clusterCompareInstances.assign(stillRecords.begin(), stillRecords.end());
+        clusterCompareInstances.insert(clusterCompareInstances.end(), records.moving.begin(), records.moving.end());
+    }
 
     std::vector<LastingWrite> previousWrites;
     appendLastingWrites(previousWrites, lastingPreviousModels->reserve(drawCount) ? everyStill : repacked, stillPrevious, 0);
@@ -4092,6 +4174,8 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     cullFrameViews.assign(count, {});
     cullFrameDraws.assign(count, 0);
     cullCompares.assign(count, std::nullopt);
+    meshClusterCulling->setFramesInFlight(count);
+    meshClusterCompares.assign(count, std::nullopt);
 
     if (rayTracing) {
         rayTracing->setFramesInFlight(count);

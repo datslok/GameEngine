@@ -39,15 +39,18 @@ struct GpuCullCandidate {
 
 static_assert(sizeof(GpuCullCandidate) == 8, "GpuCullCandidate must match camera_culling.glsl's CullCandidate");
 
-// A group: its run of segments (each a chunk's candidates of the group, in chunk order) and its mesh's indices where
-// they are (mesh_pool.h), for its indirect command. Must match camera_culling.glsl's CullGroup.
+// A group: its run of segments (each a chunk's candidates of the group, in chunk order), its mesh's indices where they
+// are (mesh_pool.h), for its indirect command, and its mesh's clusters (render/gpu/mesh_cluster_culling.h). Must match
+// camera_culling.glsl's CullGroup.
 struct GpuCullGroup {
     std::uint32_t firstSegment = 0;
     std::uint32_t segments = 0;
     std::uint32_t indexCount = 0;
     std::uint32_t firstIndex = 0;
     std::int32_t vertexOffset = 0;
-    std::uint32_t unused[3] = {0, 0, 0};
+    std::uint32_t firstCluster = 0;
+    std::uint32_t clusterCount = 0;
+    std::uint32_t unused = 0;
 };
 
 static_assert(sizeof(GpuCullGroup) == 32, "GpuCullGroup must match camera_culling.glsl's CullGroup");
