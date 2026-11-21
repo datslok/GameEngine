@@ -91,8 +91,8 @@ struct RenderSettings {
 
     // The camera's mesh clusters culled one by one on the GPU after its draws (render/gpu/mesh_cluster_culling.h, ROADMAP
     // phase 21): the frustum and facing, F4's CLUSTERS line, cluster-compare; drawn by mesh shaders where the GPU has
-    // them. Off until it pays.
-    bool meshClusters = false;
+    // them. On: the path the cluster levels (stage 2) build on; off draws every pooled mesh whole, for comparing.
+    bool meshClusters = true;
 
     // With mesh clusters drawn and the depth prepass on: two-pass occlusion (docs/research/OCCLUSION.md), the early list
     // tested against last frame's depth, the late list against this frame's, F4's LATE and HIDDEN.
