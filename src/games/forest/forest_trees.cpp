@@ -648,7 +648,8 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Level card share", settings.levelCardShare, {.min = 0.01f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Level bark share", settings.levelBarkShare, {.min = 0.01f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Level card growth", settings.levelCardGrowth, {.min = 0.05f, .max = 1.0f, .applies = FieldApplies::AtStartup});
-    visitor.field("Impostor error", settings.impostorErrorMetres, {.min = 0.01f, .max = 100.0f, .sliderMax = 10.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Shadow cascades", settings.shadowCascades, {.min = 0, .max = 4, .applies = FieldApplies::AtStartup});
+    visitor.field("Card error", settings.cardErrorTexels, {.min = 0.1f, .max = 64.0f, .sliderMax = 8.0f, .unit = "texels", .applies = FieldApplies::AtStartup});
     visitor.field("Impostor frames", settings.impostorFrames, {.min = 2, .max = 32, .sliderMax = 16, .applies = FieldApplies::AtStartup});
     visitor.field("Impostor texels", settings.impostorTexels, {.min = 8, .max = 512, .sliderMax = 256, .applies = FieldApplies::AtStartup});
     visitor.field("Cluster texels", settings.clusterTexels, {.min = 16, .max = 4096, .sliderMax = 2048, .applies = FieldApplies::AtStartup});

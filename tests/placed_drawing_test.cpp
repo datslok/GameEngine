@@ -145,7 +145,13 @@ namespace {
         std::vector<GpuPlacedPlant> plants;
         std::vector<std::uint32_t> counts;
         std::size_t layers = 0;
+        std::vector<int> fieldLayer{0, 1, 2};
     };
+
+    // The test slots as one set of 64 m cells, its layers the field's own.
+    std::vector<PlantingSetSlots> setsOf(const TestSlots& slots) {
+        return {PlantingSetSlots{slots.held, slots.layout, slots.fieldLayer, PlantingSetPlaces{}, 64.0f}};
+    }
 
     TestSlots testSlots(std::mt19937& random) {
         const std::vector<PlantingLayerRecord> layers = threeLayers();
@@ -251,7 +257,7 @@ namespace {
             chunk.flags = CULL_CHUNK_SEEN | CULL_CHUNK_CASTS | CULL_CHUNK_ALWAYS;
         }
 
-        return placedViews(asked, runs, chunks, testRegion, table);
+        return placedViews(asked, runs, chunks, table);
     }
 
     // The camera alone over every block.
@@ -481,7 +487,7 @@ namespace {
         const TestSlots slots = testSlots(random);
         const TestKinds kinds = testKinds();
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
-        const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
+        const std::vector<GpuPlacedBlock> blocks = placedBlocks(setsOf(slots), table);
         std::size_t expected = 0;
         std::size_t block = 0;
 
@@ -506,7 +512,7 @@ namespace {
         assert(blocks.size() == expected);
 
         // The runs: each held cell's drawn layer's blocks, one after another as the blocks are.
-        const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
+        const std::vector<PlacedBlockRun> runs = placedBlockRuns(setsOf(slots), table);
         std::uint32_t next = 0;
 
         for (const PlacedBlockRun& run : runs) {
@@ -521,6 +527,97 @@ namespace {
         }
 
         assert(next == blocks.size());
+    }
+
+    /*
+    * Two sets of cells (ROADMAP e1): the second's blocks after the first's, from its own places in the shared plants and
+    * counts and its slots' layout, each layer's kinds by its field's layer; a layer the set only reads has no blocks; the
+    * runs name their set and the field's layer; every counted plant of both is culled.
+    */
+    void testTheBlocksOfTwoSets() {
+        std::mt19937 random{13};
+        const TestSlots first = testSlots(random);
+        std::vector<PlantingLayerRecord> field = threeLayers();
+        field[2].cellSet = plantingFineCells;
+        const PlantingSetLayers fine = plantingSetLayers(field, plantingFineCells);
+        const PlantingSlotLayout fineLayout = plantingSlotLayout(fine.layers, 32.0f, fine.written);
+        const std::map<PlantingCell, int> fineHeld{{PlantingCell{-1, -5}, 1}, {PlantingCell{0, -4}, 0}};
+        const PlantingSetPlaces finePlaces{.plantBase = static_cast<std::uint32_t>(first.plants.size()),
+                                           .countBase = static_cast<std::uint32_t>(first.counts.size())};
+        const std::vector<PlantingSetSlots> sets{PlantingSetSlots{first.held, first.layout, first.fieldLayer, PlantingSetPlaces{}, 64.0f},
+                                                 PlantingSetSlots{fineHeld, fineLayout, fine.fieldLayer, finePlaces, 32.0f}};
+        TestKinds kinds = testKinds();
+
+        for (int kind = 0; kind < 4; ++kind) {
+            kinds.kinds.push_back(PlantedKindParts{.layer = 2, .kind = kind, .first = kinds.parts.size(), .count = 1});
+            kinds.parts.push_back(swayingLeaves());
+        }
+
+        const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, first.layers, testPlacement);
+        assert(table.drawnLayers[2]);
+
+        const std::vector<GpuPlacedBlock> alone = placedBlocks(setsOf(first), table);
+        const std::vector<GpuPlacedBlock> blocks = placedBlocks(sets, table);
+        assert(std::equal(alone.begin(), alone.end(), blocks.begin(), [](const GpuPlacedBlock& a, const GpuPlacedBlock& b) {
+            return a.firstPlant == b.firstPlant && a.countPlace == b.countPlace && a.firstInLayer == b.firstInLayer && a.firstKind == b.firstKind;
+        }));
+        const std::uint32_t perCell = (fineLayout.layerCapacity[2] + placedGroupSize - 1) / placedGroupSize;
+        assert(blocks.size() == alone.size() + fineHeld.size() * perCell);
+        std::size_t at = alone.size();
+
+        for (const auto& [cell, slot] : fineHeld) {
+            for (std::uint32_t block = 0; block < perCell; ++block, ++at) {
+                const GpuPlacedBlock& made = blocks[at];
+                assert(made.firstPlant == finePlaces.plantBase + static_cast<std::uint32_t>(slot) * fineLayout.plantsASlot + block * placedGroupSize);
+                assert(made.countPlace == finePlaces.countBase + static_cast<std::uint32_t>(slot) * 3u + 2u);
+                assert(made.firstKind == 2u * static_cast<std::uint32_t>(plantingMostKinds));
+            }
+        }
+
+        const std::vector<PlacedBlockRun> runs = placedBlockRuns(sets, table);
+        std::size_t fineRuns = 0;
+
+        for (const PlacedBlockRun& run : runs) {
+            if (run.set == 1) {
+                assert(fineHeld.contains(run.cell) && run.layer == 2u && run.blocks == perCell);
+                ++fineRuns;
+            } else {
+                assert(run.set == 0 && first.held.contains(run.cell));
+            }
+        }
+
+        assert(fineRuns == fineHeld.size() && runs.back().firstBlock + runs.back().blocks == blocks.size());
+
+        // The fine set's plants after the first set's: each counted one culled with its kind's parts.
+        std::vector<GpuPlacedPlant> plants = first.plants;
+        std::vector<std::uint32_t> counts = first.counts;
+        plants.resize(plants.size() + 2 * fineLayout.plantsASlot);
+        counts.resize(counts.size() + 2 * fine.layers.size(), 0u);
+        std::size_t finePlants = 0;
+
+        for (const auto& [cell, slot] : fineHeld) {
+            const std::uint32_t count = 20u + static_cast<std::uint32_t>(slot) * 7u;
+            counts[finePlaces.countBase + static_cast<std::size_t>(slot) * 3 + 2] = count;
+
+            for (std::uint32_t plant = 0; plant < count; ++plant) {
+                plants[finePlaces.plantBase + static_cast<std::size_t>(slot) * fineLayout.plantsASlot + plant] =
+                    randomPlant(random, plantingCellBox(cell, 32.0f));
+            }
+
+            finePlants += count;
+        }
+
+        const PlacedViews views = cameraOverEveryBlock(overheadCamera(), runs, table);
+        const PlacedCullResult all = cullPlacedOnCpu(table, blocks, views.items, plants, counts, views.views.front());
+        const PlacedViews firstViews = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(setsOf(first), table), table);
+        const PlacedCullResult firstOnly = cullPlacedOnCpu(table, alone, firstViews.items, first.plants, first.counts, firstViews.views.front());
+        std::size_t fineEntries = 0;
+
+        for (const GpuPlacedEntry& entry : all.entries) {
+            fineEntries += (entry.plant & DRAW_LIST_INSTANCE_MASK) >= finePlaces.plantBase ? 1 : 0;
+        }
+
+        assert(all.entries.size() == firstOnly.entries.size() + fineEntries && fineEntries == finePlants);
     }
 
     /*
@@ -585,12 +682,12 @@ namespace {
         const TestSlots slots = testSlots(random);
         const TestKinds kinds = testKinds();
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
-        const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
-        const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
+        const std::vector<GpuPlacedBlock> blocks = placedBlocks(setsOf(slots), table);
+        const std::vector<PlacedBlockRun> runs = placedBlockRuns(setsOf(slots), table);
         const std::vector<GpuCullChunk> chunks = runChunks(runs, table);
         const TestCamera camera = randomCamera(random, 0);
         const std::array<GpuCameraCull, 4> asked{narrowCamera(), randomSunTile(random), camera.packed, randomSunTile(random)};
-        const PlacedViews views = placedViews(asked, runs, chunks, testRegion, table);
+        const PlacedViews views = placedViews(asked, runs, chunks, table);
         assert(views.views.size() == asked.size());
         std::vector<std::uint32_t> layerOfBlock(blocks.size());
 
@@ -606,7 +703,7 @@ namespace {
             const bool shadow = (asked[index].flags & CAMERA_CULL_SHADOW) != 0u;
             assert(view.firstItem == nextItem && view.entryBase == nextEntry);
             assert(view.viewCount == views.views.size() && view.itemCount == views.items.size() && view.groups == table.groups.size());
-            assert(view.camera.flags == asked[index].flags && view.region[2] == testRegion.spread && view.region[0] == testRegion.northmost);
+            assert(view.camera.flags == asked[index].flags);
             std::uint32_t room = 0;
             std::vector<std::uint32_t> expected;
 
@@ -631,7 +728,7 @@ namespace {
             nextEntry += view.entryRoom;
 
             // Its commands count from its own entries.
-            const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
+            const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, view);
             assert(result.entries.size() <= view.entryRoom && result.commands.size() == table.groups.size());
             assert(result.commands.front().firstInstance == placedInstanceBase + view.entryBase);
         }
@@ -659,7 +756,6 @@ namespace {
     */
     void testTheBoxesHideNothing() {
         std::mt19937 random{29};
-        const PlantingMaps maps = straightMaps();
         std::size_t skipped = 0;
         std::size_t shadowEntries = 0;
 
@@ -667,17 +763,17 @@ namespace {
             const TestSlots slots = testSlots(random);
             const TestKinds kinds = testKinds();
             const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
-            const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
-            const std::vector<PlacedBlockRun> runs = placedBlockRuns(slots.held, slots.layout, table);
+            const std::vector<GpuPlacedBlock> blocks = placedBlocks(setsOf(slots), table);
+            const std::vector<PlacedBlockRun> runs = placedBlockRuns(setsOf(slots), table);
             const GpuCameraCull camera = test % 3 == 0 ? overheadCamera() : randomCamera(random, test).packed;
             const std::array<GpuCameraCull, 3> asked{camera, randomSunTile(random), randomSunTile(random)};
-            const PlacedViews culled = placedViews(asked, runs, runChunks(runs, table), testRegion, table);
+            const PlacedViews culled = placedViews(asked, runs, runChunks(runs, table), table);
             const PlacedViews every = everyBlock(asked, runs, table);
             std::vector<PlacedCullResult> results;
 
             for (std::size_t index = 0; index < asked.size(); ++index) {
-                const PlacedCullResult mine = cullPlacedOnCpu(table, blocks, culled.items, slots.plants, slots.counts, maps, culled.views[index]);
-                const PlacedCullResult all = cullPlacedOnCpu(table, blocks, every.items, slots.plants, slots.counts, maps, every.views[index]);
+                const PlacedCullResult mine = cullPlacedOnCpu(table, blocks, culled.items, slots.plants, slots.counts, culled.views[index]);
+                const PlacedCullResult all = cullPlacedOnCpu(table, blocks, every.items, slots.plants, slots.counts, every.views[index]);
                 assert(mine.entries == all.entries);
 
                 for (std::size_t group = 0; group < table.groups.size(); ++group) {
@@ -731,27 +827,23 @@ namespace {
         const std::array<GpuCullChunk, 1> seenOnly{chunks[1]};
         assert((placedChangeRecord(seenOnly).flags & CULL_CASTS_SHADOWS) == 0u);
 
-        const std::uint64_t signature = placedTableSignature(table, testRegion);
-        assert(placedTableSignature(buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement), testRegion) == signature);
-        PlantedRegion wider = testRegion;
-        wider.spread += 1.0f;
-        assert(placedTableSignature(table, wider) != signature);
+        const std::uint64_t signature = placedTableSignature(table);
+        assert(placedTableSignature(buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement)) == signature);
         TestKinds fewer = testKinds();
         fewer.kinds.pop_back();
-        assert(placedTableSignature(buildPlacedTable(fewer.parts, fewer.kinds, 3, testPlacement), testRegion) != signature);
+        assert(placedTableSignature(buildPlacedTable(fewer.parts, fewer.kinds, 3, testPlacement)) != signature);
         TestKinds casting = testKinds();
         casting.parts[0].castsShadows = true;
-        assert(placedTableSignature(buildPlacedTable(casting.parts, casting.kinds, 3, testPlacement), testRegion) != signature);
+        assert(placedTableSignature(buildPlacedTable(casting.parts, casting.kinds, 3, testPlacement)) != signature);
     }
 
     /*
-    * The passes' lists against the entities they stand for: each plant held, counted and in the region, each of its
+    * The passes' lists against the entities they stand for: each plant held and counted, each of its
     * kind's parts placed by its Transform, culled and batched by the CPU's own functions (visibleDraws, opaqueDraws,
     * batchByMesh); the same entries by mesh and style, bar those within rounding of a choice.
     */
     void testTheListsAreTheEntitys() {
         std::mt19937 random{11};
-        const PlantingMaps maps = straightMaps();
         std::size_t compared = 0;
         std::size_t nearEdges = 0;
         std::size_t fading = 0;
@@ -761,11 +853,11 @@ namespace {
             const TestSlots slots = testSlots(random);
             const TestKinds kinds = testKinds();
             const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
-            const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
+            const std::vector<GpuPlacedBlock> blocks = placedBlocks(setsOf(slots), table);
             const TestCamera camera = randomCamera(random, test);
-            const PlacedViews views = cameraOverEveryBlock(camera.packed, placedBlockRuns(slots.held, slots.layout, table), table);
+            const PlacedViews views = cameraOverEveryBlock(camera.packed, placedBlockRuns(setsOf(slots), table), table);
             const GpuPlacedView& view = views.views.front();
-            const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, maps, view);
+            const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, view);
 
             // The entities: every drawn part of every plant that counts, with its plant and part beside it.
             std::vector<DrawItem> entities;
@@ -777,11 +869,6 @@ namespace {
                 for (std::uint32_t index = block.firstInLayer; index < std::min(count, block.firstInLayer + placedGroupSize); ++index) {
                     const std::uint32_t number = block.firstPlant + (index - block.firstInLayer);
                     const GpuPlacedPlant& plant = slots.plants[number];
-
-                    if (!insidePlantedRegion(maps, testRegion, Vec3{plant.foot[0], plant.foot[1], plant.foot[2]})) {
-                        continue;
-                    }
-
                     const GpuPlacedKind& kind = table.kinds[block.firstKind + plant.kind];
 
                     for (const std::uint32_t part : std::span<const std::uint32_t>{kind.part, kind.parts}) {
@@ -865,7 +952,7 @@ namespace {
         const TestSlots slots = testSlots(random);
         const TestKinds kinds = testKinds();
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
-        const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
+        const std::vector<GpuPlacedBlock> blocks = placedBlocks(setsOf(slots), table);
         std::map<std::uint32_t, std::size_t> placeOfPlant;
 
         for (std::size_t block = 0; block < blocks.size(); ++block) {
@@ -874,9 +961,9 @@ namespace {
             }
         }
 
-        const PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(slots.held, slots.layout, table), table);
+        const PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(setsOf(slots), table), table);
         const GpuPlacedView& view = views.views.front();
-        const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
+        const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, view);
         std::size_t drawn = 0;
 
         for (const GpuDrawCommand& command : result.commands) {
@@ -898,10 +985,10 @@ namespace {
         const TestSlots slots = testSlots(random);
         const TestKinds kinds = testKinds();
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
-        const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
-        const PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(slots.held, slots.layout, table), table);
+        const std::vector<GpuPlacedBlock> blocks = placedBlocks(setsOf(slots), table);
+        const PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(setsOf(slots), table), table);
         const GpuPlacedView& view = views.views.front();
-        const PlacedCullResult cpu = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
+        const PlacedCullResult cpu = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, view);
         assert(cpu.entries.size() > 10);
 
         const PlacedComparison same = comparePlacedDraws(table, slots.plants, view, cpu, cpu.commands, cpu.entries);
@@ -943,7 +1030,6 @@ namespace {
         World world;
         const Entity air = world.create();
         auto looks = std::make_shared<PlantingLooks>();
-        looks->region = testRegion;
         ModelRenderer tree = makeMeshRenderer(MeshHandle{10});
         tree.parts.push_back(RenderPart{MeshHandle{20}, Material{}});
         tree.castsShadows = false;
@@ -957,7 +1043,7 @@ namespace {
         assert(frame.plantedKinds[0].layer == 0 && frame.plantedKinds[0].kind == 1 && frame.plantedKinds[0].first == 0 && frame.plantedKinds[0].count == 3);
         assert(frame.plantedKinds[1].layer == 2 && frame.plantedKinds[1].first == 3 && frame.plantedKinds[1].count == 1);
         assert(frame.plantedParts[1].mesh == MeshHandle{20} && !frame.plantedParts[1].castsShadows && frame.plantedParts[2].castsShadows);
-        assert(frame.plantedParts[0].model == Mat4::identity() && frame.plantedRegion.spread == testRegion.spread);
+        assert(frame.plantedParts[0].model == Mat4::identity());
         assert(frame.draws.empty());
 
         world.get<PlantingSource>(air).looks.reset();
@@ -1029,9 +1115,8 @@ namespace {
 
 namespace {
     /*
-    * How each layer is drawn (ROADMAP d3): an unbounded layer's every kind slot marked, so its plants draw wherever planted
-    * while the rest keep to the region; a layer's ground-following parts' culling spheres grown by its relief, the rest
-    * not; both in the table's signature; the frame carries the looks' layers.
+    * How each layer is drawn (ROADMAP d3): a layer's ground-following parts' culling spheres grown by its relief, the rest
+    * not; in the table's signature; the frame carries the looks' layers.
     */
     void testTheLayersDrawing() {
         std::mt19937 random{29};
@@ -1047,15 +1132,9 @@ namespace {
 
         const std::size_t following = static_cast<std::size_t>(std::find(layerOfPart.begin(), layerOfPart.end(), 0) - layerOfPart.begin());
         kinds.parts[following].followsGround = true;
-        const std::vector<PlantedLayerDrawing> layers{PlantedLayerDrawing{.unbounded = false, .groundRelief = 2.5f},
-                                                      PlantedLayerDrawing{.unbounded = true, .groundRelief = 7.0f}};
+        const std::vector<PlantedLayerDrawing> layers{PlantedLayerDrawing{.groundRelief = 2.5f}, PlantedLayerDrawing{.groundRelief = 7.0f}};
         const PlacedTable plain = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement);
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, slots.layers, testPlacement, layers);
-
-        for (std::size_t slot = 0; slot < table.kinds.size(); ++slot) {
-            assert(table.kinds[slot].unbounded == (slot / static_cast<std::size_t>(plantingMostKinds) == 1 ? 1u : 0u));
-            assert(plain.kinds[slot].unbounded == 0u);
-        }
 
         for (std::size_t place = 0; place < table.parts.size(); ++place) {
             const std::size_t part = table.draws[place];
@@ -1063,21 +1142,7 @@ namespace {
             assert(table.parts[place].record.bounds[3] == plain.parts[place].record.bounds[3] + grown);
         }
 
-        assert(placedTableSignature(table, testRegion) != placedTableSignature(plain, testRegion));
-
-        // A region holding no plant: only the unbounded layer's plants draw.
-        const std::vector<GpuPlacedBlock> blocks = placedBlocks(slots.held, slots.layout, table);
-        PlacedViews views = cameraOverEveryBlock(overheadCamera(), placedBlockRuns(slots.held, slots.layout, table), table);
-        GpuPlacedView view = views.views.front();
-        view.region[0] = 5000.0f;
-        view.region[1] = 5001.0f;
-        const PlacedCullResult result = cullPlacedOnCpu(table, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
-        const PlacedCullResult bounded = cullPlacedOnCpu(plain, blocks, views.items, slots.plants, slots.counts, straightMaps(), view);
-        assert(!result.entries.empty() && bounded.entries.empty());
-
-        for (const GpuPlacedEntry& entry : result.entries) {
-            assert(layerOfPart[table.draws[entry.part]] == 1);
-        }
+        assert(placedTableSignature(table) != placedTableSignature(plain));
 
         World world;
         auto looks = std::make_shared<PlantingLooks>();
@@ -1085,7 +1150,7 @@ namespace {
         world.add(world.create(), PlantingSource{std::make_shared<const PlantingField>(), 1, looks});
         const Camera camera{Vec3{0.0f, 1.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f};
         const FrameDescription frame = buildFrame(world, camera, 1.0f);
-        assert(frame.plantedLayers.size() == 2 && frame.plantedLayers[1].unbounded && frame.plantedLayers[0].groundRelief == 2.5f);
+        assert(frame.plantedLayers.size() == 2 && frame.plantedLayers[1].groundRelief == 7.0f && frame.plantedLayers[0].groundRelief == 2.5f);
     }
 }
 
@@ -1097,6 +1162,7 @@ void testPlacedDrawing() {
     testTheTable();
     testTheVariants();
     testTheBlocks();
+    testTheBlocksOfTwoSets();
     testTheCellBoxes();
     testTheViewsLayout();
     testTheBoxesHideNothing();

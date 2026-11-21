@@ -292,7 +292,7 @@ std::vector<GpuPlantingLayer> packPlantingLayers(const std::vector<PlantingLayer
 }
 
 std::vector<GpuPlantingJob> packPlantingJobs(const std::vector<PlantingLayerRecord>& layers, const PlantingSlotLayout& layout,
-                                             std::span<const PlantingCellMade> made, float cellMetres) {
+                                             std::span<const PlantingCellMade> made, float cellMetres, const PlantingSetPlaces& places) {
     std::vector<GpuPlantingJob> jobs;
     jobs.reserve(made.size() * layers.size());
     const auto lattice = [](std::int32_t (&into)[4], const PlantingLattice& from) {
@@ -312,7 +312,7 @@ std::vector<GpuPlantingJob> packPlantingJobs(const std::vector<PlantingLayerReco
             const PlantingLattice candidates = plantingLatticeOver(boxes[which].candidates, footprint);
             const PlantingLattice inBox = plantingLatticeOver(box, footprint);
 
-            if (candidates.count() > layout.scratchCapacity[which] || inBox.count() > layout.layerCapacity[which]) {
+            if (candidates.count() > layout.scratchCapacity[which] || (layout.written[which] && inBox.count() > layout.layerCapacity[which])) {
                 throw std::logic_error("packPlantingJobs: a cell's lattice outgrew its room");
             }
 
@@ -325,8 +325,8 @@ std::vector<GpuPlantingJob> packPlantingJobs(const std::vector<PlantingLayerReco
             job.bounds[2] = box.north;
             job.bounds[3] = box.south;
             job.candidateFirst = static_cast<std::uint32_t>(cell) * layout.candidatesACell + layout.scratchFirst[which];
-            job.plantFirst = slot * layout.plantsASlot + layout.layerFirst[which];
-            job.countPlace = slot * static_cast<std::uint32_t>(layers.size()) + static_cast<std::uint32_t>(which);
+            job.plantFirst = places.plantBase + slot * layout.plantsASlot + layout.layerFirst[which];
+            job.countPlace = places.countBase + slot * static_cast<std::uint32_t>(layers.size()) + static_cast<std::uint32_t>(which);
             job.capacity = layout.layerCapacity[which];
             jobs.push_back(job);
         }

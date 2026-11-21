@@ -24,7 +24,7 @@ Every layer (trees, palms, understorey) is planted from maps, not darts (Horizon
 
 ## The forest's layers (`forest_planting`)
 
-`forestPlantingLayers(ForestSpecies)` → five `PlantingLayerRecord`s in `ForestLayer`'s order; `plantTheForest(species, maps, heights, box, jobs)` plants a box; `plantThePatch` the box round `forestPatch`, keeping what stands in it by the maps' axis (`insidePlantedRegion`, as the GPU draws the placed trees' patch; the entities' patch until 2b's cells).
+`forestPlantingLayers(ForestSpecies)` → five `PlantingLayerRecord`s in `ForestLayer`'s order, the emergent and canopy trees in the GPU's coarse cells (to 1 km), the mid trees, understorey and palms in its middle ones (to 300 m; `cellSet`); `plantTheForest(species, maps, heights, box, jobs)` plants a box; `plantThePatch` the box round `forestPatch`, keeping what stands in it by the maps' axis (`insidePlantedRegion`): the CPU's start-up placements (climbers, epiphytes, the start). The GPU plants the whole valley round the camera.
 
 | Layer | Record (`treePlantingLayer`, `understoreyPlantingLayer`, `palmPlantingLayer`) | Keeps clear of |
 |---|---|---|
@@ -81,7 +81,7 @@ Understorey palms 2-6 m tall grown by the engine (no CC0 palm scans).
 - Squares of `cellMetres` aligned on the origin, within `reachMetres` of the path; each with one paint channel's mean (`forestGroundPaint` at 4 x 4 points over it), stepped to the nearest of `densitySteps` (`groundDensityStep`; none under `leastPaint`); a variant and quarter turn from its place. A row of cells a job.
 - `groundCoverLevelError(distance)`: the error covering the default pixel error at that distance in a 1080-pixel, 70 degree view.
 - **Drawn by the GPU's cells** (`forest_planting`, ROADMAP d3; no entity a cell): the cells baked into a cover map a layer (`forestCoverMap`: a byte a lattice cell, its kind `forestCoverKind` = variant x steps + step - 1 and its quarter turns), the layers `forestGrassPlanting` and `forestFloorPlanting` after the plants' (`forestCoverLayer`: footprint `cellMetres`, scale 1, variants x steps kinds, at most 8 x 4), in the field `plantingField` gives; the CPU's own plantings leave them out.
-- **Looks** (`addGroundCoverLooks` in `forest_game`): every variant at every density step grown on every core (a sparser step the first of the same pieces), each with its half and quarter levels and nothing past the farthest; a look a patch kind, following the ground (lifted onto the land by the vertex shaders: `terrain.md`), casting no shadow (contact shadows and ambient occlusion ground it), swaying at the patch's height (at least 0.3 m). The layers are drawn past the trees' patch (`PlantedLayerDrawing::unbounded`), their culling spheres grown by the land's relief under their cells (`forestCoverRelief`: the drawn land's range under each square grown by 1 m, from its middle).
+- **Looks** (`addGroundCoverLooks` in `forest_game`): every variant at every density step grown on every core (a sparser step the first of the same pieces), each with its half and quarter levels and nothing past the farthest; a look a patch kind, following the ground (lifted onto the land by the vertex shaders: `terrain.md`), casting no shadow (contact shadows and ambient occlusion ground it), swaying at the patch's height (at least 0.3 m). The layers are planted in the GPU's fine cells (`cellSet`), their culling spheres grown by the land's relief under their cells (`forestCoverRelief`: the drawn land's range under each square grown by 1 m, from its middle).
 
 ## Grass (`grass`)
 

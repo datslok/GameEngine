@@ -46,7 +46,8 @@ inline constexpr int forestLayerCount = 5;
 /*
 * The layers, in ForestLayer's order: the canopy shares the emergents' lattice while their footprints match, and keeps
 * its trunks outside their crowns; the mid layer keeps midTrunkClearance from both's trunks; the understorey and the
-* palms keep their trunkClearance past each big trunk's bigTrunkReach and each mid trunk's midTrunkReach.
+* palms keep their trunkClearance past each big trunk's bigTrunkReach and each mid trunk's midTrunkReach. On the GPU the
+* trees are planted in the coarse cells, the understorey and palms in the middle ones (planting_cells.h).
 */
 std::vector<PlantingLayerRecord> forestPlantingLayers(const ForestSpecies& species);
 
@@ -58,8 +59,8 @@ inline constexpr int forestFloorPlanting = forestLayerCount + 1;
 /*
 * A ground cover layer: a patch a cell of its cellMetres lattice (aligned on the origin, as forestGroundCells' squares),
 * the patch kind and quarter turns baked into its map coverMap (forestCoverMap), of scale 1, standing on the ground at
-* the cell's middle, reaching its square's half diagonal; variants times steps kinds. Throws std::invalid_argument past
-* PLANTING_MOST_KINDS kinds.
+* the cell's middle, reaching its square's half diagonal; variants times steps kinds; planted in the GPU's fine cells.
+* Throws std::invalid_argument past PLANTING_MOST_KINDS kinds.
 */
 PlantingLayerRecord forestCoverLayer(float cellMetres, int variants, int steps, int coverMap, std::uint64_t seed);
 

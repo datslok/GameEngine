@@ -236,9 +236,9 @@ namespace {
 
         assert(looks > 0);
         const PlantingLooks& drawn = *forest.world.get<PlantingSource>(forest.game.getAir()).looks;
-        assert(drawn.layers.at(static_cast<std::size_t>(forestGrassPlanting)).unbounded);
         assert(drawn.layers.at(static_cast<std::size_t>(forestGrassPlanting)).groundRelief > 0.0f);
-        assert(!drawn.layers.at(0).unbounded);
+        assert(forest.world.get<PlantingSource>(forest.game.getAir()).field->layers.at(static_cast<std::size_t>(forestGrassPlanting)).cellSet ==
+               plantingFineCells);
 
         // The relief is at least the land's rise anywhere in a cell (some cells, read every metre).
         const std::vector<GrassCell>& grass = forest.game.getGrassCells();

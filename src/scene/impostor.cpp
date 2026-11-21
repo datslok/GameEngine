@@ -415,6 +415,14 @@ IndexedMesh impostorCardMesh(const Vec3& centre, float radius) {
     return card;
 }
 
+float impostorCardError(float radius, int frameTexels, float errorTexels) {
+    if (!(radius > 0.0f) || frameTexels <= 0 || !(errorTexels > 0.0f)) {
+        throw std::invalid_argument("impostorCardError: a card needs a radius, texels and an error above 0");
+    }
+
+    return 2.0f * radius / static_cast<float>(frameTexels) * errorTexels;
+}
+
 Material impostorMaterial(TextureHandle colour, TextureHandle normal, int frames) {
     Material material;
     material.texture = colour;

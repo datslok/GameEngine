@@ -430,12 +430,17 @@ private:
     std::uint64_t shadowFrame = 0;
     ShadowTileMemory shadowMemory;
 
-    // The far shadow map's still casters (ShadowTile::separateMovers, render/gpu/shadow_cache.h): a depth image the far
-    // tile's size, drawn when they change; every frame the moving casters' patches, this frame's and last frame's, are
-    // copied back from it into the atlas and the movers drawn over them. moverPatches: last frame's.
-    VulkanImage stillShadow;
-    std::uint32_t stillShadowSize = 0;
-    std::vector<ShadowPatch> moverPatches;
+    // The still casters of each tile keeping its movers apart (ShadowTile::separateMovers, keepsMoversApart,
+    // render/gpu/shadow_cache.h: the far map, and sun cascades a mover reached), by the tile's square in the atlas: a
+    // depth image the tile's size, drawn when they change; every frame the moving casters' patches, this frame's and last
+    // frame's, are copied back from it into the atlas and the movers drawn over them. moverPatches: last frame's.
+    struct StillShadowCopy {
+        VulkanImage image;
+        std::uint32_t size = 0;
+        std::vector<ShadowPatch> moverPatches;
+    };
+
+    std::map<std::pair<std::uint32_t, std::uint32_t>, StillShadowCopy> stillShadows;
 
     // The coloured shadow maps (render/gpu/transparency.h): the tint the glass each light sees passes, and the nearest
     // glass depth, at half the atlas's size (glassShadowMapSize), and the pipeline drawing the glass into them. The
@@ -714,19 +719,24 @@ private:
         PassDraws casterDraws;
         PassDraws moverDraws;
         std::optional<std::uint32_t> placedView; // its number among the placed plants' views, drawn with its casters
+        StillShadowCopy* stillCopy = nullptr; // keeping its movers apart: its still casters' copy
     };
 
-    // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches). views: each drawn tile's view
-    // (in tiles' order), its lists' regions reserved in the frame's draw list.
+    // nextMoverPatches: each still copy's movers' patches this frame, remembered once drawn (moverPatches). views: each
+    // drawn tile's view (in tiles' order), its lists' regions reserved in the frame's draw list.
     struct ShadowDraws {
         std::vector<ShadowTileDraw> tiles;
         std::vector<bool> tileGlass;
-        std::vector<ShadowPatch> nextMoverPatches;
+        std::vector<std::pair<StillShadowCopy*, std::vector<ShadowPatch>>> nextMoverPatches;
         std::vector<GpuCameraCull> views;
     };
 
-    // The still copy at this size (a new one when it changes, the GPU waited for first).
-    void ensureStillShadow(std::uint32_t size);
+    // The tile's still copy if it has one at its size, else none.
+    StillShadowCopy* stillShadowOf(const ShadowTile& tile);
+
+    // The tile's still copy at its size, made when it has none or another size (the GPU waited for first when one is
+    // replaced); true when it was made, so its still casters are drawn before anything is copied from it.
+    std::pair<StillShadowCopy*, bool> ensureStillShadow(const ShadowTile& tile);
 
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
     // rays' hits may need (empty without probes). drawList: the frame's draw list laid out (the GPU's regions and the
@@ -762,8 +772,9 @@ private:
     // colouredShadows: the frame draws the coloured shadow maps, so each tile's glass is found and drawn too. sway: the
     // wind's settings while things sway this frame (render/gpu/wind.h), else null. Which tiles are drawn is decided from
     // the changes the table reports (render/gpu/shadow_culling.h); each drawn tile is a view whose lists get room for
-    // every draw in drawList, its glass entries appended there.
-    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, DrawListLayout& drawList, bool colouredShadows,
+    // every draw in drawList, its glass entries appended there. Each tile's separateMovers is set here for this frame
+    // (keepsMoversApart), before its needs are found.
+    ShadowDraws prepareShadowDraws(const FrameDescription& description, std::vector<ShadowTile>& tiles, DrawListLayout& drawList, bool colouredShadows,
                                    const LevelOfDetailSettings& levelSettings, const WindSettings* sway, const CameraCullFrame& table,
                                    const PlantedShadowChanges& planted);
 

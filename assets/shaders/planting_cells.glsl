@@ -188,12 +188,6 @@ float plantingAxisAt(float z) {
     return plantingBetween(mapFloat(axisFirst + north), mapFloat(axisFirst + south), share);
 }
 
-// Whether a foot is in a region (north, south, spread): insidePlantedRegion.
-bool plantingInsideRegion(vec3 region, vec3 foot) {
-    precise float across = abs(foot.x - plantingAxisAt(foot.z));
-    return foot.z >= region.x && foot.z <= region.y && across <= region.z;
-}
-
 vec2 plantingGridPlace(float x, float z) {
     precise float across = x - plantingAxisAt(z);
     return vec2(plantingCoordinate(across, -halfWidth, inverseTexel), plantingCoordinate(z, northmost, inverseTexel));

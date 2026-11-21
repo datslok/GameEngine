@@ -25,6 +25,16 @@ namespace {
         }
     }
 
+    // A buffer every frame in flight uses (not one a frame), grown as ensureBuffer grows one, once the GPU is done with
+    // the old one: a frame still in flight may be reading it. Growing doubles, so this waits only a few times a run.
+    void ensureSharedBuffer(const VulkanDevice& device, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory) {
+        if (buffer.get() != VK_NULL_HANDLE && buffer.getSize() < std::max(bytes, smallestBytes)) {
+            device.waitIdle();
+        }
+
+        ensureBuffer(device, buffer, bytes, usage, memory);
+    }
+
     // An upload buffer holding a span's elements (grown to fit), written and flushed.
     template<typename Element>
     void upload(const VulkanDevice& device, VulkanBuffer& buffer, std::span<const Element> elements) {
@@ -82,13 +92,12 @@ bool VulkanPlacedDrawing::prepare(const FrameDescription& description, const Vul
     frame.views = PlacedViews{};
     frame.field = planting.getField();
     shadowChanges = PlantedShadowChanges{};
-    bool draws = !description.plantedParts.empty() && frame.field && !planting.getHeld().empty();
+    bool draws = !description.plantedParts.empty() && frame.field && planting.holdsCells();
 
     if (draws) {
         frame.table = buildPlacedTable(description.plantedParts, description.plantedKinds, frame.field->layers.size(), placement,
                                        description.plantedLayers);
-        frame.blocks = placedBlocks(planting.getHeld(), planting.getLayout(), frame.table);
-        frame.region = description.plantedRegion;
+        frame.blocks = placedBlocks(planting.getSlots(), frame.table);
         draws = !frame.blocks.empty() && !frame.table.groups.empty();
     }
 
@@ -107,62 +116,68 @@ bool VulkanPlacedDrawing::prepare(const FrameDescription& description, const Vul
 /*
 * A cell's ground range taken once while it is held (its ground's points: grows with the cells made). Its change record
 * stands for every drawn layer's box. Made this frame (the planting's own list, so a cell made again in the same place
-* counts) or dropped since the frame before (its old record): those tiles redraw; a new table, region or field: all.
+* counts) or dropped since the frame before (its old record): those tiles redraw; a new table or field: all.
 */
 void VulkanPlacedDrawing::findBoxes(PerFrame& frame, const VulkanPlanting& planting) {
     const std::shared_ptr<const TerrainHeights>& ground = planting.getHeights();
-    const std::map<PlantingCell, int>& held = planting.getHeld();
-    const float cellMetres = planting.getCellMetres();
+    const std::vector<PlantingSetSlots> sets = planting.getSlots();
 
     if (ground != rangedGround) {
         groundRanges.clear();
         rangedGround = ground;
     }
 
-    std::map<PlantingCell, TerrainHeightRange> ranges;
+    std::map<HeldCell, TerrainHeightRange> ranges;
 
-    for (const auto& [cell, slot] : held) {
-        const auto found = groundRanges.find(cell);
+    for (std::size_t set = 0; set < sets.size(); ++set) {
+        for (const auto& [cell, slot] : sets[set].held) {
+            const HeldCell held{static_cast<int>(set), cell};
+            const auto found = groundRanges.find(held);
 
-        if (found != groundRanges.end()) {
-            ranges.insert(*found);
-            continue;
+            if (found != groundRanges.end()) {
+                ranges.insert(*found);
+                continue;
+            }
+
+            const PlantingBox box = plantingCellBox(cell, sets[set].cellMetres);
+            ranges.emplace(held, ground ? terrainHeightRange(*ground, box.west, box.east, box.north, box.south) : TerrainHeightRange{});
         }
-
-        const PlantingBox box = plantingCellBox(cell, cellMetres);
-        ranges.emplace(cell, ground ? terrainHeightRange(*ground, box.west, box.east, box.north, box.south) : TerrainHeightRange{});
     }
 
     groundRanges = std::move(ranges);
-    frame.runs = placedBlockRuns(held, planting.getLayout(), frame.table);
+    frame.runs = placedBlockRuns(sets, frame.table);
 
     for (const PlacedBlockRun& run : frame.runs) {
-        frame.chunks.push_back(
-            placedCellChunk(plantingCellBox(run.cell, cellMetres), groundRanges.at(run.cell), frame.field->layers.at(run.layer), frame.table.layerReach.at(run.layer)));
+        const PlantingBox box = plantingCellBox(run.cell, sets.at(static_cast<std::size_t>(run.set)).cellMetres);
+        frame.chunks.push_back(placedCellChunk(box, groundRanges.at(HeldCell{run.set, run.cell}), frame.field->layers.at(run.layer),
+                                               frame.table.layerReach.at(run.layer)));
     }
 
-    // Each cell's runs follow one another (the held map's order), so its boxes are one span.
-    std::map<PlantingCell, GpuCullRecord> cells;
+    // Each cell's runs follow one another (set by set, the held maps' order), so its boxes are one span.
+    std::map<HeldCell, GpuCullRecord> cells;
 
     for (std::size_t first = 0; first < frame.runs.size();) {
         std::size_t past = first;
 
-        while (past < frame.runs.size() && frame.runs[past].cell == frame.runs[first].cell) {
+        while (past < frame.runs.size() && frame.runs[past].set == frame.runs[first].set && frame.runs[past].cell == frame.runs[first].cell) {
             ++past;
         }
 
-        cells.emplace(frame.runs[first].cell, placedChangeRecord(std::span<const GpuCullChunk>{frame.chunks}.subspan(first, past - first)));
+        cells.emplace(HeldCell{frame.runs[first].set, frame.runs[first].cell},
+                      placedChangeRecord(std::span<const GpuCullChunk>{frame.chunks}.subspan(first, past - first)));
         first = past;
     }
 
-    const std::uint64_t signature = placedTableSignature(frame.table, frame.region);
+    const std::uint64_t signature = placedTableSignature(frame.table);
 
     if (signature != drawnSignature || frame.field.get() != drawnField) {
         shadowChanges.all = true;
     } else {
-        for (const PlantingCellMade& made : planting.getMade()) {
-            if (const auto found = cells.find(made.cell); found != cells.end()) {
-                shadowChanges.cells.push_back(found->second);
+        for (std::size_t set = 0; set < sets.size(); ++set) {
+            for (const PlantingCellMade& made : planting.getMade(set)) {
+                if (const auto found = cells.find(HeldCell{static_cast<int>(set), made.cell}); found != cells.end()) {
+                    shadowChanges.cells.push_back(found->second);
+                }
             }
         }
 
@@ -184,7 +199,7 @@ const PlantedShadowChanges& VulkanPlacedDrawing::getShadowChanges() const {
 
 void VulkanPlacedDrawing::setViews(std::span<const GpuCameraCull> views, std::vector<std::string> names, std::uint32_t frameIndex) {
     PerFrame& frame = frames.at(frameIndex);
-    frame.views = placedViews(views, frame.runs, frame.chunks, frame.region, frame.table);
+    frame.views = placedViews(views, frame.runs, frame.chunks, frame.table);
     frame.names = std::move(names);
     const VkDeviceSize entryBytes = static_cast<VkDeviceSize>(frame.views.entries) * sizeof(GpuPlacedEntry);
     ensureBuffer(device, frame.entries, entryBytes, storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu);
@@ -219,8 +234,8 @@ void VulkanPlacedDrawing::record(VkCommandBuffer commands, FrameDescriptors& des
     const auto items = static_cast<std::uint32_t>(frame.views.items.size());
     const auto views = static_cast<std::uint32_t>(frame.views.views.size());
     const auto groups = static_cast<std::uint32_t>(table.groups.size());
-    ensureBuffer(device, itemCounts, static_cast<VkDeviceSize>(items) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(device, totals, 2 * static_cast<VkDeviceSize>(views) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureSharedBuffer(device, itemCounts, static_cast<VkDeviceSize>(items) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureSharedBuffer(device, totals, 2 * static_cast<VkDeviceSize>(views) * groups * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
     const std::array<ComputeBinding, PLANTING_BINDINGS> plantingBindings = planting.getBindings(heights, frameIndex);
     const VkBuffer plants = plantingBindings[PLANTING_PLANTS_BINDING].buffer.buffer;
     const VkBuffer counts = plantingBindings[PLANTING_COUNTS_BINDING].buffer.buffer;
@@ -341,7 +356,7 @@ void VulkanPlacedDrawing::collect(std::uint32_t frameIndex) {
 
     for (std::size_t view = 0; view < readback->views.views.size(); ++view) {
         const GpuPlacedView& placed = readback->views.views[view];
-        const PlacedCullResult cpu = cullPlacedOnCpu(readback->table, readback->blocks, readback->views.items, plants, counts, readback->field->maps, placed);
+        const PlacedCullResult cpu = cullPlacedOnCpu(readback->table, readback->blocks, readback->views.items, plants, counts, placed);
         const PlacedComparison comparison = comparePlacedDraws(readback->table, plants, placed, cpu, commands.subspan(view * groups, groups), entries);
         text << (view > 0 ? "\n" : "") << (view < readback->names.size() ? readback->names[view] : "View") << " (" << placed.items << " blocks): "
              << describePlacedComparison(comparison);

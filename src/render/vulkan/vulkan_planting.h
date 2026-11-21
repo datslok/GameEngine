@@ -22,10 +22,11 @@ class ImmediateCommands;
 class VulkanDevice;
 
 /*
-* The planting cells on the GPU (ROADMAP phase 18, the valley's stage 2b1; docs/architecture/planting.md): the field's
-* maps and layers uploaded when it changes, the cells round the camera made a few a frame into fixed slots, three passes a
-* layer (candidates, spacing, writing), and placement-compare reading the slots back against plantLayers. Nothing draws
-* the plants yet (stage 2b2).
+* The planting cells on the GPU (ROADMAP phase 18, the valley's stages 2b1 and e1; docs/architecture/planting.md): the
+* field's maps and each set of cells' layers uploaded when it changes, each set's cells round the camera made a few a
+* frame into its fixed slots (every set's slots in one plants buffer and one counts buffer), three passes a layer
+* (candidates, spacing, writing; the writing only for the layers a set keeps), and placement-compare reading the slots
+* back against plantLayers.
 */
 class VulkanPlanting {
 public:
@@ -33,8 +34,8 @@ public:
 
     /*
     * The frame's cells: none without a field, a terrain or the setting (the cells forgotten); the field uploaded again
-    * when it or the cells' size changed (every cell made anew); the cells round the camera updated and this frame's jobs
-    * written. Returns whether the passes run.
+    * when it or a set's settings changed (every cell made anew); each set's cells round the camera updated and this
+    * frame's jobs written. Returns whether the passes run.
     */
     bool prepare(const std::shared_ptr<const PlantingField>& field, std::uint64_t fieldVersion, const std::shared_ptr<const TerrainHeights>& heights,
                  const PlantingCellSettings& settings, const Vec3& camera, std::uint32_t frameIndex);
@@ -51,35 +52,56 @@ public:
     // A new number of frames in flight: their jobs and read-backs made again with the field's next upload.
     void setFramesInFlight(std::uint32_t count);
 
-    // The cells held and made this frame, for F4.
+    // The cells held and made this frame, every set's, for F4.
     std::size_t getHeldCells() const;
     std::size_t getMadeCells() const;
 
     // What the placed drawing reads (render/vulkan/vulkan_placed_drawing.h): the passes' eight bindings this frame (the
-    // slots' plants and counts among them), the slots' plants alone, the cells held, the slots' layout, the field (none
-    // while nothing is planted), the cells' size, the ground they were planted on and the cells made this frame.
+    // slots' plants and counts among them; the first set planting's layers and jobs), the slots' plants alone, each set
+    // planting's slots (a view, while this frame's cells stand), the field (none while nothing is planted), the ground
+    // the cells were planted on, and the cells a set made this frame (by its place among getSlots').
     std::array<ComputeBinding, PLANTING_BINDINGS> getBindings(VkBuffer heights, std::uint32_t frameIndex) const;
     VkBuffer getPlants() const;
     VkDeviceSize getPlantsBytes() const;
     VkDeviceSize getCountsBytes() const;
-    const std::map<PlantingCell, int>& getHeld() const;
-    const PlantingSlotLayout& getLayout() const;
+    std::vector<PlantingSetSlots> getSlots() const;
+    const std::vector<PlantingCellMade>& getMade(std::size_t set) const;
+    bool holdsCells() const;
     const std::shared_ptr<const PlantingField>& getField() const;
-    float getCellMetres() const;
     const std::shared_ptr<const TerrainHeights>& getHeights() const;
-    const std::vector<PlantingCellMade>& getMade() const;
 
 private:
-    // A frame read back for a comparison: the cells held then, and what the CPU needs to plant them.
+    // A set of cells planting at least one layer: its settings, its layers, slots and their places, its ring, the cells
+    // it made this frame, its layers' records and a jobs buffer a frame in flight.
+    struct CellSet {
+        PlantingCellSetSettings settings;
+        PlantingSetLayers layers;
+        PlantingSlotLayout layout;
+        PlantingSetPlaces places;
+        int slots = 0;
+        PlantingCellRing ring;
+        std::vector<PlantingCellMade> made;
+        VulkanBuffer layerRecords;
+        std::vector<VulkanBuffer> jobs;
+    };
+
+    // One set's cells held when read back, and what the CPU needs to plant them.
+    struct ReadbackSet {
+        std::map<PlantingCell, int> held;
+        PlantingSetLayers layers;
+        PlantingSlotLayout layout;
+        PlantingSetPlaces places;
+        float cellMetres = 0.0f;
+    };
+
+    // A frame read back for a comparison: every set's cells held then.
     struct Readback {
         VulkanBuffer plants;
         VulkanBuffer counts;
         VulkanBuffer problems;
-        std::map<PlantingCell, int> held;
+        std::vector<ReadbackSet> sets;
         std::shared_ptr<const PlantingField> field;
         std::shared_ptr<const TerrainHeights> heights;
-        PlantingSlotLayout layout;
-        float cellMetres = 0.0f;
     };
 
     const VulkanDevice& device;
@@ -90,29 +112,23 @@ private:
 
     const PlantingField* uploadedField = nullptr;
     std::uint64_t uploadedVersion = 0;
-    float uploadedCellMetres = 0.0f;
-    int uploadedSlots = 0;
-    int uploadedCellsAFrame = 0;
+    std::array<PlantingCellSetSettings, plantingCellSetCount> uploadedSettings{};
+    std::uint32_t framesInFlight = 0;
     std::shared_ptr<const PlantingField> field;
     std::shared_ptr<const TerrainHeights> heights;
-    PlantingSlotLayout layout;
-    std::uint32_t layerCount = 0;
+    std::vector<CellSet> sets;
 
     VulkanBuffer maps;
-    VulkanBuffer layers;
     VulkanBuffer candidates;
     VulkanBuffer plants;
     VulkanBuffer counts;
     VulkanBuffer problems;
-    std::vector<VulkanBuffer> jobs;
     std::vector<std::optional<Readback>> readbacks;
 
-    PlantingCellRing ring;
-    std::vector<PlantingCellMade> made;
-    float cellMetres = 0.0f;
     bool compareAsked = false;
     std::string report;
 
     void upload(const PlantingCellSettings& settings);
     void forget();
+    std::array<ComputeBinding, PLANTING_BINDINGS> bindingsOf(const CellSet& set, VkBuffer heights, std::uint32_t frameIndex) const;
 };

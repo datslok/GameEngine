@@ -146,6 +146,30 @@ namespace {
         }
     }
 
+    /*
+    * A set's jobs: its plants and counts from its places among every set's, its read-only layers planted (their
+    * candidates' lattices) but given no room, never refused for it.
+    */
+    void testASetsJobsStartAtItsPlaces() {
+        std::vector<PlantingLayerRecord> field = threeLayers();
+        field[2].cellSet = plantingFineCells;
+        const PlantingSetLayers fine = plantingSetLayers(field, plantingFineCells);
+        const float cellMetres = 32.0f;
+        const PlantingSlotLayout layout = plantingSlotLayout(fine.layers, cellMetres, fine.written);
+        const PlantingSetPlaces places{.plantBase = 1000, .countBase = 70};
+        const std::vector<PlantingCellMade> made{{PlantingCell{-3, -2}, 4}};
+        const std::vector<GpuPlantingJob> jobs = packPlantingJobs(fine.layers, layout, made, cellMetres, places);
+        assert(jobs.size() == fine.layers.size());
+
+        for (std::size_t which = 0; which < fine.layers.size(); ++which) {
+            const GpuPlantingJob& job = jobs[which];
+            assert(job.plantFirst == places.plantBase + 4 * layout.plantsASlot + layout.layerFirst[which]);
+            assert(job.countPlace == places.countBase + 4 * static_cast<std::uint32_t>(fine.layers.size()) + which);
+            assert(job.capacity == (fine.written[which] ? layout.layerCapacity[which] : 0u));
+            assert(job.candidates[2] > 0 && job.candidates[3] > 0);
+        }
+    }
+
     // The CPU's whole planting split by cell is each cell planted alone; the same plants compare as agreeing.
     void testTheComparison() {
         const PlantingMaps maps = straightMaps();
@@ -224,14 +248,16 @@ namespace {
         assert(second.ok && asked == 2 && second.text.find("agree") != std::string::npos);
     }
 
-    // The cells' settings reach the renderer's under engine.render.planting (F5 Render > Planting).
+    // The cells' settings reach the renderer's under engine.render.planting (F5 Render > Planting), a group a set.
     void testTheSettingsKeys() {
         RenderSettings settings;
         const SettingsWalk walk = [&settings](SettingsVisitor& visitor) { visit(settings, visitor); };
-        const std::vector<std::string> warnings =
-            applySettings({{"planting.enabled", "true"}, {"planting.cellsAFrame", "8"}, {"planting.radius", "500"}}, walk, StartupFields::Keep);
+        const std::vector<std::string> warnings = applySettings(
+            {{"planting.enabled", "true"}, {"planting.coarseCells.cellsAFrame", "8"}, {"planting.middleCells.radius", "500"}, {"planting.fineCells.cell", "16"}},
+            walk, StartupFields::Keep);
         assert(warnings.empty());
-        assert(settings.planting.enabled && settings.planting.cellsAFrame == 8 && settings.planting.radiusMetres == 500.0f);
+        assert(settings.planting.enabled && settings.planting.sets[plantingCoarseCells].cellsAFrame == 8);
+        assert(settings.planting.sets[plantingMiddleCells].radiusMetres == 500.0f && settings.planting.sets[plantingFineCells].cellMetres == 16.0f);
     }
 }
 
@@ -239,6 +265,7 @@ void testPlantingRecords() {
     testTheMapsPackWhole();
     testTheLayersPack();
     testTheJobsAreTheCellsBoxes();
+    testASetsJobsStartAtItsPlaces();
     testTheComparison();
     testTheCompareCommand();
     testTheSettingsKeys();

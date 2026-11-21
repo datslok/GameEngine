@@ -86,22 +86,9 @@ namespace {
         return draws;
     }
 
-    // Whether a block's thread has a plant to cull (placedBlockPlant): within its slot's count and in the region, unless
-    // its layer is unbounded.
-    bool blockPlant(const PlacedTable& table, const GpuPlacedBlock& block, std::uint32_t thread, std::span<const GpuPlacedPlant> plants,
-                    std::span<const std::uint32_t> counts, const PlantingMaps& maps, const GpuPlacedView& view) {
-        if (block.firstInLayer + thread >= counts[block.countPlace]) {
-            return false;
-        }
-
-        const GpuPlacedPlant& plant = plants[block.firstPlant + thread];
-
-        if (table.kinds[block.firstKind + plant.kind].unbounded != 0u) {
-            return true;
-        }
-
-        const PlantedRegion region{view.region[0], view.region[1], view.region[2]};
-        return insidePlantedRegion(maps, region, Vec3{plant.foot[0], plant.foot[1], plant.foot[2]});
+    // Whether a block's thread has a plant to cull (placedBlockPlant): within its slot's count.
+    bool blockPlant(const GpuPlacedBlock& block, std::uint32_t thread, std::span<const std::uint32_t> counts) {
+        return block.firstInLayer + thread < counts[block.countPlace];
     }
 
     // A part's bounds into its layer's reach: across, up and down from the foot, what sees it and what it casts into.
@@ -278,14 +265,6 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
         }
     }
 
-    for (std::size_t layer = 0; layer < layerCount; ++layer) {
-        if (drawingOf(static_cast<int>(layer)).unbounded) {
-            for (int slot = 0; slot < plantingMostKinds; ++slot) {
-                table.kinds[layer * static_cast<std::size_t>(plantingMostKinds) + static_cast<std::size_t>(slot)].unbounded = 1u;
-            }
-        }
-    }
-
     table.order.order.resize(table.groups.size());
 
     for (std::size_t group = 0; group < table.groups.size(); ++group) {
@@ -304,48 +283,58 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
     return table;
 }
 
-std::vector<GpuPlacedBlock> placedBlocks(const std::map<PlantingCell, int>& held, const PlantingSlotLayout& layout, const PlacedTable& table) {
-    std::vector<GpuPlacedBlock> blocks;
-    const auto layers = static_cast<std::uint32_t>(layout.layerFirst.size());
+namespace {
+    // Each held cell's drawn layers of every set in placedBlocks' order: its set, the set's slots, cell and slot, the
+    // set's layer and the field's, and that layer's blocks.
+    template<typename Visit>
+    void forEachDrawnLayer(std::span<const PlantingSetSlots> sets, const PlacedTable& table, Visit&& visit) {
+        for (std::size_t set = 0; set < sets.size(); ++set) {
+            const PlantingSetSlots& slots = sets[set];
+            const auto layers = static_cast<std::uint32_t>(slots.layout.layerFirst.size());
 
-    for (const auto& [cell, slot] : held) {
-        for (std::uint32_t layer = 0; layer < layers && layer < table.drawnLayers.size(); ++layer) {
-            if (!table.drawnLayers[layer]) {
-                continue;
-            }
+            for (const auto& [cell, slot] : slots.held) {
+                for (std::uint32_t layer = 0; layer < layers; ++layer) {
+                    const auto field = static_cast<std::uint32_t>(slots.fieldLayer.at(layer));
 
-            for (std::uint32_t first = 0; first < layout.layerCapacity[layer]; first += placedGroupSize) {
-                blocks.push_back(GpuPlacedBlock{static_cast<std::uint32_t>(slot) * layout.plantsASlot + layout.layerFirst[layer] + first,
-                                                static_cast<std::uint32_t>(slot) * layers + layer, first,
-                                                layer * static_cast<std::uint32_t>(plantingMostKinds)});
+                    if (field >= table.drawnLayers.size() || !table.drawnLayers[field]) {
+                        continue;
+                    }
+
+                    const std::uint32_t blocks = (slots.layout.layerCapacity[layer] + placedGroupSize - 1) / placedGroupSize;
+
+                    if (blocks > 0) {
+                        visit(static_cast<int>(set), slots, cell, static_cast<std::uint32_t>(slot), layer, field, blocks);
+                    }
+                }
             }
         }
     }
+}
 
+std::vector<GpuPlacedBlock> placedBlocks(std::span<const PlantingSetSlots> sets, const PlacedTable& table) {
+    std::vector<GpuPlacedBlock> blocks;
+    forEachDrawnLayer(sets, table, [&](int, const PlantingSetSlots& slots, const PlantingCell&, std::uint32_t slot, std::uint32_t layer, std::uint32_t field,
+                                       std::uint32_t count) {
+        const auto layers = static_cast<std::uint32_t>(slots.layout.layerFirst.size());
+
+        for (std::uint32_t block = 0; block < count; ++block) {
+            const std::uint32_t first = block * placedGroupSize;
+            blocks.push_back(GpuPlacedBlock{slots.places.plantBase + slot * slots.layout.plantsASlot + slots.layout.layerFirst[layer] + first,
+                                            slots.places.countBase + slot * layers + layer, first, field * static_cast<std::uint32_t>(plantingMostKinds)});
+        }
+    });
     return blocks;
 }
 
 // placedBlocks' walk, counting each held cell's drawn layer's blocks instead of making them.
-std::vector<PlacedBlockRun> placedBlockRuns(const std::map<PlantingCell, int>& held, const PlantingSlotLayout& layout, const PlacedTable& table) {
+std::vector<PlacedBlockRun> placedBlockRuns(std::span<const PlantingSetSlots> sets, const PlacedTable& table) {
     std::vector<PlacedBlockRun> runs;
-    const auto layers = static_cast<std::uint32_t>(layout.layerFirst.size());
     std::uint32_t next = 0;
-
-    for (const auto& [cell, slot] : held) {
-        for (std::uint32_t layer = 0; layer < layers && layer < table.drawnLayers.size(); ++layer) {
-            if (!table.drawnLayers[layer]) {
-                continue;
-            }
-
-            const std::uint32_t blocks = (layout.layerCapacity[layer] + placedGroupSize - 1) / placedGroupSize;
-
-            if (blocks > 0) {
-                runs.push_back(PlacedBlockRun{cell, layer, next, blocks});
-                next += blocks;
-            }
-        }
-    }
-
+    forEachDrawnLayer(sets, table, [&](int set, const PlantingSetSlots&, const PlantingCell& cell, std::uint32_t, std::uint32_t, std::uint32_t field,
+                                       std::uint32_t count) {
+        runs.push_back(PlacedBlockRun{set, cell, field, next, count});
+        next += count;
+    });
     return runs;
 }
 
@@ -369,7 +358,7 @@ GpuCullChunk placedCellChunk(const PlantingBox& cell, const TerrainHeightRange& 
 * its own items' layers. A shadow tile's parts never fade, so one entry a part there.
 */
 PlacedViews placedViews(std::span<const GpuCameraCull> asked, std::span<const PlacedBlockRun> runs, std::span<const GpuCullChunk> chunks,
-                        const PlantedRegion& region, const PlacedTable& table) {
+                        const PlacedTable& table) {
     PlacedViews made;
 
     for (std::size_t index = 0; index < asked.size(); ++index) {
@@ -377,9 +366,6 @@ PlacedViews placedViews(std::span<const GpuCameraCull> asked, std::span<const Pl
         const std::uint32_t entriesAPart = (camera.flags & CAMERA_CULL_SHADOW) != 0u ? 1u : 2u;
         GpuPlacedView view;
         view.camera = camera;
-        view.region[0] = region.northmost;
-        view.region[1] = region.southmost;
-        view.region[2] = region.spread;
         view.firstItem = static_cast<std::uint32_t>(made.items.size());
         view.groups = static_cast<std::uint32_t>(table.groups.size());
         view.entryBase = made.entries;
@@ -457,13 +443,11 @@ GpuCullRecord placedChangeRecord(std::span<const GpuCullChunk> chunks) {
     return record;
 }
 
-std::uint64_t placedTableSignature(const PlacedTable& table, const PlantedRegion& region) {
+std::uint64_t placedTableSignature(const PlacedTable& table) {
     std::uint64_t hash = 14695981039346656037ull;
     hash = mixSpan(hash, std::span<const GpuPlacedPart>{table.parts});
     hash = mixSpan(hash, std::span<const GpuPlacedKind>{table.kinds});
-    hash = mixSpan(hash, std::span<const GpuPlacedGroup>{table.groups});
-    const std::array<float, 3> regionNumbers{region.northmost, region.southmost, region.spread};
-    return mixSpan(hash, std::span<const float>{regionNumbers});
+    return mixSpan(hash, std::span<const GpuPlacedGroup>{table.groups});
 }
 
 // One multiply and a truncation, rounded alike on both sides (a single product cannot be fused).
@@ -531,15 +515,14 @@ GpuInstance placedInstance(const GpuInstance& part, const GpuPlacedPlant& plant)
 * sums place (the count and scan passes' item offsets, the commands pass's group bases from the view's entries).
 */
 PlacedCullResult cullPlacedOnCpu(const PlacedTable& table, std::span<const GpuPlacedBlock> blocks, std::span<const GpuPlacedItem> items,
-                                 std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts, const PlantingMaps& maps,
-                                 const GpuPlacedView& view) {
+                                 std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts, const GpuPlacedView& view) {
     std::vector<std::vector<GpuPlacedEntry>> byGroup(table.groups.size());
 
     for (const GpuPlacedItem& item : items.subspan(view.firstItem, view.items)) {
         const GpuPlacedBlock& block = blocks[item.block];
 
         for (std::uint32_t thread = 0; thread < placedGroupSize; ++thread) {
-            if (!blockPlant(table, block, thread, plants, counts, maps, view)) {
+            if (!blockPlant(block, thread, counts)) {
                 continue;
             }
 

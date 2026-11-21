@@ -121,12 +121,32 @@ struct GpuPlantingJob {
 
 static_assert(sizeof(GpuPlantingJob) == 80, "GpuPlantingJob must match planting_cells.glsl's PlantingJob");
 
+// Where one set of cells' slots start in the buffers every set shares: its slot 0's first plant and first count.
+struct PlantingSetPlaces {
+    std::uint32_t plantBase = 0;
+    std::uint32_t countBase = 0;
+};
+
 /*
-* The frame's jobs: cell by cell in the order made, a job a layer in each (cell * layers + layer). Throws
-* std::logic_error where a lattice outgrows the layout's room (it never should: plantingSlotLayout's bound).
+* One set of cells' slots as the placed drawing reads them (render/vulkan/vulkan_planting.h holds them, a view for a
+* call): the cells held and their slots, the slots' layout, the field's number of each of the set's layers, where its
+* slots start and its cells' size. A slot's counts are its set's layers' (countBase + slot * layers + layer).
+*/
+struct PlantingSetSlots {
+    const std::map<PlantingCell, int>& held;
+    const PlantingSlotLayout& layout;
+    const std::vector<int>& fieldLayer;
+    PlantingSetPlaces places;
+    float cellMetres = 0.0f;
+};
+
+/*
+* The frame's jobs of one set: cell by cell in the order made, a job a layer in each (cell * layers + layer), its plants
+* and counts from the set's places. Throws std::logic_error where a written layer's lattice outgrows the layout's room
+* (it never should: plantingSlotLayout's bound).
 */
 std::vector<GpuPlantingJob> packPlantingJobs(const std::vector<PlantingLayerRecord>& layers, const PlantingSlotLayout& layout,
-                                             std::span<const PlantingCellMade> made, float cellMetres);
+                                             std::span<const PlantingCellMade> made, float cellMetres, const PlantingSetPlaces& places = {});
 
 // One candidate as the passes keep it: foot and scale; turn, pick, reach, threshold; kind, whether it is one, whether kept.
 struct GpuPlantingCandidate {

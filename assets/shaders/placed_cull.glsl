@@ -60,9 +60,8 @@ bool placedWorkgroupItem(out uint item) {
     return item < placedViews[0].itemCount;
 }
 
-// The thread's plant: its block's, held in the slot's count and standing in the view's region (anywhere for an unbounded
-// layer); its number in the slots.
-bool placedBlockPlant(PlacedBlock block, PlacedView view, uint thread, out uint number, out PlacedPlant plant) {
+// The thread's plant: its block's, held in the slot's count; its number in the slots.
+bool placedBlockPlant(PlacedBlock block, uint thread, out uint number, out PlacedPlant plant) {
     uint index = block.firstInLayer + thread;
     number = block.firstPlant + thread;
     plant = PlacedPlant(vec3(0.0), 0.0, 0.0, 0.0, 0u, 0.0);
@@ -72,7 +71,7 @@ bool placedBlockPlant(PlacedBlock block, PlacedView view, uint thread, out uint 
     }
 
     plant = placedPlants[number];
-    return placedKinds[block.firstKind + plant.kind].unbounded != 0u || plantingInsideRegion(view.region.xyz, plant.foot);
+    return true;
 }
 
 #endif

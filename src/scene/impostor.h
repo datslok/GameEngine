@@ -125,6 +125,14 @@ float impostorSunLight(const ImpostorBake& bake, int frames, const Vec3& point, 
 // x the radius (the vertex shader turns it to face the viewer); two triangles.
 IndexedMesh impostorCardMesh(const Vec3& centre, float radius);
 
+/*
+* A card's error in metres (scene/mesh_level.h), for choosing where it takes over: its texels' size (a frame of
+* frameTexels spans the sphere's diameter) times errorTexels, how many texels it may stray by. At 2 texels and a 2-pixel
+* budget, the card takes over where a texel covers a pixel, so a bigger plant or a coarser atlas switches farther off.
+* Throws std::invalid_argument unless all three are above 0.
+*/
+float impostorCardError(float radius, int frameTexels, float errorTexels);
+
 // The colour atlas's cutoff: its alpha is 1 where the tree was and 0 elsewhere, and its mips keep that coverage.
 inline constexpr float impostorCoverageCutoff = 0.5f;
 

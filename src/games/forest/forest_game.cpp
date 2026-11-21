@@ -19,6 +19,7 @@
 #include "scene/planting_cells.h"
 #include "scene/probe_volume.h"
 #include "scene/impostor.h"
+#include "scene/level_of_detail.h"
 #include "scene/still_draws.h"
 #include "scene/sun.h"
 #include "scene/terrain.h"
@@ -1092,16 +1093,12 @@ void ForestGame::buildLianas(AssetManager& assets) {
     }
 }
 
-/*
-* The cells round the player: up to most made this frame (all within the radius at the start). Over the patch only,
-* where the GPU draws the trees, until the whole valley is planted (ROADMAP e1).
-*/
+// The cells round the player: up to most made this frame (all within the radius at the start), wherever the player is.
 void ForestGame::updateNearLianas(World& world, int most) {
     const ForestSpecies species = plantingSpecies();
     const NearTreeSources sources{.species = species,
                                   .maps = valleyMaps.planting,
                                   .heights = *groundHeights,
-                                  .region = forestPatch,
                                   .lianas = lianaSettings,
                                   .lianaSeed = lianaSeed};
     const NearLianaTrees trees{.emergentHeights = emergentHeights, .canopyHeights = canopyHeights, .bend = swaySettings.trees.bend};
@@ -1202,7 +1199,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         }
 
         const ImpostorBake baked = bakeImpostor(parts, settings.impostorFrames, settings.impostorTexels, getJobs());
-        const float impostorError = std::max({settings.impostorErrorMetres, variant.shadowLeafError, variant.shadowBarkError});
+        const float impostorError = impostorCardError(baked.radius, settings.impostorTexels, settings.cardErrorTexels);
         Aabb treeBox = enclosing(indexedMeshBounds(variant.bark), indexedMeshBounds(variant.leaves));
 
         if (climbed) {
@@ -1228,12 +1225,15 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         cardMaterials.back().diffuseTransmission = leaf.diffuseTransmission;
         cardMaterials.back().diffuseTransmissionTint = leaf.diffuseTransmissionTint;
 
-        // The levels of detail (docs/research/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing. The
-        // leaves' coarser level is their own first vertices, thinned as the leaves are (scene/card_thinning.h).
-        assets.setMeshLevels(barkMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
-                                                 MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}, MeshLevel{MeshHandle{}, impostorError}});
-        assets.setMeshLevels(leafMeshes.back(), {MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError, true},
-                                                 MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}, MeshLevel{MeshHandle{}, impostorError}});
+        // The levels of detail (docs/research/LOD.md): each seen mesh's coarser level, then the shadow's own stand-in, then nothing
+        // where the card begins, the levels no finer than the card dropped (levelsUntilCard). The leaves' coarser level is
+        // their own first vertices, thinned as the leaves are (scene/card_thinning.h).
+        const std::array barkLevels{MeshLevel{assets.addDrawnMesh(std::move(variant.barkLevel)), variant.barkLevelError},
+                                    MeshLevel{shadowBarkMeshes.back(), variant.shadowBarkError}};
+        const std::array leafLevels{MeshLevel{assets.addDrawnMesh(std::move(variant.leafLevel)), variant.leafLevelError, true},
+                                    MeshLevel{shadowLeafMeshes.back(), variant.shadowLeafError}};
+        assets.setMeshLevels(barkMeshes.back(), levelsUntilCard(barkLevels, impostorError));
+        assets.setMeshLevels(leafMeshes.back(), levelsUntilCard(leafLevels, impostorError));
         assets.setMeshLevelOptions(barkMeshes.back(), sharedBox);
         assets.setMeshLevelOptions(leafMeshes.back(), sharedBox);
         assets.setMeshLevelOptions(cardMeshes.back(), MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = treeBox});
@@ -1267,7 +1267,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
     /*
     * Each variant's parts, as one look (scene/planting_cells.h), which the GPU's cells draw the trees with. Bark, leaves
     * and card cast no shadow; the shadow's stand-ins (the shadow leaves and the shadow bark, one shadows-only model) cast
-    * it; the climbers' stems and leaves and the epiphytes' rosettes and moss cast into the nearest cascades. All but the
+    * it, into the nearest cascades the settings name (shadowCascades: not the far map); the climbers' stems and leaves and the epiphytes' rosettes and moss cast into the nearest cascades. All but the
     * card sway as trees (treeLookSwayers, applySway); the climbers' and epiphytes' models are listed for their tests.
     */
     for (std::size_t variant = 0; variant < grown.size(); ++variant) {
@@ -1287,7 +1287,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         seen(barkMeshes[variant], bark, false, 0, false);
         seen(leafMeshes[variant], leaf, false, 0, true);
         seen(cardMeshes[variant], cardMaterials[variant], false, 0, std::nullopt);
-        seen(shadowLeafMeshes[variant], leaf, true, 0, true);
+        seen(shadowLeafMeshes[variant], leaf, true, settings.shadowCascades, true);
         look.models.back().shadowOnly = true;
         look.models.back().parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
 
@@ -1945,15 +1945,15 @@ const std::vector<PlantedKindLook>& ForestGame::getPlantLooks() const {
 
 /*
 * One list for the field: the trees' looks, then the plants', then the ground cover's (applySway gives it anew when the
-* sway changes). The ground cover is drawn wherever its maps name, past the patch, its patches' culling grown by the
-* land's relief under its cells.
+* sway changes), drawn wherever their cells plant them; the ground cover's patches' culling grown by the land's relief
+* under its cells.
 */
 std::shared_ptr<const PlantingLooks> ForestGame::plantedLooks() const {
-    PlantingLooks looks{forestPatch, treeLooks, std::vector<PlantedLayerDrawing>(forestFloorPlanting + 1)};
+    PlantingLooks looks{treeLooks, std::vector<PlantedLayerDrawing>(forestFloorPlanting + 1)};
     looks.kinds.insert(looks.kinds.end(), plantLooks.begin(), plantLooks.end());
     looks.kinds.insert(looks.kinds.end(), coverLooks.begin(), coverLooks.end());
-    looks.layers[forestGrassPlanting] = PlantedLayerDrawing{.unbounded = true, .groundRelief = grassRelief};
-    looks.layers[forestFloorPlanting] = PlantedLayerDrawing{.unbounded = true, .groundRelief = floorRelief};
+    looks.layers[forestGrassPlanting] = PlantedLayerDrawing{.groundRelief = grassRelief};
+    looks.layers[forestFloorPlanting] = PlantedLayerDrawing{.groundRelief = floorRelief};
     return std::make_shared<const PlantingLooks>(std::move(looks));
 }
 

@@ -324,6 +324,81 @@ namespace {
     }
 
     /*
+    * Which tiles keep their movers apart (keepsMoversApart): the far map always; a sun cascade once a moving draw is in
+    * it, and from then on while it has its still copy; never a swaying cascade (redrawn every frame anyway) or a lamp's
+    * tile. Kept apart, a mover moving leaves the cascade's still casters cached, where the whole tile was redrawn.
+    */
+    void testCascadesKeepTheirMoversApart() {
+        std::mt19937 random{83};
+        CullScene scene = randomCullScene(random, 300);
+        constexpr std::size_t stillDraws = 250;
+
+        for (DrawItem& draw : scene.draws) {
+            draw.previousModel = draw.model;
+        }
+
+        // A cascade's box straight down over a mover that casts.
+        const auto boxOver = [](const Vec3& centre) {
+            ShadowTile tile;
+            const Vec3 place = centre + Vec3{0.0f, 500.0f, 0.0f};
+            tile.matrix = toGpuDepthRange(Mat4::orthographic(-100.0f, 100.0f, -100.0f, 100.0f, 0.0f, 1500.0f)) *
+                          Mat4::lookAt(place, centre, Vec3{0.0f, 0.0f, 1.0f});
+            tile.lightPlace = Vec4{0.0f, 1.0f, 0.0f, 0.0f};
+            tile.size = 1024;
+            tile.sunCascade = 2;
+            return tile;
+        };
+        const LevelOfDetailSettings settings;
+        std::size_t mover = scene.draws.size();
+
+        for (std::size_t draw = stillDraws; draw < scene.draws.size() && mover == scene.draws.size(); ++draw) {
+            const DrawItem& item = scene.draws[draw];
+
+            if (item.bounds.radius > 0.0f && shadowTakes(packCullRecord(item), packShadowCull(boxOver(item.bounds.centre), settings))) {
+                mover = draw;
+            }
+        }
+
+        assert(mover < scene.draws.size());
+        // Moving already, as the drifting rocks always are.
+        scene.draws[mover].previousModel = Mat4::translation(-1.0f, 0.0f, 0.0f) * scene.draws[mover].model;
+        CameraCullTable table;
+        const CameraCullFrame culled = table.update(frameOf(scene.draws, stillDraws, 1, 0), shadowTestPlacement, [](MeshHandle) { return false; });
+
+        const ShadowTile cascade = boxOver(scene.draws[mover].bounds.centre);
+        const ShadowTile empty = boxOver(Vec3{50000.0f, 0.0f, 50000.0f});
+        ShadowTile lamp = cascade;
+        lamp.sunCascade = -1;
+        ShadowTile far = empty;
+        far.separateMovers = true;
+
+        assert(keepsMoversApart(cascade, culled, false, false));
+        assert(!keepsMoversApart(cascade, culled, true, false) && !keepsMoversApart(cascade, culled, true, true));
+        assert(!keepsMoversApart(empty, culled, false, false) && keepsMoversApart(empty, culled, false, true));
+        assert(!keepsMoversApart(lamp, culled, false, false) && !keepsMoversApart(lamp, culled, false, true));
+        assert(keepsMoversApart(far, culled, false, false) && keepsMoversApart(far, culled, true, false));
+
+        // The mover moves a metre: the whole cascade redrawn while its movers are not apart, its still casters cached once
+        // they are.
+        ShadowTile apart = cascade;
+        apart.separateMovers = true;
+        ShadowTileMemory memory;
+        memory.remember(cascade, shadowTileNeeds(cascade, settings, culled, scene.draws, {}, false, 1, memory, {}).key);
+        ShadowTileMemory apartMemory;
+        apartMemory.remember(apart, shadowTileNeeds(apart, settings, culled, scene.draws, {}, false, 1, apartMemory, {}).key);
+
+        DrawItem& moving = scene.draws[mover];
+        moving.previousModel = moving.model;
+        moving.model = Mat4::translation(1.0f, 0.0f, 0.0f) * moving.model;
+        moving.bounds.centre = moving.bounds.centre + Vec3{1.0f, 0.0f, 0.0f};
+        const CameraCullFrame moved = table.update(frameOf(scene.draws, stillDraws, 2, 1), shadowTestPlacement, [](MeshHandle) { return false; });
+
+        assert(shadowTileNeeds(cascade, settings, moved, scene.draws, {}, false, 2, memory, {}).redraw);
+        const ShadowTileNeeds apartNeeds = shadowTileNeeds(apart, settings, moved, scene.draws, {}, false, 2, apartMemory, {});
+        assert(!apartNeeds.redraw && apartNeeds.movers.moving.size() == 1 && apartNeeds.movers.moving.front() == mover);
+    }
+
+    /*
     * The placed plants' changes (render/gpu/placed_drawing.h): with nothing else changed, a tile is redrawn exactly when
     * a cell made or dropped is one of its casters by its sphere (shadowTakes); a new table redraws every tile.
     */
@@ -397,5 +472,6 @@ void testShadowCulling() {
     testLimitedCastersThinOut();
     testShadowCacheCoversTheFingerprint();
     testShadowEdges();
+    testCascadesKeepTheirMoversApart();
     testPlantedChangesRedrawTheirTiles();
 }

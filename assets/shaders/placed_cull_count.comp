@@ -4,7 +4,7 @@
 
 /*
 * The placed drawing's first pass (render/vulkan/vulkan_placed_drawing.h): a workgroup an item (a block one view culls),
-* a thread a plant; each plant in its count and the view's region culls its kind's parts as the view's draws are culled
+* a thread a plant; each plant in its count culls its kind's parts as the view's draws are culled
 * (placedPartEntries, for the view's list), and the item counts what each group draws. Counts only, so the order the
 * threads add in changes nothing; the writing pass places the entries in the plants' order.
 */
@@ -36,7 +36,7 @@ void main() {
     uint number;
     PlacedPlant plant;
 
-    if (placedBlockPlant(block, view, local, number, plant)) {
+    if (placedBlockPlant(block, local, number, plant)) {
         PlacedKind own = placedKinds[block.firstKind + plant.kind];
         PlacedKind kind = placedKinds[block.firstKind + placedKindSlot(plant.kind, own.variants, own.variantSlot, plant.pick)];
 

@@ -13,6 +13,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -307,6 +308,44 @@ namespace {
     }
 
     /*
+    * A tree's levels end where its card begins: the levels finer than the card kept, then nothing from the card's error
+    * on. A card finer than a level (a small tree's card sharp enough before its shadow's stand-in) drops that level, so
+    * the card is never held back by the tree's coarser meshes. A card at a level's own error drops it too: that level
+    * could never be chosen. A negative error throws.
+    */
+    void testATreesLevelsEndWhereItsCardBegins() {
+        const std::vector<MeshLevel> meshes{MeshLevel{MeshHandle{7}, 0.01f, true}, MeshLevel{MeshHandle{8}, 0.1f}};
+        const auto ends = [](const std::vector<MeshLevel>& levels, std::vector<std::uint32_t> kept, float cardError) {
+            if (levels.size() != kept.size() + 1 || levels.back().mesh.isValid() || levels.back().errorMetres != cardError) {
+                return false;
+            }
+
+            for (std::size_t index = 0; index < kept.size(); ++index) {
+                if (levels[index].mesh.index != kept[index]) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+        assert(ends(levelsUntilCard(meshes, 0.5f), {7, 8}, 0.5f));
+        assert(ends(levelsUntilCard(meshes, 0.05f), {7}, 0.05f));
+        assert(ends(levelsUntilCard(meshes, 0.1f), {7}, 0.1f));
+        assert(ends(levelsUntilCard(meshes, 0.005f), {}, 0.005f));
+        assert(levelsUntilCard(meshes, 0.05f).front().sharesVertices);
+
+        bool threw = false;
+
+        try {
+            levelsUntilCard(meshes, -1.0f);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+
+        assert(threw);
+    }
+
+    /*
     * The square view switches the 1 cm level in at 2.5 m and the 10 cm one at 25 m (from the sphere's surface). With a
     * fade band of 0.2, a draw that fades draws both levels over the fifth of each distance before its switch, the share
     * running 0 to 1 across it by the coarser level's error, and one level everywhere else. Draws that do not fade, views
@@ -493,6 +532,7 @@ namespace {
 
 void testLevelOfDetail() {
     testAnImpostorTakesOverWhereATreeEnds();
+    testATreesLevelsEndWhereItsCardBegins();
     testAFadingDrawCrossesTheBand();
     testAPlantFadesIntoItsCard();
     testTheReadoutCountsEachLevel();

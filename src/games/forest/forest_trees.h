@@ -222,11 +222,17 @@ struct ForestTreeSettings {
     // smaller and the crown thinner far off, which people preferred for light thinning (Neubert et al. 2011).
     float levelCardGrowth = 0.5f;
 
-    // The impostor past them (scene/impostor.h, docs/research/LOD.md): the error, in metres, from which the tree is drawn as its
-    // card (at least the shadow stand-ins'; 1.5 m switches about 580 m off at 1080 pixels and a 70 degree view, about
-    // 90 m in the reflection probe's faces), and its atlas: frames a side over the hemisphere, texels a frame (8 x 128:
-    // 1024 square, Fortnite's trees 12 x 12 in 2048).
-    float impostorErrorMetres = 1.5f;
+    // The impostor past them (scene/impostor.h, docs/research/LOD.md): its error in its own texels (impostorCardError), from
+    // which the tree is drawn as its card, ahead of any coarser level (levelsUntilCard). 2 at the 2-pixel budget switches
+    // where a texel covers a pixel: at 1080 pixels and a 70 degree view about 115 m for a mid tree, 300 m for a canopy
+    // tree, 370 m for an emergent. Its atlas: frames a side over the hemisphere, texels a frame (8 x 128: 1024 square,
+    // Fortnite's trees 12 x 12 in 2048); more texels make a sharper card, switched to farther off.
+    float cardErrorTexels = 2.0f;
+
+    // How many of the sun's cascades its shadow stand-ins are drawn into, nearest first (ModelRenderer::shadowCascades; 0
+    // all, the far shadow map too). 4, the cascades and not the far map past them (with the default 4 cascades), thinning
+    // out across the last: a far tile holding the valley's trees redrew kilometres of them whenever the camera changed cell.
+    int shadowCascades = 4;
     int impostorFrames = 8;
     int impostorTexels = 128;
 };

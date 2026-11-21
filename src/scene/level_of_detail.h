@@ -90,6 +90,13 @@ float thinningErrorPerMetre(const LevelView& view);
 // The level to draw distance metres away: 0 the mesh itself, k levels[k - 1], the coarsest whose error fits the budget.
 std::size_t chooseLevel(std::span<const MeshLevel> levels, float distance, const LevelView& view);
 
+/*
+* A tree's levels ending on its card (scene/impostor.h): the levels finer than cardErrorMetres, then one without a mesh
+* at it, where the card takes over. A level as coarse as the card or coarser is dropped, so a card sharp before the
+* tree's coarser meshes are coarse enough is never held back by them. Throws std::invalid_argument for a negative error.
+*/
+std::vector<MeshLevel> levelsUntilCard(std::span<const MeshLevel> levels, float cardErrorMetres);
+
 // How far a draw's nearest point can be: to its sphere's surface, 0 from inside it.
 float levelDistance(const BoundingSphere& bounds, const Vec3& eye);
 
