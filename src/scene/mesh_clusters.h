@@ -2,14 +2,10 @@
 
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
+#include "scene/mesh_clusters_shared.h"
 
 #include <cstdint>
 #include <vector>
-
-// A cluster's most vertices and triangles: what one mesh-shader workgroup emits (NVIDIA's advice: 64 vertices, 124
-// triangles, so the triangles' bytes fit 128-byte rows; docs/research/VIRTUALGEOMETRY.md).
-inline constexpr std::uint32_t MESH_CLUSTER_MAX_VERTICES = 64;
-inline constexpr std::uint32_t MESH_CLUSTER_MAX_TRIANGLES = 124;
 
 /*
 * A small piece of a mesh, culled on its own (ROADMAP phase 21, stage 1). Its sphere holds its vertices (for the frustum

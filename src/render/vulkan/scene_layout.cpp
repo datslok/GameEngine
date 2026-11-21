@@ -1,5 +1,6 @@
 #include "render/vulkan/scene_layout.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/gpu/taa.h"
 #include "render/vulkan/vulkan_check.h"
 
@@ -68,7 +69,12 @@ namespace {
     }};
 }
 
-SceneLayout::SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout) {
+/*
+* With mesh shaders (render/gpu/mesh_cluster_culling.h), whatever the vertex shaders read the mesh shaders read too
+* (they place vertices with the same code, triangle_vertex.glsl), and they push the style they draw after the vertex
+* shaders' push constants. Naming the mesh stage needs the GPU's mesh shaders, so only then.
+*/
+SceneLayout::SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout, bool meshShaders) {
     std::array<VkDescriptorSetLayoutBinding, SceneBindingCount> bindings{};
 
     for (std::uint32_t binding = 0; binding < SceneBindingCount; ++binding) {
@@ -76,6 +82,10 @@ SceneLayout::SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout) 
         bindings[binding].descriptorType = sceneBindings[binding].type;
         bindings[binding].descriptorCount = 1;
         bindings[binding].stageFlags = sceneBindings[binding].stages;
+
+        if (meshShaders && (sceneBindings[binding].stages & vertex) != 0) {
+            bindings[binding].stageFlags |= VK_SHADER_STAGE_MESH_BIT_EXT;
+        }
     }
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -89,16 +99,20 @@ SceneLayout::SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout) 
 
     const std::array<VkDescriptorSetLayout, 2> setLayouts{bindlessLayout, createdLayout};
 
-    // Only the shadow pass and the captures push anything: each tile's view, or each cube face's or mirror's view, for
-    // their vertex shaders.
-    const VkPushConstantRange shadowView{VK_SHADER_STAGE_VERTEX_BIT, 0, static_cast<std::uint32_t>(std::max(sizeof(GpuShadowView), sizeof(GpuCaptureView)))};
+    // The shadow pass and the captures push each tile's view, or each cube face's or mirror's view, for
+    // their vertex shaders; the mesh shaders, the style they draw, after them.
+    static_assert(std::max(sizeof(GpuShadowView), sizeof(GpuCaptureView)) == MESH_CLUSTER_PUSH_OFFSET, "The mesh shaders' push constants follow the vertex shaders'");
+    const std::array<VkPushConstantRange, 2> pushRanges{
+        VkPushConstantRange{VK_SHADER_STAGE_VERTEX_BIT, 0, MESH_CLUSTER_PUSH_OFFSET},
+        VkPushConstantRange{VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, MESH_CLUSTER_PUSH_BYTES},
+    };
 
     VkPipelineLayoutCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = static_cast<std::uint32_t>(setLayouts.size());
     pipelineInfo.pSetLayouts = setLayouts.data();
-    pipelineInfo.pushConstantRangeCount = 1;
-    pipelineInfo.pPushConstantRanges = &shadowView;
+    pipelineInfo.pushConstantRangeCount = meshShaders ? 2u : 1u;
+    pipelineInfo.pPushConstantRanges = pushRanges.data();
 
     VkPipelineLayout createdPipelineLayout = VK_NULL_HANDLE;
     vulkanCheck(vkCreatePipelineLayout(device, &pipelineInfo, nullptr, &createdPipelineLayout), "Scene pipeline layout creation failed");

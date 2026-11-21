@@ -29,4 +29,15 @@
 #define MESH_CLUSTER_WORK_REAL 5
 #define MESH_CLUSTER_WORK_WORDS 8
 
+// A style's survivors drawn as mesh shader workgroups this many across, then rows of them (a dimension is only sure to
+// take 65535): meshClusterTaskGroups, meshClusterTaskIndex.
+#define MESH_CLUSTER_TASK_WIDTH 32768u
+
+// The mesh shader's workgroup: one warp on NVIDIA's GPUs, each thread placing up to two vertices and four triangles.
+#define MESH_CLUSTER_MESH_THREADS 32
+
+// The mesh shaders' push constants (the style drawn) sit after the vertex shaders' (GpuShadowView, GpuCaptureView).
+#define MESH_CLUSTER_PUSH_OFFSET 112
+#define MESH_CLUSTER_PUSH_BYTES 16
+
 #endif

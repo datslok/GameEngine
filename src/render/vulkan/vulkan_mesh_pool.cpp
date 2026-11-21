@@ -22,7 +22,7 @@ VulkanMeshPool::VulkanMeshPool(const VulkanDevice& device, ImmediateCommands& up
 
     vertexUsage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | shared;
     indexUsage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | shared;
-    clusterUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    clusterUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 }
 
 void VulkanMeshPool::ensure(VulkanBuffer& pool, std::uint64_t& capacity, std::uint64_t used, std::uint64_t needed, std::uint64_t smallest,
@@ -123,12 +123,16 @@ VkBuffer VulkanMeshPool::getClusters() const {
     return clusters.get();
 }
 
-VkBuffer VulkanMeshPool::getClusterVertices() const {
-    return clusterVertices.get();
+VkDeviceAddress VulkanMeshPool::getClusterAddress() const {
+    return clusters.getDeviceAddress();
 }
 
-VkBuffer VulkanMeshPool::getTriangleWords() const {
-    return triangleWords.get();
+VkDeviceAddress VulkanMeshPool::getClusterVertexAddress() const {
+    return clusterVertices.getDeviceAddress();
+}
+
+VkDeviceAddress VulkanMeshPool::getTriangleWordAddress() const {
+    return triangleWords.getDeviceAddress();
 }
 
 const std::vector<GpuMeshCluster>& VulkanMeshPool::getClusterRecords() const {

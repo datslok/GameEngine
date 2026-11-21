@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_device.h"
+#include "render/gpu/mesh_cluster_culling.h"
 #include "render/vulkan/vulkan_check.h"
 
 #include <SDL3/SDL_vulkan.h>
@@ -170,6 +171,7 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     features13.subgroupSizeControl = VK_TRUE;            // required by Vulkan 1.3 itself
     features13.computeFullSubgroups = VK_TRUE;           // required by Vulkan 1.3 itself
     features13.privateData = VK_TRUE;                    // required by Vulkan 1.3 itself; Streamline keeps its data on objects with it
+    features13.maintenance4 = VK_TRUE;                   // required by Vulkan 1.3 itself; the mesh shaders' workgroup size comes as an id
 
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -263,6 +265,32 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
 
         rayQueries = physicalDevice.enable_extension_features_if_present(structures) &&
                      physicalDevice.enable_extension_features_if_present(queries);
+    }
+
+    /*
+    * Optional: mesh shaders (VK_EXT_mesh_shader), each workgroup emitting a cluster's vertices and triangles
+    * (render/gpu/mesh_cluster_culling.h), used only when the GPU takes a whole cluster in one workgroup and a style's
+    * longest run in one draw. Without them the clusters are drawn as whole meshes, as before.
+    */
+    if (physicalDevice.enable_extension_if_present(VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+        VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures{};
+        meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+        meshFeatures.meshShader = VK_TRUE;
+
+        if (physicalDevice.enable_extension_features_if_present(meshFeatures)) {
+            VkPhysicalDeviceMeshShaderPropertiesEXT meshProperties{};
+            meshProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT;
+            VkPhysicalDeviceProperties2 properties{};
+            properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            properties.pNext = &meshProperties;
+            vkGetPhysicalDeviceProperties2(physicalDevice.physical_device, &properties);
+            const std::uint32_t rows = (largestMeshClusterRoom + MESH_CLUSTER_TASK_WIDTH - 1) / MESH_CLUSTER_TASK_WIDTH;
+            meshShaders = meshProperties.maxMeshOutputVertices >= MESH_CLUSTER_MAX_VERTICES &&
+                          meshProperties.maxMeshOutputPrimitives >= MESH_CLUSTER_MAX_TRIANGLES &&
+                          meshProperties.maxMeshWorkGroupInvocations >= MESH_CLUSTER_MESH_THREADS &&
+                          meshProperties.maxMeshWorkGroupCount[0] >= MESH_CLUSTER_TASK_WIDTH && meshProperties.maxMeshWorkGroupCount[1] >= rows &&
+                          meshProperties.maxMeshWorkGroupTotalCount >= largestMeshClusterRoom;
+        }
     }
 
     if (rayQueries) {
@@ -434,6 +462,10 @@ bool VulkanDevice::reportsMemoryBudget() const {
 
 bool VulkanDevice::supportsRayQueries() const {
     return rayQueries;
+}
+
+bool VulkanDevice::supportsMeshShaders() const {
+    return meshShaders;
 }
 
 bool VulkanDevice::supportsDualSourceBlending() const {

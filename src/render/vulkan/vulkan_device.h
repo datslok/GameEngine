@@ -62,6 +62,10 @@ public:
     bool supportsRayQueries() const;
     std::uint32_t getScratchAlignment() const;
 
+    // Whether meshes can be drawn by mesh shaders (VK_EXT_mesh_shader, on when the GPU has it with room for a cluster's
+    // workgroup: render/gpu/mesh_cluster_culling.h). Without it the mesh clusters are drawn as whole meshes, as before.
+    bool supportsMeshShaders() const;
+
     // Whether the features FSR 3.1's shaders use are on (16-bit floats and integers, storage images read and written
     // without a declared format; render/vulkan/vulkan_fsr.h). On when the GPU has them; without them FSR stays off.
     bool supportsFsrFeatures() const;
@@ -138,6 +142,7 @@ private:
     bool swapchainColourSpaces = false;
     bool memoryBudget = false;
     bool rayQueries = false;
+    bool meshShaders = false;
     bool dualSourceBlending = false;
     bool independentBlending = false;
     bool blockCompression = false;

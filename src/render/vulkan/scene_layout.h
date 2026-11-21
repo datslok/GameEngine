@@ -87,7 +87,8 @@ static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsB
 // so the sets bound for one stay bound for the next.
 class SceneLayout {
 public:
-    SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout);
+    // meshShaders: the GPU draws mesh clusters by mesh shaders, which read what the vertex shaders read and push a style.
+    SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout, bool meshShaders);
 
     SceneLayout(const SceneLayout&) = delete;
     SceneLayout& operator=(const SceneLayout&) = delete;

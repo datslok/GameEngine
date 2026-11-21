@@ -29,10 +29,12 @@ public:
     VkBuffer getVertices() const;
     VkBuffer getIndices() const;
 
-    // The cluster pools, and a copy of every cluster record (cluster-compare's reference).
+    // The cluster pools and their GPU addresses (moving when a pool grows: read them when used), and a copy of every
+    // cluster record (cluster-compare's reference).
     VkBuffer getClusters() const;
-    VkBuffer getClusterVertices() const;
-    VkBuffer getTriangleWords() const;
+    VkDeviceAddress getClusterAddress() const;
+    VkDeviceAddress getClusterVertexAddress() const;
+    VkDeviceAddress getTriangleWordAddress() const;
     const std::vector<GpuMeshCluster>& getClusterRecords() const;
 
     // Seconds spent building clusters, all meshes together (measured when meshes load).

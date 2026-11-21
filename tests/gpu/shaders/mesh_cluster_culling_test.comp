@@ -10,6 +10,14 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_MESH_CLUSTER_TASKS) {
+        // Input: (a run's count, a workgroup's x, its y). Output: (the run's workgroups x y z, the workgroup's survivor).
+        vec4 a = testInput(0);
+        uvec3 groups = meshClusterTaskGroups(uint(a.x));
+        testOutput(0, vec4(vec3(groups), float(meshClusterTaskIndex(uvec3(uint(a.y), uint(a.z), 0u)))));
+        return;
+    }
+
     if (function == GPU_TEST_MESH_CLUSTER_KEPT) {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the

@@ -305,5 +305,6 @@
 
 // mesh_cluster_culling_test.comp
 #define GPU_TEST_MESH_CLUSTER_KEPT 0
+#define GPU_TEST_MESH_CLUSTER_TASKS 1
 
 #endif

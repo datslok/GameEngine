@@ -121,9 +121,13 @@ struct GpuFrameData {
     // camera-relative view-projection without the jitter, taking points measured from this frame's camera.
     float motionPrevious[16];
     float motionOptions[4];   // x: 1 while the motion is worked out (anti-aliasing is temporal), else every pixel has none; yz: this frame's jitter (pixels)
+    // The mesh shaders' buffers by GPU address (render/gpu/mesh_cluster_culling.h, packMeshClusterBuffers), each as its
+    // low and high words, all zero while no mesh shader draws: the list, its totals, the cluster records, their vertex
+    // numbers, their triangle words, the vertex pool.
+    std::uint32_t meshClusterBuffers[12];
 };
 
-static_assert(sizeof(GpuFrameData) == 512, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 560, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);

@@ -198,7 +198,7 @@ VkPipeline VulkanPipeline::build(const VulkanDevice& device, const PipelineDescr
 
     std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].stage = description.meshShader ? VK_SHADER_STAGE_MESH_BIT_EXT : VK_SHADER_STAGE_VERTEX_BIT;
     stages[0].module = vertexShader.get();
     stages[0].pName = "main";
     stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -333,8 +333,8 @@ VkPipeline VulkanPipeline::build(const VulkanDevice& device, const PipelineDescr
     info.pNext = &rendering;
     info.stageCount = hasFragmentShader ? 2 : 1;
     info.pStages = stages.data();
-    info.pVertexInputState = &vertexInput;
-    info.pInputAssemblyState = &inputAssembly;
+    info.pVertexInputState = description.meshShader ? nullptr : &vertexInput;
+    info.pInputAssemblyState = description.meshShader ? nullptr : &inputAssembly;
     info.pViewportState = &viewport;
     info.pRasterizationState = &rasterization;
     info.pMultisampleState = &multisample;

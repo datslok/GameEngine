@@ -30,6 +30,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 levelOptions;           // x: the camera's error allowed a metre away, for card thinning (0 thins nothing), y: the frame turning the level fades' dither, z: 1 shadows impostor cards by their own leaves, w: that shadow's bias in texels
     mat4 motionPrevious;         // the main pass's motion vectors (taa.glsl, pixelMotion): last frame's view-projection without the jitter, taking points measured from this frame's camera
     vec4 motionOptions;          // x: 1 while the motion is worked out, else every pixel has none; yz: this frame's jitter (pixels)
+    uvec4 meshClusterBuffers[3]; // the mesh shaders' buffers by address (low, high words): the list, its totals; the clusters, their vertex numbers; their triangle words, the vertex pool
 };
 
 #endif
