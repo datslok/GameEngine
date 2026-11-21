@@ -1,5 +1,6 @@
 #include "mesh_helpers.h"
 #include "test_jobs.h"
+#include "assets/asset_manager.h"
 #include "scene/indexed_mesh.h"
 #include "scene/mesh.h"
 #include "scene/mesh_clusters.h"
@@ -13,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <random>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -317,6 +319,193 @@ namespace {
         assert(together[1].groups.size() == 1 && together[2].groups.size() > 1);
         assert(buildMeshClusters(std::vector<MeshClusterBuild>{}, testJobs()).empty());
     }
+
+    /*
+    * Levels made by their maker, as a twig's pruned leaves (games/forest/twigs.h): 300 separate squares scattered in a
+    * box, each coarser level keeping the first half of the last and growing them by sqrt 2 about their centres (its own
+    * vertices, after the finer levels'), with errors rising.
+    */
+    struct ScatteredLevels {
+        IndexedMesh mesh;
+        std::vector<GivenClusterLevel> coarser;
+        std::vector<std::size_t> triangles; // each level's, the finest first
+    };
+
+    ScatteredLevels scatteredLevels() {
+        ScatteredLevels made;
+        std::mt19937 random(11u);
+        std::uniform_real_distribution<float> place(-5.0f, 5.0f);
+        std::vector<Vec3> centres;
+
+        for (int square = 0; square < 300; ++square) {
+            centres.push_back(Vec3{place(random), place(random), place(random)});
+        }
+
+        const auto addSquares = [&](std::size_t count, float half, std::vector<std::uint32_t>& indices) {
+            for (std::size_t square = 0; square < count; ++square) {
+                const auto first = static_cast<std::uint32_t>(made.mesh.vertices.size());
+
+                for (const Vec2 corner : {Vec2{-1.0f, -1.0f}, Vec2{1.0f, -1.0f}, Vec2{1.0f, 1.0f}, Vec2{-1.0f, 1.0f}}) {
+                    const Vec3 position = centres[square] + Vec3{corner.x * half, corner.y * half, 0.0f};
+                    made.mesh.vertices.push_back(MeshVertex{position, Vec3{0.0f, 0.0f, 1.0f}, Vec2{}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}});
+                }
+
+                indices.insert(indices.end(), {first, first + 1, first + 2, first, first + 2, first + 3});
+            }
+
+            made.triangles.push_back(count * 2);
+        };
+
+        addSquares(centres.size(), 0.1f, made.mesh.indices);
+        float half = 0.1f;
+        float error = 0.1f;
+
+        for (std::size_t count = centres.size() / 2; count >= 1; count /= 2) {
+            half *= std::sqrt(2.0f);
+            GivenClusterLevel level;
+            level.error = error;
+            addSquares(count, half, level.indices);
+            made.coarser.push_back(std::move(level));
+            error *= 2.0f;
+        }
+
+        return made;
+    }
+
+    // A level's triangles as sorted corner triples, each turned to start at its smallest corner (keeping its winding).
+    std::vector<std::array<std::uint32_t, 3>> windingTriples(const std::vector<std::uint32_t>& indices) {
+        std::vector<std::array<std::uint32_t, 3>> triples;
+
+        for (std::size_t corner = 0; corner + 2 < indices.size(); corner += 3) {
+            std::array<std::uint32_t, 3> triple{indices[corner], indices[corner + 1], indices[corner + 2]};
+
+            while (triple[0] != std::min({triple[0], triple[1], triple[2]})) {
+                std::rotate(triple.begin(), triple.begin() + 1, triple.end());
+            }
+
+            triples.push_back(triple);
+        }
+
+        std::sort(triples.begin(), triples.end());
+        return triples;
+    }
+
+    /*
+    * Given levels become a chain of groups: level k's clusters simplified with group k, made from group k - 1 (the
+    * finest from none, first), each group's error the next level's (the last never simplified), its sphere holding its
+    * own and the next level's clusters and the group below; every level's triangles in its clusters exactly once with
+    * their winding. Every cut, the same everywhere or seen from an eye, draws exactly one whole level. The asset manager
+    * keeps them for drawn meshes only, and a batch builds them as alone; levels whose errors fall, or whose corners are
+    * not the mesh's, are refused.
+    */
+    void testGivenLevels() {
+        const ScatteredLevels given = scatteredLevels();
+        const MeshClusters built = buildGivenClusterLevels(given.mesh, given.coarser);
+        const std::size_t levels = given.coarser.size() + 1;
+        assert(built.groups.size() == levels);
+        assertParentsBoundChildren(built);
+
+        std::vector<std::vector<std::uint32_t>> found(levels);
+
+        for (std::uint32_t number = 0; number < built.clusters.size(); ++number) {
+            const MeshCluster& cluster = built.clusters[number];
+            const std::uint32_t level = built.groups[cluster.group].level;
+            assert(cluster.group == level && (number < built.originalCount) == (level == 0));
+            assert(cluster.refinedGroup == (level == 0 ? meshClusterNoGroup : level - 1));
+            const MeshClusterGroup& group = built.groups[cluster.group];
+            const Vec3 offset = cluster.centre - group.centre;
+            assert(std::sqrt(offset.dot(offset)) + cluster.radius <= group.radius * 1.00001f + 1e-6f);
+            const std::vector<std::uint32_t> corners = clusterCorners(built, cluster);
+            found[level].insert(found[level].end(), corners.begin(), corners.end());
+        }
+
+        assert(windingTriples(found[0]) == windingTriples(given.mesh.indices));
+
+        for (std::size_t level = 1; level < levels; ++level) {
+            assert(windingTriples(found[level]) == windingTriples(given.coarser[level - 1].indices));
+            assert(built.groups[level - 1].error == given.coarser[level - 1].error);
+        }
+
+        assert(built.groups.back().error == FLT_MAX);
+
+        // Each group holds the next level's clusters too, so the coarser level's place is inside the sphere it is chosen by.
+        for (const MeshCluster& cluster : built.clusters) {
+            if (cluster.refinedGroup != meshClusterNoGroup) {
+                const MeshClusterGroup& below = built.groups[cluster.refinedGroup];
+                const Vec3 offset = cluster.centre - below.centre;
+                assert(std::sqrt(offset.dot(offset)) + cluster.radius <= below.radius * 1.00001f + 1e-6f);
+            }
+        }
+
+        const auto assertOneLevel = [&](const std::vector<std::uint32_t>& drawn) {
+            assert(!drawn.empty());
+            const std::uint32_t level = built.groups[built.clusters[drawn.front()].group].level;
+            std::size_t triangles = 0;
+
+            for (const std::uint32_t number : drawn) {
+                assert(built.groups[built.clusters[number].group].level == level);
+                triangles += built.clusters[number].triangleCount;
+            }
+
+            assert(triangles == given.triangles[level]);
+        };
+
+        for (const float threshold : uniformThresholds(built)) {
+            assertOneLevel(cut(built, rawError(built), threshold));
+        }
+
+        for (const float away : {0.5f, 5.0f, 20.0f, 80.0f, 400.0f}) {
+            for (const float threshold : {0.0005f, 0.002f, 0.01f}) {
+                assertOneLevel(cut(built, seenError(built, Vec3{away, 1.0f, 2.0f}), threshold));
+            }
+        }
+
+        // A batch builds them as alone.
+        const std::vector<MeshClusters> batch = buildMeshClusters(std::vector<MeshClusterBuild>{{&given.mesh, ClusterLevels::All, &given.coarser}}, testJobs());
+        assertSameClusters(batch.front(), built);
+
+        // Refused: errors falling, a corner past the mesh's vertices.
+        std::vector<GivenClusterLevel> falling = given.coarser;
+        falling.back().error = 0.0f;
+        bool refused = false;
+
+        try {
+            buildGivenClusterLevels(given.mesh, falling);
+        } catch (const std::invalid_argument&) {
+            refused = true;
+        }
+
+        assert(refused);
+        std::vector<GivenClusterLevel> outside = given.coarser;
+        outside.front().indices.front() = static_cast<std::uint32_t>(given.mesh.vertices.size());
+        refused = false;
+
+        try {
+            buildGivenClusterLevels(given.mesh, outside);
+        } catch (const std::invalid_argument&) {
+            refused = true;
+        }
+
+        assert(refused);
+
+        // The asset manager keeps given levels for a drawn mesh (which then has cluster levels), not for a Mesh.
+        AssetManager assets;
+        const MeshHandle drawn = assets.addDrawnMesh(given.mesh);
+        assert(!assets.hasClusterLevels(drawn) && assets.getGivenClusterLevels(drawn) == nullptr);
+        assets.setGivenClusterLevels(drawn, given.coarser);
+        assert(assets.hasClusterLevels(drawn) && assets.getGivenClusterLevels(drawn) != nullptr);
+        assert(assets.getGivenClusterLevels(drawn)->size() == given.coarser.size());
+        const MeshHandle cube = assets.addMesh(Mesh::cube());
+        refused = false;
+
+        try {
+            assets.setGivenClusterLevels(cube, given.coarser);
+        } catch (const std::invalid_argument&) {
+            refused = true;
+        }
+
+        assert(refused);
+    }
 }
 
 void testMeshClusterLevels() {
@@ -325,4 +514,5 @@ void testMeshClusterLevels() {
     testSmallAndRepeatable();
     testOneLevel();
     testManyBuiltAtOnce();
+    testGivenLevels();
 }

@@ -8,6 +8,7 @@
 #include "scene/material.h"
 #include "scene/deforming_mesh.h"
 #include "scene/mesh.h"
+#include "scene/mesh_clusters.h"
 #include "scene/mesh_level.h"
 #include "scene/simplify_mesh.h"
 #include "scene/model.h"
@@ -84,6 +85,15 @@ public:
     void setClusterLevels(MeshHandle mesh);
     bool hasClusterLevels(MeshHandle mesh) const;
     const std::vector<std::uint8_t>& getClusterLevels() const;
+
+    /*
+    * Give a drawn-only mesh cluster levels made by its maker (buildGivenClusterLevels: a twig's pruned leaves, ROADMAP
+    * phase 21 stage 3b-i), its vertices holding every level's, its indices the finest; it then has cluster levels.
+    * Checked as the build checks them; a mesh not drawn-only (whose vertices a conversion may reorder) throws
+    * std::invalid_argument. And a mesh's given levels, or null for one without.
+    */
+    void setGivenClusterLevels(MeshHandle mesh, std::vector<GivenClusterLevel> levels);
+    const std::vector<GivenClusterLevel>* getGivenClusterLevels(MeshHandle mesh) const;
 
     // Changes whenever a mesh's levels, options or cluster levels are named, so draws kept from frame to frame, which
     // hold spans of them (scene/still_draws.h), are built again.
@@ -167,5 +177,6 @@ private:
     std::vector<std::vector<MeshLevel>> meshLevels;
     std::vector<MeshLevelOptions> meshLevelOptions;
     std::vector<std::uint8_t> clusterLevels; // a flag a mesh, shorter when the last have none
+    std::map<std::uint32_t, std::vector<GivenClusterLevel>> givenClusterLevels; // by mesh number; never moves its elements
     std::uint64_t levelsVersion = 0;
 };

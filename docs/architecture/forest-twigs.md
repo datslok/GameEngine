@@ -2,7 +2,7 @@
 
 Covers: `src/games/forest/twigs`, `src/scene/leaf_pruning`
 
-Phase 21 stage 3 (`ROADMAP.md`; research in `docs/research/LEAFGEOMETRY.md`): twigs of opaque, modelled leaves, which the trees will place as instances in place of their cut-out cards (`forest-trees.md`, Leaf-cluster cards). So far (3a) the prototypes and a stand to look at them; no tree uses them yet.
+Phase 21 stage 3 (`ROADMAP.md`; research in `docs/research/LEAFGEOMETRY.md`): twigs of opaque, modelled leaves, which the trees will place as instances in place of their cut-out cards (`forest-trees.md`, Leaf-cluster cards). So far (3a, 3b-i) the prototypes, their levels as given cluster levels, and a stand to look at them; no tree uses them yet.
 
 ## A modelled leaf (`leaf_clusters`)
 
@@ -17,6 +17,7 @@ Phase 21 stage 3 (`ROADMAP.md`; research in `docs/research/LEAFGEOMETRY.md`): tw
 - **Stem** (`appendStem`): a three-sided tube up `clusterStemPoint`, `stemRadius` at the foot to a third at the tip, 5 rings; the finest level only, in the trees' bark.
 - **Levels** (`TwigLevel`): each keeps `prunedKept` of the leaves, the prefix of `prunedOrder` with a seeded offset, and draws them with `twigLevelRows` rows (`leafRows`, then at most 2, then 1). The kept leaves grow about their bases by sqrt(the twig's full leaf area over the kept leaves' area at the level's rows), so every level keeps the finest's area exactly (Cook and Halstead). Error: the most any grown leaf strays past its size, length x (growth - 1), never less than the finer level's; 0 for the finest.
 - **Prototypes** (`buildTwigPrototypes`): `prototypes` (8) twigs, each from its own seed (`forestShapeSeed` of `twigSeed`), built in `buildTwigs` after the trees from the canopy's settings.
+- **For the cluster cut** (`twigLeafMesh` → `TwigLeafMesh`): every level's vertices in one mesh, the finest's triangles its indices, the coarser levels given with their errors (`buildGivenClusterLevels`, `mesh-clusters.md`), a chain of a group a level.
 
 ## Pruning order (`scene/leaf_pruning`)
 

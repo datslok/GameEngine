@@ -125,6 +125,22 @@ void AssetManager::setClusterLevels(MeshHandle mesh) {
     ++levelsVersion; // the draws kept hold the flag (DrawItem::clusterLevels)
 }
 
+// Built once here to check them (the GPU's upload builds them again with the rest of its batch).
+void AssetManager::setGivenClusterLevels(MeshHandle mesh, std::vector<GivenClusterLevel> levels) {
+    if (!mesh.isValid() || !isDrawnOnly(mesh)) {
+        throw std::invalid_argument("Given cluster levels need a drawn-only mesh");
+    }
+
+    buildGivenClusterLevels(getDrawnMesh(mesh), levels);
+    givenClusterLevels[mesh.index] = std::move(levels);
+    setClusterLevels(mesh);
+}
+
+const std::vector<GivenClusterLevel>* AssetManager::getGivenClusterLevels(MeshHandle mesh) const {
+    const auto found = givenClusterLevels.find(mesh.index);
+    return mesh.isValid() && found != givenClusterLevels.end() ? &found->second : nullptr;
+}
+
 bool AssetManager::hasClusterLevels(MeshHandle mesh) const {
     return mesh.isValid() && mesh.index < clusterLevels.size() && clusterLevels[mesh.index] != 0;
 }

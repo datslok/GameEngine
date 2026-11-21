@@ -3,6 +3,7 @@
 #include "core/settings_visitor.h"
 #include "games/forest/leaf_clusters.h"
 #include "scene/indexed_mesh.h"
+#include "scene/mesh_clusters.h"
 
 #include <cstdint>
 #include <vector>
@@ -73,6 +74,17 @@ struct TwigLevel {
 struct TwigPrototype {
     std::vector<TwigLevel> levels;
 };
+
+/*
+* A twig's leaves as one mesh for the cluster cut (ROADMAP phase 21 stage 3b-i): every level's vertices, the finest's
+* triangles as its indices, and the coarser levels given with their errors (AssetManager::setGivenClusterLevels).
+*/
+struct TwigLeafMesh {
+    IndexedMesh mesh;
+    std::vector<GivenClusterLevel> coarser;
+};
+
+TwigLeafMesh twigLeafMesh(const TwigPrototype& twig);
 
 // One twig: leaves laid out as clusterLeaves(cells, leafShare, seed) lays out a card's, in a twig twigSize metres tall.
 TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& settings, float twigSize, float leafShare, std::uint32_t seed);

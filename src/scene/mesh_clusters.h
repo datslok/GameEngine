@@ -82,14 +82,37 @@ enum class ClusterLevels { One, All };
 MeshClusters buildMeshClusters(const IndexedMesh& mesh, ClusterLevels levels);
 
 /*
+* A coarser level made by the mesh's maker instead of simplified (ROADMAP phase 21 stage 3b-i): a twig's pruned leaves
+* (games/forest/twigs.h), which simplification would erode. Its triangles as the mesh's vertex numbers (its corners
+* among the mesh's vertices, which hold every level's; the mesh's own indices are the finest level), and its error: how
+* far it strays from the finest, in the mesh's units.
+*/
+struct GivenClusterLevel {
+    std::vector<std::uint32_t> indices;
+    float error = 0.0f;
+};
+
+/*
+* The levels as a chain of groups: group k is level k's clusters, made from group k - 1 (the finest from none), its error
+* the next level's (the coarsest's never simplified, drawn however far), its sphere holding its own clusters', the next
+* level's and group k - 1's, so errors rise and spheres nest as the cut needs: every cut draws exactly one whole level.
+* Each level cut into clusters as a mesh without levels is. Throws std::invalid_argument for errors that fall, a level's
+* indices not whole triangles, or corners past the mesh's vertices. Cost grows with the levels' triangles.
+*/
+MeshClusters buildGivenClusterLevels(const IndexedMesh& mesh, const std::vector<GivenClusterLevel>& coarser);
+
+/*
 * Many meshes' clusters built at once on every thread, a mesh a job and the largest first (so a big mesh does not
 * finish last: zeux.io 2025, docs/research/VIRTUALGEOMETRY.md), returned in the order asked. Each mesh is built alone,
 * so the result is what building them one by one gives, whichever threads run them. Cost: the meshes' triangles,
 * shared over the threads.
 */
+struct GivenClusterLevel;
+
 struct MeshClusterBuild {
     const IndexedMesh* mesh = nullptr;
     ClusterLevels levels = ClusterLevels::One;
+    const std::vector<GivenClusterLevel>* given = nullptr; // levels made by the caller (buildGivenClusterLevels), or none
 };
 
 std::vector<MeshClusters> buildMeshClusters(const std::vector<MeshClusterBuild>& meshes, JobSystem& jobs);

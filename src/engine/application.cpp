@@ -395,7 +395,7 @@ std::size_t Application::uploadNextMeshes() {
         const MeshHandle handle{static_cast<std::uint32_t>(index)};
 
         if (assets.isDrawnOnly(handle)) {
-            batch.push_back({&assets.getDrawnMesh(handle), false, levelsOf(handle)});
+            batch.push_back({&assets.getDrawnMesh(handle), false, levelsOf(handle), assets.getGivenClusterLevels(handle)});
         } else if (assets.isDeforming(handle)) {
             batch.push_back({&assets.getDeformingTopology(handle).rest, true});
         } else {

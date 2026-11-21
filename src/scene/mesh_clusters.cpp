@@ -10,6 +10,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 
 namespace {
     /*
@@ -63,16 +64,17 @@ namespace {
     }
 
     /*
-    * The mesh's own clusters only, cut as clusterlod cuts its first level (its clusterize: the same builder, limits and
-    * reordering), so they are the clusters the mesh would have with levels; all in one group, never simplified.
+    * Triangles cut into clusters as clusterlod cuts its first level (its clusterize: the same builder, limits and
+    * reordering), each added with the group and refined group given.
     */
-    void buildOneLevel(MeshClusters& built, const IndexedMesh& mesh, const clodConfig& config) {
-        const std::size_t most = meshopt_buildMeshletsBound(mesh.indices.size(), config.max_vertices, config.min_triangles);
+    void cutIntoClusters(MeshClusters& built, const IndexedMesh& mesh, const std::vector<std::uint32_t>& source, const clodConfig& config,
+                         std::uint32_t group, std::uint32_t refinedGroup) {
+        const std::size_t most = meshopt_buildMeshletsBound(source.size(), config.max_vertices, config.min_triangles);
         std::vector<meshopt_Meshlet> made(most);
-        std::vector<unsigned> vertices(mesh.indices.size());
-        std::vector<unsigned char> triangles(mesh.indices.size());
+        std::vector<unsigned> vertices(source.size());
+        std::vector<unsigned char> triangles(source.size());
         const std::size_t count =
-            meshopt_buildMeshletsFlex(made.data(), vertices.data(), triangles.data(), mesh.indices.data(), mesh.indices.size(), &mesh.vertices[0].position.x,
+            meshopt_buildMeshletsFlex(made.data(), vertices.data(), triangles.data(), source.data(), source.size(), &mesh.vertices[0].position.x,
                                       mesh.vertices.size(), sizeof(MeshVertex), config.max_vertices, config.min_triangles, config.max_triangles, 0.0f,
                                       config.cluster_split_factor);
         std::vector<unsigned> indices;
@@ -91,9 +93,16 @@ namespace {
                 indices.push_back(vertices[meshlet.vertex_offset + triangles[meshlet.triangle_offset + corner]]);
             }
 
-            addCluster(built, mesh, indices.data(), indices.size(), 0, meshClusterNoGroup);
+            addCluster(built, mesh, indices.data(), indices.size(), group, refinedGroup);
         }
+    }
 
+    /*
+    * The mesh's own clusters only, cut as clusterlod cuts its first level, so they are the clusters the mesh would have
+    * with levels; all in one group, never simplified.
+    */
+    void buildOneLevel(MeshClusters& built, const IndexedMesh& mesh, const clodConfig& config) {
+        cutIntoClusters(built, mesh, mesh.indices, config, 0, meshClusterNoGroup);
         built.originalCount = static_cast<std::uint32_t>(built.clusters.size());
         const meshopt_Bounds bounds = meshopt_computeSphereBounds(&built.clusters[0].centre.x, built.clusters.size(), sizeof(MeshCluster),
                                                                   &built.clusters[0].radius, sizeof(MeshCluster));
@@ -136,6 +145,82 @@ namespace {
     }
 }
 
+namespace {
+    // A sphere and whether another lies inside it.
+    struct Sphere {
+        Vec3 centre;
+        float radius = 0.0f;
+    };
+
+    /*
+    * A sphere round spheres: meshoptimizer's, then grown until it holds each exactly (its fit is close but not a promise,
+    * and the cut needs every group to hold the one below).
+    */
+    Sphere sphereRound(const std::vector<Sphere>& spheres) {
+        const meshopt_Bounds bounds = meshopt_computeSphereBounds(&spheres[0].centre.x, spheres.size(), sizeof(Sphere), &spheres[0].radius, sizeof(Sphere));
+        Sphere round{Vec3{bounds.center[0], bounds.center[1], bounds.center[2]}, bounds.radius};
+
+        for (const Sphere& inner : spheres) {
+            const Vec3 offset = inner.centre - round.centre;
+            round.radius = std::max(round.radius, std::sqrt(offset.dot(offset)) + inner.radius);
+        }
+
+        return round;
+    }
+}
+
+MeshClusters buildGivenClusterLevels(const IndexedMesh& mesh, const std::vector<GivenClusterLevel>& coarser) {
+    const std::size_t vertexCount = mesh.vertices.size();
+    float lastError = 0.0f;
+
+    for (const GivenClusterLevel& level : coarser) {
+        if (level.error < lastError || level.indices.empty() || level.indices.size() % 3 != 0 ||
+            std::any_of(level.indices.begin(), level.indices.end(), [vertexCount](std::uint32_t corner) { return corner >= vertexCount; })) {
+            throw std::invalid_argument("Given cluster levels need rising errors and whole triangles of the mesh's vertices");
+        }
+
+        lastError = level.error;
+    }
+
+    MeshClusters built;
+
+    if (mesh.indices.empty()) {
+        return built;
+    }
+
+    const clodConfig config = clusterConfig();
+    std::vector<std::size_t> firstClusters;
+
+    for (std::size_t level = 0; level <= coarser.size(); ++level) {
+        firstClusters.push_back(built.clusters.size());
+        const auto group = static_cast<std::uint32_t>(level);
+        cutIntoClusters(built, mesh, level == 0 ? mesh.indices : coarser[level - 1].indices, config, group,
+                        level == 0 ? meshClusterNoGroup : group - 1);
+    }
+
+    firstClusters.push_back(built.clusters.size());
+    built.originalCount = static_cast<std::uint32_t>(firstClusters[1]);
+
+    for (std::size_t level = 0; level <= coarser.size(); ++level) {
+        // Its own clusters, the next level's, and the group below.
+        std::vector<Sphere> held;
+
+        for (std::size_t cluster = firstClusters[level]; cluster < firstClusters[std::min(level + 2, firstClusters.size() - 1)]; ++cluster) {
+            held.push_back(Sphere{built.clusters[cluster].centre, built.clusters[cluster].radius});
+        }
+
+        if (level > 0) {
+            held.push_back(Sphere{built.groups.back().centre, built.groups.back().radius});
+        }
+
+        const Sphere round = sphereRound(held);
+        const float error = level < coarser.size() ? coarser[level].error : FLT_MAX;
+        built.groups.push_back(MeshClusterGroup{round.centre, round.radius, error, static_cast<std::uint32_t>(level)});
+    }
+
+    return built;
+}
+
 MeshClusters buildMeshClusters(const IndexedMesh& mesh, ClusterLevels levels) {
     MeshClusters built;
 
@@ -167,7 +252,7 @@ std::vector<MeshClusters> buildMeshClusters(const std::vector<MeshClusterBuild>&
     std::vector<MeshClusters> built(meshes.size());
     jobs.parallelFor(meshes.size(), 1, [&](std::size_t place) {
         const MeshClusterBuild& asked = meshes[largestFirst[place]];
-        built[largestFirst[place]] = buildMeshClusters(*asked.mesh, asked.levels);
+        built[largestFirst[place]] = asked.given != nullptr ? buildGivenClusterLevels(*asked.mesh, *asked.given) : buildMeshClusters(*asked.mesh, asked.levels);
     });
     return built;
 }
