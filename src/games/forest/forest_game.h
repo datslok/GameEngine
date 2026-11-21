@@ -17,6 +17,7 @@
 #include "games/forest/lianas.h"
 #include "games/forest/near_trees.h"
 #include "games/forest/palms.h"
+#include "games/forest/twigs.h"
 #include "games/forest/understorey.h"
 #include "games/forest/valley_maps.h"
 #include "games/forest/valley_shapes.h"
@@ -276,6 +277,11 @@ public:
     const std::vector<PlantedKindLook>& getCoverLooks() const;
     // The field the GPU's cells plant from (on the air entity): the valley's maps with the ground cover's, every layer.
     const PlantingField& getPlantingField(const World& world) const;
+    // The twigs of modelled leaves (games/forest/twigs.h), and the stand forest-twigs shows them on: an entity a
+    // prototype's level, prototype by prototype, each hidden until shown.
+    ForestTwigSettings& getTwigSettings();
+    const std::vector<TwigPrototype>& getTwigPrototypes() const;
+    const std::vector<Entity>& getTwigStand() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -351,6 +357,12 @@ private:
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
 
+    // The twig prototypes, from the canopy's leaves, and their stand's entities, hidden (ROADMAP phase 21 stage 3a).
+    void buildTwigs(World& world, AssetManager& assets);
+
+    // The stand shown in front of the camera (a row a prototype, its levels left to right, facing the camera), or hidden.
+    void showTwigStand(World& world, bool shown);
+
     std::string assetFolder;
     PlayerControls controls;
     ForestSunSettings sunSettings;
@@ -379,6 +391,9 @@ private:
     ForestClimberSettings climberSettings;
     ForestEpiphyteSettings epiphyteSettings;
     ForestGrassSettings grassSettings;
+    ForestTwigSettings twigSettings;
+    std::vector<TwigPrototype> twigPrototypes;
+    std::vector<Entity> twigStand;
 
     // The wind over the valley (docs/research/WIND.md): down it, along the path from the rim towards the Monolith (-z), a few m/s
     // above the canopy as measured over rainforests; under the canopy the plants' springs answer it less.

@@ -9,7 +9,7 @@
 
 | List | Holds | Run |
 |---|---|---|
-| `routineTests` | Everything else | `tools/visible_tests.ps1` (release; `-Build debug`); `--times` lists the 30 slowest |
+| `routineTests` | Everything else | `tools/visible_tests.ps1` (release; `-Build debug`); `--times` lists the 30 slowest; `tests.exe --only <name>...` runs just those (seeing a planted bug fire) |
 | `runSlowTests` | Many seconds, guarding things rarely changed: cloth solvers, the golden views' scenes | `make test-slow`, only when asked or before a golden run |
 | `runParkedTests` | Work on hold: light probes, cloth, signed distance field | Never; fixed when that work resumes |
 

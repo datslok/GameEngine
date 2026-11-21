@@ -164,23 +164,39 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
 * The scan's normal and roughness maps must match its colour's size, as the clusters sample them at the same places; a
 * scan missing either, or the whole folder, falls back to the stand-in leaf, so the trees always have clusters.
 */
-Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare) {
+LeafAtlas forestTreeLeafAtlas(const std::string& assetFolder) {
     const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestTreeLeafFolder).string());
-    LeafAtlas source;
 
-    if (!files.colour.empty() && !files.opacity.empty() && !files.normal.empty() && !files.roughness.empty()) {
-        source = LeafAtlas{colourWithOpacity(files), loadImage(files.normal), loadImage(files.roughness), forestTreeLeafColumns, forestTreeLeafRows};
-        source.normal.encoding = TextureEncoding::Linear;
-        source.roughness.encoding = TextureEncoding::Linear;
-
-        if (source.normal.width != source.colour.width || source.roughness.width != source.colour.width ||
-            source.normal.height != source.colour.height || source.roughness.height != source.colour.height) {
-            throw std::runtime_error("A leaf atlas's normal or roughness map is not the size of its colour map: " + files.colour);
-        }
-    } else {
-        source = standInLeafAtlas(standInLeafTexels, forestTreeLeafColumns, forestTreeLeafRows, forestLeafStandIn);
+    if (files.colour.empty() || files.opacity.empty() || files.normal.empty() || files.roughness.empty()) {
+        return standInLeafAtlas(standInLeafTexels, forestTreeLeafColumns, forestTreeLeafRows, forestLeafStandIn);
     }
 
+    LeafAtlas source{colourWithOpacity(files), loadImage(files.normal), loadImage(files.roughness), forestTreeLeafColumns, forestTreeLeafRows};
+    source.normal.encoding = TextureEncoding::Linear;
+    source.roughness.encoding = TextureEncoding::Linear;
+
+    if (source.normal.width != source.colour.width || source.roughness.width != source.colour.width ||
+        source.normal.height != source.colour.height || source.roughness.height != source.colour.height) {
+        throw std::runtime_error("A leaf atlas's normal or roughness map is not the size of its colour map: " + files.colour);
+    }
+
+    return source;
+}
+
+Material forestTwigLeafMaterial(AssetManager& assets, LeafAtlas atlas, Pixel tint) {
+    Material material;
+    material.doubleSided = true;
+    material.texture = assets.addTexture(std::move(atlas.colour));
+    material.normalTexture = assets.addTexture(std::move(atlas.normal));
+    material.metallicRoughnessTexture = assets.addTexture(std::move(atlas.roughness));
+    material.colour = tint;
+    material.roughness = 1.0f;
+    material.metallic = 0.0f;
+    return material;
+}
+
+Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare) {
+    const LeafAtlas source = forestTreeLeafAtlas(assetFolder);
     LeafAtlas clusters = composeLeafClusters(source, cellTexels, leafShare, forestClusterSeed);
     Material material = leafCutOut();
     material.texture = assets.addTexture(std::move(clusters.colour), forestLeafCutoff);

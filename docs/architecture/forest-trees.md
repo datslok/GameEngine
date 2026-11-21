@@ -36,7 +36,7 @@ Three, each a `ForestTreeSettings` (F5 Forest, Canopy trees, Emergent trees, Mid
 
 ## Leaf-cluster cards
 
-A twig of 12-18 leaves on each card, so more leaf for fewer cards (`docs/research/TREES.md`, Part 2).
+A twig of 12-18 leaves on each card, so more leaf for fewer cards (`docs/research/TREES.md`, Part 2). Twigs of modelled leaves will replace them (`forest-twigs.md`).
 
 - `appendClusterCards`: `cardsPerNode` (6) cards at every leafy node (`leafyNodes`: at most `leafyRadius`, 6 cm, thick) at least `shellShare` (0.3) of its clump's radius out of the clump it is deepest in (`clumpOf`), each `clusterSize` (1 m) a side, its front a random turn from out of its clump, the twig reaching out and up; then `fillCards` (32) cards 1.5 times as big near each clump's middle, facing every way, so the crown is not seen through.
 - Normals (`foliageNormal`): `cardNormalShare` 0.3 the card's facing, `clumpNormalShare` 0.5 out of its clump, `crownNormalShare` 0.2 out of the crown, the last two cone-flattened underneath (`coneFlattened`), never past square to the card's front: each clump gets a lit top and shaded underside.

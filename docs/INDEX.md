@@ -32,7 +32,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | Ray tracing | `docs/architecture/ray-tracing.md`; light probes (on hold): `docs/architecture/ddgi.md`, `docs/architecture/ddgi-cascades.md`, `docs/architecture/ddgi-memory.md` |
 | Content | `docs/architecture/assets.md`, `docs/architecture/materials.md`, `docs/architecture/meshes.md`, `docs/architecture/level-of-detail.md` (levels, impostors, card thinning), `docs/architecture/terrain.md`, `docs/architecture/planting.md` (plants from maps, CPU and GPU alike), `docs/architecture/wind.md` |
 | Simulation | `docs/architecture/physics.md`, `docs/architecture/gameplay.md` (characters, cameras, control modes, the demo); cloth (parked): `docs/architecture/cloth.md`, `docs/architecture/cloth-solvers.md`, `docs/architecture/cloth-garments.md`, `docs/architecture/cloth-gpu.md` |
-| Games | `docs/architecture/games.md`, `docs/architecture/light-lab.md`, `docs/architecture/cloth-lab.md`, `docs/architecture/forest.md`, `docs/architecture/forest-rock.md`, `docs/architecture/forest-trees.md`, `docs/architecture/forest-plants.md` |
+| Games | `docs/architecture/games.md`, `docs/architecture/light-lab.md`, `docs/architecture/cloth-lab.md`, `docs/architecture/forest.md`, `docs/architecture/forest-rock.md`, `docs/architecture/forest-trees.md`, `docs/architecture/forest-twigs.md`, `docs/architecture/forest-plants.md` |
 
 ## Research (read before building)
 
@@ -42,6 +42,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/LUMEN.md` | The software tracer or the Lumen-like layer (phase 14) |
 | `docs/research/SHADOWCACHE.md` | Shadow caching for still and moving casters |
 | `docs/research/VIRTUALGEOMETRY.md` | Nanite-style clusters, virtual shadow maps, leaves as geometry; why cascades popped (phase 21) |
+| `docs/research/LEAFGEOMETRY.md` | Modelled leaves, assemblies, crowns kept under simplification, rigid wind (phase 21 stage 3) |
 | `docs/research/PERSISTENTSCENE.md` | The persistent GPU scene's later stages |
 | `docs/research/FARFOLIAGE.md` | Far foliage as volumes: Nanite Foliage's voxels and assemblies, earlier volume methods, a smaller version here |
 | `docs/research/LOD.md` | Level of detail, impostors, card thinning |
