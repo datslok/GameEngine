@@ -43,6 +43,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/SHADOWCACHE.md` | Shadow caching for still and moving casters |
 | `docs/research/VIRTUALGEOMETRY.md` | Nanite-style clusters, virtual shadow maps, leaves as geometry; why cascades popped (phase 21) |
 | `docs/research/LEAFGEOMETRY.md` | Modelled leaves, assemblies, crowns kept under simplification, rigid wind (phase 21 stage 3) |
+| `docs/research/VISBUFFER.md` | Visibility buffer, material pass, compute rasteriser for small triangles (phase 21 stage 5) |
 | `docs/research/PERSISTENTSCENE.md` | The persistent GPU scene's later stages |
 | `docs/research/FARFOLIAGE.md` | Far foliage as volumes: Nanite Foliage's voxels and assemblies, earlier volume methods, a smaller version here |
 | `docs/research/LOD.md` | Level of detail, impostors, card thinning |
