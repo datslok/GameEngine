@@ -15,15 +15,15 @@ enum class GpuPass {
     Cloth,
     DebugUi,
     CameraCull,   // every view's lists built on the GPU (render/gpu/camera_culling.h): the camera, velocity pass, captures, shadow tiles
+    Planting,     // the planting cells made this frame (render/vulkan/vulkan_planting.h)
+    Placed,       // the camera's lists of the placed plants' parts (render/vulkan/vulkan_placed_drawing.h)
+    Wind,         // the wind force field's springs stepped (render/gpu/wind.h), before anything that sways is posed or drawn
+    Bones,        // the swaying trees' bones posed (render/vulkan/vulkan_bone_posing.h), after the wind's springs are stepped
+    Twigs,        // the camera's twigs culled, each at its level (render/vulkan/vulkan_twig_drawing.h), while Passes "Twigs" draws them
     MeshCull,     // the camera's mesh clusters culled one by one (render/gpu/mesh_cluster_culling.h), while meshClusters is on
     RayScene,
     Atmosphere,
     Probes,
-    Wind,         // the wind force field's springs stepped (render/gpu/wind.h), before anything that sways is drawn
-    Planting,     // the planting cells made this frame (render/vulkan/vulkan_planting.h)
-    Placed,       // the camera's lists of the placed plants' parts (render/vulkan/vulkan_placed_drawing.h)
-    Bones,        // the swaying trees' bones posed (render/vulkan/vulkan_bone_posing.h), after the wind's springs are stepped
-    Twigs,        // the camera's twigs culled, each at its level (render/vulkan/vulkan_twig_drawing.h), while Passes "Twigs" draws them
     Clusters,
     Shadows,
     Fog,          // the fog's grid lit and integrated (render/gpu/volumetric_fog.h)
