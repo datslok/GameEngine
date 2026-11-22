@@ -20,7 +20,7 @@
 */
 
 /*
-* How the bones move (3c-iii hangs it on WindSettings). A bone's turn grows as (foot radius / its radius)^stiffnessExponent
+* How the bones move (WindSettings::bones, F5 Wind, Bones). A bone's turn grows as (foot radius / its radius)^stiffnessExponent
 * (a cantilever's bend: drag a metre grows with r, stiffness with r^4), held under mostStiffness times the trunk's;
 * a branch swings at its first mode, woodSpeed (sqrt(E / rho), green wood about 3000 m/s) times radius / 2 over its
 * length squared times 1.875^2 / (2 pi), held between slowestHertz and fastestHertz (leaves' mass slows twigs); it swings

@@ -6,6 +6,7 @@
 #include "math/vec4.h"
 #include "scene/card_thinning.h"
 #include "scene/mesh.h"
+#include "scene/sway_bones.h"
 #include "scene/wind.h"
 
 #include <cstdint>
@@ -46,6 +47,10 @@ struct IndexedMesh {
     // or none at all for everything else.
     CardThinning thinning{};
     std::vector<ThinningCard> thinningCards{};
+
+    // Moved by its skeleton's bones (scene/sway_bones.h, RenderPart::skeleton): each vertex's bone and weight, one a
+    // vertex, or none at all for everything else. Kept by meshPrefix and simplifyMesh.
+    std::vector<SwayBinding> swayBindings{};
 };
 
 /*

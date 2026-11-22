@@ -853,11 +853,11 @@ namespace {
         }
 
         assert(sideChains + 1 >= tree.tipCount / 2);
-        assert(tree.barkBindings.size() == tree.bark.vertices.size());
+        assert(tree.bark.swayBindings.size() == tree.bark.vertices.size());
         int blended = 0;
 
         for (std::size_t vertex = 0; vertex < tree.bark.vertices.size(); ++vertex) {
-            const SwayBinding& binding = tree.barkBindings[vertex];
+            const SwayBinding& binding = tree.bark.swayBindings[vertex];
             assert(binding.bone >= 0 && binding.bone < static_cast<int>(bones.size()) && binding.weight >= 0.0f && binding.weight <= 1.0f);
             const SwayBone& bone = bones[static_cast<std::size_t>(binding.bone)];
             assert(binding.weight == 1.0f || bone.parent >= 0);
@@ -873,6 +873,42 @@ namespace {
             assert(fromBone(bones[static_cast<std::size_t>(twig.binding.bone)], twig.foot) < reach);
             assert(twig.node < 0 || (twig.foot - tree.skeleton.nodes[static_cast<std::size_t>(twig.node)].position).length() < 1e-5f);
         }
+
+        /*
+        * Every other mesh bound too (ROADMAP phase 21 stage 3c-iii): the bark's levels by the vertices they keep (each
+        * binding the bark's own at that place), the cards whole (a card's four corners one binding, so it moves rigidly),
+        * each within reach of its bone as the twigs are.
+        */
+        for (const IndexedMesh* level : {&tree.barkLevel, &tree.shadowBark}) {
+            assert(level->swayBindings.size() == level->vertices.size());
+
+            for (std::size_t vertex = 0; vertex < level->vertices.size(); vertex += 7) {
+                const auto same = std::find_if(tree.bark.vertices.begin(), tree.bark.vertices.end(), [&](const MeshVertex& bark) {
+                    return (bark.position - level->vertices[vertex].position).lengthSquared() == 0.0f;
+                });
+                assert(same != tree.bark.vertices.end());
+                const SwayBinding& barkBinding = tree.bark.swayBindings[static_cast<std::size_t>(same - tree.bark.vertices.begin())];
+                assert(level->swayBindings[vertex].bone == barkBinding.bone);
+            }
+        }
+
+        for (const IndexedMesh* cards : {&tree.leaves, &tree.leafLevel, &tree.shadowLeaves}) {
+            assert(cards->swayBindings.size() == cards->vertices.size() && cards->vertices.size() % 4 == 0);
+
+            for (std::size_t corner = 0; corner < cards->vertices.size(); ++corner) {
+                const SwayBinding& binding = cards->swayBindings[corner];
+                const SwayBinding& first = cards->swayBindings[corner - corner % 4];
+                assert(binding.bone == first.bone && binding.weight == first.weight);
+                assert(binding.bone >= 0 && fromBone(bones[static_cast<std::size_t>(binding.bone)], cards->vertices[corner].position) <
+                                                settings.clumpRadius + settings.boneMetres + 2.0f * settings.clusterSize);
+            }
+        }
+
+        // Something growing on the tree follows the bark nearest it: on the trunk low down the trunk's first bone.
+        IndexedMesh climber;
+        climber.vertices = {MeshVertex{tree.skeleton.nodes[0].position + Vec3{0.4f, 0.5f, 0.0f}, Vec3{}, Vec2{}, Vec4{}}};
+        bindToTreeBones(climber, tree, settings.boneBlendShare);
+        assert(climber.swayBindings.size() == 1 && climber.swayBindings[0].bone == 0);
 
         // The same seed, the same bones.
         const TreeMeshes again = growTreeMeshes(settings, 21u, 1.5f);

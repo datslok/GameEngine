@@ -3,6 +3,7 @@
 #include "core/blue_noise.h"
 #include "core/profiler.h"
 #include "scene/sky_object.h"
+#include "render/gpu/bone_records.h"
 #include "render/gpu/brdf.h"
 #include "render/gpu/camera_relative.h"
 #include "render/gpu/depth_shared.h"
@@ -2770,6 +2771,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.placedParts.write(placedParts);
     updateVertexRecords(hangingRecords.data(), hangingRecords.size() * sizeof(hangingRecords.front()), hangingChanged, hangingVertices);
     updateVertexRecords(thinningRecords.data(), thinningRecords.size() * sizeof(GpuThinningRecord), thinningChanged, thinningCards);
+    updateVertexRecords(swayBindingRecords.data(), swayBindingRecords.size() * sizeof(std::uint32_t), swayBindingsChanged, swayBindings);
 
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -2808,6 +2810,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.placedEntries = framePlaced ? placedDrawing->describeEntries(frame.frameIndex) : VkDescriptorBufferInfo{noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.twigEntries = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getEntries(frame.frameIndex) : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.twigs = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getTwigs() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    views.twigBindings = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getTwigBindings() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    views.swayBindings = VkDescriptorBufferInfo{swayBindingRecords.empty() ? noPlacedRecords.get() : swayBindings.get(), 0, VK_WHOLE_SIZE};
     views.lianaShapes = lianaShapeRecords->describe();
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
@@ -4308,6 +4312,12 @@ VertexEntries VulkanRenderer::uploadOneMesh(const IndexedMesh& mesh, bool deform
         entries.hanging = static_cast<std::uint32_t>(hangingRecords.size()) + 1;
         std::transform(mesh.hanging.begin(), mesh.hanging.end(), std::back_inserter(hangingRecords), packHangingVertex);
         hangingChanged = true;
+    }
+
+    // Its bones' bindings at its place in the pool (render/gpu/bone_records.h), the list grown to it.
+    if (!mesh.swayBindings.empty()) {
+        placeSwayBindings(swayBindingRecords, mesh, meshes.back()->getPlacement());
+        swayBindingsChanged = true;
     }
 
     // Its header and a record a vertex likewise (packCardThinning).

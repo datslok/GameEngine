@@ -1,10 +1,15 @@
 #include "render/gpu/twig_records.h"
 
+#include "render/gpu/bone_records.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/mesh_cluster_culling.h"
 
 #include <cmath>
 #include <stdexcept>
+
+std::uint32_t packTwigBinding(const TwigInstance& twig) {
+    return twig.binding.bone < 0 ? swayUnbound : packSwayBinding(twig.binding);
+}
 
 GpuTwig packTwig(const TwigInstance& twig) {
     GpuTwig packed;

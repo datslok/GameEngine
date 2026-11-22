@@ -20,7 +20,8 @@ inline constexpr std::uint32_t twigBrickSize = 64;
 /*
 * One twig: its foot in the plant's frame and its frame there (across, towardsTip, facing: where the prototype's x, y
 * and z go; right-handed, unit), its scale, its prototype, and the lean its leaves' normals bend by (the clump's and
-* crown's share of the foliage blend, games/forest/forest_trees.h).
+* crown's share of the foliage blend, games/forest/forest_trees.h); and the bone it rides on in its part's skeleton
+* (RenderPart::skeleton), a bone below 0 for none.
 */
 struct TwigInstance {
     Vec3 foot;
@@ -30,6 +31,7 @@ struct TwigInstance {
     float scale = 1.0f;
     std::uint32_t prototype = 0;
     Vec3 lean;
+    SwayBinding binding{.bone = -1, .weight = 1.0f};
 };
 
 // A run of twigs and the sphere holding every one of them (each twig its foot and its prototype's reach times its scale).

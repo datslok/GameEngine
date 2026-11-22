@@ -1,9 +1,13 @@
+#include "scene/indexed_mesh.h"
+#include "scene/simplify_mesh.h"
 #include "scene/sway_bones.h"
 
+#include "mesh_helpers.h"
 #include "test_levels.h"
 
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -94,6 +98,67 @@ namespace {
         bones[1].parent = -1;
         assert(swayBonesOrdered(bones));
     }
+
+    /*
+    * A point near a skeleton follows its nearest line where its closest point lies along it: by the trunk the trunk's
+    * bone, by the branch the branch's (blended towards the trunk near the fork), whichever line comes first in the list.
+    * A line's sphere holds its points.
+    */
+    void testTheNearestBinding() {
+        std::vector<SwayBone> bones;
+        const std::vector<Vec3> trunkLine{Vec3{}, Vec3{0.0f, 8.0f, 0.0f}};
+        const std::vector<Vec3> branchLine{Vec3{0.0f, 4.0f, 0.0f}, Vec3{4.0f, 6.0f, 0.0f}};
+        const SwayChain trunk = appendSwayChain(bones, trunkLine, {0.3f, 0.1f}, -1, 0, 2.0f);
+        const SwayChain branch = appendSwayChain(bones, branchLine, {0.1f, 0.02f}, 1, 1, 2.0f);
+        const SwayLine trunkSway = makeSwayLine(trunk, trunkLine);
+        const SwayLine branchSway = makeSwayLine(branch, branchLine);
+        assert(near(trunkSway.radius, 4.0f, 1e-5f) && (trunkSway.centre - Vec3{0.0f, 4.0f, 0.0f}).length() < 1e-5f);
+
+        for (const std::vector<SwayLine>& lines : {std::vector<SwayLine>{trunkSway, branchSway}, std::vector<SwayLine>{branchSway, trunkSway}}) {
+            const SwayBinding low = swayNearestBinding(lines, bones, Vec3{0.2f, 1.0f, 0.1f}, 0.5f);
+            assert(low.bone == 0 && low.weight == 1.0f);
+            const SwayBinding high = swayNearestBinding(lines, bones, Vec3{-0.3f, 7.0f, 0.0f}, 0.5f);
+            assert(high.bone == trunk.firstBone + 3 && near(high.weight, 1.0f, 1e-5f));
+            const SwayBinding out = swayNearestBinding(lines, bones, Vec3{3.6f, 6.1f, 0.2f}, 0.5f);
+            assert(out.bone == branch.firstBone + branch.boneCount - 1);
+            const SwayBinding fork = swayNearestBinding(lines, bones, Vec3{0.3f, 4.2f, 0.0f}, 0.5f);
+            assert(fork.bone == branch.firstBone && fork.weight < 0.5f);
+        }
+
+        bool threw = false;
+
+        try {
+            swayNearestBinding({}, bones, Vec3{}, 0.5f);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+
+        assert(threw);
+    }
+
+    // A mesh's bindings ride along: its prefix keeps its first ones, its simplified level each kept vertex's own.
+    void testMeshesKeepTheirBindings() {
+        IndexedMesh sheet = rippledSheet(12);
+
+        for (std::size_t vertex = 0; vertex < sheet.vertices.size(); ++vertex) {
+            sheet.swayBindings.push_back(SwayBinding{.bone = static_cast<int>(vertex), .weight = 0.5f});
+        }
+
+        const IndexedMesh prefix = meshPrefix(sheet, 30, 0);
+        assert(prefix.swayBindings.size() == 30 && prefix.swayBindings[29].bone == 29);
+
+        const IndexedMesh simpler = simplifyMesh(sheet, 0.2f, 1.0f, false);
+        assert(simpler.vertices.size() < sheet.vertices.size() && simpler.swayBindings.size() == simpler.vertices.size());
+
+        for (std::size_t vertex = 0; vertex < simpler.vertices.size(); ++vertex) {
+            const MeshVertex& kept = sheet.vertices[static_cast<std::size_t>(simpler.swayBindings[vertex].bone)];
+            assert((kept.position - simpler.vertices[vertex].position).lengthSquared() == 0.0f);
+        }
+
+        // Nothing bound, nothing carried.
+        sheet.swayBindings.clear();
+        assert(simplifyMesh(sheet, 0.2f, 1.0f, false).swayBindings.empty() && meshPrefix(sheet, 30, 0).swayBindings.empty());
+    }
 }
 
 void testSwayBones() {
@@ -101,4 +166,6 @@ void testSwayBones() {
     testTheArcOfAPoint();
     testTheBindingAlongAChain();
     testTheOrder();
+    testTheNearestBinding();
+    testMeshesKeepTheirBindings();
 }

@@ -84,6 +84,9 @@ struct DrawItem {
     const TwigSet* twigs = nullptr;
     bool twigFallback = false;
 
+    // Moved by these bones (RenderPart::skeleton; held by the part's renderer), or none.
+    const SwaySkeleton* skeleton = nullptr;
+
     // A terrain patch's index in FrameDescription::terrainPatches (scene/terrain.h), -1 for every other draw: its mesh is a
     // flat grid the vertex shaders lift onto the land.
     int terrainPatch = -1;

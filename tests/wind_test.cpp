@@ -179,10 +179,10 @@ namespace {
 
     /*
     * The record the GPU reads: the wind's direction, speed and the time; each category's spring; each cascade's window,
-    * last frame's window and its cell size; off without wind or with the setting off.
+    * last frame's window and its cell size; the bones' motion; off without wind or with the setting off.
     */
     void testTheRecord() {
-        static_assert(sizeof(GpuWindField) == 304);
+        static_assert(sizeof(GpuWindField) == 336);
         WindSettings settings;
         Wind wind;
         wind.towardsDegrees = 90.0f;
@@ -195,6 +195,12 @@ namespace {
         assert(field.springs[WIND_CATEGORY_GRASS][0] == settings.springs[WIND_CATEGORY_GRASS].frequency);
         assert(field.windows[1][0] == 3 && field.windows[1][1] == 4 && field.windows[1][2] == 3 && field.windows[1][3] == 3);
         assert(field.cells[0][0] == settings.nearCellMetres && field.cells[1][0] == settings.farCellMetres);
+        settings.bones.woodSpeed = 2500.0f;
+        settings.bones.sideShare = 0.4f;
+        const GpuWindField boned = packWindField(&wind, settings, windows, previous, true, 12.5f, 1.0f / 60.0f);
+        assert(boned.bones[0][0] == settings.bones.stiffnessExponent && boned.bones[0][1] == settings.bones.mostStiffness);
+        assert(boned.bones[0][2] == 2500.0f && boned.bones[0][3] == settings.bones.slowestHertz && boned.bones[1][0] == settings.bones.fastestHertz);
+        assert(boned.bones[1][1] == settings.bones.swingShare && boned.bones[1][2] == 0.4f);
 
         assert(packWindField(nullptr, settings, windows, previous, true, 0.0f, 0.0f).step[1] == 0.0f);
         WindSettings off = settings;
@@ -223,6 +229,17 @@ namespace {
 
         try {
             validateWind(badSpring);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+
+        assert(threw);
+        WindSettings badBones = settings;
+        badBones.bones.woodSpeed = 0.0f;
+        threw = false;
+
+        try {
+            validateWind(badBones);
         } catch (const std::invalid_argument&) {
             threw = true;
         }

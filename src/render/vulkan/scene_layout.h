@@ -79,7 +79,9 @@ enum SceneBinding : std::uint32_t {
     PlacedEntriesBinding = 45,
     TwigEntriesBinding = 46,
     TwigsBinding = 47,
-    SceneBindingCount = 48
+    SwayBindingsBinding = 48,
+    TwigBindingsBinding = 49,
+    SceneBindingCount = 50
 };
 
 static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsBinding == SCENE_PLACED_PARTS_BINDING &&
@@ -230,6 +232,8 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo placedEntries{};   // the camera's placed entries (a stand-in without)
     VkDescriptorBufferInfo twigEntries{};     // the camera's twig entries and the twigs (stand-ins without; render/gpu/twig_records.h)
     VkDescriptorBufferInfo twigs{};
+    VkDescriptorBufferInfo swayBindings{};    // every pool vertex's binding to its bones (a stand-in without; render/gpu/bone_records.h)
+    VkDescriptorBufferInfo twigBindings{};    // each twig's binding, beside the twigs (a stand-in without)
     VkDescriptorBufferInfo lianaShapes{};     // the lianas' records, slot by slot (scene/liana_shape.h; one unused without)
 };
 

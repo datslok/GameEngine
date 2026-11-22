@@ -131,3 +131,9 @@
   - **Across the wind:** `W - d (d.W)` moves a bone at right angles to itself and the wind, so a horizontal branch across the wind bobs, as today's branch bob does, from the same term that sways a trunk sideways.
   - **New library `wind_bones.glsl`** rather than `wind.glsl` (its mirror `wind.h` already long); `quat.glsl` is the first GLSL quaternion code, mirroring `math/quat.h`. GPU test written, not run.
   - **7 planted bugs caught** (a pose not carried by its parent, the share's factor 2 dropped, no swing across, the union's radius short, a turn in still air, the mode's r / 2 lost, a posed sphere shrunk).
+- `tree-bones-3c-iii-a` (Nov 22 2026): every tree mesh bound to its variant's bones and the records on the GPU; nothing moves by them yet.
+  - **Picks (the user, 3c-iii):** poses only for trees a swaying view draws, each once (1A); last frame's poses recomputed (2A); twigs rigid on their bone plus flutter (3A); every tree mesh bound, shadows' too (4A).
+  - **Bindings beside the vertex pool, not a mesh's entry:** a placed part's level meshes have their own vertices but share the part's instance, so a per-mesh entry (as hanging and thinning use) cannot reach them; a word a pool vertex can, from the mesh shaders' cluster vertices too. 4 B beside each 48 B vertex, no cost a frame.
+  - **Cards whole:** each card's four corners take its node's binding (a filler its nearest node's, the twigs' rule, now `nodeOrNearest`), so a card moves rigidly as its twig will.
+  - **Climbers and epiphytes** sit on the bark, so they follow the nearest bark's binding (`swayNearestBinding`, lines skipped by their spheres); bound in the variants' parallel jobs.
+  - **9 planted bugs caught** (simplified levels' bindings not their vertices', the nearest line's sphere skip, fillers' cards unbound, the weight's bits, the pool's gaps 0 not unbound, a skeleton numbered from 0, the record's wood speed, the shadow bark without its skeleton, climbers unbound).

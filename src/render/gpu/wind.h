@@ -4,6 +4,7 @@
 #include "math/vec2.h"
 #include "math/vec3.h"
 #include "math/vec4.h"
+#include "render/gpu/wind_bones.h"
 #include "render/gpu/wind_shared.h"
 #include "scene/liana_shape.h"
 #include "scene/wind.h"
@@ -89,6 +90,9 @@ struct WindSettings {
     float swayFadeEnd = 400.0f;
     int swayShadowCascades = 1;
     bool swayLocalShadows = true;
+
+    // How the trees moved by bones move (render/gpu/wind_bones.h, ROADMAP phase 21 stage 3c), F5 Wind, Bones.
+    WindBoneMotion bones;
 };
 
 void visit(WindSettings& settings, SettingsVisitor& visitor);
@@ -153,7 +157,8 @@ bool windCellInWindow(const WindCell& cell, const WindWindow& window);
 * and its spring images are filled; each category's spring (frequency, damping, response); each cascade's window and
 * last frame's; each cascade's cell (metres, and 1 / its window's width); flags whether last frame's windows hold; sway
 * whether things sway (1, with the field on), where the sway's fade starts and ends (metres) and last frame's time;
-* each category's flutter (hertz, metres).
+* each category's flutter (hertz, metres); the bones' motion (WindBoneMotion: exponent, most stiffness,
+* wood speed, slowest hertz; fastest hertz, swing along, swing across).
 */
 struct GpuWindField {
     float wind[4];
@@ -165,9 +170,10 @@ struct GpuWindField {
     std::int32_t flags[4];
     float sway[4];
     float flutters[WIND_CATEGORIES][4];
+    float bones[2][4];
 };
 
-static_assert(sizeof(GpuWindField) == 304, "GpuWindField must match wind.glsl's WindField");
+static_assert(sizeof(GpuWindField) == 336, "GpuWindField must match wind.glsl's WindField");
 
 // The record for a frame: off without wind or with the setting off. previousKnown: last frame's windows are the ones
 // its spring images hold.

@@ -487,6 +487,9 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [x] 3c-i. Bones from each variant's skeleton, each bark vertex's and twig's binding (`tree-bones-3c-i`)
     - [x] 3c-ii. The bones' motion in `wind_bones.glsl` and its C++ mirror (`tree-bones-3c-ii`)
     - [ ] 3c-iii. The bones pass; bark and twigs moved by their bones, the trees' per-vertex sway retired
+      - [x] 3c-iii-a. Bones and every tree vertex's binding on the GPU, the motion settings in F5 Wind (`tree-bones-3c-iii-a`)
+      - [ ] 3c-iii-b. The bones pass: trees drawn by swaying views posed once, F4 `BONES`, `bones-compare`
+      - [ ] 3c-iii-c. Bark, twigs, shadows and lianas' anchors moved by the poses; the trees' per-vertex sway retired
     - [ ] 3c-iv. Clusters within chains, culled by their bones' bounds; animation stopped when small
   - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels
   - [ ] 3f. The leaf cards and shadow stand-ins retired; leaves cast opaque shadows

@@ -39,6 +39,10 @@ IndexedMesh simplifyMesh(const IndexedMesh& mesh, float keepShare, float maxErro
         if (remap[index] == UINT32_MAX) {
             remap[index] = static_cast<std::uint32_t>(simpler.vertices.size());
             simpler.vertices.push_back(mesh.vertices[index]);
+
+            if (!mesh.swayBindings.empty()) {
+                simpler.swayBindings.push_back(mesh.swayBindings[index]);
+            }
         }
 
         simpler.indices.push_back(remap[index]);
