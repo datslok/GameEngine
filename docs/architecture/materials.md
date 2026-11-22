@@ -21,7 +21,7 @@ What a surface is made of, from file to `Material`, and how cut-outs keep their 
 | Normal map | `normalTexture`, `normalScale` | 1 |
 | Baked occlusion | `occlusionTexture` (red: 0 buried, 1 open), `occlusionStrength` 0..1 | 1 |
 | Glow | `emissive` (linear, may exceed 1), `emissiveTexture` (sRGB, multiplying it) | black |
-| Alpha | `alphaMode` (`Opaque`, `Mask`, `Blend`), `alphaCutoff`, `opacity`, `doubleSided`, `backKeepsNormal` | Opaque, 0.5, 1, false |
+| Alpha | `alphaMode` (`Opaque`, `Mask`, `Blend`), `alphaCutoff`, `opacity`, `doubleSided`, `backKeepsNormal`, `leafTones` | Opaque, 0.5, 1, false, false |
 | Leaves | `diffuseTransmission`, `diffuseTransmissionTint` | 0 |
 | Faceted shapes | `facetTone` (a share), `facetRoughness`: each triangle's texture coordinate read as its facet's two random numbers (`render/gpu/facet_variation.h`, applied after any blended layers) | 0 |
 | Thin glass | `transmission`, `transmissionTexture` (red) | 0 |
@@ -34,6 +34,7 @@ What a surface is made of, from file to `Material`, and how cut-outs keep their 
 - `isCutOut(material)`: `Mask`. `isTransparent(material)`: `Blend` or `transmission` above 0, so drawn after the opaque scene.
 - Clear coat is ignored on transparent materials (their glass is a varnish already); parallax on cut-outs and transparent ones.
 - `backKeepsNormal`: a double-sided back keeping the front's normal (grass tilted up, lit from above whichever way a blade faces).
+- `leafTones` (`MATERIAL_LEAF_TONES`): each leaf toned by the seed its texture coordinate's whole part carries (twigs' leaves, `twig-drawing.md`).
 - Ground layers are set by games in code (the forest), never loaded; shaded as [parallax-and-grounds.md](parallax-and-grounds.md) describes.
 
 ## Texture encodings
