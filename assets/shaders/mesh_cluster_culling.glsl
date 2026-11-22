@@ -26,7 +26,7 @@ struct MeshCluster {
     vec4 ownSphere;        // and its sphere
     vec4 parentSphere;     // the group it was simplified with: its sphere
     float parentError;     // and the error of what was made from it (above MESH_CLUSTER_NEVER_COARSER: nothing was)
-    uint unused0;
+    uint level;            // the level of the group it was simplified with (scene/mesh_clusters.h)
     uint unused1;
     uint unused2;
 };

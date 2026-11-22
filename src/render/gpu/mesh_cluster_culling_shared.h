@@ -13,7 +13,7 @@
 
 // The storage buffers every pass binds (mesh_cluster_pass.glsl: the camera's tables, then the placed plants'); each
 // pass's own come after.
-#define MESH_CLUSTER_PASS_BINDINGS 18
+#define MESH_CLUSTER_PASS_BINDINGS 21
 
 // GpuMeshCluster::counts: the vertices in the low byte, the triangles from this bit.
 #define MESH_CLUSTER_TRIANGLE_SHIFT 8u

@@ -66,6 +66,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the planting cells' slots' plants (render/gpu/placed_drawing.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each placed part's instance in its plant's frame
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the camera's placed entries
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the camera's twig entries (render/gpu/twig_records.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the twigs
     }};
 }
 
@@ -258,6 +260,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.placedPlants,
         buffers.placedParts.describe(),
         views.placedEntries,
+        views.twigEntries,
+        views.twigs,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

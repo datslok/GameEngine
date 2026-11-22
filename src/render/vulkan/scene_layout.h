@@ -2,6 +2,7 @@
 
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/placed_drawing_shared.h"
+#include "render/gpu/twig_drawing_shared.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
@@ -76,12 +77,15 @@ enum SceneBinding : std::uint32_t {
     PlacedPlantsBinding = 43,
     PlacedPartsBinding = 44,
     PlacedEntriesBinding = 45,
-    SceneBindingCount = 46
+    TwigEntriesBinding = 46,
+    TwigsBinding = 47,
+    SceneBindingCount = 48
 };
 
 static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsBinding == SCENE_PLACED_PARTS_BINDING &&
                   PlacedEntriesBinding == SCENE_PLACED_ENTRIES_BINDING,
               "The placed bindings must match drawn_objects.glsl's");
+static_assert(TwigEntriesBinding == SCENE_TWIG_ENTRIES_BINDING && TwigsBinding == SCENE_TWIGS_BINDING, "The twig bindings must match drawn_objects.glsl's");
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
 // so the sets bound for one stay bound for the next.
@@ -224,6 +228,8 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo thinningCards{};   // every thinned mesh's header and cards (a stand-in without; scene/card_thinning.h)
     VkDescriptorBufferInfo placedPlants{};    // the planting cells' slots' plants (a stand-in without; render/gpu/placed_drawing.h)
     VkDescriptorBufferInfo placedEntries{};   // the camera's placed entries (a stand-in without)
+    VkDescriptorBufferInfo twigEntries{};     // the camera's twig entries and the twigs (stand-ins without; render/gpu/twig_records.h)
+    VkDescriptorBufferInfo twigs{};
     VkDescriptorBufferInfo lianaShapes{};     // the lianas' records, slot by slot (scene/liana_shape.h; one unused without)
 };
 

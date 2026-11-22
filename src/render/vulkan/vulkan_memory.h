@@ -129,6 +129,9 @@ inline constexpr VkDeviceSize smallestRecordBufferBytes = 256;
 */
 bool ensureBuffer(VmaAllocator allocator, VulkanBuffer& buffer, VkDeviceSize bytes, VkBufferUsageFlags usage, BufferMemory memory);
 
+// A frame's own upload storage buffer (ensureBuffer) holding the bytes, written and flushed.
+void uploadBytes(VmaAllocator allocator, VulkanBuffer& buffer, const void* bytes, VkDeviceSize size);
+
 // One image barrier, recorded on its own.
 void recordImageBarrier(VkCommandBuffer commands, const VkImageMemoryBarrier2& barrier);
 

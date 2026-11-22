@@ -76,6 +76,16 @@ namespace {
 
         assert(next == 1000 + clusters.clusters.size() && levels.back().error == FLT_MAX);
 
+        // The pool's records give the same levels (the renderer's way to them).
+        const PackedMeshClusters packed = packMeshClusters(clusters, 0, 0, 0);
+        const std::vector<GpuTwigLevel> fromRecords = packTwigLevels(std::span<const GpuMeshCluster>{packed.clusters}, 1000);
+        assert(fromRecords.size() == levels.size());
+
+        for (std::size_t level = 0; level < levels.size(); ++level) {
+            assert(fromRecords[level].firstCluster == levels[level].firstCluster && fromRecords[level].clusterCount == levels[level].clusterCount);
+            assert(fromRecords[level].error == levels[level].error && fromRecords[level].sphere[3] == levels[level].sphere[3]);
+        }
+
         // A sphere's simplified levels mix groups within a level: not a chain.
         const MeshClusters simplified = buildMeshClusters(buildIndexedMesh(Mesh::sphere(96, 48)), ClusterLevels::All);
         bool refused = false;
@@ -245,7 +255,96 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The cluster passes' twig regions (on the CPU): the drawing order puts them in their style's run; a region's pairs
+    * are its entries (at most its room) times its clusters, each item its entry's place and its level's first cluster
+    * plus its offset; a twig entry draws its part placed by its plant, then its twig; the bound holds every region full.
+    */
+    void testTwigGroupsInTheClusterPasses() {
+        GpuPlacedPlant plant{};
+        plant.foot[0] = 3.0f;
+        plant.foot[1] = 1.0f;
+        plant.foot[2] = -2.0f;
+        plant.scale = 1.5f;
+        plant.turnRadians = 0.6f;
+        const std::vector<GpuPlacedPlant> plants{plant};
+        const std::vector<GpuInstance> partInstances{placedInstance(Mat4::translation(0.0f, 2.0f, 0.0f))};
+        const std::vector<GpuPlacedPart> parts{GpuPlacedPart{}};
+        const std::vector<GpuPlacedEntry> placedEntries{GpuPlacedEntry{0, 0}};
+        std::vector<GpuTwig> twigs;
+
+        for (int index = 0; index < 6; ++index) {
+            twigs.push_back(packTwig(testTwig(Vec3{static_cast<float>(index), 5.0f, 0.0f}, 1.0f + 0.1f * static_cast<float>(index))));
+        }
+
+        constexpr std::uint32_t room = 4;
+        std::vector<GpuTwigEntry> entries(room * twigMostLevelClusters);
+        const auto put = [&](std::uint32_t region, std::uint32_t slot, std::uint32_t twig) {
+            entries[region * room + slot] = GpuTwigEntry{0, twig, 10 * twig, 0};
+        };
+        put(0, 0, 0);
+        put(0, 1, 1);
+        put(0, 2, 2);
+        put(0, 3, 3);
+        put(1, 0, 3);
+        put(1, 1, 4);
+        put(3, 0, 5);
+
+        MeshClusterTables tables;
+        tables.placed.entries = placedEntries;
+        tables.placed.partInstances = partInstances;
+        tables.placed.parts = parts;
+        tables.placed.plants = plants;
+        tables.twigs.counts = {6, 2, 0, 1};
+        tables.twigs.room = room;
+        tables.twigs.entries = entries;
+        tables.twigs.twigs = twigs;
+
+        const CullDrawOrder order = meshClusterDrawOrder(CullDrawOrder{}, 0, CullDrawOrder{}, 1);
+        assert(order.order.size() == twigMostLevelClusters && order.runFirst[1] == 0 && order.runCount[1] == twigMostLevelClusters);
+        assert(order.order[2] == twigGroupBase + 2);
+        tables.drawOrder = order.order;
+        GpuCameraCull view{};
+
+        for (std::size_t style = 0; style < MESH_CLUSTER_STYLES; ++style) {
+            view.runFirst[style] = order.runFirst[style];
+            view.runCount[style] = order.runCount[style];
+        }
+
+        std::array<std::uint32_t, MESH_CLUSTER_WORK_WORDS> work{};
+        const std::vector<std::uint32_t> ends = meshClusterWorkEnds(tables, view, work);
+        assert(work[MESH_CLUSTER_WORK_REAL] == 4 * 1 + 2 * 2 + 0 * 3 + 1 * 4); // region 0's six cut to its room of four
+
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> found;
+
+        for (std::uint32_t pair = 0; pair < work[MESH_CLUSTER_WORK_END]; ++pair) {
+            const MeshClusterPair at = meshClusterPairAt(tables, ends, pair);
+
+            if (at.real) {
+                found.emplace_back(at.entry, at.cluster);
+            }
+        }
+
+        const std::vector<std::pair<std::uint32_t, std::uint32_t>> expected{
+            {twigInstanceBase + 0, 0},          {twigInstanceBase + 1, 10},         {twigInstanceBase + 2, 20},         {twigInstanceBase + 3, 30},
+            {twigInstanceBase + room, 30},      {twigInstanceBase + room, 31},      {twigInstanceBase + room + 1, 40},  {twigInstanceBase + room + 1, 41},
+            {twigInstanceBase + 3 * room, 50},  {twigInstanceBase + 3 * room, 51},  {twigInstanceBase + 3 * room, 52}, {twigInstanceBase + 3 * room, 53}};
+        assert(found == expected);
+
+        const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, twigInstanceBase + 3 * room);
+        const GpuInstance wanted = twigInstance(placedInstance(partInstances[0], plant), twigs[5]);
+
+        for (int value = 0; value < 16; ++value) {
+            assert(std::abs(drawn.instance.model[value] - wanted.model[value]) < 1e-6f);
+        }
+
+        assert(drawn.entry == placedEntries[0].plant && twigMeshClusterPairBound(room) == room * (1 + 2 + 3 + 4));
+    }
+}
+
 void testTwigRecords() {
+    testTwigGroupsInTheClusterPasses();
     testATwigsRecord();
     testAPrototypesLevels();
     testATwigsInstance();

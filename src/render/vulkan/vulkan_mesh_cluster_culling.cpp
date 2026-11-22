@@ -39,13 +39,6 @@ namespace {
         return description;
     }
 
-    // An upload buffer holding the bytes, written and flushed.
-    void uploadBytes(VmaAllocator allocator, VulkanBuffer& buffer, const void* bytes, VkDeviceSize size) {
-        ensureBuffer(allocator, buffer, size, storage, BufferMemory::Upload);
-        std::memcpy(buffer.getMapped(), bytes, size);
-        buffer.flush();
-    }
-
     void pushList(VkCommandBuffer commands, const ComputePipeline& pipeline, std::uint32_t list) {
         vkCmdPushConstants(commands, pipeline.getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(list), &list);
     }
@@ -127,6 +120,7 @@ std::vector<ComputeBinding> VulkanMeshClusterCulling::passBindings(const PerFram
         storageBufferBinding(frame.inputs.clusters), storageBufferBinding(frame.setup.get()),     storageBufferBinding(frame.occlusionRecord.get()),
         placedOr(placed.commands),                   placedOr(placed.groups),                    placedOr(placed.entries),
         placedOr(placed.partInstances.buffer),       placedOr(placed.parts),                     placedOr(placed.plants),
+        placedOr(frame.inputs.twigs.regions),        placedOr(frame.inputs.twigs.entries),       placedOr(frame.inputs.twigs.twigs),
     };
     all[7].buffer = frame.inputs.instances;
 

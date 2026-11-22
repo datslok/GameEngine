@@ -50,7 +50,7 @@ void main() {
         vec4 errors = testInput(19);
         cluster.ownError = errors.x;
         cluster.parentError = errors.y;
-        cluster.unused0 = 0u;
+        cluster.level = 0u;
         cluster.unused1 = 0u;
         cluster.unused2 = 0u;
 

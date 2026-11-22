@@ -1,0 +1,60 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The twig passes' second (render/vulkan/vulkan_twig_drawing.h; mirrored by twigDrawsOnCpu): a workgroup a source's
+* brick (x the brick within its set, y the source), a thread a twig. The brick kept (twigBrickKept), each twig kept
+* (twigKept), its level walked to the one it draws (twigLevelDrawn), its entry put in the region of its level's
+* cluster count. The regions' order is the atomics', so the cluster passes and cluster-compare take them as sets.
+*/
+#include "twig_pass.glsl"
+
+layout(local_size_x = TWIG_BRICK_SIZE) in;
+
+void main() {
+    uvec2 source = twigSources[gl_WorkGroupID.y];
+    uvec4 set = twigSets[source.y];
+
+    if (gl_WorkGroupID.x >= set.y) {
+        return;
+    }
+
+    TwigBrick brick = twigBricks[set.x + gl_WorkGroupID.x];
+    uvec2 placed = placedEntries[source.x];
+    PlacedPlant plant = placedPlants[placed.x & DRAW_LIST_INSTANCE_MASK];
+    InstanceData part = placedInstance(placedPartInstances[placed.y], plant);
+    CullRecord record = placedCullRecord(placedParts[placed.y].record, plant);
+    uint local = gl_LocalInvocationID.x;
+
+    if (local >= brick.twigCount || !twigBrickKept(brick, part, placed.x, record, view)) {
+        return;
+    }
+
+    uint number = brick.firstTwig + local;
+    Twig twig = twigs[number];
+    TwigPrototype prototype = twigPrototypes[twig.prototype];
+    InstanceData placedTwig = twigInstance(part, twig);
+
+    if (!twigKept(twigLevels[prototype.firstLevel + prototype.levelCount - 1u], placedTwig, placed.x, record, view)) {
+        return;
+    }
+
+    uint chosen = prototype.levelCount - 1u;
+
+    for (uint level = 0u; level < prototype.levelCount; ++level) {
+        TwigLevel before = twigLevels[prototype.firstLevel + max(level, 1u) - 1u];
+
+        if (twigLevelDrawn(before, level == 0u, twigLevels[prototype.firstLevel + level], placedTwig.model, view.levels)) {
+            chosen = level;
+            break;
+        }
+    }
+
+    TwigLevel drawn = twigLevels[prototype.firstLevel + chosen];
+    uint region = drawn.clusterCount - 1u;
+    uint slot = atomicAdd(twigCounts[region], 1u);
+
+    if (slot < twigRoom.x) {
+        twigEntries[region * twigRoom.x + slot] = uvec4(source.x, number, drawn.firstCluster, 0u);
+    }
+}

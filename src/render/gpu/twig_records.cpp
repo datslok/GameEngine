@@ -81,6 +81,39 @@ std::vector<GpuTwigLevel> packTwigLevels(const MeshClusters& clusters, std::uint
     return levels;
 }
 
+// Level by level the records' runs (their groups' levels from 0 up, each run together), each its group's sphere and error.
+std::vector<GpuTwigLevel> packTwigLevels(std::span<const GpuMeshCluster> records, std::uint32_t firstPoolCluster) {
+    std::vector<GpuTwigLevel> levels;
+
+    for (std::uint32_t number = 0; number < records.size(); ++number) {
+        const GpuMeshCluster& cluster = records[number];
+
+        if (cluster.level == levels.size()) {
+            GpuTwigLevel level;
+            std::copy(cluster.parentSphere, cluster.parentSphere + 4, level.sphere);
+            level.error = cluster.parentError;
+            level.firstCluster = firstPoolCluster + number;
+            levels.push_back(level);
+        } else if (levels.empty() || cluster.level + 1 != levels.size()) {
+            throw std::invalid_argument("A twig prototype's clusters are not a chain of levels");
+        }
+
+        ++levels.back().clusterCount;
+    }
+
+    for (const GpuTwigLevel& level : levels) {
+        if (level.clusterCount > twigMostLevelClusters) {
+            throw std::invalid_argument("A twig prototype's level has more than TWIG_MOST_LEVEL_CLUSTERS clusters");
+        }
+    }
+
+    if (levels.size() > twigMostLevels) {
+        throw std::invalid_argument("A twig prototype has more than TWIG_MOST_LEVELS levels");
+    }
+
+    return levels;
+}
+
 namespace {
     // A twig's matrix: its rows as GpuTwig holds them, the last (0 0 0 1).
     Mat4 twigMatrix(const GpuTwig& twig) {

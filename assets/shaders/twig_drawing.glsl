@@ -4,15 +4,8 @@
 #ifndef TWIG_DRAWING_GLSL
 #define TWIG_DRAWING_GLSL
 
-#include "render/gpu/twig_drawing_shared.h"
 #include "mesh_cluster_culling.glsl"
-
-// A twig: its matrix's three rows (prototype frame to plant frame), its lean and prototype. Must match GpuTwig.
-struct Twig {
-    vec4 rows[3];
-    vec3 lean;
-    uint prototype;
-};
+#include "twig_record.glsl"
 
 // A brick: its sphere in the plant's frame and its twigs' run. Must match GpuTwigBrick.
 struct TwigBrick {
@@ -39,11 +32,6 @@ struct TwigPrototype {
     uint unused0;
     uint unused1;
 };
-
-// The twig's matrix (its rows, then 0 0 0 1), column by column as GLSL holds it.
-mat4 twigMatrix(Twig twig) {
-    return transpose(mat4(twig.rows[0], twig.rows[1], twig.rows[2], vec4(0.0, 0.0, 0.0, 1.0)));
-}
 
 // A twig of a placed part (twigInstance): the twig's matrix after the part's, its turn after the part's normals, its
 // scale (its across column's length) on the part's.

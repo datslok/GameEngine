@@ -61,6 +61,7 @@
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_placed_drawing.h"
+#include "render/vulkan/vulkan_twig_drawing.h"
 #include "render/vulkan/vulkan_planting.h"
 #include "render/vulkan/vulkan_wind.h"
 #include "render/vulkan/vulkan_camera_culling.h"
@@ -398,7 +399,9 @@ private:
     // The placed plants drawn in every view (render/gpu/placed_drawing.h): the frame in flight while it draws any, each
     // view's number among its views (the camera's 0), and a stand-in for the scene set's placed buffers while it draws none.
     std::unique_ptr<VulkanPlacedDrawing> placedDrawing;
+    std::unique_ptr<VulkanTwigDrawing> twigDrawing; // the camera's twigs (phase 21 stage 3b-iii)
     std::optional<std::uint32_t> framePlaced;
+    std::optional<std::uint32_t> frameTwigs; // the frame drawing twigs (twigDrawing prepared), if this one does
 
     // The camera's placed plants are drawn as mesh clusters this frame, so its passes skip their indexed draws.
     bool framePlacedByClusters = false;
