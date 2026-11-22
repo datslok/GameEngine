@@ -62,3 +62,17 @@ The culling algorithm itself is unpublished (no talk slides found).
 - **Levels:** clusterlod with `simplify_dilate_borders` (automatic, risk of blobs and erosion) or our own leaf DAG by prune rank (the card-thinning maths moved into the hierarchy; watertightness not needed between leaves; tested as in 2b).
 - **Wind (the user's picks, Nov 22 2026):** bones from the skeleton (chains cut about every 2 m, two-bone blend along a chain and at its joint), a twig a bone with its flutter as that bone's turn; transforms in a pass once a frame, parents first; clusters within one chain holding their run of bones, bounds from the bones with no pad; animation stopped below 0.1 of the screen, which stage 4 needs.
 - **Far:** the crown impostor card stays until volumes (`FARFOLIAGE.md`).
+
+## The plan (phase 21 stage 3)
+
+| Stage | What | Tests and checks |
+|---|---|---|
+| 3a | Twig prototypes: a `LeafSet024` leaf traced from its opacity (3 rows across the midrib, 12 triangles, folded and curled, opaque, light through it); twigs placed as `ClusterLeaf` places them; half the leaves a level by a fixed rank, the survivors widened | area kept a level, a level a prefix of the one below, ranks fixed |
+| 3b | Trees draw twigs, expanded on the GPU while culling (assemblies, over a CPU bake); the cards beyond the twigs' reach and for shadows until 3f | i: levels given by the caller, as 2b; ii: twigs laid out as the cards; iii: twig pass, normal blend, a leaf's tone from a hash |
+| 3c-ii | Bone motion in `wind.glsl` and its C++ mirror: each bone's turn from the tree's spring, stiffness and phase, about the axis across its direction and the wind; parents composed first; the blended vertex; a cluster's bound from its bones | still air still, the foot fixed, joints continuous, bounds holding over random poses; a GPU test (not run) |
+| 3c-iii | The bones pass, its pool and buffers; bark and twigs moved by their bones in every view (twig flutter as its bone's turn); the trees' per-vertex sway retired | the user checks and tunes the sway |
+| 3c-iv | Clusters built within chains, culled by their bones' bounds (cones turned with them); nothing kept whole for sway on trees; animation stopped below 0.1 of the screen | F4 counts, `cluster-compare`, timings at the four spots |
+| 3e | Far levels above the twigs: whole twigs pruned by rank and merged into each variant's coarse levels, the cut crossing from twigs to tree without cracks or pops | |
+| 3f | The leaf cards and shadow stand-ins retired, leaves casting opaque shadows in the cascades until stage 4; the crown's impostor card kept far until volumes | measured at the four spots |
+
+- Plants, grass and hanging things keep today's sway. Grass and floor cover stay as they are: stage 1 culls their patches by cluster, stage 4 decides their shadows (contact shadows instead, measured), stage 5 helps them most.

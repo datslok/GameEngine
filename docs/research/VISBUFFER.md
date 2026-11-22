@@ -53,3 +53,14 @@ Why: with twigs on, the ring view draws 109.6M cluster triangles (cards: 18.6M);
 
 - Nanite on aggregates (leaves, grass): holes and overdraw, no per-triangle culling, "doesn't perform as well" [K21]. UE 5.7: assemblies, skinned wind, voxels for far foliage [F].
 - [I] A visibility buffer removes the forward pass's quad waste (MAIN's 62 ms) but not the raster's triangle count (PREPASS's 43 ms); the compute rasteriser cuts the cost a triangle; neither cuts the count. 109.6M triangles over a ~2-3M pixel screen is ~40 a pixel, so the twigs' levels (3e) and culling of swaying twigs (3c) still decide the count.
+
+## The plan (phase 21 stage 5)
+
+- The user's picks: 32-bit depth, 25-bit cluster, 7-bit triangle in a 64-bit image; one material pass running today's shading; cut-outs on the forward path; GPUs without 64-bit image atomics or mesh shaders keep today's path.
+
+| Step | What |
+|---|---|
+| 5-0 | F4 counts of twig triangles by level, kept for sway against kept as seen (done, `twig-counts-5-0`) |
+| 5a | The visibility buffer drawn by the mesh shaders' atomics in place of the mesh clusters' prepass; a resolve to the depth image and solid mask (AO, SSR, fog, the pyramid unchanged); other draws' prepass and main pass on top |
+| 5b | The material pass: one compute pass rebuilding each pixel's triangle by `shadeVertex` (sway, motion), analytic derivatives, today's `scene_surface.glsl`, in place of the main pass for cluster pixels; measured at the four spots |
+| 5c | A compute rasteriser for clusters of small triangles (under about 32 px), near-plane crossers on the hardware path, fixed point and the top-left rule so the paths meet without cracks; measured |

@@ -139,6 +139,7 @@
     - The light lab's `street-night` once differed from its reference in 5 pixels (up to 29 half-float steps) and the next run matched bit for bit.
     - The demo's first saved `lamp-field` was the odd one of four runs (22 pixels, up to 2 steps).
     - Both views have many lights at probe hits, so something there is not quite reproducible from run to run. `main` before this branch does the same (`street-night` passed, then failed by the same 73 pixels): the view lands on one of two pictures, not random noise.
+    - Where to look first: many lights at probe rays' hits (`keepBrightestLight` ties, the order lights reach a hit).
 - `lumen-research` (Oct 20 2026): the user asked how Lumen is made and tuned, and how to build something like it.
   - **Read:** Epic's SIGGRAPH 2021 and 2022 Advances talks in full (with speaker notes), their documentation and release notes, a copy of the scalability settings, and the published alternatives (GI-1.0, Brixelizer, kajiya, ReSTIR GI, radiance cascades, hash-grid caches, denoisers); written up as `docs/research/LUMEN.md`.
   - **What it showed:**

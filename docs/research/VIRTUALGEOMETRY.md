@@ -84,4 +84,5 @@ Ours, measured (laptop, release, forest, nothing else running): 10.3M triangles 
 
 - Shadows' cost would follow pages on screen, not the forest: the steps, thinning, stand-ins and cascade edges go; swaying pages near the camera still redraw every frame, so sway stops past a distance.
 - The main pass (8-17 ms, triangle-bound) gains from cluster culling and levels before any shadow work; the card-to-3D pop goes with cards.
-- Plan and stages: `ROADMAP.md`, phase 21 (Virtual geometry).
+- Stage 4, virtual shadow maps for the sun: a clipmap of virtual maps in pages round the camera, pages marked from the depth buffer, one physical pool, clusters culled and drawn a page, pages kept until something in them moves; the cascades, their steps and thinning and the far map retired; then the lamps.
+- Stages: `ROADMAP.md`, phase 21; stage 3's plan in `LEAFGEOMETRY.md`, stage 5's in `VISBUFFER.md`.

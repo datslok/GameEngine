@@ -38,6 +38,10 @@ namespace {
     // Longer than about four sentences is a wall of prose in a file Claude reads as rules. Table rows are exempt.
     constexpr std::size_t longestRuleLine = 400;
 
+    // A ROADMAP.md step is a short bullet saying what, its branches and the doc with the choices and outcomes; the
+    // limit counts the prose only (inline code and link targets left out), so long branch lists do not count.
+    constexpr std::size_t longestRoadmapStep = 120;
+
     // Twelve identical words in a row are almost never a coincidence, while shorter runs catch stock phrases.
     constexpr std::size_t duplicateRunWords = 12;
 
@@ -772,14 +776,60 @@ namespace {
         return looksLikeCode ? parts : std::vector<std::string>{};
     }
 
+    // A date as the docs write them ("2026-11-22", "Nov 22"): shared by the step check and the report's warnings.
+    const std::regex& datePattern() {
+        static const std::regex date(
+            R"(\b(19|20)\d\d-\d\d-\d\d\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}\b)");
+        return date;
+    }
+
+    /*
+    * The prose of a ROADMAP.md bullet, or "" for a line that is not one: the dash and tick box, inline code and link
+    * targets removed, so a step is measured by what it says, not by its branch names and paths.
+    */
+    std::string roadmapStepProse(const std::string& line) {
+        static const std::regex bullet(R"(^\s*- (\[[ x]\] )?)");
+        static const std::regex linkTarget(R"(\]\([^)]*\))");
+        std::smatch match;
+
+        if (!std::regex_search(line, match, bullet)) {
+            return "";
+        }
+
+        return std::regex_replace(withoutCode(match.suffix().str()), linkTarget, "]");
+    }
+
+    /*
+    * Every ROADMAP.md step a short bullet (the root CLAUDE.md, "Where new information goes"): what is built and its
+    * branches, no dates; the choices, plans and measurements live in the research docs and the build log it links.
+    */
+    void checkRoadmapSteps(Problems& problems) {
+        const std::vector<std::string> lines = splitLines(readText("ROADMAP.md"));
+
+        for (std::size_t index = 0; index < lines.size(); ++index) {
+            const std::string prose = roadmapStepProse(lines[index]);
+            const std::string where = "ROADMAP.md:" + std::to_string(index + 1);
+            std::smatch match;
+
+            if (prose.size() > longestRoadmapStep) {
+                problems.push_back(where + ": a step of " + std::to_string(prose.size()) + " characters, over " +
+                                   std::to_string(longestRoadmapStep) + ": the detail goes in the docs it links");
+            }
+
+            if (std::regex_search(prose, match, datePattern())) {
+                problems.push_back(where + ": a step with a date (\"" + match.str() +
+                                   "\"): history goes in the build log");
+            }
+        }
+    }
+
     /*
     * What the docs-review skill reads at the end of a phase: dates and measurements that belong in the build log or the
     * roadmap ("Dense: no history or dates outside BUILDLOG.md and ROADMAP.md"), and backticked names no longer in the
     * code. Warnings, not failures: a budget ("16 ms a tick") is a measurement-shaped fact that belongs where it is.
     */
     Problems docsWarnings() {
-        static const std::regex date(
-            R"(\b(19|20)\d\d-\d\d-\d\d\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}\b)");
+        const std::regex& date = datePattern();
         static const std::regex measurement(R"(\b\d+(\.\d+)? ?(ms|us|fps|FPS)\b|\b\d+(\.\d+)? ?µs)");
         const std::set<std::string> identifiers = codeIdentifiers();
         Problems warnings;
@@ -830,14 +880,16 @@ namespace {
 
 /*
 * Keeps the docs from growing needlessly (ROADMAP phase 19): the layers docs/LAYOUT.md states hold for every include,
-* instruction files stay within their budgets and line length, the paths the checked docs name exist, every doc is in
-* docs/INDEX.md, every source and shader has an architecture file, and no two checked docs repeat the same text.
+* instruction files stay within their budgets and line length, each roadmap step is a short line, the paths the checked
+* docs name exist, every doc is in docs/INDEX.md, every source and shader has an architecture file, and no two checked
+* docs repeat the same text.
 */
 void testDocs() {
     Problems problems;
     checkLayers(problems);
     checkBudgets(problems);
     checkLineLengths(problems);
+    checkRoadmapSteps(problems);
     checkPaths(problems);
     checkIndex(problems);
     checkCoverage(problems);
