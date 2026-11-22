@@ -1,6 +1,6 @@
 # Mesh clusters
 
-Covers: `src/scene/mesh_clusters`, `src/scene/twig_set`, `src/render/gpu/twig_records`, `src/render/gpu/twig_drawing_shared.h`, `assets/shaders/twig_drawing.glsl`, `src/render/gpu/mesh_cluster_culling`, `src/render/gpu/mesh_cluster_culling_shared.h`, `assets/shaders/mesh_cluster_culling.glsl`, `assets/shaders/mesh_cluster_pass.glsl`, `assets/shaders/mesh_cluster_count.comp`, `assets/shaders/mesh_cluster_test.comp`, `assets/shaders/mesh_cluster_scan.comp`, `assets/shaders/mesh_cluster_write.comp`, `src/render/vulkan/vulkan_mesh_cluster_culling`, `src/scene/mesh_clusters_shared.h`, `assets/shaders/mesh_cluster_draw.glsl`, `assets/shaders/triangle.mesh`, `assets/shaders/triangle_motion.mesh`
+Covers: `src/scene/mesh_clusters`, `src/render/gpu/mesh_cluster_culling`, `src/render/gpu/mesh_cluster_culling_shared.h`, `assets/shaders/mesh_cluster_culling.glsl`, `assets/shaders/mesh_cluster_pass.glsl`, `assets/shaders/mesh_cluster_count.comp`, `assets/shaders/mesh_cluster_test.comp`, `assets/shaders/mesh_cluster_scan.comp`, `assets/shaders/mesh_cluster_write.comp`, `src/render/vulkan/vulkan_mesh_cluster_culling`, `src/scene/mesh_clusters_shared.h`, `assets/shaders/mesh_cluster_draw.glsl`, `assets/shaders/triangle.mesh`, `assets/shaders/triangle_motion.mesh`
 
 Meshes cut into small pieces culled one by one (ROADMAP phase 21, stage 1; research `docs/research/VIRTUALGEOMETRY.md`). Not the lights' clusters (`clustered-shading.md`). Cost grows with the camera's drawn instances times their clusters, not with the scene.
 
@@ -86,15 +86,9 @@ The same switch draws the list: the camera's prepass and main pass draw each sty
 - **Same depth bit for bit:** the main pass shades where depth equals the prepass's, so `gl_Position` is `invariant` in both, as in the vertex shaders.
 - **One vertex body:** `triangle_vertex.glsl`'s `shadeVertex` writes each output once through `VERTEX_OUT` macros (mesh shaders may not read their outputs back), so vertex and mesh shaders place and sway alike. A pooled mesh never deforms, so last frame's shape is its own.
 
-## Twigs (assemblies, stage 3b-iii)
+## Twigs
 
-A plant's twigs drawn as instances of a few prototype meshes, culled a brick, then a twig, before their clusters (Nanite's assemblies; `forest-twigs.md` for the forest's).
-
-- **What a game hands over** (`scene/twig_set`, `TwigSet`): the prototypes (drawn-only meshes with given cluster levels), each twig (`TwigInstance`: foot, frame, scale, prototype, lean) and the bricks (`TwigBrick`, `twigBrickSize` 64). `makeTwigSet` splits the feet's box along its longest side at whole bricks until each part is one brick (a median split: compact bricks, all full but the last; a Morton order's runs left one brick 12.6 m across in a 14 m crown), each brick's sphere its farthest twig's foot plus that twig's reach (`meshReach` of its prototype, times its scale).
-- **Records** (`render/gpu/twig_records`): `GpuTwig` (64 B: the 3 x 4 matrix from prototype to plant frame, lean, prototype), `GpuTwigBrick` (32 B), `GpuTwigLevel` (32 B a prototype's level: its group's sphere and error, its clusters' run in the pool; `packTwigLevels` refuses clusters that are not a chain).
-- **The twig pass's maths** (`twig_drawing.glsl`, mirrored in `render/gpu/twig_records`; 3b-iii-b1): `twigInstance` (the part's instance with the twig's matrix after it, the twig's turn after its normals, its scale on the part's); `twigLevelDrawn` and `twigLevel` (the cluster cut on whole levels: the level whose own error, the level before's group's, fits and whose group's does not, so the twig pass picks exactly the clusters `meshClusterInCut` keeps); `twigBrickKept` and `twigKept` (kept whole where the part is not rigid, as `meshClusterRigid`; else the brick's sphere placed by the part, or the prototype's coarsest group's placed by the twig, in the frustum). `twigDrawsOnCpu` runs the pass's steps for a part (`TwigTables`, `TwigDraw`). Twig entries from `TWIG_INSTANCE_BASE`; a level at most `TWIG_MOST_LEVEL_CLUSTERS` clusters, a prototype at most `TWIG_MOST_LEVELS` levels (`twig_drawing_shared.h`).
-- **Twig parts** (3b-iii-b2a): a part carrying a twig set (`RenderPart::twigs`, `DrawItem::twigs`, `CULL_TWIGS`) is drawn only by views drawing twigs (`LevelView::twigs`, `CULL_LEVELS_TWIGS`: the camera drawing mesh clusters with Passes "Twigs" on, off until the twig pass draws), and what it replaces (`ModelRenderer::twigFallback`, `CULL_TWIG_FALLBACK`) only by the others (`cameraTakesTwigs` in `cameraCandidateFlags`); shadows take the fallback either way. In the placed table a twig part's groups draw nothing and its `unused[0]` names its set in `PlacedTable::twigSets`. Its mesh only stands for it (bounds, levels).
-- Not drawn yet: the GPU's twig pass and the mesh shaders' twig instances are 3b-iii-b2b.
+A plant's twigs drawn as instances of prototypes, culled a brick, then a twig, before their clusters, which take them as groups: `twig-drawing.md`.
 
 ## Tests
 

@@ -3,6 +3,7 @@
 #include "render/vulkan/vulkan_device.h"
 
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 #include <utility>
 
@@ -255,6 +256,12 @@ bool ensureBuffer(VmaAllocator allocator, VulkanBuffer& buffer, VkDeviceSize byt
 
     buffer = VulkanBuffer{allocator, std::max(bytes, 2 * buffer.getSize()), usage, memory};
     return true;
+}
+
+void uploadBytes(VmaAllocator allocator, VulkanBuffer& buffer, const void* bytes, VkDeviceSize size) {
+    ensureBuffer(allocator, buffer, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Upload);
+    std::memcpy(buffer.getMapped(), bytes, size);
+    buffer.flush();
 }
 
 void recordImageBarrier(VkCommandBuffer commands, const VkImageMemoryBarrier2& barrier) {

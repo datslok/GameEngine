@@ -8,7 +8,10 @@
 #include "scene/twig_set.h"
 
 #include <cstdint>
+#include <span>
 #include <vector>
+
+struct GpuMeshCluster; // render/gpu/mesh_cluster_culling.h, which includes this
 
 /*
 * A twig set's records as the GPU's twig pass reads them (ROADMAP phase 21 stage 3b-iii; scene/twig_set.h). Render-only
@@ -65,6 +68,12 @@ GpuTwigBrick packTwigBrick(const TwigBrick& brick);
 */
 std::vector<GpuTwigLevel> packTwigLevels(const MeshClusters& clusters, std::uint32_t firstPoolCluster);
 
+/*
+* The same levels from the pool's records of a prototype's clusters (the renderer's view of them: packMeshClusters keeps
+* each cluster's group's level, sphere and error), its clusters from firstPoolCluster. Throws as the other does.
+*/
+std::vector<GpuTwigLevel> packTwigLevels(std::span<const GpuMeshCluster> records, std::uint32_t firstPoolCluster);
+
 // A prototype's levels in the level table: from firstLevel, levelCount of them.
 struct GpuTwigPrototype {
     std::uint32_t firstLevel = 0;
@@ -74,7 +83,22 @@ struct GpuTwigPrototype {
 
 static_assert(sizeof(GpuTwigPrototype) == 16, "GpuTwigPrototype must match twig_drawing.glsl's TwigPrototype");
 
+/*
+* A twig a view draws, as the twig pass writes it for the cluster passes and mesh shaders (an entry from
+* TWIG_INSTANCE_BASE, in its region by its level's cluster count): its part's placed entry (the camera's place in the
+* placed entries), its twig's number in the twig table, its level's first cluster in the pool.
+*/
+struct GpuTwigEntry {
+    std::uint32_t placedEntry = 0;
+    std::uint32_t twig = 0;
+    std::uint32_t firstCluster = 0;
+    std::uint32_t unused = 0;
+};
+
+static_assert(sizeof(GpuTwigEntry) == 16, "GpuTwigEntry must match twig_drawing.glsl's uvec4");
+
 inline constexpr std::uint32_t twigInstanceBase = TWIG_INSTANCE_BASE;
+inline constexpr std::uint32_t twigGroupBase = TWIG_GROUP_BASE;
 inline constexpr std::uint32_t twigMostLevelClusters = TWIG_MOST_LEVEL_CLUSTERS;
 inline constexpr std::uint32_t twigMostLevels = TWIG_MOST_LEVELS;
 static_assert(TWIG_BRICK_SIZE == twigBrickSize, "The twig pass's workgroup is a brick");

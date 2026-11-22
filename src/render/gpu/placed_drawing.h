@@ -159,6 +159,7 @@ struct PlacedTable {
     // GpuPlacedPart::unused[0] is its set's number here, and its groups draw nothing themselves (ROADMAP phase 21 stage
     // 3b-iii: the twig pass draws its twigs).
     std::vector<const TwigSet*> twigSets;
+    int twigStyle = -1; // its twig parts' style (they must share one: the twig regions are drawn in one style's run); -1 none
 };
 
 // The slot of its layer's kinds a plant of kind draws: the kind's own, or, with variants (its kind given several looks),

@@ -211,6 +211,11 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
         }
 
         if (draw.twigs != nullptr) {
+            if (table.twigStyle >= 0 && table.twigStyle != partStyle(draw.material)) {
+                throw std::invalid_argument("The placed twig parts must share one style");
+            }
+
+            table.twigStyle = partStyle(draw.material);
             const auto known = std::find(table.twigSets.begin(), table.twigSets.end(), draw.twigs);
             placed.unused[0] = static_cast<std::uint32_t>(known - table.twigSets.begin());
 

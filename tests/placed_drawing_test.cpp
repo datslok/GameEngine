@@ -387,6 +387,8 @@ namespace {
         kinds.parts[0].twigs = &first;
         kinds.parts[1].twigs = &second;
         kinds.parts[2].twigs = &first;
+        kinds.parts[1].material = kinds.parts[0].material; // twig parts share one style
+        kinds.parts[2].material = kinds.parts[0].material;
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
         assert(table.twigSets.size() == 2);
 
@@ -402,8 +404,23 @@ namespace {
 
             if (draw.twigs != nullptr) {
                 assert((part.record.flags & CULL_TWIGS) != 0u && table.twigSets.at(part.unused[0]) == draw.twigs);
+                assert(table.twigStyle == (isCutOut(draw.material) ? 2 : 0) + (draw.material.doubleSided ? 1 : 0));
             }
         }
+
+        // Twig parts of different styles are refused: their twigs share the cluster passes' regions, drawn in one style.
+        kinds.parts[2].material.doubleSided = !kinds.parts[0].material.doubleSided;
+        kinds.parts[2].material.alphaMode = kinds.parts[0].material.alphaMode;
+        bool refused = false;
+
+        try {
+            buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
+        } catch (const std::invalid_argument&) {
+            refused = true;
+        }
+
+        assert(refused);
+        assert(buildPlacedTable(testKinds().parts, testKinds().kinds, 3, testPlacement).twigStyle == -1);
     }
 
     void testTheTable() {

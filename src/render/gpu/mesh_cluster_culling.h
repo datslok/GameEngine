@@ -10,6 +10,7 @@
 #include "render/gpu/mesh_pool.h"
 #include "render/gpu/placed_drawing.h"
 #include "render/gpu/screen_reflections.h"
+#include "render/gpu/twig_records.h"
 #include "scene/mesh_clusters.h"
 
 #include <array>
@@ -47,7 +48,8 @@ struct GpuMeshCluster {
     float ownSphere[4] = {};
     float parentSphere[4] = {};
     float parentError = 0.0f;
-    std::uint32_t unused[3] = {};
+    std::uint32_t level = 0;              // the level of the group it was simplified with (MeshClusterGroup::level)
+    std::uint32_t unused[2] = {};
 };
 
 static_assert(sizeof(GpuMeshCluster) == 112, "GpuMeshCluster must match mesh_cluster_culling.glsl's MeshCluster");
@@ -249,9 +251,21 @@ struct MeshClusterPlacedTables {
 };
 
 /*
+* The camera's twigs as the passes read them (phase 21 stage 3b-iii; render/gpu/twig_records.h): each region's entries
+* written by the twig pass (region r's entries draw r + 1 clusters each; a count may pass the room, the rest lost), the
+* room a region has (region r's entries from r times it), the entries and the twigs. Empty without twigs.
+*/
+struct MeshClusterTwigTables {
+    std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS> counts{};
+    std::uint32_t room = 0;
+    std::span<const GpuTwigEntry> entries;
+    std::span<const GpuTwig> twigs;
+};
+
+/*
 * What the passes read: the camera's commands by group (its culling's, unpacked), the drawing order (meshClusterDrawOrder:
-* a number past the groups is a placed group's, less their count), the groups (their clusters), the frame's draw list,
-* instances, records and clusters, and the placed plants.
+* a number past the groups is a placed group's, less their count; from twigGroupBase a twig region's), the groups (their
+* clusters), the frame's draw list, instances, records and clusters, the placed plants and the twigs.
 */
 struct MeshClusterTables {
     std::span<const GpuDrawCommand> commands;
@@ -262,13 +276,18 @@ struct MeshClusterTables {
     std::span<const GpuCullRecord> records;
     std::span<const GpuMeshCluster> clusters;
     MeshClusterPlacedTables placed{};
+    MeshClusterTwigTables twigs{};
 };
 
 /*
 * The order the passes walk: each style's run of the draws' pooled groups, then its run of the placed groups, numbered
-* after the draws' drawGroups; every place pooled. Cost grows with the groups.
+* after the draws' drawGroups, then, in twigStyle's run (none below 0), the twig regions (twigGroupBase + 0 to
+* TWIG_MOST_LEVEL_CLUSTERS - 1); every place pooled. Cost grows with the groups.
 */
-CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t drawGroups, const CullDrawOrder& placed);
+CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t drawGroups, const CullDrawOrder& placed, int twigStyle = -1);
+
+// The most pairs the twig regions can hold: each region's room times its clusters (1 + 2 + ... + TWIG_MOST_LEVEL_CLUSTERS).
+std::uint64_t twigMeshClusterPairBound(std::uint32_t room);
 
 // What a pair's place draws: its instance, its entry's bits (thinned, fade, with its draw's or plant's number) and its record.
 struct MeshClusterDrawn {

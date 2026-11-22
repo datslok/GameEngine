@@ -38,8 +38,21 @@ namespace {
         std::uint32_t clusterCount = 0;
     };
 
+    /*
+    * A group's command and clusters: a draw group's, a placed group's past them, or from twigGroupBase a twig region's:
+    * its entries written (at most its room) from its first place, each with its own first cluster (meshClusterPairAt),
+    * the region's cluster count for all.
+    */
     OrderedGroup orderedGroup(const MeshClusterTables& tables, std::uint32_t group) {
         const std::size_t drawGroups = tables.groups.size();
+
+        if (group >= twigGroupBase) {
+            const std::uint32_t region = group - twigGroupBase;
+            GpuDrawCommand command{};
+            command.instanceCount = std::min(tables.twigs.counts[region], tables.twigs.room);
+            command.firstInstance = twigInstanceBase + region * tables.twigs.room;
+            return OrderedGroup{command, 0, region + 1};
+        }
 
         if (group < drawGroups) {
             return OrderedGroup{tables.commands[group], tables.groups[group].firstCluster, tables.groups[group].clusterCount};
@@ -126,6 +139,7 @@ PackedMeshClusters packMeshClusters(const MeshClusters& built, std::uint32_t mes
         record.meshFirstVertex = meshFirstVertex;
         writeGroupSphere(built.groups[cluster.group], record.parentSphere);
         record.parentError = built.groups[cluster.group].error;
+        record.level = built.groups[cluster.group].level;
 
         if (cluster.refinedGroup == meshClusterNoGroup) {
             std::copy(std::begin(record.sphere), std::end(record.sphere), std::begin(record.ownSphere));
@@ -422,11 +436,23 @@ MeshClusterPair meshClusterPairAt(const MeshClusterTables& tables, std::span<con
 
     const std::uint32_t within = pair - first;
     const OrderedGroup ordered = orderedGroup(tables, group);
-    return MeshClusterPair{true, ordered.command.firstInstance + within / ordered.clusterCount, ordered.firstCluster + within % ordered.clusterCount};
+    const std::uint32_t entry = ordered.command.firstInstance + within / ordered.clusterCount;
+    const std::uint32_t firstCluster = group >= twigGroupBase ? tables.twigs.entries[entry - twigInstanceBase].firstCluster : ordered.firstCluster;
+    return MeshClusterPair{true, entry, firstCluster + within % ordered.clusterCount};
 }
 
-// Each style's pooled draw groups, then its placed groups (all pooled: buildPlacedTable refuses the rest).
-CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t drawGroups, const CullDrawOrder& placed) {
+std::uint64_t twigMeshClusterPairBound(std::uint32_t room) {
+    std::uint64_t bound = 0;
+
+    for (std::uint32_t clusters = 1; clusters <= twigMostLevelClusters; ++clusters) {
+        bound += std::uint64_t{room} * clusters;
+    }
+
+    return bound;
+}
+
+// Each style's pooled draw groups, then its placed groups (all pooled: buildPlacedTable refuses the rest), then its twig regions.
+CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t drawGroups, const CullDrawOrder& placed, int twigStyle) {
     CullDrawOrder both;
 
     for (std::size_t style = 0; style < cullStyles; ++style) {
@@ -440,6 +466,12 @@ CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t dra
             both.order.push_back(drawGroups + placed.order[place]);
         }
 
+        if (static_cast<int>(style) == twigStyle) {
+            for (std::uint32_t region = 0; region < twigMostLevelClusters; ++region) {
+                both.order.push_back(twigGroupBase + region);
+            }
+        }
+
         both.runCount[style] = static_cast<std::uint32_t>(both.order.size()) - both.runFirst[style];
     }
 
@@ -449,6 +481,14 @@ CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t dra
 
 MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32_t place) {
     MeshClusterDrawn drawn;
+
+    // A twig: its part placed by its plant as a placed entry's, then the twig after it (twigInstance).
+    if (place >= twigInstanceBase) {
+        const GpuTwigEntry& twig = tables.twigs.entries[place - twigInstanceBase];
+        drawn = meshClusterDrawnAt(tables, placedInstanceBase + twig.placedEntry);
+        drawn.instance = twigInstance(drawn.instance, tables.twigs.twigs[twig.twig]);
+        return drawn;
+    }
 
     if (place >= placedInstanceBase) {
         const GpuPlacedEntry& placed = tables.placed.entries[place - placedInstanceBase];

@@ -66,6 +66,14 @@ public:
     * occlusion: two lists; viewProjection: this frame's camera-relative view-projection as the depth is drawn
     * (jittered), from origin.
     */
+    // The camera's twigs (render/vulkan/vulkan_twig_drawing.h), the passes' own record each without: the regions' counts
+    // and room, the entries, the twigs.
+    struct TwigInputs {
+        VkBuffer regions = VK_NULL_HANDLE;
+        VkBuffer entries = VK_NULL_HANDLE;
+        VkBuffer twigs = VK_NULL_HANDLE;
+    };
+
     struct Inputs {
         GpuCameraCull view{};
         std::vector<std::uint32_t> order;
@@ -77,6 +85,7 @@ public:
         VkDescriptorBufferInfo instances{};
         VkBuffer clusters = VK_NULL_HANDLE;
         PlacedInputs placed;
+        TwigInputs twigs;
         std::uint64_t pairBound = 0;
         bool occlusion = false;
         Mat4 viewProjection;

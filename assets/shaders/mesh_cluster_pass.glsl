@@ -6,6 +6,7 @@
 
 #include "mesh_cluster_culling.glsl"
 #include "placed_drawing.glsl"
+#include "twig_drawing.glsl"
 
 // The camera's view as its culling placed it, with the wind's sway (its own copy: the camera culls without it).
 layout(std430, set = 0, binding = 0) readonly buffer Views {
@@ -96,18 +97,50 @@ layout(std430, set = 0, binding = 17) readonly buffer PlacedPlants {
     PlacedPlant placedPlants[];
 };
 
+// The camera's twigs (render/gpu/twig_records.h; one unused record each without): each region's entries the twig pass
+// wrote (region r's draw r + 1 clusters each) and a region's room, the entries (a placed entry's place, the twig, its
+// level's first cluster) and the twigs.
+layout(std430, set = 0, binding = 18) readonly buffer TwigRegions {
+    uvec4 twigCounts;
+    uvec4 twigRoom; // x
+};
+
+layout(std430, set = 0, binding = 19) readonly buffer TwigEntries {
+    uvec4 twigEntries[];
+};
+
+layout(std430, set = 0, binding = 20) readonly buffer Twigs {
+    Twig twigs[];
+};
+
 // The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands.
 layout(push_constant) uniform MeshClusterList {
     uint list;
 } pass;
 
-// A group's command: a draw group's, or, past them, a placed group's (orderedGroup).
+// A group's command: a draw group's, past them a placed group's, from TWIG_GROUP_BASE a twig region's: its entries
+// written (at most its room) from its first place (orderedGroup).
 DrawCommand groupCommand(uint group) {
+    if (group >= TWIG_GROUP_BASE) {
+        uint region = group - TWIG_GROUP_BASE;
+        DrawCommand command;
+        command.indexCount = 0u;
+        command.instanceCount = min(twigCounts[region], twigRoom.x);
+        command.firstIndex = 0u;
+        command.vertexOffset = 0;
+        command.firstInstance = TWIG_INSTANCE_BASE + region * twigRoom.x;
+        return command;
+    }
+
     return group < setup.w ? commands[views[0].slices.z + group] : placedCommands[group - setup.w];
 }
 
-// A group's clusters: first, count.
+// A group's clusters: first, count (a twig region's first is each entry's own: meshClusterPairKept).
 uvec2 groupClusters(uint group) {
+    if (group >= TWIG_GROUP_BASE) {
+        return uvec2(0u, group - TWIG_GROUP_BASE + 1u);
+    }
+
     if (group < setup.w) {
         return uvec2(groups[group].firstCluster, groups[group].clusterCount);
     }
@@ -135,12 +168,22 @@ struct MeshClusterDrawn {
 MeshClusterDrawn meshClusterDrawnAt(uint place) {
     MeshClusterDrawn drawn;
 
+    // A twig: its part placed by its plant, then the twig after it (twigInstance).
+    bool twig = place >= TWIG_INSTANCE_BASE;
+    uvec4 twigEntry = twig ? twigEntries[place - TWIG_INSTANCE_BASE] : uvec4(0u);
+    place = twig ? PLACED_INSTANCE_BASE + twigEntry.x : place;
+
     if (place >= PLACED_INSTANCE_BASE) {
         uvec2 placed = placedEntries[place - PLACED_INSTANCE_BASE];
         PlacedPlant plant = placedPlants[placed.x & DRAW_LIST_INSTANCE_MASK];
         drawn.instance = placedInstance(placedPartInstances[placed.y], plant);
         drawn.record = placedCullRecord(placedParts[placed.y].record, plant);
         drawn.entry = placed.x;
+
+        if (twig) {
+            drawn.instance = twigInstance(drawn.instance, twigs[twigEntry.y]);
+        }
+
         return drawn;
     }
 
@@ -231,7 +274,9 @@ bool meshClusterPairKept(uint pair, out MeshClusterItem item, out bool candidate
 
     uint within = pair - first;
     uvec2 grouped = groupClusters(group);
-    item = MeshClusterItem(groupCommand(group).firstInstance + within / grouped.y, grouped.x + within % grouped.y);
+    uint entry = groupCommand(group).firstInstance + within / grouped.y;
+    uint firstCluster = group >= TWIG_GROUP_BASE ? twigEntries[entry - TWIG_INSTANCE_BASE].z : grouped.x;
+    item = MeshClusterItem(entry, firstCluster + within % grouped.y);
     MeshClusterDrawn drawn = meshClusterDrawnAt(item.entry);
     MeshCluster cluster = clusters[item.cluster];
     InstanceData instance = drawn.instance;

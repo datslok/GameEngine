@@ -1,0 +1,35 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The twig passes' first (render/vulkan/vulkan_twig_drawing.h): the camera's placed entries of twig parts gathered as
+* sources, group by group in the twig groups' order and entry by entry (one thread: a few thousand trees at most, in a
+* fixed order), each with its part's twig set; the cull pass's dispatch (the most bricks a set has, a workgroup row a
+* source) and the regions' counts cleared.
+*/
+#include "twig_pass.glsl"
+
+layout(local_size_x = 1) in;
+
+void main() {
+    uint count = 0u;
+
+    for (uint listed = 0u; listed < twigGroupCount; ++listed) {
+        DrawCommand command = placedCommands[twigGroups[listed]];
+        uint first = command.firstInstance - PLACED_INSTANCE_BASE;
+
+        for (uint instance = 0u; instance < command.instanceCount && count < push.mostSources; ++instance) {
+            uint place = first + instance;
+            twigSources[count] = uvec2(place, placedParts[placedEntries[place].y].unused0);
+            ++count;
+        }
+    }
+
+    twigSourceCount = count;
+    twigDispatch[0] = push.mostBricks;
+    twigDispatch[1] = count;
+    twigDispatch[2] = 1u;
+    for (uint region = 0u; region < uint(TWIG_MOST_LEVEL_CLUSTERS); ++region) {
+        twigCounts[region] = 0u;
+    }
+}

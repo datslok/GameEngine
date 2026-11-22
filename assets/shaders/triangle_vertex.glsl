@@ -121,6 +121,16 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
     DrawnObject drawn = drawnObject(instanceIndex, baseInstance);
     uint entry = drawn.entry;
     InstanceData instance = drawn.instance;
+
+    // A twig (render/gpu/twig_records.h): its prototype's vertex placed in its part's frame by the twig's matrix first,
+    // so from here it is the part's own vertex (swaying with its tree); the normal turned with it (made unit below).
+    if (drawn.twig) {
+        mat3 twigTurn = mat3(drawn.twigMatrix);
+        position = (drawn.twigMatrix * vec4(position, 1.0)).xyz;
+        previousPosition = (drawn.twigMatrix * vec4(previousPosition, 1.0)).xyz;
+        normal = twigTurn * normal;
+        tangent = vec4(twigTurn * tangent.xyz, tangent.w);
+    }
     VERTEX_OUT(levelFade) = drawListFade(entry);
     mat4 normalMatrix = instance.normalMatrix;
     vec4 handedness = instance.handedness;

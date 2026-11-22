@@ -163,6 +163,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
     placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
+    twigDrawing = std::make_unique<VulkanTwigDrawing>(device, framesInFlight);
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -1037,6 +1038,7 @@ FrameContext VulkanRenderer::beginFrame() {
 
     planting->collect(frameIndex, jobs);
     placedDrawing->collect(frameIndex);
+    twigDrawing->collect(frameIndex);
     collectClothReadbacks();
 
     frame.descriptors->reset();
@@ -1756,7 +1758,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // 21, 2e); their old levels serve the shadows, the captures and GPUs without mesh shaders.
     LevelView cameraLevels = cameraLevelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
     cameraLevels.clusterLevels = drawsClusters;
-    cameraLevels.twigs = drawsClusters && settings.twigs;
     cameraThinning = thinningErrorPerMetre(cameraLevels);
     stats.drawnByLevel = lastCameraCull.levels;
     stats.drawnTriangles = lastCameraCull.triangles;
@@ -1777,6 +1778,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool drawsPlaced = placedDrawing->prepare(description, *planting, [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); },
                                                     frame.frameIndex);
     framePlaced = drawsPlaced ? std::optional{frame.frameIndex} : std::nullopt;
+
+    // The camera's twigs (render/vulkan/vulkan_twig_drawing.h): drawn by mesh shaders with Passes "Twigs" on where the
+    // placed plants carry twig sets; then the camera's view takes the twig parts and leaves the cards they replace.
+    const bool drawsTwigs = drawsPlaced && drawsClusters && settings.twigs &&
+                            twigDrawing->prepare(placedDrawing->getTable(frame.frameIndex),
+                                                 [this](MeshHandle mesh) { return meshes.at(mesh.index)->getPlacement(); }, meshPool->getClusterRecords(),
+                                                 frame.frameIndex);
+    frameTwigs = drawsTwigs ? std::optional{frame.frameIndex} : std::nullopt;
+    cameraLevels.twigs = drawsTwigs;
 
     // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway.
     validateWind(settings.wind);
@@ -2068,21 +2078,43 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::Placed);
     }
 
-    // The camera's mesh clusters culled from its list and its placed plants' (each style's draws, then its placed
-    // groups), its view given the wind's sway (the camera culls without it), so a draw swaying near the camera keeps
-    // every cluster.
+    // The camera's view as its mesh clusters and twigs are culled: given the wind's sway (the camera culls without it), so
+    // a draw swaying near the camera keeps every cluster (and twig), and the cut's pixel error.
+    GpuCameraCull clusterView{};
+
+    if (cullsClusters) {
+        clusterView = cameraCulling->placedView(frame.frameIndex, 0);
+        clusterView.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
+        clusterView.swayFadeEnd = settings.wind.swayFadeEnd;
+        clusterView.levels.pixelError = settings.meshClusterErrorPixels;
+    }
+
+    // The camera's twigs (render/vulkan/vulkan_twig_drawing.h): after its placed plants, before its mesh clusters, which
+    // take the twigs' regions as groups.
+    const bool twigClusters = frameTwigs.has_value() && placedClusters;
+
+    if (twigClusters) {
+        beginGpuPass(frame, GpuPass::Twigs);
+        const VulkanPlacedDrawing::ClusterInputs placed = placedDrawing->clusterInputs(frame.frameIndex);
+        twigDrawing->record(frame.commands, frame.descriptors,
+                            VulkanTwigDrawing::PlacedInputs{placed.commands, placed.entries, frames[frame.frameIndex].scene->placedParts.describe(),
+                                                            placed.parts, planting->getPlants()},
+                            clusterView, frame.frameIndex);
+        endGpuPass(frame, GpuPass::Twigs);
+    }
+
+    // The camera's mesh clusters culled from its list, its placed plants' and its twigs' (each style's draws, then its
+    // placed groups, then the twig regions in the twigs' style).
     if (cullsClusters) {
         beginGpuPass(frame, GpuPass::MeshCull);
         const VulkanCameraCulling::Outputs culled = cameraCulling->outputs(frame.frameIndex);
         const VulkanPlacedDrawing::ClusterInputs placed =
             placedClusters ? placedDrawing->clusterInputs(frame.frameIndex) : VulkanPlacedDrawing::ClusterInputs{};
+        const int twigStyle = twigClusters ? placedDrawing->getTable(frame.frameIndex).twigStyle : -1;
         const CullDrawOrder order = meshClusterDrawOrder(cullFrame.drawOrder, static_cast<std::uint32_t>(cullFrame.groups.size()),
-                                                         placedClusters ? *placed.order : CullDrawOrder{});
+                                                         placedClusters ? *placed.order : CullDrawOrder{}, twigStyle);
         VulkanMeshClusterCulling::Inputs inputs;
-        inputs.view = cameraCulling->placedView(frame.frameIndex, 0);
-        inputs.view.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
-        inputs.view.swayFadeEnd = settings.wind.swayFadeEnd;
-        inputs.view.levels.pixelError = settings.meshClusterErrorPixels;
+        inputs.view = clusterView;
 
         for (std::size_t style = 0; style < cullStyles; ++style) {
             inputs.view.runFirst[style] = order.runFirst[style];
@@ -2103,7 +2135,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                                    frames[frame.frameIndex].scene->placedParts.describe(), placed.parts, planting->getPlants()};
         }
 
-        inputs.pairBound = meshClusterPairBound(cullFrame) + placed.pairBound;
+        if (twigClusters) {
+            inputs.twigs = VulkanMeshClusterCulling::TwigInputs{twigDrawing->getRegions(frame.frameIndex), twigDrawing->getEntries(frame.frameIndex),
+                                                                twigDrawing->getTwigs()};
+        }
+
+        inputs.pairBound = meshClusterPairBound(cullFrame) + placed.pairBound + (twigClusters ? twigMeshClusterPairBound(twigDrawing->getRoom(frame.frameIndex)) : 0);
         inputs.occlusion = occludesClusters;
         inputs.viewProjection = relativeViewProjection;
         inputs.origin = cameraOrigin;
@@ -2758,6 +2795,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.thinningCards = VkDescriptorBufferInfo{thinningRecords.empty() ? noThinningCards.get() : thinningCards.get(), 0, VK_WHOLE_SIZE};
     views.placedPlants = VkDescriptorBufferInfo{framePlaced ? planting->getPlants() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.placedEntries = framePlaced ? placedDrawing->describeEntries(frame.frameIndex) : VkDescriptorBufferInfo{noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    views.twigEntries = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getEntries(frame.frameIndex) : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    views.twigs = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getTwigs() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.lianaShapes = lianaShapeRecords->describe();
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
@@ -4411,6 +4450,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     cameraCulling->setFramesInFlight(count);
     planting->setFramesInFlight(count);
     placedDrawing->setFramesInFlight(count);
+    twigDrawing->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
     cullFrameViews.assign(count, {});
     cullFrameDraws.assign(count, 0);
