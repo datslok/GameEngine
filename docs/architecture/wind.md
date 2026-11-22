@@ -1,6 +1,6 @@
 # Wind
 
-Covers: `src/scene/wind`, `src/scene/liana_shape`, `src/scene/liana_shared.h`, `assets/shaders/liana.glsl`, `assets/shaders/liana_data.glsl`, `src/render/gpu/wind`, `src/render/gpu/wind_shared.h`, `src/render/vulkan/vulkan_wind`, `assets/shaders/wind.glsl`, `assets/shaders/wind_data.glsl`, `assets/shaders/wind_field.comp`
+Covers: `src/scene/wind`, `src/scene/sway_bones`, `src/scene/liana_shape`, `src/scene/liana_shared.h`, `assets/shaders/liana.glsl`, `assets/shaders/liana_data.glsl`, `src/render/gpu/wind`, `src/render/gpu/wind_shared.h`, `src/render/vulkan/vulkan_wind`, `assets/shaders/wind.glsl`, `assets/shaders/wind_data.glsl`, `assets/shaders/wind_field.comp`
 
 A wind force field of springs round the camera, after Horizon Zero Dawn's, that every vertex shader bends growing and hanging things by. Research and plan: `docs/research/WIND.md`. Maths in `render/gpu/wind`, mirrored in `wind.glsl`. The forest's use (sway groups, lianas' anchors): [forest.md](forest.md), [forest-trees.md](forest-trees.md), [forest-rock.md](forest-rock.md).
 
@@ -99,6 +99,15 @@ A mesh without entries of kind `Hanging` sways as its own object on the short ba
 - `packHangingVertex`: three words (anchors as two 16-bit halves; along and arm as half floats; swing length as a half float), binding 40, read by `gl_VertexIndex`. `uploadMesh` returns the mesh's entry (`VertexEntries`), `attachVertexEntries` gives each draw `DrawItem::hangingEntry` → `GpuInstance::hanging[0]`. Copied whole when new ones arrive (`updateVertexRecords`).
 - Lianas' records: binding 41 (`LianaShape`, 128 bytes with the ivy's, `writeLianaShapes`: a slot's block copied when it is replaced). A draw's `hanging.w` is its record + 1, with `LIANA_IVY_BIT` (`scene/liana_shared.h`) for its ivy.
 
+## Bones (phase 21 stage 3c, being built)
+
+Trees will move by bones instead of `windSwayOffset` (research: `docs/research/LEAFGEOMETRY.md`, Wind with valid bounds). Built so far (3c-i): the bones and bindings; nothing moves by them yet.
+
+- `SwayBone` (`scene/sway_bones`): pivot, tip, parent (before it in the list, -1 a root), level (0 the trunk, +1 a side chain), the line's radius at its pivot.
+- `SwayBinding`: a vertex's bone and its weight, the rest its parent's (two-bone blending, GPU Gems 3 ch. 6), so joints never open.
+- `appendSwayChain`: a line cut into whole bones of one length near `boneMetres`, each the one before's child; `swayArcOfPoint` (how far along a line a point lies); `swayChainBinding` (the bone at an arc, weight rising from 0 at its pivot over its first `blendShare`, a root's whole); `swayBonesOrdered`.
+- Trees: `treeBones` (`games/forest/forest_trees`) cuts each chain, chains taken by first node so parents come first, a side chain's first bone the child of the bone holding its start node; `TreeMeshes::bones`, `barkBindings` (each bark vertex by its own chain's arc), `PlacedTwig::binding` (its node's; a filler its nearest node's). `ForestTreeSettings::boneMetres` 2 m, `boneBlendShare` 0.5 (F5 Forest, at start-up).
+
 ## Debug view
 
 `WindSettings::showField` (off): `drawWindField` (`engine/debug_views`) draws 9 x 9 arrows 4 m apart round the camera on the drawn ground (`terrainSurfaceHeight`), each half a second of wind, white to red towards 15 m/s.
@@ -109,4 +118,4 @@ A mesh without entries of kind `Hanging` sways as its own object on the short ba
 
 ## Tests
 
-`wind_test` (noise, velocity, springs, windows), `wind_sway_test`, `wind_hanging_test`; GPU: `wind_gpu_test`.
+`wind_test` (noise, velocity, springs, windows), `wind_sway_test`, `wind_hanging_test`, `sway_bones_test` (and `forest_trees_test`'s bones); GPU: `wind_gpu_test`.
