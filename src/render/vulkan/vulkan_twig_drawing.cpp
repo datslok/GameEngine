@@ -18,6 +18,11 @@ namespace {
     // A region's most room (64 MB of entries for the four); the room grows to fit up to here.
     constexpr std::uint32_t largestRoom = 1u << 22;
 
+    // The regions buffer as twig_pass.glsl lays it out: the counts, the room, then the tally.
+    constexpr VkDeviceSize countBytes = TWIG_MOST_LEVEL_CLUSTERS * sizeof(std::uint32_t);
+    constexpr VkDeviceSize regionsTallyOffset = countBytes + 4 * sizeof(std::uint32_t);
+    constexpr VkDeviceSize tallyBytes = TWIG_TALLY_WORDS * sizeof(std::uint32_t);
+
     constexpr std::uint32_t pushBytes = 8;
 
     constexpr BufferUse computeWrite{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
@@ -76,10 +81,10 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
     const VmaAllocator allocator = device.getAllocator();
     ensureBuffer(allocator, frame.sources, 8 + VkDeviceSize{mostSources} * 8, storage, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.dispatch, 3 * sizeof(std::uint32_t), storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, BufferMemory::Gpu);
-    ensureBuffer(allocator, frame.regions, 2 * 4 * sizeof(std::uint32_t), storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    ensureBuffer(allocator, frame.regions, regionsTallyOffset + tallyBytes, storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                  BufferMemory::Gpu);
     ensureBuffer(allocator, frame.entries, VkDeviceSize{room} * TWIG_MOST_LEVEL_CLUSTERS * 4 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(allocator, frame.readback, TWIG_MOST_LEVEL_CLUSTERS * sizeof(std::uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
+    ensureBuffer(allocator, frame.readback, countBytes + tallyBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
     frame.room = room;
 
     std::vector<MeshHandle> prototypeMeshes;
@@ -210,8 +215,9 @@ void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descr
     bufferBarrier(commands, frame.regions.get(), computeReadWrite, then);
     bufferBarrier(commands, frame.entries.get(), computeWrite, then);
 
-    const VkBufferCopy copy{0, 0, TWIG_MOST_LEVEL_CLUSTERS * sizeof(std::uint32_t)};
-    vkCmdCopyBuffer(commands, frame.regions.get(), frame.readback.get(), 1, &copy);
+    // The counts, then the tally (past the room) straight after them.
+    const VkBufferCopy copies[2] = {{0, 0, countBytes}, {regionsTallyOffset, countBytes, tallyBytes}};
+    vkCmdCopyBuffer(commands, frame.regions.get(), frame.readback.get(), 2, copies);
     frame.pending = true;
 }
 
@@ -232,7 +238,7 @@ std::uint32_t VulkanTwigDrawing::getRoom(std::uint32_t frameIndex) const {
 }
 
 // A region past its room grows every region's room to the next power of two that holds it, up to largestRoom.
-std::optional<std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS>> VulkanTwigDrawing::collect(std::uint32_t frameIndex) {
+std::optional<VulkanTwigDrawing::Collected> VulkanTwigDrawing::collect(std::uint32_t frameIndex) {
     PerFrame& frame = frames.at(frameIndex);
 
     if (!frame.pending) {
@@ -241,13 +247,17 @@ std::optional<std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS>> VulkanTwigDra
 
     frame.pending = false;
     frame.readback.invalidate();
-    std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS> counts{};
-    std::memcpy(counts.data(), frame.readback.getMapped(), sizeof(counts));
-    const std::uint32_t most = *std::max_element(counts.begin(), counts.end());
+    Collected collected;
+    const auto* mapped = static_cast<const std::uint8_t*>(frame.readback.getMapped());
+    std::memcpy(collected.counts.data(), mapped, countBytes);
+    std::array<std::uint32_t, TWIG_TALLY_WORDS> tally{};
+    std::memcpy(tally.data(), mapped + countBytes, tallyBytes);
+    collected.tally = readTwigTally(tally);
+    const std::uint32_t most = *std::max_element(collected.counts.begin(), collected.counts.end());
 
     if (most > room) {
         room = std::min(std::bit_ceil(most), largestRoom);
     }
 
-    return counts;
+    return collected;
 }

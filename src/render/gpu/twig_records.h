@@ -7,6 +7,7 @@
 #include "scene/mesh_clusters.h"
 #include "scene/twig_set.h"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -43,14 +44,15 @@ static_assert(sizeof(GpuTwigBrick) == 32, "GpuTwigBrick must match twig_drawing.
 /*
 * A prototype's level, as its given cluster levels made it (buildGivenClusterLevels): its clusters' run in the cluster
 * pool, and its group's sphere (prototype frame) and error, the error past which the next level takes over (the
-* coarsest's the largest float). A level is chosen where the level before's error is small enough and its own is not.
+* coarsest's the largest float), and its clusters' triangles (for the pass's tally). A level is chosen where the level
+* before's error is small enough and its own is not.
 */
 struct GpuTwigLevel {
     float sphere[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float error = 0.0f;
     std::uint32_t firstCluster = 0;
     std::uint32_t clusterCount = 0;
-    std::uint32_t unused = 0;
+    std::uint32_t triangleCount = 0;
 };
 
 static_assert(sizeof(GpuTwigLevel) == 32, "GpuTwigLevel must match twig_drawing.glsl's TwigLevel");
@@ -153,8 +155,26 @@ struct TwigTables {
 };
 
 /*
+* What the twig pass counted (F4's TWIGS line, ROADMAP phase 21 stage 5-0): its sources' twigs tested, those kept
+* (drawn), those of them kept because their part sways (meshClusterRigid false: no frustum test), and the kept ones'
+* twigs and triangles at each level. The pass writes it as TWIG_TALLY_WORDS words (readTwigTally).
+*/
+struct TwigTally {
+    std::uint32_t tested = 0;
+    std::uint32_t kept = 0;
+    std::uint32_t swaying = 0;
+    std::array<std::uint32_t, TWIG_MOST_LEVELS> levelTwigs{};
+    std::array<std::uint32_t, TWIG_MOST_LEVELS> levelTriangles{};
+
+    bool operator==(const TwigTally&) const = default;
+};
+
+TwigTally readTwigTally(std::span<const std::uint32_t, TWIG_TALLY_WORDS> words);
+
+/*
 * What the twig pass draws of a placed part (twig_cull.comp's steps): each brick kept (twigBrickKept), each of its
-* twigs kept (twigKept), each drawn at its level (twigLevel), in brick and twig order.
+* twigs kept (twigKept), each drawn at its level (twigLevel), in brick and twig order. A tally, when given, gains the
+* part's counts, as the pass's atomics add every part's.
 */
 std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
-                                     const GpuCameraCull& view);
+                                     const GpuCameraCull& view, TwigTally* tally = nullptr);

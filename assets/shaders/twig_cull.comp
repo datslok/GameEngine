@@ -6,55 +6,85 @@
 * brick (x the brick within its set, y the source), a thread a twig. The brick kept (twigBrickKept), each twig kept
 * (twigKept), its level walked to the one it draws (twigLevelDrawn), its entry put in the region of its level's
 * cluster count. The regions' order is the atomics', so the cluster passes and cluster-compare take them as sets.
+*
+* The tally (F4's TWIGS line, TwigTally) is counted in shared memory and added once a workgroup, so a frame's million
+* twigs do not all meet at the same few words.
 */
 #include "twig_pass.glsl"
 
 layout(local_size_x = TWIG_BRICK_SIZE) in;
 
+shared uint groupTally[TWIG_TALLY_WORDS];
+
 void main() {
     uvec2 source = twigSources[gl_WorkGroupID.y];
     uvec4 set = twigSets[source.y];
 
+    // The same for the whole workgroup, so no thread is left waiting at the barriers below.
     if (gl_WorkGroupID.x >= set.y) {
         return;
     }
+
+    uint local = gl_LocalInvocationID.x;
+
+    if (local < uint(TWIG_TALLY_WORDS)) {
+        groupTally[local] = 0u;
+    }
+
+    barrier();
 
     TwigBrick brick = twigBricks[set.x + gl_WorkGroupID.x];
     uvec2 placed = placedEntries[source.x];
     PlacedPlant plant = placedPlants[placed.x & DRAW_LIST_INSTANCE_MASK];
     InstanceData part = placedInstance(placedPartInstances[placed.y], plant);
     CullRecord record = placedCullRecord(placedParts[placed.y].record, plant);
-    uint local = gl_LocalInvocationID.x;
+    bool swaying = !meshClusterRigid(part, placed.x, record, view);
 
-    if (local >= brick.twigCount || !twigBrickKept(brick, part, placed.x, record, view)) {
-        return;
-    }
+    if (local < brick.twigCount && twigBrickKept(brick, part, placed.x, record, view)) {
+        uint number = brick.firstTwig + local;
+        Twig twig = twigs[number];
+        TwigPrototype prototype = twigPrototypes[twig.prototype];
+        InstanceData placedTwig = twigInstance(part, twig);
 
-    uint number = brick.firstTwig + local;
-    Twig twig = twigs[number];
-    TwigPrototype prototype = twigPrototypes[twig.prototype];
-    InstanceData placedTwig = twigInstance(part, twig);
+        if (twigKept(twigLevels[prototype.firstLevel + prototype.levelCount - 1u], placedTwig, placed.x, record, view)) {
+            uint chosen = prototype.levelCount - 1u;
 
-    if (!twigKept(twigLevels[prototype.firstLevel + prototype.levelCount - 1u], placedTwig, placed.x, record, view)) {
-        return;
-    }
+            for (uint level = 0u; level < prototype.levelCount; ++level) {
+                TwigLevel before = twigLevels[prototype.firstLevel + max(level, 1u) - 1u];
 
-    uint chosen = prototype.levelCount - 1u;
+                if (twigLevelDrawn(before, level == 0u, twigLevels[prototype.firstLevel + level], placedTwig.model, view.levels)) {
+                    chosen = level;
+                    break;
+                }
+            }
 
-    for (uint level = 0u; level < prototype.levelCount; ++level) {
-        TwigLevel before = twigLevels[prototype.firstLevel + max(level, 1u) - 1u];
+            TwigLevel drawn = twigLevels[prototype.firstLevel + chosen];
+            uint region = drawn.clusterCount - 1u;
+            uint slot = atomicAdd(twigCounts[region], 1u);
 
-        if (twigLevelDrawn(before, level == 0u, twigLevels[prototype.firstLevel + level], placedTwig.model, view.levels)) {
-            chosen = level;
-            break;
+            if (slot < twigRoom.x) {
+                twigEntries[region * twigRoom.x + slot] = uvec4(source.x, number, drawn.firstCluster, 0u);
+            }
+
+            atomicAdd(groupTally[TWIG_TALLY_KEPT], 1u);
+            atomicAdd(groupTally[TWIG_TALLY_LEVEL_TWIGS + chosen], 1u);
+            atomicAdd(groupTally[TWIG_TALLY_LEVEL_TRIANGLES + chosen], drawn.triangleCount);
+
+            if (swaying) {
+                atomicAdd(groupTally[TWIG_TALLY_SWAYING], 1u);
+            }
         }
     }
 
-    TwigLevel drawn = twigLevels[prototype.firstLevel + chosen];
-    uint region = drawn.clusterCount - 1u;
-    uint slot = atomicAdd(twigCounts[region], 1u);
+    barrier();
 
-    if (slot < twigRoom.x) {
-        twigEntries[region * twigRoom.x + slot] = uvec4(source.x, number, drawn.firstCluster, 0u);
+    if (local == 0u) {
+        groupTally[TWIG_TALLY_TESTED] = brick.twigCount;
+    }
+
+    barrier();
+
+    if (local < uint(TWIG_TALLY_WORDS) && groupTally[local] != 0u) {
+        atomicAdd(twigTally[local], groupTally[local]);
     }
 }

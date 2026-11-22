@@ -1038,7 +1038,8 @@ FrameContext VulkanRenderer::beginFrame() {
 
     planting->collect(frameIndex, jobs);
     placedDrawing->collect(frameIndex);
-    twigDrawing->collect(frameIndex);
+    const std::optional<VulkanTwigDrawing::Collected> twigsCollected = twigDrawing->collect(frameIndex);
+    lastTwigTally = twigsCollected ? std::optional<TwigTally>{twigsCollected->tally} : std::nullopt;
     collectClothReadbacks();
 
     frame.descriptors->reset();
@@ -1691,6 +1692,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.meshClusterOcclusion = clustersCulled && lastMeshClusters->occlusion;
     stats.meshClustersLate = clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_KEPT);
     stats.meshClustersHidden = clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_CANDIDATES) - stats.meshClustersLate;
+    const TwigTally twigTally = lastTwigTally.value_or(TwigTally{});
+    stats.twigsTested = twigTally.tested;
+    stats.twigsKept = twigTally.kept;
+    stats.twigsSwaying = twigTally.swaying;
+
+    for (std::size_t level = 0; level < twigTally.levelTwigs.size(); ++level) {
+        stats.twigsByLevel[level] = twigTally.levelTwigs[level];
+        stats.twigTrianglesByLevel[level] = twigTally.levelTriangles[level];
+    }
     cpuClock.lap(CpuStage::Frustum, profilerSeconds());
 
     // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's

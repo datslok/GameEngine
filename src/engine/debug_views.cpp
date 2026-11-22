@@ -45,6 +45,31 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 * states, the video memory, the still draws' cells with the bytes copied into lasting GPU buffers, and the eye's
 * exposure with the upscaler.
 */
+namespace {
+    /*
+    * The twigs' line (ROADMAP phase 21 stage 5-0: where the twig triangles come from): kept of tested, those kept for
+    * sway, then each level's twigs and thousands of triangles, up to the coarsest level any twig drew.
+    */
+    std::string twigStatsText(const RenderStats& stats) {
+        std::size_t levels = 0;
+
+        for (std::size_t level = 0; level < stats.twigsByLevel.size(); ++level) {
+            levels = stats.twigsByLevel[level] > 0 ? level + 1 : levels;
+        }
+
+        std::string twigs;
+        std::string triangles;
+
+        for (std::size_t level = 0; level < levels; ++level) {
+            twigs += " " + std::to_string(stats.twigsByLevel[level]);
+            triangles += " " + std::to_string(stats.twigTrianglesByLevel[level] / 1000) + "K";
+        }
+
+        return "TWIGS " + std::to_string(stats.twigsKept) + "/" + std::to_string(stats.twigsTested) + "  SWAY " + std::to_string(stats.twigsSwaying) +
+               "  LEVELS" + twigs + "  TRIS" + triangles;
+    }
+}
+
 std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled) +
                                "  CALLS " + std::to_string(stats.drawCalls);
@@ -81,6 +106,11 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                               std::to_string(stats.lastingCopiedBytes / 1024) + " KB";
     std::vector<std::string> lines{camera, detail, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory), cells,
                                    exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)};
+
+    if (stats.twigsTested > 0) {
+        lines.insert(lines.begin() + 2, twigStatsText(stats));
+    }
+
     return lines;
 }
 

@@ -16,13 +16,13 @@ struct TwigBrick {
     uint unused1;
 };
 
-// A prototype's level: its group's sphere and error, its clusters' run. Must match GpuTwigLevel.
+// A prototype's level: its group's sphere and error, its clusters' run and triangles. Must match GpuTwigLevel.
 struct TwigLevel {
     vec4 sphere;
     float error;
     uint firstCluster;
     uint clusterCount;
-    uint unused;
+    uint triangleCount;
 };
 
 // A prototype's levels in the level table. Must match GpuTwigPrototype.

@@ -72,10 +72,12 @@ layout(std430, set = 0, binding = 13) buffer TwigDispatch {
     uint twigDispatch[3];
 };
 
-// Each region's entries written (may pass the room), and the room (x of the second).
+// Each region's entries written (may pass the room), the room (x of the second), then the cull pass's tally
+// (TWIG_TALLY_*: F4's TWIGS line).
 layout(std430, set = 0, binding = 14) buffer TwigRegions {
     uint twigCounts[TWIG_MOST_LEVEL_CLUSTERS];
     uvec4 twigRoom;
+    uint twigTally[TWIG_TALLY_WORDS];
 };
 
 // The twigs drawn: region r's from r times the room, each (placed entry place, twig, its level's first cluster, 0).
