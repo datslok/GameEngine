@@ -3,6 +3,7 @@
 #include "engine/engine_commands.h"
 #include "math/frustum.h"
 #include "math/mat4.h"
+#include "cull_helpers.h"
 #include "mesh_helpers.h"
 #include "render/gpu/camera_culling.h"
 #include "render/gpu/column_major.h"
@@ -30,43 +31,6 @@
 #include <vector>
 
 namespace {
-    // The world's view-projection from an eye looking along yaw, slightly down, 0.9 radians tall.
-    Mat4 testViewProjection(const Vec3& eye, float yaw) {
-        const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.9f, 16.0f / 9.0f, 0.1f, 500.0f));
-        return projection * Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
-    }
-
-    // The same, taking points measured from the eye (as the main pass's camera-relative matrices do).
-    Mat4 testRelativeViewProjection(const Vec3& eye, float yaw) {
-        return testViewProjection(eye, yaw) * Mat4::translation(eye.x, eye.y, eye.z);
-    }
-
-    // That view's record; things sway within fadeEnd.
-    GpuCameraCull testView(const Vec3& eye, float yaw, bool sway, float fadeEnd) {
-        LevelView levels;
-        levels.eye = eye;
-        return packCameraCull(Frustum::fromClipMatrix(testViewProjection(eye, yaw), ClipDepth::OneToZero), levels, true, sway, fadeEnd);
-    }
-
-    // A plain still instance placed by the matrix.
-    GpuInstance placedInstance(const Mat4& model) {
-        GpuInstance instance{};
-        writeColumnMajor(model, instance.model);
-        instance.sway[0] = -1.0f;
-        return instance;
-    }
-
-    // A still single-sided draw's record round a sphere.
-    GpuCullRecord stillRecord(const Vec3& centre, float radius) {
-        GpuCullRecord record;
-        record.bounds[0] = centre.x;
-        record.bounds[1] = centre.y;
-        record.bounds[2] = centre.z;
-        record.bounds[3] = radius;
-        record.flags = CULL_CASTS_SHADOWS;
-        return record;
-    }
-
     Vec3 worldPoint(const GpuInstance& instance, const Vec3& point) {
         const float* m = instance.model;
         return Vec3{m[0] * point.x + m[4] * point.y + m[8] * point.z + m[12], m[1] * point.x + m[5] * point.y + m[9] * point.z + m[13],
@@ -218,14 +182,6 @@ namespace {
 
         const GpuCameraCull shortReach = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, true, 10.0f);
         assert(!meshClusterKept(cluster, plain, 0u, swaying, shortReach));
-    }
-
-    // A view for the cut: testView's, with 1080 rows' pixels a metre away (its 0.9 radians tall) and the pixel error.
-    GpuCameraCull cutView(const Vec3& eye, float yaw, float pixelError) {
-        GpuCameraCull view = testView(eye, yaw, false, 0.0f);
-        view.levels.eye[3] = 1080.0f / (2.0f * std::tan(0.45f));
-        view.levels.pixelError = pixelError;
-        return view;
     }
 
     // The clusters the cut draws, by number.

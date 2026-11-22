@@ -13,3 +13,16 @@ inline void writeColumnMajor(const Mat4& matrix, float* target) {
         }
     }
 }
+
+// The reverse: 16 floats column by column read into a Mat4.
+inline Mat4 readColumnMajor(const float* columns) {
+    Mat4 matrix;
+
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            matrix.values[row][column] = columns[column * 4 + row];
+        }
+    }
+
+    return matrix;
+}

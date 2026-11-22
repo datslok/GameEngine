@@ -22,7 +22,7 @@
 | `test_jobs.h` | `testJobs`: give it to every game a test builds (`Game::useJobs`) |
 | `forest_helpers.h` | `TestForest`, `FieldCounter`, `trianglesFaceTheirNormals` |
 | `cloth_helpers.h` | `untetheredSettings` |
-| `cull_helpers.h` | `randomCullScene`, `packCullSceneLevels` (GPU-driven drawing's scenes) |
+| `cull_helpers.h` | `randomCullScene`, `packCullSceneLevels` (GPU-driven drawing's scenes); `testView`, `cutView`, `placedInstance`, `stillRecord` (mesh cluster views) |
 | `planting_helpers.h` | `straightMaps`, `rollingGround`, `threeLayers`, `samePlant` (planting from maps) |
 | `mesh_helpers.h` | `rippledSheet` (a curved open sheet for mesh tools); cluster cuts: `positionNumbers`, `openEdges`, `enclosedVolume` |
 

@@ -308,4 +308,9 @@
 #define GPU_TEST_MESH_CLUSTER_TASKS 1
 #define GPU_TEST_MESH_CLUSTER_SCREEN_BOX 2
 
+// twig_drawing_test.comp
+#define GPU_TEST_TWIG_INSTANCE 0
+#define GPU_TEST_TWIG_LEVEL_DRAWN 1
+#define GPU_TEST_TWIG_BRICK_KEPT 2
+
 #endif
