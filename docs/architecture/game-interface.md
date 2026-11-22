@@ -31,7 +31,7 @@ Non-virtual, set by the engine: `useJobs`/`getJobs` (`serialJobs()` until given)
 
 ## What draws: `ModelRenderer`
 
-A component: `parts` (`RenderPart`: mesh, material, local transform) moved by the entity's one `Transform`. Flags, each copied onto its `DrawItem`s:
+A component: `parts` (`RenderPart`: mesh, material, local transform, twigs) moved by the entity's one `Transform`. Flags, each copied onto its `DrawItem`s:
 
 | Flag | Effect |
 |---|---|
