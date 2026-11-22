@@ -102,6 +102,11 @@ struct RenderSettings {
     // tested against last frame's depth, the late list against this frame's, F4's LATE and HIDDEN.
     bool meshClusterOcclusion = true;
 
+    // With mesh clusters drawn by mesh shaders: trees' leaves drawn as twigs of modelled leaves (ROADMAP phase 21 stage
+    // 3b-iii; scene/twig_set.h), their cut-out cards standing aside (they stay in the shadows, captures and on GPUs
+    // without mesh shaders). Off until the twig pass draws them.
+    bool twigs = false;
+
     // Each pixel loops only over the lights listed for its cluster (render/gpu/clusters.h) instead of every light in the
     // frame; both add the same lights in the same order, so the picture is identical. Off is for comparing the timings.
     bool clusteredShading = true;

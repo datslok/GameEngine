@@ -211,10 +211,17 @@ bool shadowTakes(CullRecord record, CameraCull view) {
 * moved, its mesh deformed or it sways within reach; thinned as slotThinned says; fading. A shadow tile: drawn where
 * shadowTakes and the slot is chosen, moving instead where it keeps moved casters apart; never thinned, never fading.
 */
+// Whether a camera's view takes a draw as twigs go (cameraTakesTwigs): twig parts only where it draws twigs, what they
+// replace only where it does not, everything else always.
+bool cameraTakesTwigs(uint recordFlags, uint levelFlags) {
+    bool twigsDrawn = (levelFlags & CULL_LEVELS_TWIGS) != 0u;
+    return (recordFlags & CULL_TWIGS) != 0u ? twigsDrawn : (recordFlags & CULL_TWIG_FALLBACK) != 0u ? !twigsDrawn : true;
+}
+
 uint cameraCandidateFlags(CullRecord record, MeshLevels levels, CameraCull view, uint slot) {
     bool shadow = (view.flags & CAMERA_CULL_SHADOW) != 0u;
 
-    if (shadow ? !shadowTakes(record, view) : !cameraTakes(record, view.frustum)) {
+    if ((shadow ? !shadowTakes(record, view) : !cameraTakes(record, view.frustum)) || (!shadow && !cameraTakesTwigs(record.flags, view.levels.flags))) {
         return 0u;
     }
 

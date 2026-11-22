@@ -323,6 +323,26 @@ namespace {
     }
 }
 
+namespace {
+    // Every twig flag of a record against both of a view's: what the mirror takes.
+    void checkTakesTwigs(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        std::vector<GpuVec4> inputs;
+
+        for (const std::uint32_t record : {0u, CULL_TWIGS, CULL_TWIG_FALLBACK, CULL_TWIGS | CULL_CASTS_SHADOWS, CULL_TWIG_FALLBACK | CULL_SWAYS}) {
+            for (const std::uint32_t level : {0u, CULL_LEVELS_TWIGS, CULL_LEVELS_TWIGS | CULL_LEVELS_CLUSTERS, CULL_LEVELS_CLUSTERS}) {
+                inputs.push_back(gpuVec4(static_cast<float>(record), static_cast<float>(level)));
+            }
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TAKES_TWIGS, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const bool expected = cameraTakesTwigs(static_cast<std::uint32_t>(inputs[i][0]), static_cast<std::uint32_t>(inputs[i][1]));
+            report.check("cameraTakesTwigs", exactTolerance, expected ? 1.0f : 0.0f, outputs[i][0]);
+        }
+    }
+}
+
 void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("culling.glsl, level_of_detail.glsl");
     checkDraws(runner, report);
@@ -331,4 +351,5 @@ void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkCandidates(runner, report);
     checkChunks(runner, report);
     checkEntries(runner, report);
+    checkTakesTwigs(runner, report);
 }

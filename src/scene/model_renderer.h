@@ -4,8 +4,10 @@
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
+#include "scene/twig_set.h"
 #include "scene/wind.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -16,6 +18,12 @@ struct RenderPart {
 
     // Places the part relative to the entity's Transform. Includes any node transforms and normalization from the imported model.
     Mat4 localTransform = Mat4::identity();
+
+    /*
+    * Drawn as twigs (scene/twig_set.h, ROADMAP phase 21 stage 3b-iii) where a view draws them, its mesh then only a
+    * placeholder giving its bounds and levels (it draws nothing itself); none for an ordinary part. Placed plants only.
+    */
+    std::shared_ptr<const TwigSet> twigs = nullptr;
 };
 
 /*
@@ -76,6 +84,9 @@ struct ModelRenderer {
 
     // How it sways in the wind (scene/wind.h; Still by default): every vertex shader bends it by its spring.
     WindSway sway{};
+
+    // What twigs replace (a tree's leaf cards): drawn only by views that do not draw twigs (LevelView::twigs).
+    bool twigFallback = false;
 
     /*
     * A liana the GPU bends (scene/liana_shape.h): one past its record in the frame's LianaShapes (0 for everything

@@ -155,6 +155,9 @@ struct ForestView {
 // rim (the valley from the start), ring (the Ring from the path) and wall (up the Monolith from its foot).
 std::vector<ForestView> forestViews();
 
+// A tree look's leaves model (the leaf cards): the second, after the bark.
+inline constexpr std::size_t treeLeavesModel = 1;
+
 /*
 * The jungle valley showcase (ROADMAP phase 18), so far the rough valley, its test of scale: the land in rings reaching
 * 20 km (forest_terrain.h), its ground blended from scanned grass, leaf litter, mud and mossy rock (forest_ground.h; plain
@@ -236,8 +239,9 @@ public:
     // The mid layer's (docs/research/JUNGLE.md).
     ForestTreeSettings& getMidSettings();
     const std::vector<TreePlacement>& getMidPlacements() const;
-    // Each species' variants as the GPU's cells draw them (no entity a tree): bark, leaves, card, the shadow's
-    // stand-ins, then any climbers and epiphytes; the canopy's, the emergents', the mid layer's.
+    // Each species' variants as the GPU's cells draw them (no entity a tree): bark, leaves (treeLeavesModel), card, the
+    // shadow's stand-ins, then any climbers and epiphytes, then the twigs (buildTwigs); the canopy's, the emergents', the
+    // mid layer's.
     const std::vector<PlantedKindLook>& getTreeLooks() const;
     // The understorey's settings and places.
     ForestUnderstoreySettings& getUnderstoreySettings();

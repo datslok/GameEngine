@@ -97,3 +97,8 @@
   - **Swaying parts keep every twig** where the view's sway reaches, as the cluster passes keep every cluster of a draw that is not rigid; twigs there are culled once 3c makes them rigid.
   - **Tests caught 4 planted bugs:** the level choice reading its own group's error instead of the level before's, the twig's turn left off the normals, bricks culled while swaying, the twig's sphere not placed by the twig.
   - `readColumnMajor` joins `writeColumnMajor` (`render/gpu/column_major.h`); the placed mirror's copy of it went. The cluster tests' views moved to `tests/cull_helpers.h` for the twig tests.
+- `twig-parts-3b-iii-b2a` (Nov 22 2026): twig parts in the scene, the culling and the placed table; the forest's tree looks carry theirs, drawn by nothing yet.
+  - **Behind a switch:** the cards standing aside before the twig pass draws would leave the trees bare on main between merges, so Passes "Twigs" (`RenderSettings::twigs`) gates it, off until b2b.
+  - **One rule both sides** (`cameraTakesTwigs` in `cameraCandidateFlags`, GLSL and C++): twig parts only in views drawing twigs, their fallback only elsewhere; shadow views keep taking the fallback's casts.
+  - **A stand-in mesh a look:** sharing the leaves' mesh would have pulled in their card thinning records and fades; a triangle across the twigs' box with the leaves' last level and level options gives the bounds and the end at the crown card alone.
+  - **Tests caught 4 planted bugs:** twig parts taken in every view, the fallback flag not packed, twig parts' groups drawing their mesh, the leaves not marked as the fallback. Two tree tests had to learn the new last model (it casts nothing; the card was not baked round it).

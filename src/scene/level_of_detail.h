@@ -73,6 +73,10 @@ struct LevelView {
     // The view draws mesh clusters by their levels (the camera's, with mesh shaders; ROADMAP phase 21, 2e): a draw whose
     // mesh has cluster levels (DrawItem::clusterLevels) keeps the mesh itself, never its old levels, however far.
     bool clusterLevels = false;
+
+    // The view draws twigs (ROADMAP phase 21 stage 3b-iii; the camera's, drawing mesh clusters, with Passes "Twigs"
+    // on): parts drawn as twigs (DrawItem::twigs) are taken and what they replace (DrawItem::twigFallback) is not.
+    bool twigs = false;
 };
 
 // The widest fade band: past it the band's start would come too near the eye to mean anything.

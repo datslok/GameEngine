@@ -1103,7 +1103,7 @@ namespace {
         std::set<std::uint32_t> lookMeshes;
 
         for (const PlantedKindLook& look : game.getTreeLooks()) {
-            assert(look.models.size() >= 4 && look.models.size() <= 8);
+            assert(look.models.size() >= 5 && look.models.size() <= 9); // the twigs last
             const ModelRenderer& bark = look.models[0];
             const ModelRenderer& leaves = look.models[1];
             const ModelRenderer& card = look.models[2];
@@ -1132,6 +1132,10 @@ namespace {
 
             for (std::size_t model = 4; model < look.models.size(); ++model) {
                 for (const RenderPart& part : look.models[model].parts) {
+                    if (part.twigs != nullptr) {
+                        continue; // the twigs' stand-in, not part of what the card was baked from
+                    }
+
                     crown = enclosing(crown, indexedMeshBounds(assets.getDrawnMesh(part.mesh)));
                 }
             }
@@ -1179,10 +1183,11 @@ namespace {
             assert(card.parts.front().material.diffuseTransmission == leaf.diffuseTransmission);
             assert(card.parts.front().material.diffuseTransmissionTint.x == leaf.diffuseTransmissionTint.x);
 
-            // Only the stand-ins are shadows-only; the climbers and epiphytes after them cast.
+            // Only the stand-ins are shadows-only; the climbers and epiphytes after them cast; the twigs, last, cast nothing (the
+            // stand-ins cast for them).
             for (std::size_t model = 0; model < look.models.size(); ++model) {
                 assert(look.models[model].shadowOnly == (model == 3));
-                assert(model < 4 || look.models[model].castsShadows);
+                assert(model < 4 || look.models[model].castsShadows == (model + 1 < look.models.size()));
 
                 for (const RenderPart& part : look.models[model].parts) {
                     lookMeshes.insert(part.mesh.index);

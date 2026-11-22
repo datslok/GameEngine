@@ -191,7 +191,8 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
             const MeshHandle mesh = slot == 0 ? draw.mesh : draw.levels[slot - 1].mesh;
             GpuPlacedGroup group;
 
-            if (mesh.isValid()) {
+            // A twig part's mesh only gives its bounds and levels: its groups draw nothing (the twig pass draws its twigs).
+            if (mesh.isValid() && draw.twigs == nullptr) {
                 const MeshPlacement where = placement(mesh);
 
                 if (!where.pooled) {
@@ -207,6 +208,15 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
 
             table.groups.push_back(group);
             table.styles.push_back(CullGroupStyle{mesh, cutOut, draw.material.doubleSided, true});
+        }
+
+        if (draw.twigs != nullptr) {
+            const auto known = std::find(table.twigSets.begin(), table.twigSets.end(), draw.twigs);
+            placed.unused[0] = static_cast<std::uint32_t>(known - table.twigSets.begin());
+
+            if (known == table.twigSets.end()) {
+                table.twigSets.push_back(draw.twigs);
+            }
         }
 
         placeOf[part] = static_cast<std::uint32_t>(table.parts.size());
