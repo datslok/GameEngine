@@ -1,6 +1,6 @@
 # Mesh clusters
 
-Covers: `src/scene/mesh_clusters`, `src/render/gpu/mesh_cluster_culling`, `src/render/gpu/mesh_cluster_culling_shared.h`, `assets/shaders/mesh_cluster_culling.glsl`, `assets/shaders/mesh_cluster_pass.glsl`, `assets/shaders/mesh_cluster_count.comp`, `assets/shaders/mesh_cluster_test.comp`, `assets/shaders/mesh_cluster_scan.comp`, `assets/shaders/mesh_cluster_write.comp`, `src/render/vulkan/vulkan_mesh_cluster_culling`, `src/scene/mesh_clusters_shared.h`, `assets/shaders/mesh_cluster_draw.glsl`, `assets/shaders/triangle.mesh`, `assets/shaders/triangle_motion.mesh`
+Covers: `src/scene/mesh_clusters`, `src/scene/twig_set`, `src/render/gpu/twig_records`, `src/render/gpu/mesh_cluster_culling`, `src/render/gpu/mesh_cluster_culling_shared.h`, `assets/shaders/mesh_cluster_culling.glsl`, `assets/shaders/mesh_cluster_pass.glsl`, `assets/shaders/mesh_cluster_count.comp`, `assets/shaders/mesh_cluster_test.comp`, `assets/shaders/mesh_cluster_scan.comp`, `assets/shaders/mesh_cluster_write.comp`, `src/render/vulkan/vulkan_mesh_cluster_culling`, `src/scene/mesh_clusters_shared.h`, `assets/shaders/mesh_cluster_draw.glsl`, `assets/shaders/triangle.mesh`, `assets/shaders/triangle_motion.mesh`
 
 Meshes cut into small pieces culled one by one (ROADMAP phase 21, stage 1; research `docs/research/VIRTUALGEOMETRY.md`). Not the lights' clusters (`clustered-shading.md`). Cost grows with the camera's drawn instances times their clusters, not with the scene.
 
@@ -85,6 +85,14 @@ The same switch draws the list: the camera's prepass and main pass draw each sty
 
 - **Same depth bit for bit:** the main pass shades where depth equals the prepass's, so `gl_Position` is `invariant` in both, as in the vertex shaders.
 - **One vertex body:** `triangle_vertex.glsl`'s `shadeVertex` writes each output once through `VERTEX_OUT` macros (mesh shaders may not read their outputs back), so vertex and mesh shaders place and sway alike. A pooled mesh never deforms, so last frame's shape is its own.
+
+## Twigs (assemblies, stage 3b-iii)
+
+A plant's twigs drawn as instances of a few prototype meshes, culled a brick, then a twig, before their clusters (Nanite's assemblies; `forest-twigs.md` for the forest's).
+
+- **What a game hands over** (`scene/twig_set`, `TwigSet`): the prototypes (drawn-only meshes with given cluster levels), each twig (`TwigInstance`: foot, frame, scale, prototype, lean) and the bricks (`TwigBrick`, `twigBrickSize` 64). `makeTwigSet` splits the feet's box along its longest side at whole bricks until each part is one brick (a median split: compact bricks, all full but the last; a Morton order's runs left one brick 12.6 m across in a 14 m crown), each brick's sphere its farthest twig's foot plus that twig's reach (`meshReach` of its prototype, times its scale).
+- **Records** (`render/gpu/twig_records`): `GpuTwig` (64 B: the 3 x 4 matrix from prototype to plant frame, lean, prototype), `GpuTwigBrick` (32 B), `GpuTwigLevel` (32 B a prototype's level: its group's sphere and error, its clusters' run in the pool; `packTwigLevels` refuses clusters that are not a chain).
+- Not drawn yet: the twig pass and the mesh shaders' twig instances are 3b-iii-b.
 
 ## Tests
 

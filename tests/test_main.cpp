@@ -92,6 +92,8 @@ void testTestProgress();
 void testCardThinning();
 void testLeafPruning();
 void testTwigs();
+void testTwigSet();
+void testTwigRecords();
 void testTerrain();
 void testGroundFollow();
 void testImpostors();
@@ -438,6 +440,8 @@ const RoutineTest routineTests[] = {
     {"testCardThinning", testCardThinning},
     {"testLeafPruning", testLeafPruning},
     {"testTwigs", testTwigs},
+    {"testTwigSet", testTwigSet},
+    {"testTwigRecords", testTwigRecords},
     {"testTerrain", testTerrain},
     {"testGroundFollow", testGroundFollow},
     {"testImpostors", testImpostors},

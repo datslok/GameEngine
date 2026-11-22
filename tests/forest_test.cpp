@@ -960,6 +960,23 @@ namespace {
         for (const std::vector<PlacedTwig>& twigs : forest.game.getTreeTwigs()) {
             assert(!twigs.empty());
         }
+
+        // And as the renderer takes them: every twig in bricks over the prototypes' meshes, each with its levels given.
+        assert(forest.game.getTreeTwigSets().size() == forest.game.getTreeTwigs().size());
+
+        for (std::size_t look = 0; look < forest.game.getTreeTwigSets().size(); ++look) {
+            const TwigSet& set = *forest.game.getTreeTwigSets()[look];
+            assert(set.twigs.size() == forest.game.getTreeTwigs()[look].size() && !set.bricks.empty());
+            assert(static_cast<int>(set.prototypes.size()) == forest.game.getTwigSettings().prototypes);
+
+            for (const MeshHandle prototype : set.prototypes) {
+                assert(forest.assets.hasClusterLevels(prototype) && forest.assets.getGivenClusterLevels(prototype) != nullptr);
+            }
+
+            for (const TwigInstance& twig : set.twigs) {
+                assert(twig.prototype < set.prototypes.size());
+            }
+        }
         assert(!stand.empty() && stand.size() == levels);
 
         for (const Entity entity : stand) {
@@ -1239,6 +1256,11 @@ namespace {
         for (const PlantedKindLook& look : forest.game.getTreeLooks()) {
             expectMarked(look.models.at(0).parts.front().mesh);
             assert(!forest.assets.hasClusterLevels(look.models.at(1).parts.front().mesh));
+        }
+
+        // The twig prototypes, with their levels given (twigs.h).
+        for (const MeshHandle prototype : forest.game.getTreeTwigSets().front()->prototypes) {
+            expectMarked(prototype);
         }
 
         assert(!forest.assets.hasClusterLevels(firstMesh(forest.game.getGround())));

@@ -186,6 +186,23 @@ std::uint32_t twigPrototypeOf(float pick, std::size_t count) {
     return static_cast<std::uint32_t>(std::min(chosen, count - 1));
 }
 
+TwigSet treeTwigSet(const std::vector<PlacedTwig>& twigs, std::vector<MeshHandle> prototypes, const std::vector<float>& reaches) {
+    std::vector<TwigInstance> instances;
+    instances.reserve(twigs.size());
+
+    for (const PlacedTwig& twig : twigs) {
+        instances.push_back(TwigInstance{.foot = twig.foot,
+                                         .across = twig.across,
+                                         .towardsTip = twig.towardsTip,
+                                         .facing = twig.facing,
+                                         .scale = twig.scale,
+                                         .prototype = twigPrototypeOf(twig.pick, prototypes.size()),
+                                         .lean = twig.lean});
+    }
+
+    return makeTwigSet(std::move(prototypes), reaches, std::move(instances));
+}
+
 // Each level's vertices after the finer ones', its indices moved past them.
 TwigLeafMesh twigLeafMesh(const TwigPrototype& twig) {
     TwigLeafMesh made;
