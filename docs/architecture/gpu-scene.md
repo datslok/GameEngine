@@ -77,7 +77,7 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 | 29, 30 | sky visibility grid and cascades | `sky-visibility.md` |
 | 31, 32 | contact shadow masks | `sun-shadows.md` |
 | 35, 36 | terrain heights and patches | terrain (`scene/terrain`) |
-| 37-41 | wind field, springs (two), hanging vertices, anchors | wind (`render/gpu/wind`) |
+| 37-41 | wind field, springs (two; 37-39 compute too, for the bones pass), hanging vertices, anchors | wind (`render/gpu/wind`) |
 | 42 | card thinning records | card thinning (`scene/card_thinning`) |
 | 43-45 | the planting cells' slots' plants, placed parts' instances, every view's placed entries | `planting.md` (Placed plants drawn) |
 
