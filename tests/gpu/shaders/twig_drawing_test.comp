@@ -1,0 +1,90 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs twig_drawing.glsl's functions on the cases twig_drawing_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "twig_drawing.glsl"
+
+// A plain instance placed by the model in inputs first..first+3, its normal matrix in the next four, its scale after.
+InstanceData testInstance(uint first) {
+    InstanceData instance;
+    instance.model = mat4(testInput(first), testInput(first + 1u), testInput(first + 2u), testInput(first + 3u));
+    instance.normalMatrix = mat4(testInput(first + 4u), testInput(first + 5u), testInput(first + 6u), testInput(first + 7u));
+    instance.handedness = vec4(1.0, testInput(first + 8u).x, 0.0, 0.0);
+    instance.material = uvec4(0u, 0u, 0u, uint(INSTANCE_KIND_PLAIN));
+    instance.sway = vec4(-1.0);
+    instance.hanging = uvec4(0u);
+    instance.levelSphere = vec4(0.0);
+    return instance;
+}
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_TWIG_INSTANCE) {
+        // Inputs: the part's model, normal matrix and scale (9), the twig's three rows. Outputs: the twig's model (4
+        // columns), its normal matrix's first three columns, (its scale).
+        InstanceData part = testInstance(0u);
+        Twig twig;
+        twig.rows[0] = testInput(9);
+        twig.rows[1] = testInput(10);
+        twig.rows[2] = testInput(11);
+        twig.lean = vec3(0.0);
+        twig.prototype = 0u;
+        InstanceData placed = twigInstance(part, twig);
+
+        for (int column = 0; column < 4; ++column) {
+            testOutput(uint(column), placed.model[column]);
+        }
+
+        for (int column = 0; column < 3; ++column) {
+            testOutput(uint(4 + column), placed.normalMatrix[column]);
+        }
+
+        testOutput(7, vec4(placed.handedness.y, 0.0, 0.0, 0.0));
+        return;
+    }
+
+    if (function == GPU_TEST_TWIG_LEVEL_DRAWN) {
+        // Inputs: the level before's sphere, the level's sphere, (before's error, the level's error, finest, pixel error),
+        // the model's four columns, the eye (w pixels a metre away), (level flags). Output: (drawn).
+        TwigLevel before = TwigLevel(testInput(0), testInput(2).x, 0u, 1u, 0u);
+        TwigLevel level = TwigLevel(testInput(1), testInput(2).y, 0u, 1u, 0u);
+        mat4 model = mat4(testInput(3), testInput(4), testInput(5), testInput(6));
+        LevelView view;
+        view.eye = testInput(7);
+        view.pixelError = testInput(2).w;
+        view.flags = uint(testInput(8).x);
+        testOutput(0, vec4(twigLevelDrawn(before, testInput(2).z != 0.0, level, model, view) ? 1.0 : 0.0, 0.0, 0.0, 0.0));
+        return;
+    }
+
+    if (function == GPU_TEST_TWIG_BRICK_KEPT) {
+        // Inputs: the part's model, normal matrix and scale (9), the brick's sphere, (record flags, view flags, sway fade
+        // end), the record's bounds, the eye, the frustum's six planes. Output: (kept).
+        InstanceData part = testInstance(0u);
+        TwigBrick brick = TwigBrick(testInput(9), 0u, 64u, 0u, 0u);
+        vec4 flags = testInput(10);
+        CullRecord record;
+        record.bounds = testInput(11);
+        record.levelSphere = record.bounds;
+        record.flags = uint(flags.x);
+        record.mesh = 0u;
+        record.hiddenBelowError = 0.0;
+        record.shadowCascades = 0;
+        CameraCull view;
+        view.levels.eye = testInput(12);
+        view.levels.pixelError = 1.0;
+        view.levels.flags = 0u;
+        view.flags = uint(flags.y);
+        view.swayFadeEnd = flags.z;
+
+        for (int plane = 0; plane < 6; ++plane) {
+            view.frustum.planes[plane] = testInput(13u + uint(plane));
+        }
+
+        testOutput(0, vec4(twigBrickKept(brick, part, 0u, record, view) ? 1.0 : 0.0, 0.0, 0.0, 0.0));
+    }
+}

@@ -1,5 +1,9 @@
 #pragma once
 
+#include "render/gpu/camera_culling.h"
+#include "render/gpu/cull_records.h"
+#include "render/gpu/gpu_scene.h"
+#include "render/gpu/twig_drawing_shared.h"
 #include "scene/mesh_clusters.h"
 #include "scene/twig_set.h"
 
@@ -57,6 +61,76 @@ GpuTwigBrick packTwigBrick(const TwigBrick& brick);
 /*
 * A prototype's levels from its clusters (a chain, as buildGivenClusterLevels makes: group k level k's clusters, which
 * run together), its clusters from firstPoolCluster in the pool. Throws std::invalid_argument for clusters that are not
-* such a chain.
+* such a chain, more than TWIG_MOST_LEVELS levels or a level of more than TWIG_MOST_LEVEL_CLUSTERS clusters.
 */
 std::vector<GpuTwigLevel> packTwigLevels(const MeshClusters& clusters, std::uint32_t firstPoolCluster);
+
+// A prototype's levels in the level table: from firstLevel, levelCount of them.
+struct GpuTwigPrototype {
+    std::uint32_t firstLevel = 0;
+    std::uint32_t levelCount = 0;
+    std::uint32_t unused[2] = {0, 0};
+};
+
+static_assert(sizeof(GpuTwigPrototype) == 16, "GpuTwigPrototype must match twig_drawing.glsl's TwigPrototype");
+
+inline constexpr std::uint32_t twigInstanceBase = TWIG_INSTANCE_BASE;
+inline constexpr std::uint32_t twigMostLevelClusters = TWIG_MOST_LEVEL_CLUSTERS;
+inline constexpr std::uint32_t twigMostLevels = TWIG_MOST_LEVELS;
+static_assert(TWIG_BRICK_SIZE == twigBrickSize, "The twig pass's workgroup is a brick");
+
+// ---- Mirrored by twig_drawing.glsl ----
+
+/*
+* A twig of a placed part: the part's instance (its plant and part placed: placedInstance) with the twig's matrix after
+* its own, so the prototype's frame goes to the world; the twig's turn after the part's normals (its scale is uniform,
+* so its matrix's turning part serves, made unit later), its scale on the part's.
+*/
+GpuInstance twigInstance(const GpuInstance& part, const GpuTwig& twig);
+
+/*
+* The level a twig draws (the cluster cut on its prototype's chain, meshClusterInCut's test on whole levels): the level
+* whose own error (the level before's group's; none for the finest) fits the view's pixel error and whose group's does
+* not, or that nothing coarser was made from. Each group holds the one before and errors rise, so exactly one level fits;
+* the last if rounding left none.
+*/
+std::uint32_t twigLevel(const GpuTwigLevel* levels, std::uint32_t levelCount, const GpuInstance& twig, const GpuCameraCull& view);
+
+// One step of it (the shaders' twig pass walks the levels with it): whether the twig draws level, given the level before
+// (ignored for the finest).
+bool twigLevelDrawn(const GpuTwigLevel& before, bool finest, const GpuTwigLevel& level, const GpuInstance& twig, const GpuCameraCull& view);
+
+/*
+* Whether a view keeps a brick or a twig of a placed part (its record placed in the world, its entry's bits): kept whole
+* where the part is not rigid (meshClusterRigid: swaying where the view's sway reaches), else when its sphere (the
+* brick's in the plant's frame, placed by the part; a twig's coarsest group's in the prototype's, placed by the twig) is
+* in the frustum.
+*/
+bool twigBrickKept(const GpuTwigBrick& brick, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view);
+bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view);
+
+// ---- The twig pass's steps on the CPU ----
+
+// A twig a view draws: its number in the set, and its chosen level's clusters in the pool.
+struct TwigDraw {
+    std::uint32_t twig = 0;
+    std::uint32_t firstCluster = 0;
+    std::uint32_t clusterCount = 0;
+
+    bool operator==(const TwigDraw&) const = default;
+};
+
+// A part's twigs as the pass reads them: its bricks and twigs, and the prototypes and levels they draw.
+struct TwigTables {
+    std::vector<GpuTwigBrick> bricks;
+    std::vector<GpuTwig> twigs;
+    std::vector<GpuTwigPrototype> prototypes;
+    std::vector<GpuTwigLevel> levels;
+};
+
+/*
+* What the twig pass draws of a placed part (twig_cull.comp's steps): each brick kept (twigBrickKept), each of its
+* twigs kept (twigKept), each drawn at its level (twigLevel), in brick and twig order.
+*/
+std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
+                                     const GpuCameraCull& view);

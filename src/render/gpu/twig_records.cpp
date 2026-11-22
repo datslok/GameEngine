@@ -1,5 +1,9 @@
 #include "render/gpu/twig_records.h"
 
+#include "render/gpu/column_major.h"
+#include "render/gpu/mesh_cluster_culling.h"
+
+#include <cmath>
 #include <stdexcept>
 
 GpuTwig packTwig(const TwigInstance& twig) {
@@ -65,10 +69,107 @@ std::vector<GpuTwigLevel> packTwigLevels(const MeshClusters& clusters, std::uint
         levels[level].sphere[3] = group.radius;
         levels[level].error = group.error;
 
-        if (levels[level].clusterCount == 0) {
-            throw std::invalid_argument("A twig prototype's level has no clusters");
+        if (levels[level].clusterCount == 0 || levels[level].clusterCount > twigMostLevelClusters) {
+            throw std::invalid_argument("A twig prototype's level has no clusters or more than TWIG_MOST_LEVEL_CLUSTERS");
         }
     }
 
+    if (levels.size() > twigMostLevels) {
+        throw std::invalid_argument("A twig prototype has more than TWIG_MOST_LEVELS levels");
+    }
+
     return levels;
+}
+
+namespace {
+    // A twig's matrix: its rows as GpuTwig holds them, the last (0 0 0 1).
+    Mat4 twigMatrix(const GpuTwig& twig) {
+        Mat4 matrix = Mat4::identity();
+
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                matrix.values[row][column] = twig.rows[row][column];
+            }
+        }
+
+        return matrix;
+    }
+
+    // Whether a sphere (plant or prototype frame) placed by an instance is kept: always where the part is not rigid.
+    bool twigSphereKept(const float sphere[4], const GpuInstance& placedBy, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
+                        const GpuCameraCull& view) {
+        if (!meshClusterRigid(part, entry, record, view)) {
+            return true;
+        }
+
+        const std::array<float, 4> placed = meshClusterPlacedSphere(sphere, placedBy);
+        return sphereInFrustum(view.frustum, placed.data());
+    }
+}
+
+// The twig's scale is its across column's length (its frame is unit, its scale uniform).
+GpuInstance twigInstance(const GpuInstance& part, const GpuTwig& twig) {
+    const Mat4 matrix = twigMatrix(twig);
+    Mat4 turn = matrix;
+    turn.values[0][3] = 0.0f;
+    turn.values[1][3] = 0.0f;
+    turn.values[2][3] = 0.0f;
+    GpuInstance instance = part;
+    writeColumnMajor(readColumnMajor(part.model) * matrix, instance.model);
+    writeColumnMajor(readColumnMajor(part.normalMatrix) * turn, instance.normalMatrix);
+    const float scale = std::sqrt(twig.rows[0][0] * twig.rows[0][0] + twig.rows[1][0] * twig.rows[1][0] + twig.rows[2][0] * twig.rows[2][0]);
+    instance.handedness[1] = part.handedness[1] * scale;
+    return instance;
+}
+
+bool twigLevelDrawn(const GpuTwigLevel& before, bool finest, const GpuTwigLevel& level, const GpuInstance& twig, const GpuCameraCull& view) {
+    const float budget = view.levels.pixelError;
+    const bool ownFits = finest || meshClusterErrorPixels(before.sphere, before.error, twig, view) <= budget;
+    const bool coarserFits = level.error <= static_cast<float>(MESH_CLUSTER_NEVER_COARSER) && meshClusterErrorPixels(level.sphere, level.error, twig, view) <= budget;
+    return ownFits && !coarserFits;
+}
+
+std::uint32_t twigLevel(const GpuTwigLevel* levels, std::uint32_t levelCount, const GpuInstance& twig, const GpuCameraCull& view) {
+    for (std::uint32_t level = 0; level < levelCount; ++level) {
+        if (twigLevelDrawn(levels[level == 0 ? 0 : level - 1], level == 0, levels[level], twig, view)) {
+            return level;
+        }
+    }
+
+    return levelCount - 1;
+}
+
+bool twigBrickKept(const GpuTwigBrick& brick, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view) {
+    return twigSphereKept(brick.sphere, part, part, entry, record, view);
+}
+
+bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view) {
+    return twigSphereKept(coarsest.sphere, twig, twig, entry, record, view);
+}
+
+std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
+                                     const GpuCameraCull& view) {
+    std::vector<TwigDraw> draws;
+
+    for (const GpuTwigBrick& brick : tables.bricks) {
+        if (!twigBrickKept(brick, part, entry, record, view)) {
+            continue;
+        }
+
+        for (std::uint32_t number = brick.firstTwig; number < brick.firstTwig + brick.twigCount; ++number) {
+            const GpuTwig& twig = tables.twigs[number];
+            const GpuTwigPrototype& prototype = tables.prototypes[twig.prototype];
+            const GpuTwigLevel* levels = &tables.levels[prototype.firstLevel];
+            const GpuInstance placed = twigInstance(part, twig);
+
+            if (!twigKept(levels[prototype.levelCount - 1], placed, entry, record, view)) {
+                continue;
+            }
+
+            const GpuTwigLevel& chosen = levels[twigLevel(levels, prototype.levelCount, placed, view)];
+            draws.push_back(TwigDraw{number, chosen.firstCluster, chosen.clusterCount});
+        }
+    }
+
+    return draws;
 }

@@ -486,17 +486,7 @@ GpuCullRecord placedCullRecord(const GpuCullRecord& part, const GpuPlacedPlant& 
 
 // Column-major in and out, as the shaders hold them. The turn made once for the matrix, the normals and the sphere.
 GpuInstance placedInstance(const GpuInstance& part, const GpuPlacedPlant& plant) {
-    const auto read = [](const float* columns) {
-        Mat4 matrix;
-
-        for (int row = 0; row < 4; ++row) {
-            for (int column = 0; column < 4; ++column) {
-                matrix.values[row][column] = columns[column * 4 + row];
-            }
-        }
-
-        return matrix;
-    };
+    const auto read = readColumnMajor;
     const PlacedTurn turn = placedTurn(plant.turnRadians);
     Mat4 rotation = Mat4::identity();
     rotation.values[0][0] = turn.diagonal;
