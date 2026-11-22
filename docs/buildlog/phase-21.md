@@ -124,3 +124,10 @@
   - **Ordering:** chains taken by first node: a chain's first node lies on its parent chain after that chain's first node, so parents always come first.
   - **Counts (laptop release, seed 7):** emergent 610 bones in 5 levels (389 chains, 18.0K bark vertices, 7,668 twigs); canopy 749 in 6 (474, 17.5K, 9,768); mid 50 in 4 (34, 2.9K, 894). Whole variant build 45.5 / 44.1 / 5.6 ms with the bindings.
   - **4 planted bugs caught** (the blend reversed, a chain's bones all children of its parent, bark bound along the trunk's chain, every twig on the root's bone).
+- `tree-bones-3c-ii` (Nov 22 2026): the bones' motion as maths (`render/gpu/wind_bones`, `wind_bones.glsl`, `quat.glsl`), tested on the CPU; nothing moves by it yet.
+  - **Picks (the user):** the beam law with exponent and clamp as settings (1A), an ellipse along and across the wind (2A), turns from rest directions (3A).
+  - **Frequency a branch, not a bone (corrected while building):** at one length the beam's mode goes as r / L^2, so thin 2 m bones would swing slower; short branches are what swing fast. Each chain's mode from its length and base radius: a 30 m trunk 0.3 m thick 0.28 Hz, a 4 m branch 5 cm thick 2.6 Hz.
+  - **No special case for a bone along the wind:** the axis `d x W` is left unnormalised, its length the wind's share across the bone (drag on a cylinder).
+  - **Across the wind:** `W - d (d.W)` moves a bone at right angles to itself and the wind, so a horizontal branch across the wind bobs, as today's branch bob does, from the same term that sways a trunk sideways.
+  - **New library `wind_bones.glsl`** rather than `wind.glsl` (its mirror `wind.h` already long); `quat.glsl` is the first GLSL quaternion code, mirroring `math/quat.h`. GPU test written, not run.
+  - **7 planted bugs caught** (a pose not carried by its parent, the share's factor 2 dropped, no swing across, the union's radius short, a turn in still air, the mode's r / 2 lost, a posed sphere shrunk).

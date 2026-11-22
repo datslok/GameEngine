@@ -84,6 +84,7 @@ void testWind();
 void testWindSway();
 void testWindHanging();
 void testSwayBones();
+void testWindBones();
 void testSimplifyMesh();
 void testMeshClusters();
 void testMeshClusterLevels();
@@ -435,6 +436,7 @@ const RoutineTest routineTests[] = {
     {"testWindSway", testWindSway},
     {"testWindHanging", testWindHanging},
     {"testSwayBones", testSwayBones},
+    {"testWindBones", testWindBones},
     {"testSimplifyMesh", testSimplifyMesh},
     {"testMeshClusters", testMeshClusters},
     {"testMeshClusterLevels", testMeshClusterLevels},

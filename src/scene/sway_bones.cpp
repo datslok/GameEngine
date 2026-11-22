@@ -39,7 +39,14 @@ SwayChain appendSwayChain(std::vector<SwayBone>& bones, const std::vector<Vec3>&
     for (int k = 0; k < count; ++k) {
         const auto [pivot, radius] = pointAlong(points, radii, arcs, length * static_cast<float>(k) / static_cast<float>(count));
         const Vec3 tip = pointAlong(points, radii, arcs, length * static_cast<float>(k + 1) / static_cast<float>(count)).first;
-        bones.push_back(SwayBone{.pivot = pivot, .tip = tip, .parent = k == 0 ? parent : chain.firstBone + k - 1, .level = level, .radius = radius});
+        bones.push_back(SwayBone{.pivot = pivot,
+                                 .tip = tip,
+                                 .parent = k == 0 ? parent : chain.firstBone + k - 1,
+                                 .level = level,
+                                 .radius = radius,
+                                 .chainStart = chain.firstBone,
+                                 .chainLength = length,
+                                 .chainRadius = radii.front()});
     }
 
     return chain;

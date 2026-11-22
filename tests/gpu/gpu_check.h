@@ -143,6 +143,7 @@ void gpuTestLiana(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCardThinning(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestFacetVariation(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestFoliageShading(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestWindBones(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCullRecords(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestMeshClusterCulling(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestTwigDrawing(GpuFunctionRunner& runner, GpuCheckReport& report);

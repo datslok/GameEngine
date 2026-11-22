@@ -27,6 +27,7 @@ namespace {
         for (int k = 0; k < 3; ++k) {
             const SwayBone& bone = bones[static_cast<std::size_t>(1 + k)];
             assert(bone.parent == k && bone.level == 1);
+            assert(bone.chainStart == 1 && near(bone.chainLength, 6.0f, 1e-5f) && near(bone.chainRadius, 0.4f, 1e-6f));
         }
 
         assert((bones[1].pivot - Vec3{0.0f, 0.0f, 0.0f}).length() < 1e-5f && (bones[1].tip - Vec3{0.0f, 2.0f, 0.0f}).length() < 1e-5f);

@@ -1,0 +1,42 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs wind_bones.glsl's and quat.glsl's functions on the cases wind_bones_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "wind_bones.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+    vec4 b = testInput(1);
+
+    if (function == GPU_TEST_QUAT) {
+        vec4 c = testInput(2);
+        testOutput(0, quatMultiply(a, b));
+        testOutput(1, vec4(quatRotate(a, c.xyz), 0.0));
+        testOutput(2, quatFromRotationVector(testInput(3).xyz));
+    } else if (function == GPU_TEST_WIND_BONE_SHARE) {
+        testOutput(0, vec4(windBoneShare(a.x, a.y, a.z, a.w, b.x, b.y)));
+    } else if (function == GPU_TEST_WIND_BRANCH) {
+        testOutput(0, vec4(windBranchHertz(a.x, a.y, a.z, a.w, b.x), windBranchPhase(uint(b.y), uint(b.z)), 0.0, 0.0));
+    } else if (function == GPU_TEST_WIND_BONE_TURN) {
+        vec4 c = testInput(2);
+        testOutput(0, vec4(windBoneTurn(a.xyz, a.w, b.xy, b.z, b.w, c.x, c.yz), 0.0));
+    } else if (function == GPU_TEST_WIND_BONE_POSE) {
+        WindBonePose parent = WindBonePose(a, b.xyz);
+        vec4 place = testInput(4);
+        WindBonePose pose = windBonePose(parent, testInput(2).xyz, testInput(3).xyz);
+        testOutput(0, pose.turn);
+        testOutput(1, vec4(pose.shift, 0.0));
+        testOutput(2, vec4(windBlendedPlace(pose, parent, place.w, place.xyz), 0.0));
+        testOutput(3, vec4(windBlendedDirection(pose, parent, place.w, testInput(5).xyz), 0.0));
+    } else if (function == GPU_TEST_WIND_SPHERES) {
+        WindBonePose pose = WindBonePose(a, b.xyz);
+        vec4 first = testInput(2);
+        testOutput(0, windPosedSphere(pose, first));
+        testOutput(1, windSphereUnion(first, testInput(3)));
+    }
+}
