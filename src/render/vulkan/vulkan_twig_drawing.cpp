@@ -133,6 +133,7 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
     std::vector<std::array<std::uint32_t, 4>> setRecords;
     std::vector<GpuTwigBrick> brickRecords;
     std::vector<GpuTwig> twigRecords;
+    std::vector<std::uint32_t> bindingRecords;
     mostBricks = 0;
 
     for (const TwigSet* set : table.twigSets) {
@@ -151,6 +152,7 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
             packed.prototype = static_cast<std::uint32_t>(
                 std::find(prototypeMeshes.begin(), prototypeMeshes.end(), set->prototypes.at(twig.prototype)) - prototypeMeshes.begin());
             twigRecords.push_back(packed);
+            bindingRecords.push_back(packTwigBinding(twig));
         }
     }
 
@@ -162,6 +164,7 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
     uploadBytes(allocator, sets, setRecords.data(), setRecords.size() * sizeof(setRecords[0]));
     uploadBytes(allocator, bricks, brickRecords.data(), std::max<std::size_t>(brickRecords.size(), 1) * sizeof(GpuTwigBrick));
     uploadBytes(allocator, twigs, twigRecords.data(), std::max<std::size_t>(twigRecords.size(), 1) * sizeof(GpuTwig));
+    uploadBytes(allocator, twigBindings, bindingRecords.data(), std::max<std::size_t>(bindingRecords.size(), 1) * sizeof(std::uint32_t));
     uploadBytes(allocator, prototypes, prototypeRecords.data(), prototypeRecords.size() * sizeof(GpuTwigPrototype));
     uploadBytes(allocator, levels, levelRecords.data(), levelRecords.size() * sizeof(GpuTwigLevel));
     madeFrom = table.twigSets;
@@ -231,6 +234,10 @@ VkBuffer VulkanTwigDrawing::getEntries(std::uint32_t frameIndex) const {
 
 VkBuffer VulkanTwigDrawing::getTwigs() const {
     return twigs.get();
+}
+
+VkBuffer VulkanTwigDrawing::getTwigBindings() const {
+    return twigBindings.get();
 }
 
 std::uint32_t VulkanTwigDrawing::getRoom(std::uint32_t frameIndex) const {

@@ -60,6 +60,10 @@ static_assert(sizeof(GpuTwigLevel) == 32, "GpuTwigLevel must match twig_drawing.
 // A twig's record from its instance.
 GpuTwig packTwig(const TwigInstance& twig);
 
+// A twig's binding as the twigs' bindings list holds it, one word a twig beside its record (packSwayBinding), or
+// SWAY_UNBOUND for a twig riding on no bone.
+std::uint32_t packTwigBinding(const TwigInstance& twig);
+
 // A brick's record.
 GpuTwigBrick packTwigBrick(const TwigBrick& brick);
 

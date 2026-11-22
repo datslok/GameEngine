@@ -17,6 +17,7 @@ struct WindField {
     ivec4 flags;  // x 1 when last frame's windows are the ones the springs hold
     vec4 sway;    // x 1 while things sway, y and z the fade's start and end (m), w last frame's time
     vec4 flutters[WIND_CATEGORIES]; // each category's flutter: hertz, metres
+    vec4 bones[2]; // the bones' motion: stiffness exponent, most stiffness, wood speed, slowest hertz; fastest hertz, swing along, swing across
 };
 
 // A lattice point's value: its hash's top 24 bits over 2^24 (windNoise's).

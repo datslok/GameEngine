@@ -987,6 +987,50 @@ namespace {
             const std::vector<MeshLevel>& standLevels = forest.assets.getMeshLevels().at(twigModel.parts.front().mesh.index);
             const std::vector<MeshLevel>& leafLevels = forest.assets.getMeshLevels().at(leaves.parts.front().mesh.index);
             assert(standLevels.size() == 1 && !standLevels.front().mesh.isValid() && standLevels.front().errorMetres == leafLevels.back().errorMetres);
+
+            /*
+            * Moved by bones (ROADMAP phase 21 stage 3c-iii): every part but the still impostor card (and the twig part's
+            * stand-in) carries the look's one skeleton, and each mesh it or its levels draw is bound one a vertex to
+            * bones it has; every twig rides on one of them.
+            */
+            const SwaySkeleton* skeleton = leaves.parts.front().skeleton.get();
+            assert(skeleton != nullptr && !skeleton->bones.empty() && skeleton->height > 1.0f && twigModel.parts.front().skeleton.get() == skeleton);
+            int bound = 0;
+
+            for (const ModelRenderer& model : kind.models) {
+                for (const RenderPart& part : model.parts) {
+                    assert(part.skeleton.get() == skeleton || (part.skeleton == nullptr && model.sway.kind == SwayKind::Still));
+
+                    if (part.skeleton == nullptr || part.twigs != nullptr) {
+                        continue;
+                    }
+
+                    std::vector<MeshHandle> drawn{part.mesh};
+
+                    for (const MeshLevel& level : forest.assets.getMeshLevels().at(part.mesh.index)) {
+                        if (level.mesh.isValid()) {
+                            drawn.push_back(level.mesh);
+                        }
+                    }
+
+                    for (const MeshHandle mesh : drawn) {
+                        const IndexedMesh& indexed = forest.assets.getDrawnMesh(mesh);
+                        assert(indexed.swayBindings.size() == indexed.vertices.size());
+
+                        for (const SwayBinding& binding : indexed.swayBindings) {
+                            assert(binding.bone >= 0 && static_cast<std::size_t>(binding.bone) < skeleton->bones.size());
+                        }
+
+                        ++bound;
+                    }
+                }
+            }
+
+            assert(bound >= 6);
+
+            for (const TwigInstance& twig : set.twigs) {
+                assert(twig.binding.bone >= 0 && static_cast<std::size_t>(twig.binding.bone) < skeleton->bones.size());
+            }
         }
         assert(!stand.empty() && stand.size() == levels);
 

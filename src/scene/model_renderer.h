@@ -4,6 +4,7 @@
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
+#include "scene/sway_bones.h"
 #include "scene/twig_set.h"
 #include "scene/wind.h"
 
@@ -24,6 +25,12 @@ struct RenderPart {
     * placeholder giving its bounds and levels (it draws nothing itself); none for an ordinary part. Placed plants only.
     */
     std::shared_ptr<const TwigSet> twigs = nullptr;
+
+    /*
+    * Moved by these bones (scene/sway_bones.h, ROADMAP phase 21 stage 3c-iii): its mesh's vertices bound to them
+    * (IndexedMesh::swayBindings), its twigs too; none for a part swaying by its vertices, or still. Placed plants only.
+    */
+    std::shared_ptr<const SwaySkeleton> skeleton = nullptr;
 };
 
 /*

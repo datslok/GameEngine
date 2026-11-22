@@ -423,6 +423,36 @@ namespace {
         assert(buildPlacedTable(testKinds().parts, testKinds().kinds, 3, testPlacement).twigStyle == -1);
     }
 
+    /*
+    * Parts moved by bones (ROADMAP phase 21 stage 3c-iii): each names its skeleton's number in the table's skeletons
+    * plus one, a skeleton shared by two parts listed once; a part without one names 0.
+    */
+    void testSkeletonParts() {
+        TestKinds kinds = testKinds();
+        const SwaySkeleton first;
+        const SwaySkeleton second;
+        kinds.parts[0].skeleton = &first;
+        kinds.parts[1].skeleton = &second;
+        kinds.parts[2].skeleton = &first;
+        const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
+        assert(table.skeletons.size() == 2);
+        bool unbound = false;
+
+        for (std::size_t place = 0; place < table.parts.size(); ++place) {
+            const GpuPlacedPart& part = table.parts[place];
+            const DrawItem& draw = kinds.parts[table.draws[place]];
+
+            if (draw.skeleton != nullptr) {
+                assert(part.unused[1] > 0 && table.skeletons.at(part.unused[1] - 1) == draw.skeleton);
+            } else {
+                assert(part.unused[1] == 0);
+                unbound = true;
+            }
+        }
+
+        assert(unbound && buildPlacedTable(testKinds().parts, testKinds().kinds, 3, testPlacement).skeletons.empty());
+    }
+
     void testTheTable() {
         const TestKinds kinds = testKinds();
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
@@ -1212,6 +1242,7 @@ void testPlacedDrawing() {
     testTheRegion();
     testTheTable();
     testTwigParts();
+    testSkeletonParts();
     testTheVariants();
     testTheBlocks();
     testTheBlocksOfTwoSets();

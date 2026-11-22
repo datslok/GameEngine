@@ -68,6 +68,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the camera's placed entries
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the camera's twig entries (render/gpu/twig_records.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the twigs
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // every pool vertex's binding to its bones (render/gpu/bone_records.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each twig's binding
     }};
 }
 
@@ -262,6 +264,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.placedEntries,
         views.twigEntries,
         views.twigs,
+        views.swayBindings,
+        views.twigBindings,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

@@ -1151,6 +1151,13 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         }
 
         perching[variant] = growEpiphytes(grown[variant].skeleton, *epiphytes.settings, epiphytes.bigTree, forestShapeSeed(seed, epiphyteSeedUse));
+
+        // What grows on the tree moves with the bark under it (ROADMAP phase 21 stage 3c-iii).
+        for (IndexedMesh* mesh : {&climbing[variant].stems, &climbing[variant].leaves, &perching[variant].leaves, &perching[variant].moss}) {
+            if (!mesh->vertices.empty()) {
+                bindToTreeBones(*mesh, grown[variant], settings.boneBlendShare);
+            }
+        }
     });
 
     std::vector<MeshHandle> barkMeshes;
@@ -1172,6 +1179,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
     std::vector<MeshHandle> epiphyteLeafMeshes(grown.size());
     std::vector<MeshHandle> epiphyteMossMeshes(grown.size());
     std::vector<float> treeHeights(grown.size());
+    std::vector<std::shared_ptr<const SwaySkeleton>> treeSkeletons(grown.size());
     std::vector<Vec3> firstRosette(grown.size());
 
     for (std::size_t index = 0; index < grown.size(); ++index) {
@@ -1225,6 +1233,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         }
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
         treeHeights[index] = std::max(treeBox.maximum.y, 1e-3f);
+        treeSkeletons[index] = std::make_shared<const SwaySkeleton>(SwaySkeleton{.bones = variant.bones, .height = treeHeights[index]});
 
         barkMeshes.push_back(withClusterLevels(assets, assets.addDrawnMesh(std::move(variant.bark))));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
@@ -1290,8 +1299,10 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
             model.castsShadows = castsShadows;
             model.shadowCascades = cascades;
 
+            // Everything swaying is bound to the variant's bones (ROADMAP phase 21 stage 3c-iii); the card stands still.
             if (leafy) {
                 treeLookSwayers.push_back(LookSwayer{treeLooks.size(), look.models.size(), ForestSwayer{Entity{}, ForestSwayPart::Trees, height, *leafy}});
+                model.parts.front().skeleton = treeSkeletons[variant];
             }
 
             look.models.push_back(std::move(model));
@@ -1301,7 +1312,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         seen(cardMeshes[variant], cardMaterials[variant], false, 0, std::nullopt);
         seen(shadowLeafMeshes[variant], leaf, true, settings.shadowCascades, true);
         look.models.back().shadowOnly = true;
-        look.models.back().parts.push_back(RenderPart{shadowBarkMeshes[variant], bark});
+        look.models.back().parts.push_back(RenderPart{.mesh = shadowBarkMeshes[variant], .material = bark, .skeleton = treeSkeletons[variant]});
 
         if (climberStemMeshes[variant].isValid()) {
             for (auto [mesh, material, leafy] : {std::tuple{climberStemMeshes[variant], &climbers->stem, false},
@@ -1860,6 +1871,7 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
 
         ModelRenderer twigModel = makeMeshRenderer(standIn, leaf);
         twigModel.parts.front().twigs = treeTwigSets[look];
+        twigModel.parts.front().skeleton = kind.models.at(treeLeavesModel).parts.front().skeleton;
         twigModel.castsShadows = false;
 
         for (const LookSwayer& swayer : std::vector<LookSwayer>(treeLookSwayers)) {

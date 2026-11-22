@@ -11,7 +11,7 @@
 * keepShare of the triangles are left or the next collapse would move the surface more than maxError, a share of the
 * mesh's size. With lockBorder, vertices on an open edge never move, so a cut-out leaf's outline and a seam keep their
 * place (the seen mesh); without it the border goes too (a shadow's stand-in). The vertices no triangle uses any more are
-* dropped. For scanned meshes (the forest's understorey) and level of detail: errorMetres, when given, gets how far the
+* dropped (their sway bindings with them, the rest kept). For scanned meshes (the forest's understorey) and level of detail: errorMetres, when given, gets how far the
 * surface moved (meshoptimizer's error times the mesh's size), the level's error to choose it by (scene/level_of_detail.h).
 */
 IndexedMesh simplifyMesh(const IndexedMesh& mesh, float keepShare, float maxError, bool lockBorder, float* errorMetres = nullptr);

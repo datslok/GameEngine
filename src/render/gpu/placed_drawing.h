@@ -160,6 +160,10 @@ struct PlacedTable {
     // 3b-iii: the twig pass draws its twigs).
     std::vector<const TwigSet*> twigSets;
     int twigStyle = -1; // its twig parts' style (they must share one: the twig regions are drawn in one style's run); -1 none
+
+    // The skeletons its parts are moved by (DrawItem::skeleton), each once, in the order first met; a bound part's
+    // GpuPlacedPart::unused[1] is its skeleton's number here plus 1 (0 none: ROADMAP phase 21 stage 3c-iii).
+    std::vector<const SwaySkeleton*> skeletons;
 };
 
 // The slot of its layer's kinds a plant of kind draws: the kind's own, or, with variants (its kind given several looks),

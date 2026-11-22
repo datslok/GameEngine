@@ -189,6 +189,10 @@ IndexedMesh meshPrefix(const IndexedMesh& mesh, std::size_t vertexCount, std::si
         prefix.hanging.assign(mesh.hanging.begin(), mesh.hanging.begin() + static_cast<std::ptrdiff_t>(vertexCount));
     }
 
+    if (!mesh.swayBindings.empty()) {
+        prefix.swayBindings.assign(mesh.swayBindings.begin(), mesh.swayBindings.begin() + static_cast<std::ptrdiff_t>(vertexCount));
+    }
+
     return prefix;
 }
 

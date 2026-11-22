@@ -224,6 +224,15 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
             }
         }
 
+        if (draw.skeleton != nullptr) {
+            const auto known = std::find(table.skeletons.begin(), table.skeletons.end(), draw.skeleton);
+            placed.unused[1] = static_cast<std::uint32_t>(known - table.skeletons.begin()) + 1;
+
+            if (known == table.skeletons.end()) {
+                table.skeletons.push_back(draw.skeleton);
+            }
+        }
+
         placeOf[part] = static_cast<std::uint32_t>(table.parts.size());
         table.parts.push_back(placed);
         table.draws.push_back(part);

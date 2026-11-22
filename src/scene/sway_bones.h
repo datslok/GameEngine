@@ -56,3 +56,31 @@ SwayBinding swayChainBinding(const SwayChain& chain, const std::vector<SwayBone>
 
 // Whether every bone's parent comes before it (so parents are worked out first).
 bool swayBonesOrdered(const std::vector<SwayBone>& bones);
+
+/*
+* A swaying thing's skeleton as its parts carry it (RenderPart::skeleton, ROADMAP phase 21 stage 3c-iii): its bones,
+* parents first, and its height in its mesh's units, which a bone's share of its lean is measured against
+* (render/gpu/wind_bones.h, windBoneShare).
+*/
+struct SwaySkeleton {
+    std::vector<SwayBone> bones;
+    float height = 1.0f;
+};
+
+// A chain and the line it was cut from, with a sphere holding the line, for binding things near it (swayNearestBinding).
+struct SwayLine {
+    SwayChain chain;
+    std::vector<Vec3> points;
+    Vec3 centre;
+    float radius = 0.0f;
+};
+
+// A line of a chain's points (at least two), its sphere about the middle of its box.
+SwayLine makeSwayLine(const SwayChain& chain, const std::vector<Vec3>& points);
+
+/*
+* What a point near a skeleton follows: its nearest line's binding where its closest point lies along it
+* (swayChainBinding), so a climber or a perched plant moves with the bark under it. Throws std::invalid_argument for no
+* lines.
+*/
+SwayBinding swayNearestBinding(const std::vector<SwayLine>& lines, const std::vector<SwayBone>& bones, const Vec3& point, float blendShare);

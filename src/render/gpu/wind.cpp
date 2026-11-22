@@ -68,9 +68,14 @@ void visit(WindSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Sway fade end", settings.swayFadeEnd, {.min = 0.0f, .max = 10000.0f, .sliderMax = 400.0f, .unit = "m"});
     visitor.field("Swaying shadow cascades", settings.swayShadowCascades, {.min = 0, .max = 8});
     visitor.field("Swaying lamp shadows", settings.swayLocalShadows);
+    visitor.group("Bones", [&] {
+        visit(settings.bones, visitor);
+    });
 }
 
 void validateWind(const WindSettings& settings) {
+    validateWindBoneMotion(settings.bones);
+
     if (!(settings.nearCellMetres > 0.0f) || !(settings.farCellMetres > 0.0f)) {
         throw std::invalid_argument("The wind field's cells must be above 0 m");
     }
@@ -215,6 +220,13 @@ GpuWindField packWindField(const Wind* wind, const WindSettings& settings, const
     field.sway[1] = settings.swayFadeStart;
     field.sway[2] = settings.swayFadeEnd;
     field.sway[3] = seconds - stepSeconds;
+    field.bones[0][0] = settings.bones.stiffnessExponent;
+    field.bones[0][1] = settings.bones.mostStiffness;
+    field.bones[0][2] = settings.bones.woodSpeed;
+    field.bones[0][3] = settings.bones.slowestHertz;
+    field.bones[1][0] = settings.bones.fastestHertz;
+    field.bones[1][1] = settings.bones.swingShare;
+    field.bones[1][2] = settings.bones.sideShare;
     return field;
 }
 

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <utility>
 
 namespace {
     // Each point's distance along the line from its first.
@@ -52,26 +54,81 @@ SwayChain appendSwayChain(std::vector<SwayBone>& bones, const std::vector<Vec3>&
     return chain;
 }
 
-float swayArcOfPoint(const std::vector<Vec3>& points, const Vec3& point) {
-    float best = INFINITY;
-    float bestArc = 0.0f;
-    float arc = 0.0f;
+namespace {
+    // The squared distance from a point to a line's closest point, and how far along the line that is.
+    std::pair<float, float> closestOnLine(const std::vector<Vec3>& points, const Vec3& point) {
+        float best = INFINITY;
+        float bestArc = 0.0f;
+        float arc = 0.0f;
 
-    for (std::size_t k = 0; k + 1 < points.size(); ++k) {
-        const Vec3 along = points[k + 1] - points[k];
-        const float span = along.length();
-        const float share = span > 0.0f ? std::clamp((point - points[k]).dot(along) / (span * span), 0.0f, 1.0f) : 0.0f;
-        const float distance = (points[k] + along * share - point).lengthSquared();
+        for (std::size_t k = 0; k + 1 < points.size(); ++k) {
+            const Vec3 along = points[k + 1] - points[k];
+            const float span = along.length();
+            const float share = span > 0.0f ? std::clamp((point - points[k]).dot(along) / (span * span), 0.0f, 1.0f) : 0.0f;
+            const float distance = (points[k] + along * share - point).lengthSquared();
+
+            if (distance < best) {
+                best = distance;
+                bestArc = arc + share * span;
+            }
+
+            arc += span;
+        }
+
+        return {best, bestArc};
+    }
+}
+
+float swayArcOfPoint(const std::vector<Vec3>& points, const Vec3& point) {
+    return closestOnLine(points, point).second;
+}
+
+SwayLine makeSwayLine(const SwayChain& chain, const std::vector<Vec3>& points) {
+    Vec3 low = points.front();
+    Vec3 high = points.front();
+
+    for (const Vec3& point : points) {
+        low = Vec3{std::min(low.x, point.x), std::min(low.y, point.y), std::min(low.z, point.z)};
+        high = Vec3{std::max(high.x, point.x), std::max(high.y, point.y), std::max(high.z, point.z)};
+    }
+
+    const Vec3 centre = (low + high) * 0.5f;
+    float radius = 0.0f;
+
+    for (const Vec3& point : points) {
+        radius = std::max(radius, (point - centre).length());
+    }
+
+    return SwayLine{.chain = chain, .points = points, .centre = centre, .radius = radius};
+}
+
+SwayBinding swayNearestBinding(const std::vector<SwayLine>& lines, const std::vector<SwayBone>& bones, const Vec3& point, float blendShare) {
+    if (lines.empty()) {
+        throw std::invalid_argument("A point can only be bound to a skeleton with lines");
+    }
+
+    // A line whose sphere lies farther than the best line so far cannot be nearer: skipped.
+    float best = INFINITY;
+    const SwayLine* nearest = &lines.front();
+    float nearestArc = 0.0f;
+
+    for (const SwayLine& line : lines) {
+        const float gap = std::max((point - line.centre).length() - line.radius, 0.0f);
+
+        if (gap * gap >= best) {
+            continue;
+        }
+
+        const auto [distance, arc] = closestOnLine(line.points, point);
 
         if (distance < best) {
             best = distance;
-            bestArc = arc + share * span;
+            nearest = &line;
+            nearestArc = arc;
         }
-
-        arc += span;
     }
 
-    return bestArc;
+    return swayChainBinding(nearest->chain, bones, nearestArc, blendShare);
 }
 
 SwayBinding swayChainBinding(const SwayChain& chain, const std::vector<SwayBone>& bones, float arc, float blendShare) {

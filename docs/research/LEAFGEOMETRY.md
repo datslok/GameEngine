@@ -66,6 +66,10 @@ The culling algorithm itself is unpublished (no talk slides found).
   - Frequency a chain (branch), not a bone: the cantilever's first mode `f = 1.875^2 / (2 pi) (r / 2) sqrt(E / rho) / L^2` (L, r the chain's length and base radius; equal-length bones would make thin ones slower). sqrt(E / rho) about 3000 m/s for green wood: a 30 m trunk 0.3 m thick 0.28 Hz (measured 0.3-0.5), a 4 m branch 5 cm thick 2.6 Hz; twigs far faster, so clamped (leaves' mass slows them). Phase hashed a chain, so a branch's bones swing together.
   - Ellipse (2A): the swing along the wind (share a) and across it (share b, about 0.3) a quarter turn apart, both scaling with the lean, so still air is still. Across is `W - d (d.W)`'s turn, moving the bone at right angles to both itself and the wind: a trunk sways sideways, a horizontal branch across the wind bobs up and down (today's branch bob).
   - Pose `T(x) = q x + t`, composed parents first: `T_b(x) = T_parent(p_b) + q_parent Q_b (x - p_b)`, so a child's pivot stays on its parent. Vertex `w T_b(v) + (1 - w) T_parent(v)`; a cluster's sphere posed by each bone of its run and their parents, merged.
+- **Bones on the GPU (3c-iii, the user's picks 1A 2A 3A 4A, Nov 22 2026):** posed once a frame for each tree a swaying view draws (camera, swaying shadow tiles; trees are placed plants, one identity across views), deduplicated by a per-frame table, within the sway's reach (until 3c-iv's screen cut), in a fixed pool (F5; a tree that does not fit stands still, F4 shows the need). Cost grows with drawn swaying trees' bones (Nanite: 100k bones about 0.1 ms).
+  - Last frame's poses (2A) recomputed from last frame's springs and time, as the sway does today: no slot history.
+  - Twigs (3A) rigid by their bone's blended pose at the foot, plus a flutter turn about it: work a twig, not a leaf vertex.
+  - Every tree mesh bound (4A): bark's old levels and the shadows' leaf cards too, so a tree and its shadow move alike and the per-vertex sway can go.
 - **Far:** the crown impostor card stays until volumes (`FARFOLIAGE.md`).
 
 ## The plan (phase 21 stage 3)

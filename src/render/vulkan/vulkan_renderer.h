@@ -728,6 +728,12 @@ private:
     VulkanBuffer thinningCards;
     VulkanBuffer noThinningCards;
 
+    // Every pool vertex's binding to its bones (render/gpu/bone_records.h, placeSwayBindings), up to the last bound
+    // mesh's vertices (the shaders take those past its end as unbound), likewise; the placed records' stand-in without.
+    std::vector<std::uint32_t> swayBindingRecords;
+    bool swayBindingsChanged = false;
+    VulkanBuffer swayBindings;
+
     // Copies a kind of per-vertex records to the GPU when new ones came (bytes their size).
     void updateVertexRecords(const void* records, VkDeviceSize bytes, bool& changed, VulkanBuffer& buffer);
 

@@ -199,7 +199,8 @@ TwigSet treeTwigSet(const std::vector<PlacedTwig>& twigs, std::vector<MeshHandle
                                          .facing = twig.facing,
                                          .scale = twig.scale,
                                          .prototype = twigPrototypeOf(twig.pick, prototypes.size()),
-                                         .lean = twig.lean});
+                                         .lean = twig.lean,
+                                         .binding = twig.binding});
     }
 
     return makeTwigSet(std::move(prototypes), reaches, std::move(instances));

@@ -559,6 +559,35 @@ TreeBones treeBones(const TreeSkeleton& skeleton, float boneMetres, float blendS
     return result;
 }
 
+int nodeOrNearest(int node, const Vec3& foot, const std::vector<TreeNode>& nodes) {
+    if (node >= 0) {
+        return node;
+    }
+
+    float nearest = INFINITY;
+    int found = 0;
+
+    for (std::size_t k = 0; k < nodes.size(); ++k) {
+        const float distance = (nodes[k].position - foot).lengthSquared();
+
+        if (distance < nearest) {
+            nearest = distance;
+            found = static_cast<int>(k);
+        }
+    }
+
+    return found;
+}
+
+void bindToTreeBones(IndexedMesh& mesh, const TreeMeshes& tree, float blendShare) {
+    mesh.swayBindings.clear();
+    mesh.swayBindings.reserve(mesh.vertices.size());
+
+    for (const MeshVertex& vertex : mesh.vertices) {
+        mesh.swayBindings.push_back(swayNearestBinding(tree.swayLines, tree.bones, vertex.position, blendShare));
+    }
+}
+
 std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius) {
     std::vector<bool> leafy(radii.size(), false);
 
@@ -683,7 +712,7 @@ namespace {
 
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
                        const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
-                       const ClusterOutlines* outlines, int nodeCardStride, const ClusterCardRun& run) {
+                       const ClusterOutlines* outlines, int nodeCardStride, const ClusterCardRun& run, const std::vector<SwayBinding>* nodeBindings) {
     // The ranks' own random numbers, so the cards themselves stay as they were.
     const std::uint32_t rankSeed = forestShapeSeed(seed, 9);
     constexpr int cells = clusterColumns * clusterRows;
@@ -702,6 +731,11 @@ int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, co
         if (run.thinned) {
             const float rank = run.leastShare < 1.0f ? removedCardRank(forestUnitRandom(rankSeed, card.slot), run.leastShare) : 0.0f;
             mesh.thinningCards.resize(mesh.vertices.size(), ThinningCard{card.stem, rank});
+        }
+
+        if (nodeBindings != nullptr) {
+            const int node = nodeOrNearest(card.node, card.stem, nodes);
+            mesh.swayBindings.resize(mesh.vertices.size(), (*nodeBindings)[static_cast<std::size_t>(node)]);
         }
 
         ++made;
@@ -918,8 +952,10 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
 
         for (std::size_t vertex = firstVertex; vertex < meshes.bark.vertices.size(); ++vertex) {
             const float arc = swayArcOfPoint(strand.points, meshes.bark.vertices[vertex].position);
-            meshes.barkBindings.push_back(swayChainBinding(bones.chains[index], bones.bones, arc, settings.boneBlendShare));
+            meshes.bark.swayBindings.push_back(swayChainBinding(bones.chains[index], bones.bones, arc, settings.boneBlendShare));
         }
+
+        meshes.swayLines.push_back(makeSwayLine(bones.chains[index], strand.points));
     }
 
     const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
@@ -937,34 +973,20 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
     keptCards.fillCards = std::min(std::max(static_cast<int>(std::lround(static_cast<float>(settings.fillCards) * keptShare)), 1), settings.fillCards);
     meshes.leaves.thinning = CardThinning{.cardSize = settings.clusterSize, .growth = settings.levelCardGrowth, .leastShare = keptShare};
     meshes.leafLevelCardCount = appendClusterCards(meshes.leaves, nodes, radii, crown, clumps, keptCards, forestShapeSeed(seed, 3), outlines,
-                                                   settings.cardsPerNode, ClusterCardRun{.thinned = true});
+                                                   settings.cardsPerNode, ClusterCardRun{.thinned = true}, &bones.nodes);
     const std::size_t keptVertices = meshes.leaves.vertices.size();
     const std::size_t keptIndices = meshes.leaves.indices.size();
     meshes.cardCount = meshes.leafLevelCardCount +
                        appendClusterCards(meshes.leaves, nodes, radii, crown, clumps, settings, forestShapeSeed(seed, 3), outlines, 0,
                                           ClusterCardRun{.firstNodeCard = keptCards.cardsPerNode, .firstFillCard = keptCards.fillCards, .thinned = true,
-                                                         .leastShare = keptShare});
+                                                         .leastShare = keptShare},
+                                          &bones.nodes);
     meshes.leafLevel = meshPrefix(meshes.leaves, keptVertices, keptIndices);
     meshes.twigs = clusterTwigs(nodes, radii, crown, clumps, settings, forestShapeSeed(seed, 3));
 
     // Each twig rides on its node's bone; a filler, inside its clump, on its nearest node's.
     for (PlacedTwig& twig : meshes.twigs) {
-        int node = twig.node;
-
-        if (node < 0) {
-            float nearest = INFINITY;
-
-            for (std::size_t k = 0; k < nodes.size(); ++k) {
-                const float distance = (nodes[k].position - twig.foot).lengthSquared();
-
-                if (distance < nearest) {
-                    nearest = distance;
-                    node = static_cast<int>(k);
-                }
-            }
-        }
-
-        twig.binding = bones.nodes[static_cast<std::size_t>(node)];
+        twig.binding = bones.nodes[static_cast<std::size_t>(nodeOrNearest(twig.node, twig.foot, nodes))];
     }
 
     meshes.bones = bones.bones;
@@ -975,7 +997,8 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
     shadowCards.cardsPerNode = settings.shadowCardsPerNode;
     shadowCards.fillCards = settings.shadowFillCards;
     shadowCards.clusterSize = settings.clusterSize * settings.shadowCardScale;
-    meshes.shadowCardCount = appendClusterCards(meshes.shadowLeaves, nodes, radii, crown, clumps, shadowCards, forestShapeSeed(seed, 4), outlines);
+    meshes.shadowCardCount = appendClusterCards(meshes.shadowLeaves, nodes, radii, crown, clumps, shadowCards, forestShapeSeed(seed, 4), outlines, 0, {},
+                                                &bones.nodes);
 
     // The shadow bark: the tubes simplified, their open ends free to move (a shadow cannot show them).
     constexpr float shadowBarkError = 0.005f; // about 19 cm on a canopy tree, 7 cm on a mid tree; still 10-12% of the triangles

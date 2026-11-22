@@ -64,6 +64,8 @@ public:
     VkBuffer getRegions(std::uint32_t frameIndex) const;
     VkBuffer getEntries(std::uint32_t frameIndex) const;
     VkBuffer getTwigs() const;
+    // One binding word a twig beside its record (packTwigBinding), for the bones (ROADMAP phase 21 stage 3c-iii).
+    VkBuffer getTwigBindings() const;
 
     // A frame's region room (as prepare sized its entries), which the cluster passes' pair bound takes (twigMeshClusterPairBound).
     std::uint32_t getRoom(std::uint32_t frameIndex) const;
@@ -100,6 +102,7 @@ private:
     VulkanBuffer sets;
     VulkanBuffer bricks;
     VulkanBuffer twigs;
+    VulkanBuffer twigBindings;
     VulkanBuffer prototypes;
     VulkanBuffer levels;
     std::vector<const TwigSet*> madeFrom;

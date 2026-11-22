@@ -72,6 +72,7 @@ DrawItem rendererPartDraw(const ModelRenderer& renderer, std::size_t part, const
     draw.sway = renderer.sway;
     draw.lianaShape = renderer.lianaShape;
     draw.twigs = piece.twigs.get();
+    draw.skeleton = piece.skeleton.get();
     draw.twigFallback = renderer.twigFallback;
     return draw;
 }

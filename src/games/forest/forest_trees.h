@@ -304,7 +304,9 @@ struct PlacedTwig {
 * shellShare of the clump's radius out of its centre), each clusterSize a side, its stem near the node, the twig reaching
 * out of the clump and a little up, its front facing out of the clump (a random turn, never past square), its picture
 * one of the clusters' four cells; then fillCards cards half as big again inside each clump, near its middle, facing
-* every way, shading with the crown's way out. Normals by foliageNormal. Returns the cards made.
+* every way, shading with the crown's way out. Normals by foliageNormal. Returns the cards made. With nodeBindings
+* (each node's, treeBones), a whole card follows its node's (a filler's nearest node's, nodeOrNearest), as its twig does,
+* so it moves rigidly (IndexedMesh::swayBindings).
 */
 // Each leaf-cluster cell's outline (clusterOutline), in cell order; a card is drawn as its cell's outline.
 // nodeCardStride (0: cardsPerNode) numbers each node's cards as if it had that many, so the same seed with fewer cards
@@ -323,7 +325,8 @@ struct ClusterCardRun {
 
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
                        const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
-                       const ClusterOutlines* outlines = nullptr, int nodeCardStride = 0, const ClusterCardRun& run = {});
+                       const ClusterOutlines* outlines = nullptr, int nodeCardStride = 0, const ClusterCardRun& run = {},
+                       const std::vector<SwayBinding>* nodeBindings = nullptr);
 
 // A twig where each card appendClusterCards would make with the same arguments (every card, no run) is, in its order.
 std::vector<PlacedTwig> clusterTwigs(const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
@@ -383,8 +386,10 @@ struct TreeMeshes {
     std::vector<PlacedTwig> twigs;
 
     // The bones the wind moves the tree by (treeBones), and each bark vertex's (ROADMAP phase 21 stage 3c).
+    // Every mesh above is bound to them (IndexedMesh::swayBindings); each chain's line binds what grows on the tree
+    // (bindToTreeBones).
     std::vector<SwayBone> bones;
-    std::vector<SwayBinding> barkBindings;
+    std::vector<SwayLine> swayLines;
 };
 
 /*
@@ -401,6 +406,12 @@ struct TreeBones {
 };
 
 TreeBones treeBones(const TreeSkeleton& skeleton, float boneMetres, float blendShare);
+
+// The node a card or twig grows from: its own, or for a filler (-1) the node nearest its foot.
+int nodeOrNearest(int node, const Vec3& foot, const std::vector<TreeNode>& nodes);
+
+// Each vertex of a mesh growing on a tree (its climbers, its epiphytes) bound to the tree's nearest line (swayNearestBinding).
+void bindToTreeBones(IndexedMesh& mesh, const TreeMeshes& tree, float blendShare);
 
 // The crown a tree of these settings grows into, in its own frame: from the fork to the top, crownRadius across.
 CrownEnvelope treeCrown(const ForestTreeSettings& settings);
