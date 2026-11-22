@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <utility>
 
 namespace {
@@ -496,6 +497,68 @@ int tubeSides(float radius) {
     return std::clamp(sides, fewestTubeSides, mostTubeSides);
 }
 
+namespace {
+    // A chain's line, as its tube and its bones both follow it: its nodes' places and radii, a side chain's first point
+    // (its parent's node, inside the parent's tube) taking the chain's own radius.
+    HangingStrand chainStrand(const TreeSkeleton& skeleton, std::size_t index) {
+        const std::vector<int>& chain = skeleton.chains[index];
+        HangingStrand strand;
+
+        for (std::size_t k = 0; k < chain.size(); ++k) {
+            const std::size_t node = static_cast<std::size_t>(chain[k]);
+            strand.points.push_back(skeleton.nodes[node].position);
+            strand.radii.push_back(index > 0 && k == 0 && chain.size() > 1 ? skeleton.radii[static_cast<std::size_t>(chain[1])] : skeleton.radii[node]);
+        }
+
+        return strand;
+    }
+}
+
+TreeBones treeBones(const TreeSkeleton& skeleton, float boneMetres, float blendShare) {
+    TreeBones result;
+    result.chains.assign(skeleton.chains.size(), SwayChain{});
+    result.nodes.assign(skeleton.nodes.size(), SwayBinding{});
+    std::vector<bool> bound(skeleton.nodes.size(), false);
+
+    // A chain's first node is on its parent chain, after that chain's own first node (parents before children), so
+    // taking chains by their first node makes every parent bone before its children.
+    std::vector<std::size_t> order(skeleton.chains.size());
+    std::iota(order.begin(), order.end(), std::size_t{0});
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        const int firstA = skeleton.chains[a].empty() ? std::numeric_limits<int>::max() : skeleton.chains[a].front();
+        const int firstB = skeleton.chains[b].empty() ? std::numeric_limits<int>::max() : skeleton.chains[b].front();
+        return firstA < firstB;
+    });
+
+    for (const std::size_t index : order) {
+        const std::vector<int>& chain = skeleton.chains[index];
+
+        if (chain.size() < 2) {
+            continue;
+        }
+
+        const HangingStrand strand = chainStrand(skeleton, index);
+        const std::size_t attach = static_cast<std::size_t>(chain.front());
+        const int parentBone = index > 0 && bound[attach] ? result.nodes[attach].bone : -1;
+        const int level = parentBone >= 0 ? result.bones[static_cast<std::size_t>(parentBone)].level + 1 : 0;
+        const SwayChain& cut = result.chains[index] = appendSwayChain(result.bones, strand.points, strand.radii, parentBone, level, boneMetres);
+        float arc = 0.0f;
+
+        for (std::size_t k = 0; k < chain.size(); ++k) {
+            arc += k > 0 ? (strand.points[k] - strand.points[k - 1]).length() : 0.0f;
+            const std::size_t node = static_cast<std::size_t>(chain[k]);
+
+            // A side chain's first node is its parent chain's, bound there.
+            if (k > 0 || index == 0) {
+                result.nodes[node] = swayChainBinding(cut, result.bones, arc, blendShare);
+                bound[node] = true;
+            }
+        }
+    }
+
+    return result;
+}
+
 std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius) {
     std::vector<bool> leafy(radii.size(), false);
 
@@ -552,6 +615,7 @@ namespace {
         Vec3 clumpOut;
         Vec3 crownOut;
         std::uint64_t slot = 0;
+        int node = -1; // the node it grows from; -1 for a filler
     };
 
     /*
@@ -571,10 +635,10 @@ namespace {
         const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
 
         const auto place = [&](const Vec3& stem, const Vec3& facing, const Vec3& reach, float size, const Vec3& clumpOut, const Vec3& crownOut,
-                               std::uint64_t slot) {
+                               std::uint64_t slot, int node) {
             const Vec3 inPlane = reach - facing * reach.dot(facing);
             const Vec3 towardsTip = inPlane.lengthSquared() > 1e-8f ? inPlane.normalized() : squareTo(facing);
-            visit(ClusterCardPlace{stem, towardsTip, facing, size, clumpOut, crownOut, slot});
+            visit(ClusterCardPlace{stem, towardsTip, facing, size, clumpOut, crownOut, slot, node});
         };
 
         for (std::size_t node = 0; node < nodes.size(); ++node) {
@@ -599,7 +663,7 @@ namespace {
                                             static_cast<std::uint64_t>(card)) * 8;
                 const Vec3 facing = (clumpOut + randomDirection(seed, base) * cardFacingStray).normalized();
                 const Vec3 reach = clumpOut + up * cardReachUp + randomDirection(seed, base + 2) * cardReachStray;
-                place(nodes[node].position, facing, reach, settings.clusterSize, clumpOut, crownOut, base + 4);
+                place(nodes[node].position, facing, reach, settings.clusterSize, clumpOut, crownOut, base + 4, static_cast<int>(node));
             }
         }
 
@@ -611,7 +675,7 @@ namespace {
                 const Vec3 crownOut = crownOutward(crown, stem);
                 const Vec3 turned = randomDirection(seed, base + 3);
                 const Vec3 facing = turned.dot(crownOut) >= 0.0f ? turned : turned * -1.0f;
-                place(stem, facing, randomDirection(seed, base + 5), fillerSize * settings.clusterSize, crownOut, crownOut, base + 7);
+                place(stem, facing, randomDirection(seed, base + 5), fillerSize * settings.clusterSize, crownOut, crownOut, base + 7, -1);
             }
         }
     }
@@ -662,7 +726,9 @@ std::vector<PlacedTwig> clusterTwigs(const std::vector<TreeNode>& nodes, const s
                                    .facing = card.facing,
                                    .scale = card.size / settings.clusterSize,
                                    .pick = forestUnitRandom(seed, card.slot),
-                                   .lean = foliageLean(card.clumpOut, card.crownOut)});
+                                   .lean = foliageLean(card.clumpOut, card.crownOut),
+                                   .node = card.node,
+                                   .binding = SwayBinding{}});
     });
 
     return twigs;
@@ -684,6 +750,8 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Twig radius", settings.twigRadius, {.min = 0.002f, .max = 0.2f, .sliderMax = 0.05f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Buttresses", settings.buttress, {.min = 0.0f, .max = 5.0f, .sliderMax = 3.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Lean", settings.lean, {.min = 0.0f, .max = 20.0f, .sliderMax = 8.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Bone length", settings.boneMetres, {.min = 0.1f, .max = 50.0f, .sliderMax = 8.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Bone blend", settings.boneBlendShare, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Cluster size", settings.clusterSize, {.min = 0.1f, .max = 10.0f, .sliderMax = 4.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leaf length", settings.leafLength, {.min = 0.02f, .max = 2.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leafy radius", settings.leafyRadius, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.15f, .unit = "m", .applies = FieldApplies::AtStartup});
@@ -819,6 +887,7 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
     }
 
     meshes.skeleton = TreeSkeleton{.nodes = nodes, .radii = radii, .chains = chains, .trunkRadius = meshes.trunkRadius};
+    const TreeBones bones = treeBones(meshes.skeleton, settings.boneMetres, settings.boneBlendShare);
 
     for (std::size_t index = 0; index < chains.size(); ++index) {
         const std::vector<int>& chain = chains[index];
@@ -827,14 +896,7 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
             continue;
         }
 
-        HangingStrand strand;
-
-        for (std::size_t k = 0; k < chain.size(); ++k) {
-            const std::size_t node = static_cast<std::size_t>(chain[k]);
-            strand.points.push_back(nodes[node].position);
-            // A side chain's first point (its parent's node) takes the chain's own radius.
-            strand.radii.push_back(index > 0 && k == 0 ? radii[static_cast<std::size_t>(chain[1])] : radii[node]);
-        }
+        const HangingStrand strand = chainStrand(meshes.skeleton, index);
 
         TubeOptions options{.wholeTilesRound = true, .lobes = {}};
         int sides = tubeSides(strand.radii.front());
@@ -850,7 +912,14 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
             meshes.trunk = ClimbHost{.trunk = strand, .lobes = options.lobes, .topHeight = forkHeight};
         }
 
+        // Each of the tube's vertices follows its own chain's bones where it lies along the chain.
+        const std::size_t firstVertex = meshes.bark.vertices.size();
         appendTube(meshes.bark, strand, sides, barkTileMetres, options);
+
+        for (std::size_t vertex = firstVertex; vertex < meshes.bark.vertices.size(); ++vertex) {
+            const float arc = swayArcOfPoint(strand.points, meshes.bark.vertices[vertex].position);
+            meshes.barkBindings.push_back(swayChainBinding(bones.chains[index], bones.bones, arc, settings.boneBlendShare));
+        }
     }
 
     const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
@@ -877,6 +946,28 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
                                                          .leastShare = keptShare});
     meshes.leafLevel = meshPrefix(meshes.leaves, keptVertices, keptIndices);
     meshes.twigs = clusterTwigs(nodes, radii, crown, clumps, settings, forestShapeSeed(seed, 3));
+
+    // Each twig rides on its node's bone; a filler, inside its clump, on its nearest node's.
+    for (PlacedTwig& twig : meshes.twigs) {
+        int node = twig.node;
+
+        if (node < 0) {
+            float nearest = INFINITY;
+
+            for (std::size_t k = 0; k < nodes.size(); ++k) {
+                const float distance = (nodes[k].position - twig.foot).lengthSquared();
+
+                if (distance < nearest) {
+                    nearest = distance;
+                    node = static_cast<int>(k);
+                }
+            }
+        }
+
+        twig.binding = bones.nodes[static_cast<std::size_t>(node)];
+    }
+
+    meshes.bones = bones.bones;
     meshes.leafLevelError = thinningError(meshes.leaves.thinning, keptShare);
 
     // The shadow leaves: the same nodes and clumps, fewer and bigger cards.

@@ -118,3 +118,9 @@
   - **Plant in the hash:** twig numbers repeat in every tree of one look, so the plant's pick bits join the hash.
   - **3 planted bugs caught** (blend reversed, leaves not numbered, the swap keeping the leaf number).
   - **The user's look:** tones fine; blend 0 to 1 only slightly changes sunlit crown tops: the leaves' own shadows already shade the crowns, which the cards needed the bend for. 1 kept (reads as clumps far off). Timings not yet taken (PC not idle).
+- `tree-bones-3c-i` (Nov 22 2026): trees' bones built from the skeleton (`scene/sway_bones`, `treeBones`), each bark vertex's and twig's binding; nothing moves by them yet.
+  - **Rigid twigs on today's bend, measured and dropped:** a 1 m twig moved as one piece (its pivot's offset plus the best turn from the bend's central differences) missed today's per-vertex offset by 8-14 cm at 7 m/s, 15-25 cm at 10 m/s, 37-64 cm in a storm (mid and emergent trees): mostly the branch bob's 4 m wave across the twig; the bend's own shear 1.5-6 cm. Padding culling for it instead was the easy fix, not the scalable one (the user); bones were the research's answer all along (Nanite skinning, GPU Gems 3 ch. 6).
+  - **Picks (the user):** bones about 2 m along a chain, blended (1A); clusters within a chain holding their run of bones (2A); animation stopped below 0.1 of the screen with a fade (3A).
+  - **Ordering:** chains taken by first node: a chain's first node lies on its parent chain after that chain's first node, so parents always come first.
+  - **Counts (laptop release, seed 7):** emergent 610 bones in 5 levels (389 chains, 18.0K bark vertices, 7,668 twigs); canopy 749 in 6 (474, 17.5K, 9,768); mid 50 in 4 (34, 2.9K, 894). Whole variant build 45.5 / 44.1 / 5.6 ms with the bindings.
+  - **4 planted bugs caught** (the blend reversed, a chain's bones all children of its parent, bark bound along the trunk's chain, every twig on the root's bone).

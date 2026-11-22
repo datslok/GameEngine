@@ -816,6 +816,69 @@ namespace {
         assert((again.leaves.vertices[10].position - tree.leaves.vertices[10].position).lengthSquared() == 0.0f);
     }
 
+    // How far a point is from a bone's straight line, pivot to tip.
+    float fromBone(const SwayBone& bone, const Vec3& point) {
+        const Vec3 along = bone.tip - bone.pivot;
+        const float span = along.lengthSquared();
+        const float share = span > 0.0f ? std::clamp((point - bone.pivot).dot(along) / span, 0.0f, 1.0f) : 0.0f;
+        return (bone.pivot + along * share - point).length();
+    }
+
+    /*
+    * A tree's bones (scene/sway_bones.h, ROADMAP phase 21 stage 3c): its chains cut into bones about boneMetres long, parents
+    * before children, one root (the trunk's first bone, at the foot); along a chain each bone starts where the one
+    * before ends, and a side chain's first bone, a level up, starts at the node it grows from, on its parent bone. Every
+    * bark vertex is bound to a bone near it, blended towards its parent near the pivot; every twig to the bone at its
+    * node (a filler to its nearest node's).
+    */
+    void testATreesBones() {
+        const ForestTreeSettings settings = smallSettings();
+        const TreeMeshes tree = growTreeMeshes(settings, 21u, 1.5f);
+        const std::vector<SwayBone>& bones = tree.bones;
+        assert(bones.size() > static_cast<std::size_t>(tree.tipCount) / 2 && swayBonesOrdered(bones));
+        assert(bones[0].parent == -1 && bones[0].level == 0 && (bones[0].pivot - tree.skeleton.nodes[0].position).length() < 1e-5f);
+        int sideChains = 0;
+
+        for (std::size_t k = 1; k < bones.size(); ++k) {
+            const SwayBone& bone = bones[k];
+            assert(bone.parent >= 0 && (bone.tip - bone.pivot).length() <= 1.5f * settings.boneMetres + 1e-4f && bone.radius > 0.0f);
+            const SwayBone& parent = bones[static_cast<std::size_t>(bone.parent)];
+
+            if (bone.level == parent.level) {
+                assert((bone.pivot - parent.tip).length() < 1e-4f);
+            } else {
+                assert(bone.level == parent.level + 1 && fromBone(parent, bone.pivot) < 0.5f * settings.boneMetres);
+                ++sideChains;
+            }
+        }
+
+        assert(sideChains + 1 >= tree.tipCount / 2);
+        assert(tree.barkBindings.size() == tree.bark.vertices.size());
+        int blended = 0;
+
+        for (std::size_t vertex = 0; vertex < tree.bark.vertices.size(); ++vertex) {
+            const SwayBinding& binding = tree.barkBindings[vertex];
+            assert(binding.bone >= 0 && binding.bone < static_cast<int>(bones.size()) && binding.weight >= 0.0f && binding.weight <= 1.0f);
+            const SwayBone& bone = bones[static_cast<std::size_t>(binding.bone)];
+            assert(binding.weight == 1.0f || bone.parent >= 0);
+            assert(fromBone(bone, tree.bark.vertices[vertex].position) < bone.radius * (2.0f + settings.buttress) + 0.5f * settings.boneMetres);
+            blended += binding.weight > 0.0f && binding.weight < 1.0f ? 1 : 0;
+        }
+
+        assert(blended > 0);
+
+        for (const PlacedTwig& twig : tree.twigs) {
+            assert(twig.binding.bone >= 0 && twig.binding.bone < static_cast<int>(bones.size()));
+            const float reach = twig.node >= 0 ? 0.5f * settings.boneMetres : settings.clumpRadius + settings.boneMetres;
+            assert(fromBone(bones[static_cast<std::size_t>(twig.binding.bone)], twig.foot) < reach);
+            assert(twig.node < 0 || (twig.foot - tree.skeleton.nodes[static_cast<std::size_t>(twig.node)].position).length() < 1e-5f);
+        }
+
+        // The same seed, the same bones.
+        const TreeMeshes again = growTreeMeshes(settings, 21u, 1.5f);
+        assert(again.bones.size() == bones.size() && (again.bones.back().tip - bones.back().tip).lengthSquared() == 0.0f);
+    }
+
     /*
     * The sight lines: from eye height along the path every 10 m or less, round the meadow and the clearing, to the
     * Monolith and the Ring; a sphere on one blocks it, one far off does not.
@@ -947,7 +1010,7 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 40 && counter.live == 0);
+        assert(counter.fields == 42 && counter.live == 0);
         // The trees cast into the sun's four cascades, not the far map past them (the far map is the cascade after the last).
         assert(visited.shadowCascades == 4);
         assert(settings.shadowBarkShare > 0.0f && settings.shadowBarkShare <= 0.2f);
@@ -1365,6 +1428,7 @@ void testForestTrees() {
     testFoliageNormals();
     testClusterCards();
     testATreeIsBuilt();
+    testATreesBones();
     testSightLines();
     testTreesArePlaced();
     testTheStartAmongTheTrees();

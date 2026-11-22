@@ -7,6 +7,7 @@
 #include "math/vec2.h"
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
+#include "scene/sway_bones.h"
 
 #include <array>
 #include <cstdint>
@@ -184,6 +185,12 @@ struct ForestTreeSettings {
     // How far the most leaning variant's fork stands off its foot (metres); each leans 30-100% of it its own way.
     float lean = 2.5f;
 
+    // The bones the wind moves the tree by (ROADMAP phase 21 stage 3c, scene/sway_bones.h): each branch chain cut into bones
+    // about boneMetres long (the user's pick, Nov 22 2026), a vertex blended towards its bone's parent over the first
+    // boneBlendShare of the bone from its pivot.
+    float boneMetres = 2.0f;
+    float boneBlendShare = 0.5f;
+
     // Foliage on leaf-cluster cards (docs/research/TREES.md, Part 2): a card's size (metres a side), a leaf's length on it, how
     // thick a branch may be and still carry foliage, how many cards each such node in a clump's shell carries, how far
     // out of its clump a node must be to have one (a share of the clump's radius), how many bigger cards fill each
@@ -276,7 +283,9 @@ Vec3 foliageLean(const Vec3& clumpOut, const Vec3& crownOut);
 /*
 * A twig of modelled leaves (games/forest/twigs.h) where a card is (ROADMAP phase 21 stage 3b-ii): its foot (the card's
 * stem), its frame (across, towardsTip, facing: the twig's x, y and z), its size over the twigs' (fillers are larger), a
-* random number in 0..1 choosing its prototype (twigPrototypeOf), and the lean its leaves' normals bend by (foliageLean).
+* random number in 0..1 choosing its prototype (twigPrototypeOf), and the lean its leaves' normals bend by (foliageLean);
+* the skeleton's node it grows from (-1 for a filler inside its clump) and the bone it rides on (growTreeMeshes binds it:
+* its node's, a filler its nearest node's).
 */
 struct PlacedTwig {
     Vec3 foot;
@@ -286,6 +295,8 @@ struct PlacedTwig {
     float scale = 1.0f;
     float pick = 0.0f;
     Vec3 lean;
+    int node = -1;
+    SwayBinding binding;
 };
 
 /*
@@ -370,7 +381,26 @@ struct TreeMeshes {
 
     // A twig where each of the leaves' cards is (clusterTwigs), for the modelled leaves (ROADMAP phase 21 stage 3b).
     std::vector<PlacedTwig> twigs;
+
+    // The bones the wind moves the tree by (treeBones), and each bark vertex's (ROADMAP phase 21 stage 3c).
+    std::vector<SwayBone> bones;
+    std::vector<SwayBinding> barkBindings;
 };
+
+/*
+* A skeleton's bones (ROADMAP phase 21 stage 3c, scene/sway_bones.h): each chain cut into bones about boneMetres long
+* (appendSwayChain), chains taken in order of their first node so every parent bone comes first; the trunk's first bone the
+* one root, a side chain's first bone the child of the bone holding the node it grows from, a level up; and what each
+* node follows (blendShare of a bone from its pivot blended towards its parent). A chain of fewer than two nodes has no
+* bones.
+*/
+struct TreeBones {
+    std::vector<SwayBone> bones;
+    std::vector<SwayChain> chains;      // a chain's bones, in the skeleton's chain order
+    std::vector<SwayBinding> nodes;     // what each node follows
+};
+
+TreeBones treeBones(const TreeSkeleton& skeleton, float boneMetres, float blendShare);
 
 // The crown a tree of these settings grows into, in its own frame: from the fork to the top, crownRadius across.
 CrownEnvelope treeCrown(const ForestTreeSettings& settings);
