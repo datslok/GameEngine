@@ -953,6 +953,13 @@ namespace {
         }
 
         assert(static_cast<int>(forest.game.getTwigPrototypes().size()) == forest.game.getTwigSettings().prototypes);
+
+        // Every tree look has its twigs (forest_trees_test checks them against the cards).
+        assert(forest.game.getTreeTwigs().size() == forest.game.getTreeLooks().size());
+
+        for (const std::vector<PlacedTwig>& twigs : forest.game.getTreeTwigs()) {
+            assert(!twigs.empty());
+        }
         assert(!stand.empty() && stand.size() == levels);
 
         for (const Entity entity : stand) {

@@ -532,6 +532,38 @@ namespace {
     * out of its clump, each clusterSize a side (fillers half as big again), its picture one of the four clusters, its
     * normals unit and the triangles facing them; the same seed the same cards.
     */
+    /*
+    * Square cards (four corners each, in any order) are where the twigs put a twig-sized cell: each card's first corner
+    * (its stem's left) and third (its tip's right) match a twig's, card for card once both are sorted.
+    */
+    void assertTwigsOnSquareCards(const IndexedMesh& cards, const std::vector<PlacedTwig>& twigs, float clusterSize) {
+        assert(cards.vertices.size() == twigs.size() * 4);
+        std::vector<std::array<float, 6>> fromCards;
+        std::vector<std::array<float, 6>> fromTwigs;
+
+        for (std::size_t vertex = 0; vertex < cards.vertices.size(); vertex += 4) {
+            const Vec3& first = cards.vertices[vertex].position;
+            const Vec3& third = cards.vertices[vertex + 2].position;
+            fromCards.push_back({first.x, first.y, first.z, third.x, third.y, third.z});
+        }
+
+        for (const PlacedTwig& twig : twigs) {
+            const float half = 0.5f * clusterSize * twig.scale;
+            const Vec3 first = twig.foot - twig.across * half;
+            const Vec3 third = twig.foot + twig.across * half + twig.towardsTip * (clusterSize * twig.scale);
+            fromTwigs.push_back({first.x, first.y, first.z, third.x, third.y, third.z});
+        }
+
+        std::sort(fromCards.begin(), fromCards.end());
+        std::sort(fromTwigs.begin(), fromTwigs.end());
+
+        for (std::size_t card = 0; card < fromCards.size(); ++card) {
+            for (std::size_t axis = 0; axis < 6; ++axis) {
+                assert(std::abs(fromCards[card][axis] - fromTwigs[card][axis]) < 1e-4f);
+            }
+        }
+    }
+
     void testClusterCards() {
         ForestTreeSettings settings;
         settings.clumpRadius = 1.5f;
@@ -606,6 +638,40 @@ namespace {
         IndexedMesh again;
         appendClusterCards(again, nodes, radii, crown, clumps, settings, 9u);
         assert((again.vertices[5].position - cards.vertices[5].position).lengthSquared() == 0.0f);
+
+        /*
+        * The twigs follow the cards one for one: a twig's frame (right-handed, unit) and scale put a twig-sized cell's
+        * corners on its card's corners; its lean bends its facing into the card's normal; its pick is in 0..1, choosing
+        * a prototype in range. The kept cards and the rest (two runs, as a grown tree makes them) are the same cards.
+        */
+        const std::vector<PlacedTwig> twigs = clusterTwigs(nodes, radii, crown, clumps, settings, 9u);
+        assert(static_cast<int>(twigs.size()) == made);
+
+        for (int card = 0; card < made; ++card) {
+            const PlacedTwig& twig = twigs[static_cast<std::size_t>(card)];
+            const MeshVertex* corner = &cards.vertices[static_cast<std::size_t>(card) * 4];
+            assert(near(twig.across.length(), 1.0f, 1e-4f) && near(twig.towardsTip.length(), 1.0f, 1e-4f) && near(twig.facing.length(), 1.0f, 1e-4f));
+            assert((twig.across.cross(twig.towardsTip) - twig.facing).length() < 1e-4f);
+            assert(twig.scale == (card >= made - fillers ? 1.5f : 1.0f));
+            assert(twig.pick >= 0.0f && twig.pick < 1.0f && twigPrototypeOf(twig.pick, 8) < 8);
+
+            const std::array<Vec2, 4> square{Vec2{0.0f, 0.0f}, Vec2{1.0f, 0.0f}, Vec2{1.0f, 1.0f}, Vec2{0.0f, 1.0f}};
+
+            for (std::size_t k = 0; k < 4; ++k) {
+                const Vec3 local{(square[k].x - 0.5f) * settings.clusterSize, square[k].y * settings.clusterSize, 0.0f};
+                const Vec3 placed = twig.foot + (twig.across * local.x + twig.towardsTip * local.y + twig.facing * local.z) * twig.scale;
+                assert((placed - corner[k].position).length() < 1e-4f);
+                assert((bentFoliageNormal(twig.facing, twig.lean) - corner[k].normal).length() < 1e-4f);
+            }
+        }
+
+        ForestTreeSettings kept = settings;
+        kept.cardsPerNode = 2;
+        kept.fillCards = 10;
+        IndexedMesh twoRuns;
+        appendClusterCards(twoRuns, nodes, radii, crown, clumps, kept, 9u, nullptr, settings.cardsPerNode);
+        appendClusterCards(twoRuns, nodes, radii, crown, clumps, settings, 9u, nullptr, 0, ClusterCardRun{.firstNodeCard = 2, .firstFillCard = 10});
+        assertTwigsOnSquareCards(twoRuns, twigs, settings.clusterSize);
     }
 
     ForestTreeSettings smallSettings() {
@@ -632,6 +698,7 @@ namespace {
         const TreeMeshes tree = growTreeMeshes(settings, 21u, 1.5f);
         assert(tree.tipCount > 20 && tree.leafyCount > tree.tipCount && !tree.bark.vertices.empty());
         assert(tree.cardCount > settings.clumps * settings.fillCards && tree.leaves.vertices.size() == static_cast<std::size_t>(tree.cardCount) * 4);
+        assertTwigsOnSquareCards(tree.leaves, tree.twigs, settings.clusterSize); // a twig a card, wherever the card is
         assert(near(tree.trunkRadius, settings.twigRadius * std::pow(static_cast<float>(tree.tipCount), 1.0f / leonardoExponent), 1e-3f * tree.trunkRadius));
         assert(trianglesFaceTheirNormals(tree.bark));
 

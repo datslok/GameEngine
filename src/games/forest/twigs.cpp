@@ -177,6 +177,15 @@ TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& se
     return twig;
 }
 
+std::uint32_t twigPrototypeOf(float pick, std::size_t count) {
+    if (count == 0) {
+        return 0;
+    }
+
+    const auto chosen = static_cast<std::size_t>(std::clamp(pick, 0.0f, 1.0f) * static_cast<float>(count));
+    return static_cast<std::uint32_t>(std::min(chosen, count - 1));
+}
+
 // Each level's vertices after the finer ones', its indices moved past them.
 TwigLeafMesh twigLeafMesh(const TwigPrototype& twig) {
     TwigLeafMesh made;

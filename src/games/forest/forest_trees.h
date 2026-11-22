@@ -270,6 +270,26 @@ inline constexpr float clumpNormalShare = 0.5f;
 inline constexpr float crownNormalShare = 0.2f;
 Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOut);
 
+// The same blend split in two: the clump's and crown's shares together (the lean, the same for every leaf of a card or
+// twig), and a leaf's own facing bent by it (facing times its share plus the lean, made unit, never past square to it).
+Vec3 foliageLean(const Vec3& clumpOut, const Vec3& crownOut);
+Vec3 bentFoliageNormal(const Vec3& facing, const Vec3& lean);
+
+/*
+* A twig of modelled leaves (games/forest/twigs.h) where a card is (ROADMAP phase 21 stage 3b-ii): its foot (the card's
+* stem), its frame (across, towardsTip, facing: the twig's x, y and z), its size over the twigs' (fillers are larger), a
+* random number in 0..1 choosing its prototype (twigPrototypeOf), and the lean its leaves' normals bend by (foliageLean).
+*/
+struct PlacedTwig {
+    Vec3 foot;
+    Vec3 across;
+    Vec3 towardsTip;
+    Vec3 facing;
+    float scale = 1.0f;
+    float pick = 0.0f;
+    Vec3 lean;
+};
+
 /*
 * Leaf-cluster cards, appended to mesh: cardsPerNode cards at every leafy node in its clump's shell (at least
 * shellShare of the clump's radius out of its centre), each clusterSize a side, its stem near the node, the twig reaching
@@ -295,6 +315,10 @@ struct ClusterCardRun {
 int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
                        const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed,
                        const ClusterOutlines* outlines = nullptr, int nodeCardStride = 0, const ClusterCardRun& run = {});
+
+// A twig where each card appendClusterCards would make with the same arguments (every card, no run) is, in its order.
+std::vector<PlacedTwig> clusterTwigs(const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
+                                     const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed);
 
 // The fixed parts of a tree's shape. Leonardo's n of 2.5 keeps the limbs thick against the twigs (measured trees: 2-3).
 inline constexpr float leonardoExponent = 2.5f;
@@ -345,6 +369,9 @@ struct TreeMeshes {
 
     // The whole skeleton, for epiphytes (games/forest/epiphytes.h).
     TreeSkeleton skeleton;
+
+    // A twig where each of the leaves' cards is (clusterTwigs), for the modelled leaves (ROADMAP phase 21 stage 3b).
+    std::vector<PlacedTwig> twigs;
 };
 
 // The crown a tree of these settings grows into, in its own frame: from the fork to the top, crownRadius across.

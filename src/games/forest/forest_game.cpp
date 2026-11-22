@@ -1318,6 +1318,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
             }
         }
 
+        treeTwigs.push_back(std::move(grown[variant].twigs));
         treeLooks.push_back(std::move(look));
     }
 
@@ -1763,6 +1764,10 @@ const std::vector<TwigPrototype>& ForestGame::getTwigPrototypes() const {
 
 const std::vector<Entity>& ForestGame::getTwigStand() const {
     return twigStand;
+}
+
+const std::vector<std::vector<PlacedTwig>>& ForestGame::getTreeTwigs() const {
+    return treeTwigs;
 }
 
 void ForestGame::buildTwigs(World& world, AssetManager& assets) {

@@ -80,3 +80,8 @@
   - **Spheres:** a group holds its own clusters, the next level's (whose grown leaves reach further) and the group below; meshoptimizer's sphere of spheres is then grown to hold each exactly, since the cut needs strict nesting.
   - **Only drawn-only meshes:** a converted `Mesh` may have its vertices reordered, which would break the given indices.
   - **Tests caught 5 planted bugs:** groups missing the next level's clusters, a group carrying its own level's error, coarser clusters made from their own group, falling errors accepted, given levels not marking the mesh.
+- `twig-layout-3b-ii` (Nov 21 2026): each tree variant's twigs where its cards are (`clusterTwigs`).
+  - **One walk for cards and twigs** (`forEachClusterCard`): the cards' placement moved out of `appendClusterCards`, so the twigs cannot drift from them; a grown tree makes its cards in two runs (kept, then the rest) on the same random slots, so one run of every card gives the same set.
+  - **The lean:** the cards' normal blend split into the clump's and crown's share (one vector a twig) and the leaf's own facing, so a twig carries 12 bytes and the shader can bend each leaf as the cards were bent.
+  - **A pick, not a prototype number:** the card's own random number, mapped to a prototype when drawn (`twigPrototypeOf`), so changing the prototype count needs no regrowing.
+  - **Tests caught 4 planted bugs:** a left-handed twig frame, fillers not scaled up, the lean missing the crown's share, the twigs grown from another seed than the cards.

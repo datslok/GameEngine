@@ -89,6 +89,9 @@ TwigLeafMesh twigLeafMesh(const TwigPrototype& twig);
 // One twig: leaves laid out as clusterLeaves(cells, leafShare, seed) lays out a card's, in a twig twigSize metres tall.
 TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& settings, float twigSize, float leafShare, std::uint32_t seed);
 
+// The prototype a placed twig's pick (0..1) chooses among count.
+std::uint32_t twigPrototypeOf(float pick, std::size_t count);
+
 // The settings' prototypes, each from its own seed out of this one.
 std::vector<TwigPrototype> buildTwigPrototypes(const TracedLeaves& leaves, const ForestTwigSettings& settings, float twigSize, float leafShare,
                                                std::uint32_t seed);
