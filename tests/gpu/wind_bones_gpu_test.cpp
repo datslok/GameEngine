@@ -1,8 +1,11 @@
 #include "gpu_check.h"
 #include "gpu_test_functions.h"
 
+#include "render/gpu/bone_poses.h"
 #include "render/gpu/wind_bones.h"
 
+#include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -155,10 +158,81 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The bones pass's maths: a bone's own turn in its tree (random bones, trees, scales, seeds, leans, times, motions),
+    * a lean into a plant's frame, and a claim's reach, first pose (fitting, exactly filling, not fitting, near the
+    * 32-bit edge) and seed.
+    */
+    void checkBonePass(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{84};
+        std::vector<GpuVec4> turns;
+        std::vector<GpuVec4> leans;
+        std::vector<GpuVec4> claims;
+
+        for (int i = 0; i < 400; ++i) {
+            const Vec3 pivot = random.direction() * random.between(0.0f, 10.0f);
+            const Vec3 tip = pivot + random.direction() * random.between(0.0f, 3.0f);
+            const auto chainStart = static_cast<std::uint32_t>(i * 37 % 500);
+            const auto seed = static_cast<std::uint32_t>(i * 7919 % 100000);
+            turns.push_back(gpuVec4(pivot, random.between(0.01f, 0.5f)));
+            turns.push_back(gpuVec4(tip, static_cast<float>(chainStart)));
+            turns.push_back(gpuVec4(random.between(0.5f, 20.0f), random.between(0.01f, 0.4f), random.between(-0.3f, 0.3f), random.between(-0.3f, 0.3f)));
+            turns.push_back(gpuVec4(Vec3{random.between(2.0f, 40.0f), random.between(0.05f, 1.0f), random.between(0.3f, 3.0f)}, static_cast<float>(seed)));
+            turns.push_back(gpuVec4(random.between(0.0f, 100.0f)));
+            const float slowest = random.between(0.05f, 1.0f);
+            turns.push_back(gpuVec4(random.between(0.0f, 4.0f), random.between(1.0f, 20.0f), random.between(1000.0f, 5000.0f), slowest));
+            turns.push_back(gpuVec4(slowest + random.between(0.0f, 5.0f), random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
+            leans.push_back(gpuVec4(random.between(-1.0f, 1.0f), random.between(-1.0f, 1.0f), random.between(-7.0f, 7.0f)));
+
+            // Integers ride as their bits: what was asked before, the tree's bones, the pool.
+            const std::uint32_t pool = i % 4 == 3 ? 0xFFFFFFFFu : static_cast<std::uint32_t>(i * 13 % 3000);
+            const std::uint32_t asked = i % 4 == 3 ? 0xFFFFFF00u : static_cast<std::uint32_t>(i * 29 % 3000);
+            const std::uint32_t bones = i % 4 == 2 ? pool - std::min(pool, asked) : static_cast<std::uint32_t>(i * 11 % 700);
+            claims.push_back(gpuVec4(random.direction() * random.between(0.0f, 600.0f), random.between(1.0f, 500.0f)));
+            claims.push_back(gpuVec4(std::bit_cast<float>(asked), std::bit_cast<float>(bones), std::bit_cast<float>(pool), random.between(0.0f, 1.0f)));
+            claims.push_back(gpuVec4(random.direction() * random.between(0.0f, 100.0f)));
+        }
+
+        const std::vector<GpuVec4> turned = runner.run(shader, GPU_TEST_WIND_BONE_OWN_TURN, turns, 7, 1);
+        const std::vector<GpuVec4> leaned = runner.run(shader, GPU_TEST_BONE_LEAN_IN_PLANT, leans, 1, 1);
+        const std::vector<GpuVec4> claimed = runner.run(shader, GPU_TEST_BONE_CLAIM, claims, 3, 1);
+
+        // The turn: a pow, a sine and cosine of up to 2 pi times a few hundred radians (100 s at up to 6 Hz).
+        constexpr FloatTolerance turnTolerance{.absolute = 1e-4f, .relative = 1e-3f};
+
+        for (std::size_t i = 0; i < turned.size(); ++i) {
+            const GpuVec4* t = &turns[7 * i];
+            const WindBoneShape bone{.pivot = vec3From(t[0]), .tip = vec3From(t[1]), .radius = t[0][3], .chainStart = static_cast<std::uint32_t>(t[1][3]),
+                                     .chainLength = t[2][0], .chainRadius = t[2][1]};
+            const WindTreeShape tree{.height = t[3][0], .footRadius = t[3][1], .metresPerUnit = t[3][2], .seed = static_cast<std::uint32_t>(t[3][3])};
+            const WindBoneMotion motion{.stiffnessExponent = t[5][0], .mostStiffness = t[5][1], .woodSpeed = t[5][2], .slowestHertz = t[5][3],
+                                        .fastestHertz = t[6][0], .swingShare = t[6][1], .sideShare = t[6][2]};
+            report.check("windBoneOwnTurn", turnTolerance, windBoneOwnTurn(bone, tree, Vec2{t[2][2], t[2][3]}, t[4][0], motion), vec3From(turned[i]));
+            const Vec2 own = windLeanInPlant(Vec2{leans[i][0], leans[i][1]}, leans[i][2]);
+            report.check("windLeanInPlant", transcendentalTolerance, own.x, leaned[i][0]);
+            report.check("windLeanInPlant", transcendentalTolerance, own.y, leaned[i][1]);
+
+            const GpuVec4* c = &claims[3 * i];
+            const bool wanted = boneTreeWanted(vec3From(c[0]), vec3From(c[2]), c[0][3]);
+            const std::uint32_t firstPose =
+                boneTreeFirstPose(std::bit_cast<std::uint32_t>(c[1][0]), std::bit_cast<std::uint32_t>(c[1][1]), std::bit_cast<std::uint32_t>(c[1][2]));
+            report.check("boneTreeWanted", arithmeticTolerance, wanted ? 1.0f : 0.0f, claimed[i][0]);
+            report.check("boneTreeFirstPose", arithmeticTolerance, static_cast<float>(firstPose == boneNoPose),
+                         static_cast<float>(std::bit_cast<std::uint32_t>(claimed[i][1]) == boneNoPose));
+            report.check("boneTreeFirstPose", arithmeticTolerance, static_cast<float>(firstPose), static_cast<float>(std::bit_cast<std::uint32_t>(claimed[i][1])));
+            GpuPlacedPlant picked{};
+            picked.pick = c[1][3];
+            report.check("boneTreeSeed", arithmeticTolerance, static_cast<float>(boneTreeSeed(picked) == std::bit_cast<std::uint32_t>(claimed[i][2])), 1.0f);
+        }
+    }
+}
+
 void gpuTestWindBones(GpuFunctionRunner& runner, GpuCheckReport& report) {
-    report.section("wind_bones.glsl, quat.glsl");
+    report.section("wind_bones.glsl, quat.glsl, bone_poses.glsl");
     checkQuaternions(runner, report);
     checkSharesAndBranches(runner, report);
     checkTurns(runner, report);
     checkPoses(runner, report);
+    checkBonePass(runner, report);
 }

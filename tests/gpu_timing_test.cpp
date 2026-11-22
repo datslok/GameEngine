@@ -59,7 +59,9 @@ void testGpuTiming() {
         assert(std::string(gpuPassName(GpuPass::Planting)) == "PLANTING");
         assert(static_cast<int>(GpuPass::Planting) + 1 == static_cast<int>(GpuPass::Placed));
         assert(std::string(gpuPassName(GpuPass::Placed)) == "PLACED");
-        assert(static_cast<int>(GpuPass::Placed) + 1 == static_cast<int>(GpuPass::Twigs));
+        assert(static_cast<int>(GpuPass::Placed) + 1 == static_cast<int>(GpuPass::Bones));
+        assert(std::string(gpuPassName(GpuPass::Bones)) == "BONES");
+        assert(static_cast<int>(GpuPass::Bones) + 1 == static_cast<int>(GpuPass::Twigs));
         assert(std::string(gpuPassName(GpuPass::Twigs)) == "TWIGS");
         assert(static_cast<int>(GpuPass::Twigs) + 1 == static_cast<int>(GpuPass::Clusters));
         assert(static_cast<int>(GpuPass::Clusters) + 1 == static_cast<int>(GpuPass::Shadows));
@@ -164,7 +166,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];

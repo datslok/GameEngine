@@ -69,3 +69,9 @@ void addPlacementCompareCommand(CommandRegistry& registry, std::function<std::st
 * compared with the CPU's and returns the last comparison's report (empty when none has finished).
 */
 void addClusterCompareCommand(CommandRegistry& registry, std::function<std::string()> compare);
+
+/*
+* bones-compare (render/gpu/bone_poses.h): compare asks for the next frame's posed trees and poses to be read back and
+* checked against the CPU's, and returns the last comparison's report (empty when none has finished).
+*/
+void addBonesCompareCommand(CommandRegistry& registry, std::function<std::string()> compare);

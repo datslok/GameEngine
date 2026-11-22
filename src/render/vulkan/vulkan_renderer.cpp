@@ -165,6 +165,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
     placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
     twigDrawing = std::make_unique<VulkanTwigDrawing>(device, framesInFlight);
+    bonePosing = std::make_unique<VulkanBonePosing>(device, bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), framesInFlight);
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -1037,6 +1038,7 @@ FrameContext VulkanRenderer::beginFrame() {
         takeMeshClusterCull(*clusters, culled ? &*culled : nullptr, frameIndex);
     }
 
+    takeBonePoses(frameIndex);
     planting->collect(frameIndex, jobs);
     placedDrawing->collect(frameIndex);
     const std::optional<VulkanTwigDrawing::Collected> twigsCollected = twigDrawing->collect(frameIndex);
@@ -1212,6 +1214,44 @@ void VulkanRenderer::finishGpuTimings(FrameContext& context) {
 std::string VulkanRenderer::compareCulling() {
     cullCompareAsked = true;
     return cullCompareReport;
+}
+
+std::string VulkanRenderer::compareBones() {
+    bonesCompareAsked = true;
+    return bonesCompareReport;
+}
+
+/*
+* The bones pass's counts kept for F4 (none from a frame that posed nothing); a frame read back for bones-compare
+* checked against the CPU: the plants its swaying views' read-back lists want, its trees and poses (before the placed
+* drawing's collect lets its read-back go).
+*/
+void VulkanRenderer::takeBonePoses(std::uint32_t frameIndex) {
+    std::optional<VulkanBonePosing::Collected> collected = bonePosing->collect(frameIndex);
+
+    if (!collected) {
+        lastBones.reset();
+        return;
+    }
+
+    if (bonesCompare && bonesCompare->frameIndex == frameIndex) {
+        const std::optional<VulkanPlacedDrawing::ReadBack> placed = placedDrawing->readBack(frameIndex);
+
+        if (placed && !collected->poses.empty()) {
+            const std::vector<BoneWanted> wanted =
+                boneWantedPlants(*placed->table, placed->commands, placed->entries, bonesCompare->views, placed->plants, bonesCompare->eye, bonesCompare->fadeEnd);
+            bonesCompareReport = describeBoneComparison(compareBonePoses(wanted, collected->posedTrees, collected->poses, bonePosing->getTables(), placed->plants,
+                                                                         bonesCompare->motion, bonesCompare->seconds, bonesCompare->previousSeconds));
+        } else {
+            bonesCompareReport = "Bones: the frame's placed lists or poses were not read back.";
+        }
+
+        bonesCompare.reset();
+    }
+
+    collected->posedTrees.clear();
+    collected->poses.clear();
+    lastBones = std::move(collected);
 }
 
 std::string VulkanRenderer::compareMeshClusters() {
@@ -1693,6 +1733,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.meshClusterOcclusion = clustersCulled && lastMeshClusters->occlusion;
     stats.meshClustersLate = clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_KEPT);
     stats.meshClustersHidden = clusterTotal(MESH_CLUSTER_LATE, MESH_CLUSTER_TOTAL_CANDIDATES) - stats.meshClustersLate;
+    const VulkanBonePosing::Collected bones = lastBones.value_or(VulkanBonePosing::Collected{});
+    stats.boneTrees = bones.trees;
+    stats.boneTreesStill = bones.still;
+    stats.bonesAsked = bones.bonesAsked;
+    stats.bonePool = bones.pool;
     const TwigTally twigTally = lastTwigTally.value_or(TwigTally{});
     stats.twigsTested = twigTally.tested;
     stats.twigsKept = twigTally.kept;
@@ -1802,6 +1847,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The wind (render/gpu/wind.h): whether things sway this frame, for the shadow tiles that sway.
     validateWind(settings.wind);
     const WindSettings* sway = description.wind && settings.wind.enabled && settings.wind.sway ? &settings.wind : nullptr;
+
+    // The swaying trees' bones (render/vulkan/vulkan_bone_posing.h): posed while things sway and placed plants carry skeletons.
+    const bool posesBones = drawsPlaced && sway != nullptr &&
+                            bonePosing->prepare(placedDrawing->getTable(frame.frameIndex), description.plantedParts,
+                                                static_cast<std::uint32_t>(planting->getPlantsBytes() / sizeof(GpuPlacedPlant)), settings.wind.bones,
+                                                frame.frameIndex);
+    frameBones = posesBones ? std::optional{frame.frameIndex} : std::nullopt;
     ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
                                                  placedDrawing->getShadowChanges());
     stats.shadowDrawn += lastCameraCull.shadowDrawn;
@@ -2009,6 +2061,19 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         setPlacedViews(cameraCull, faces, faceNumbers, shadowDraws, frame.frameIndex);
     }
 
+    // The placed views that sway, whose trees the bones pass poses: the camera (view 0), the tiles drawn swaying.
+    swayingPlacedViews.clear();
+
+    if (frameBones) {
+        swayingPlacedViews.push_back(0);
+
+        for (const ShadowTileDraw& drawing : shadowDraws.tiles) {
+            if (drawing.sways && drawing.placedView) {
+                swayingPlacedViews.push_back(*drawing.placedView);
+            }
+        }
+    }
+
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
     // points copied up before the fog and the main pass read them.
     const bool readsSkyVisibility = readsSkyGrid(description, settings);
@@ -2079,14 +2144,51 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool placedClusters = cullsClusters && drawsPlaced;
     framePlacedByClusters = placedClusters && drawsClusters;
 
+    // bones-compare reads back this frame's placed lists with its trees and poses.
+    const bool bonesComparing = bonesCompareAsked && frameBones.has_value();
+    bonesCompareAsked = bonesCompareAsked && !bonesComparing;
+
     if (drawsPlaced) {
-        if (placedClusters && clusterComparing) {
+        if ((placedClusters && clusterComparing) || bonesComparing) {
             placedDrawing->askReadback();
         }
 
         beginGpuPass(frame, GpuPass::Placed);
         placedDrawing->record(frame.commands, frame.descriptors, *planting, plantingGround, frame.frameIndex);
         endGpuPass(frame, GpuPass::Placed);
+    }
+
+    // The wind's springs stepped before anything that sways is drawn or posed (the bones are first).
+    if (wind->runs()) {
+        beginGpuPass(frame, GpuPass::Wind);
+        wind->step(frame.commands, frame.descriptors, frames[frame.frameIndex].scene->wind.describe().buffer);
+        endGpuPass(frame, GpuPass::Wind);
+    }
+
+    // The swaying trees' bones posed from the springs, before the cluster passes and the shaders that will read them.
+    if (frameBones && wind->runs()) {
+        beginGpuPass(frame, GpuPass::Bones);
+        const VulkanPlacedDrawing::ClusterInputs placed = placedDrawing->clusterInputs(frame.frameIndex);
+        VulkanBonePosing::Inputs inputs;
+        inputs.commands = placed.commands;
+        inputs.entries = placed.entries;
+        inputs.parts = placed.parts;
+        inputs.plants = planting->getPlants();
+        inputs.partInstances = frames[frame.frameIndex].scene->placedParts.describe();
+        inputs.groupsAView = static_cast<std::uint32_t>(placedDrawing->getTable(frame.frameIndex).groups.size());
+        inputs.swayingViews = swayingPlacedViews;
+        inputs.textures = bindlessTextures->getSet();
+        inputs.scene = sceneSet;
+        inputs.eye = cameraOrigin;
+        inputs.fadeEnd = settings.wind.swayFadeEnd;
+        inputs.readBackPoses = bonesComparing;
+        bonePosing->record(frame.commands, frame.descriptors, inputs, frame.frameIndex);
+        endGpuPass(frame, GpuPass::Bones);
+
+        if (bonesComparing) {
+            bonesCompare = BonesCompare{frame.frameIndex, swayingPlacedViews, cameraOrigin, settings.wind.swayFadeEnd, frameWind.wind[3], frameWind.sway[3],
+                                        settings.wind.bones};
+        }
     }
 
     // The camera's view as its mesh clusters and twigs are culled: given the wind's sway (the camera culls without it), so
@@ -2232,13 +2334,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ddgi->update(frame.commands, frame.descriptors, probeSets, illumination, description.lighting.background, description.frameSeconds,
                      hitLights.fast > 0, !mirrorPairs.empty() && settings.mirroredLights.bounce, events, frame.frameIndex);
         endGpuPass(frame, GpuPass::Probes);
-    }
-
-    // The wind's springs stepped before anything that sways is drawn (the shadows are first).
-    if (wind->runs()) {
-        beginGpuPass(frame, GpuPass::Wind);
-        wind->step(frame.commands, frame.descriptors, frames[frame.frameIndex].scene->wind.describe().buffer);
-        endGpuPass(frame, GpuPass::Wind);
     }
 
     // The lists feed both clustered shading and its heatmap.
@@ -4472,6 +4567,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     planting->setFramesInFlight(count);
     placedDrawing->setFramesInFlight(count);
     twigDrawing->setFramesInFlight(count);
+    bonePosing->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
     cullFrameViews.assign(count, {});
     cullFrameDraws.assign(count, 0);

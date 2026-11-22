@@ -21,6 +21,7 @@ void visit(WindBoneMotion& motion, SettingsVisitor& visitor) {
     visitor.field("Fastest branch", motion.fastestHertz, {.min = 0.01f, .max = 20.0f, .sliderMax = 8.0f, .unit = "Hz"});
     visitor.field("Swing along", motion.swingShare, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
     visitor.field("Swing across", motion.sideShare, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
+    visitor.field("Pool", motion.poolBones, {.min = 1, .max = 1 << 24, .sliderMax = 1 << 20, .unit = "bones"});
 }
 
 void validateWindBoneMotion(const WindBoneMotion& motion) {
@@ -34,6 +35,10 @@ void validateWindBoneMotion(const WindBoneMotion& motion) {
 
     if (motion.swingShare < 0.0f || motion.sideShare < 0.0f) {
         throw std::invalid_argument("bones' swing shares must be at least 0");
+    }
+
+    if (motion.poolBones < 1 || motion.poolBones > (1 << 24)) {
+        throw std::invalid_argument("the bones' pool must hold 1 to 16777216 bones");
     }
 }
 
@@ -100,21 +105,27 @@ Vec4 windSphereUnion(const Vec4& first, const Vec4& second) {
     return Vec4{centre.x, centre.y, centre.z, radius};
 }
 
-std::vector<WindBonePose> windTreePoses(const std::vector<SwayBone>& bones, float treeHeight, std::uint32_t treeSeed, const Vec2& lean,
+Vec3 windBoneOwnTurn(const WindBoneShape& bone, const WindTreeShape& tree, const Vec2& lean, float seconds, const WindBoneMotion& motion) {
+    const Vec3 along = bone.tip - bone.pivot;
+    const float length = along.length();
+    const Vec3 direction = length > 0.0f ? along * (1.0f / length) : Vec3{0.0f, 1.0f, 0.0f};
+    const float share = windBoneShare(length, tree.height, bone.radius, tree.footRadius, motion.stiffnessExponent, motion.mostStiffness);
+    const float hertz = windBranchHertz(bone.chainLength * tree.metresPerUnit, bone.chainRadius * tree.metresPerUnit, motion.woodSpeed,
+                                        motion.slowestHertz, motion.fastestHertz);
+    const float phase = windBranchPhase(tree.seed, bone.chainStart);
+    return windBoneTurn(direction, share, lean, hertz, phase, seconds, Vec2{motion.swingShare, motion.sideShare});
+}
+
+std::vector<WindBonePose> windTreePoses(const std::vector<SwayBone>& bones, float treeHeight, float metresPerUnit, std::uint32_t treeSeed, const Vec2& lean,
                                         float seconds, const WindBoneMotion& motion) {
     std::vector<WindBonePose> poses;
     poses.reserve(bones.size());
-    const float footRadius = bones.empty() ? 0.0f : bones[0].radius;
-    const Vec2 shares{motion.swingShare, motion.sideShare};
+    const WindTreeShape tree{.height = treeHeight, .footRadius = bones.empty() ? 0.0f : bones[0].radius, .metresPerUnit = metresPerUnit, .seed = treeSeed};
 
     for (const SwayBone& bone : bones) {
-        const Vec3 along = bone.tip - bone.pivot;
-        const float length = along.length();
-        const Vec3 direction = length > 0.0f ? along * (1.0f / length) : Vec3{0.0f, 1.0f, 0.0f};
-        const float share = windBoneShare(length, treeHeight, bone.radius, footRadius, motion.stiffnessExponent, motion.mostStiffness);
-        const float hertz = windBranchHertz(bone.chainLength, bone.chainRadius, motion.woodSpeed, motion.slowestHertz, motion.fastestHertz);
-        const float phase = windBranchPhase(treeSeed, static_cast<std::uint32_t>(bone.chainStart));
-        const Vec3 turn = windBoneTurn(direction, share, lean, hertz, phase, seconds, shares);
+        const WindBoneShape shape{.pivot = bone.pivot, .tip = bone.tip, .radius = bone.radius, .chainStart = static_cast<std::uint32_t>(bone.chainStart),
+                                  .chainLength = bone.chainLength, .chainRadius = bone.chainRadius};
+        const Vec3 turn = windBoneOwnTurn(shape, tree, lean, seconds, motion);
         const WindBonePose parent = bone.parent < 0 ? WindBonePose{} : poses[static_cast<std::size_t>(bone.parent)];
         poses.push_back(windBonePose(parent, turn, bone.pivot));
     }

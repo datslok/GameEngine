@@ -249,6 +249,10 @@ Vec2 windSoftLean(const Vec2& lean) {
     return lean * (1.0f / (1.0f + lean.length() / static_cast<float>(WIND_MOST_LEAN)));
 }
 
+Vec2 windFadedLean(const Vec2& spring, float bend, float fade) {
+    return windSoftLean(spring * bend) * fade;
+}
+
 float windWindowShare(const Vec2& place, const WindWindow& window, float cellMetres) {
     const float x = place.x / cellMetres;
     const float z = place.y / cellMetres;
@@ -280,7 +284,7 @@ Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, 
 
     const float share = std::max(modelHeight, 0.0f) / std::max(sway.y, 1e-4f);
     const float heightMetres = sway.y * scale;
-    const Vec2 lean = windSoftLean(spring * sway.z) * fade;
+    const Vec2 lean = windFadedLean(spring, sway.z, fade);
     const Vec2 sideways = lean * (heightMetres * share * share);
     const Vec3 bent{fromFoot.x + sideways.x, fromFoot.y, fromFoot.z + sideways.y};
     const float bentLength = bent.length();
@@ -367,7 +371,7 @@ Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fad
 }
 
 Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, const Vec2& flutterRate, float seconds) {
-    const Vec2 lean = windSoftLean(spring * swing) * fade;
+    const Vec2 lean = windFadedLean(spring, swing, fade);
     const float reach = std::max(arm, 0.0f);
     const Vec2 out = lean * reach;
     const float rise = reach - std::sqrt(std::max(reach * reach - out.lengthSquared(), 0.0f));

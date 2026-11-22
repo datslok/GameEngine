@@ -1,0 +1,85 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The bones passes' second (render/vulkan/vulkan_bone_posing.h; its CPU steps boneTreePoses): a workgroup a claimed
+* tree. Its lean, this frame's and last's, from the trees' spring at its foot through its skeleton's lean part's bend,
+* faded, turned into its plant's frame; then its skeleton's chains a level at a time, a thread a chain walking its bones
+* in order, each bone's own turn carried by its parent's pose (the bone before in its chain, or one a level below,
+* posed before the barrier). Both frames' poses at once: last frame's recomputed from last frame's springs and time.
+*/
+#include "bone_pass.glsl"
+#include "wind_bones.glsl"
+#include "wind_data.glsl"
+
+layout(local_size_x = BONE_GROUP_SIZE) in;
+
+shared vec4 treeLeans;
+
+WindBonePose poseAt(uint place) {
+    BonePose pose = bonePoses[place];
+    return WindBonePose(pose.turn, pose.shift.xyz);
+}
+
+void main() {
+    uint treeNumber = gl_WorkGroupID.x;
+    BoneTree tree = boneTrees[treeNumber];
+
+    // The same for the whole workgroup: no thread passes a barrier the others skip.
+    if (tree.firstPose == BONE_NO_POSE) {
+        return;
+    }
+
+    SwaySkeletonRecord skeleton = swaySkeletons[tree.skeleton];
+    PlacedPlant plant = placedPlants[tree.plant];
+
+    if (gl_LocalInvocationID.x == 0u) {
+        vec4 leans = vec4(0.0);
+
+        if (skeleton.leanPart != BONE_NO_PART && windField.sway.x != 0.0) {
+            float bend = placedPartInstances[skeleton.leanPart].sway.z;
+            float fade = windSwayFade(distance(plant.foot, push.eye.xyz), windField.sway.y, windField.sway.z);
+            vec2 now = windFadedLean(windSpringAt(plant.foot.xz, WIND_CATEGORY_TREES, false), bend, fade);
+            vec2 last = windFadedLean(windSpringAt(plant.foot.xz, WIND_CATEGORY_TREES, true), bend, fade);
+            leans = vec4(windLeanInPlant(now, plant.turnRadians), windLeanInPlant(last, plant.turnRadians));
+        }
+
+        treeLeans = leans;
+        boneTrees[treeNumber].leans = leans;
+    }
+
+    barrier();
+    vec4 leans = treeLeans;
+    vec3 shape = vec3(skeleton.height, skeleton.footRadius, plant.scale);
+    uint seed = boneTreeSeed(plant.pick);
+    float seconds = windField.wind.w;
+    float previousSeconds = windField.sway.w;
+
+    for (uint level = 0u; level < skeleton.levelCount; ++level) {
+        uint firstChain = swayLevelStarts[skeleton.firstLevel + level];
+        uint endChain = swayLevelStarts[skeleton.firstLevel + level + 1u];
+
+        for (uint chain = firstChain + gl_LocalInvocationID.x; chain < endChain; chain += BONE_GROUP_SIZE) {
+            uvec2 run = swayChains[chain];
+            int firstParent = swayBones[skeleton.firstBone + run.x].parent;
+            WindBonePose parentNow = firstParent < 0 ? windRestPose() : poseAt(tree.firstPose + 2u * uint(firstParent));
+            WindBonePose parentLast = firstParent < 0 ? windRestPose() : poseAt(tree.firstPose + 2u * uint(firstParent) + 1u);
+
+            for (uint bone = run.x; bone < run.x + run.y; ++bone) {
+                SwayBoneRecord b = swayBones[skeleton.firstBone + bone];
+                vec3 turnNow = windBoneOwnTurn(b.pivot, b.tip, b.radius, b.chainStart, b.chainLength, b.chainRadius, shape, seed, leans.xy, seconds,
+                                               windField.bones[0], windField.bones[1]);
+                vec3 turnLast = windBoneOwnTurn(b.pivot, b.tip, b.radius, b.chainStart, b.chainLength, b.chainRadius, shape, seed, leans.zw,
+                                                previousSeconds, windField.bones[0], windField.bones[1]);
+                parentNow = windBonePose(parentNow, turnNow, b.pivot);
+                parentLast = windBonePose(parentLast, turnLast, b.pivot);
+                bonePoses[tree.firstPose + 2u * bone] = BonePose(parentNow.turn, vec4(parentNow.shift, 0.0));
+                bonePoses[tree.firstPose + 2u * bone + 1u] = BonePose(parentLast.turn, vec4(parentLast.shift, 0.0));
+            }
+        }
+
+        // This level's poses seen by the next level's threads.
+        memoryBarrierBuffer();
+        barrier();
+    }
+}

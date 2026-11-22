@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <stdexcept>
 
 std::uint32_t packSwayBinding(const SwayBinding& binding) {
@@ -17,6 +18,48 @@ SwayBinding unpackSwayBinding(std::uint32_t packed) {
     return SwayBinding{.bone = static_cast<int>(packed & 0xFFFFu), .weight = static_cast<float>(packed >> 16u) / 65535.0f};
 }
 
+namespace {
+    /*
+    * A skeleton's chains, level by level (in first bone order within each), and where each level starts among them
+    * (one past the last for the end). Throws std::invalid_argument as packSwaySkeletons says.
+    */
+    void appendChainsByLevel(const std::vector<SwayBone>& bones, SwaySkeletonTables& tables) {
+        std::map<int, std::vector<GpuSwayChain>> byLevel;
+
+        for (std::size_t bone = 0; bone < bones.size();) {
+            const SwayBone& first = bones[bone];
+
+            if (first.chainStart != static_cast<int>(bone)) {
+                throw std::invalid_argument("A chain must start at its chainStart");
+            }
+
+            if (first.parent >= 0 && bones[static_cast<std::size_t>(first.parent)].level >= first.level) {
+                throw std::invalid_argument("A chain must start on a bone of a lower level");
+            }
+
+            std::size_t end = bone + 1;
+
+            while (end < bones.size() && bones[end].chainStart == first.chainStart) {
+                if (bones[end].parent != static_cast<int>(end - 1) || bones[end].level != first.level) {
+                    throw std::invalid_argument("A chain's bones must each be the one before's child, of one level");
+                }
+
+                ++end;
+            }
+
+            byLevel[first.level].push_back(GpuSwayChain{static_cast<std::uint32_t>(bone), static_cast<std::uint32_t>(end - bone)});
+            bone = end;
+        }
+
+        for (const auto& [level, chains] : byLevel) {
+            tables.levelStarts.push_back(static_cast<std::uint32_t>(tables.chains.size()));
+            tables.chains.insert(tables.chains.end(), chains.begin(), chains.end());
+        }
+
+        tables.levelStarts.push_back(static_cast<std::uint32_t>(tables.chains.size()));
+    }
+}
+
 SwaySkeletonTables packSwaySkeletons(const std::vector<const SwaySkeleton*>& skeletons) {
     SwaySkeletonTables tables;
 
@@ -25,10 +68,14 @@ SwaySkeletonTables packSwaySkeletons(const std::vector<const SwaySkeleton*>& ske
             throw std::invalid_argument("A skeleton needs 1 to 65535 bones, parents first");
         }
 
+        const auto firstLevel = static_cast<std::uint32_t>(tables.levelStarts.size());
+        appendChainsByLevel(skeleton->bones, tables);
         tables.skeletons.push_back(GpuSwaySkeleton{.firstBone = static_cast<std::uint32_t>(tables.bones.size()),
                                                    .boneCount = static_cast<std::uint32_t>(skeleton->bones.size()),
                                                    .height = skeleton->height,
-                                                   .footRadius = skeleton->bones.front().radius});
+                                                   .footRadius = skeleton->bones.front().radius,
+                                                   .firstLevel = firstLevel,
+                                                   .levelCount = static_cast<std::uint32_t>(tables.levelStarts.size()) - firstLevel - 1});
 
         for (const SwayBone& bone : skeleton->bones) {
             tables.bones.push_back(GpuSwayBone{.pivot = {bone.pivot.x, bone.pivot.y, bone.pivot.z},

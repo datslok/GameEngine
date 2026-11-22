@@ -60,7 +60,7 @@ namespace {
         const std::vector<SwayBone> bones = branchedTree();
 
         for (float seconds : {0.0f, 1.7f, 93.2f}) {
-            const std::vector<WindBonePose> poses = windTreePoses(bones, 12.0f, 7u, Vec2{0.0f, 0.0f}, seconds, WindBoneMotion{});
+            const std::vector<WindBonePose> poses = windTreePoses(bones, 12.0f, 1.0f, 7u, Vec2{0.0f, 0.0f}, seconds, WindBoneMotion{});
 
             for (std::size_t k = 0; k < bones.size(); ++k) {
                 assert((windBonePlace(poses[k], bones[k].tip) - bones[k].tip).length() < 1e-6f);
@@ -74,7 +74,7 @@ namespace {
     */
     void testJointsHold() {
         const std::vector<SwayBone> bones = branchedTree();
-        const std::vector<WindBonePose> poses = windTreePoses(bones, 12.0f, 3u, Vec2{0.2f, -0.15f}, 4.3f, WindBoneMotion{});
+        const std::vector<WindBonePose> poses = windTreePoses(bones, 12.0f, 1.0f, 3u, Vec2{0.2f, -0.15f}, 4.3f, WindBoneMotion{});
         assert((windBonePlace(poses[0], bones[0].pivot) - bones[0].pivot).length() < 1e-6f);
         bool somethingMoved = false;
 
@@ -100,12 +100,12 @@ namespace {
         const Vec3 top = bones.back().tip;
         const float lean = 0.05f;
 
-        const std::vector<WindBonePose> alongX = windTreePoses(bones, 20.0f, 1u, Vec2{lean, 0.0f}, 0.0f, steadyMotion());
+        const std::vector<WindBonePose> alongX = windTreePoses(bones, 20.0f, 1.0f, 1u, Vec2{lean, 0.0f}, 0.0f, steadyMotion());
         const Vec3 movedX = windBonePlace(alongX.back(), top) - top;
         assert(movedX.x > lean * 20.0f && movedX.x < lean * 20.0f * 1.12f);
         assert(std::abs(movedX.z) < 1e-4f);
 
-        const std::vector<WindBonePose> alongZ = windTreePoses(bones, 20.0f, 1u, Vec2{0.0f, -lean}, 0.0f, steadyMotion());
+        const std::vector<WindBonePose> alongZ = windTreePoses(bones, 20.0f, 1.0f, 1u, Vec2{0.0f, -lean}, 0.0f, steadyMotion());
         const Vec3 movedZ = windBonePlace(alongZ.back(), top) - top;
         assert(movedZ.z < -lean * 20.0f && std::abs(movedZ.x) < 1e-4f);
     }
@@ -239,7 +239,7 @@ namespace {
 
                 for (int trial = 0; trial < 50; ++trial) {
                     const Vec2 lean{unit(random) * 0.4f, unit(random) * 0.4f};
-                    const std::vector<WindBonePose> poses = windTreePoses(bones, 9.0f, 11u, lean, share(random) * 100.0f, WindBoneMotion{});
+                    const std::vector<WindBonePose> poses = windTreePoses(bones, 9.0f, 1.0f, 11u, lean, share(random) * 100.0f, WindBoneMotion{});
                     const int firstBone = chain.firstBone + first;
                     Vec4 bound = windPosedSphere(poses[static_cast<std::size_t>(firstBone)], rest);
 

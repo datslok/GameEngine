@@ -101,6 +101,11 @@ vec2 windSoftLean(vec2 lean) {
     return lean * (1.0 / (1.0 + length(lean) / float(WIND_MOST_LEAN)));
 }
 
+// The lean a spring gives something bending by bend per radian of it, softly held and faded (windFadedLean).
+vec2 windFadedLean(vec2 spring, float bend, float fade) {
+    return windSoftLean(spring * bend) * fade;
+}
+
 // How much a place reads a window (its first cell origin) rather than the next coarser one (windWindowShare).
 float windWindowShare(vec2 place, ivec2 origin, float cellMetres) {
     vec2 cell = place / cellMetres;
@@ -133,7 +138,7 @@ vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, flo
 
     float share = max(modelHeight, 0.0) / max(sway.y, 1e-4);
     float heightMetres = sway.y * scale;
-    vec2 lean = windSoftLean(spring * sway.z) * fade;
+    vec2 lean = windFadedLean(spring, sway.z, fade);
     vec2 sideways = lean * (heightMetres * share * share);
     vec3 bent = vec3(fromFoot.x + sideways.x, fromFoot.y, fromFoot.z + sideways.y);
     float bentLength = length(bent);
@@ -167,7 +172,7 @@ vec3 windAnchorOffset(WindAnchorRecord anchor, vec2 spring, float fade, float se
 
 // A hanging vertex's own swing and flutter (windSwingOffset).
 vec3 windSwingOffset(float arm, vec3 place, float swing, float flutter, vec2 spring, float fade, vec2 flutterRate, float seconds) {
-    vec2 lean = windSoftLean(spring * swing) * fade;
+    vec2 lean = windFadedLean(spring, swing, fade);
     float reach = max(arm, 0.0);
     vec2 outwards = lean * reach;
     float rise = reach - sqrt(max(reach * reach - dot(outwards, outwards), 0.0));

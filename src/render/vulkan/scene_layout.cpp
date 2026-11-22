@@ -57,9 +57,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // their nearest glass depths
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the terrain's heights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the terrain's patches
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the wind field's record
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the wind's springs
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // and last frame's (the velocity pass)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // the wind field's record (compute for the bones pass)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex | compute},    // the wind's springs (compute for the bones pass)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex | compute},    // and last frame's (the velocity pass, the bones pass)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the hanging vertices' anchors and arms
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the anchors they hang from
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the thinned meshes' cards

@@ -22,6 +22,8 @@ const char* gpuPassName(GpuPass pass) {
         return "PLANTING";
     case GpuPass::Placed:
         return "PLACED";
+    case GpuPass::Bones:
+        return "BONES";
     case GpuPass::Twigs:
         return "TWIGS";
     case GpuPass::Probes:
