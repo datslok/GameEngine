@@ -2,6 +2,7 @@
 
 #include "games/forest/forest_terrain.h"
 #include "math/angles.h"
+#include "scene/foliage_shading.h"
 
 #include <algorithm>
 #include <array>
@@ -27,9 +28,6 @@ namespace {
     constexpr float shortestLeafShare = 0.7f;
     constexpr float tipLeafShrink = 0.25f;
     constexpr float highestLeafTip = 0.98f;
-    constexpr float darkestTone = 0.85f;
-    constexpr float toneRange = 0.25f;
-    constexpr float mostWarmth = 0.06f;
     constexpr float mostStemBend = 0.12f;
 
     // The stem: its foot and rise as shares of the cell, half its width at the foot (thinning to a third at the tip),
@@ -220,8 +218,8 @@ std::vector<ClusterLeaf> clusterLeaves(int sourceCells, float leafShare, std::ui
         }
 
         leaf.sourceCell = std::min(static_cast<int>(forestUnitRandom(seed, base + 2) * static_cast<float>(sourceCells)), sourceCells - 1);
-        leaf.tone = darkestTone + toneRange * forestUnitRandom(seed, base + 3);
-        leaf.warmth = mostWarmth * (2.0f * forestUnitRandom(seed, base + 4) - 1.0f);
+        leaf.tone = leafDarkestTone + leafToneRange * forestUnitRandom(seed, base + 3);
+        leaf.warmth = leafMostWarmth * (2.0f * forestUnitRandom(seed, base + 4) - 1.0f);
         leaves.push_back(leaf);
     }
 

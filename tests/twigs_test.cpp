@@ -186,6 +186,17 @@ namespace {
             assert(made.leaves.indices.size() == made.kept.size() * 4 * rows * 3);
             assert(trianglesFaceTheirNormals(made.leaves));
 
+            // Each leaf's number (in clusterLeaves' order, the same at every level) in its texture coordinate's whole part,
+            // the texture's own place in the fraction: a leaf keeps its tone as its twig changes level.
+            const std::size_t leafVertices = rows * 3 + 2;
+            assert(made.leaves.vertices.size() == made.kept.size() * leafVertices);
+
+            for (std::size_t vertex = 0; vertex < made.leaves.vertices.size(); ++vertex) {
+                const float u = made.leaves.vertices[vertex].uv.x;
+                assert(std::floor(u) == static_cast<float>(made.kept[vertex / leafVertices]));
+                assert(u - std::floor(u) > 0.0f && u - std::floor(u) < 1.0f);
+            }
+
             if (level > 0) {
                 const TwigLevel& finer = twig.levels[level - 1];
                 assert(made.stem.indices.empty());

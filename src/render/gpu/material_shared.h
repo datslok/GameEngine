@@ -25,6 +25,10 @@
 // tilted up so a field is lit from above whichever way each blade faces (games/forest/grass.h).
 #define MATERIAL_BACK_KEEPS_NORMAL 32u
 
+// Each leaf's tone from the seed its texture coordinate across carries in its whole part (scene/foliage_shading.h,
+// Material::leafTones): the twigs' modelled leaves.
+#define MATERIAL_LEAF_TONES 64u
+
 // The specialization constant that turns a scene fragment shader into its cut-out variant, which throws away the holes.
 // Number 1, after the light probes' (DDGI_SAMPLE_PROBES_CONSTANT), so a pipeline can set both.
 #define MATERIAL_CUT_OUT_CONSTANT 1

@@ -6,6 +6,7 @@
 #include "games/forest/leaf_clusters.h"
 #include "math/angles.h"
 #include "math/closest_points.h"
+#include "scene/foliage_shading.h"
 
 #include <algorithm>
 #include <array>
@@ -30,9 +31,6 @@ namespace {
 
     // The cone under a clump: its downward part kept at this share.
     constexpr float coneFlattening = 0.5f;
-
-    // The least a foliage normal leans to its card's front (the cosine between them, before making it unit again).
-    constexpr float leastFrontShare = 0.1f;
 
     // How far round the trunk the foot looks for the lowest ground (the buttresses' reach, at the variant's size).
 
@@ -534,13 +532,6 @@ Vec3 coneFlattened(const Vec3& direction) {
 
 Vec3 foliageLean(const Vec3& clumpOut, const Vec3& crownOut) {
     return coneFlattened(clumpOut) * clumpNormalShare + coneFlattened(crownOut) * crownNormalShare;
-}
-
-// Never past square to the leaf's own front: a normal behind it would light it from the wrong side.
-Vec3 bentFoliageNormal(const Vec3& facing, const Vec3& lean) {
-    const Vec3 blend = (facing * cardNormalShare + lean).normalized();
-    const float front = blend.dot(facing);
-    return front >= leastFrontShare ? blend : (blend + facing * (leastFrontShare - front)).normalized();
 }
 
 Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOut) {

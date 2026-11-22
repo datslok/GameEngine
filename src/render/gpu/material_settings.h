@@ -25,6 +25,10 @@ struct MaterialSettings {
     // Light through leaves (render/gpu/brdf.h, addDiffuseTransmission): a leaf lit from behind glows with the light its
     // far side receives.
     bool lightThroughLeaves = true;
+
+    // Twigs' modelled leaves (scene/foliage_shading.h, blendedFoliageNormal): their normals from their own (0) to bent
+    // by their clump and crown as the cards' were (1, the look the cards were tuned to), so a crown reads as lit clumps.
+    float leafNormalBlend = 1.0f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

@@ -45,6 +45,7 @@ int main() {
             gpuTestLiana(runner, report);
             gpuTestCardThinning(runner, report);
             gpuTestFacetVariation(runner, report);
+            gpuTestFoliageShading(runner, report);
             gpuTestWindowMask(runner, report);
             gpuTestCullRecords(runner, report);
             gpuTestMeshClusterCulling(runner, report);

@@ -11,6 +11,7 @@
 #include "math/angles.h"
 #include "input/input.h"
 #include "math/closest_points.h"
+#include "scene/foliage_shading.h"
 #include "scene/impostor.h"
 #include "scene/indexed_mesh.h"
 #include "scene/model_renderer.h"
@@ -522,9 +523,9 @@ namespace {
         const Vec3 facing = Vec3{0.0f, 0.2f, 1.0f}.normalized();
         const Vec3 clumpOut{1.0f, 0.0f, 0.0f};
         const Vec3 normal = foliageNormal(facing, clumpOut, up);
-        const Vec3 expected = (facing * cardNormalShare + clumpOut * clumpNormalShare + up * crownNormalShare).normalized();
+        const Vec3 expected = (facing * foliageFacingShare + clumpOut * clumpNormalShare + up * crownNormalShare).normalized();
         assert(near(normal.length(), 1.0f, 1e-5f) && near(normal.x, expected.x, 1e-5f) && near(normal.z, expected.z, 1e-5f));
-        assert(near(cardNormalShare + clumpNormalShare + crownNormalShare, 1.0f, 1e-6f));
+        assert(near(foliageFacingShare + clumpNormalShare + crownNormalShare, 1.0f, 1e-6f));
     }
 
     /*

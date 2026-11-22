@@ -186,6 +186,7 @@ LeafAtlas forestTreeLeafAtlas(const std::string& assetFolder) {
 Material forestTwigLeafMaterial(AssetManager& assets, LeafAtlas atlas, Pixel tint) {
     Material material;
     material.doubleSided = true;
+    material.leafTones = true;
     material.texture = assets.addTexture(std::move(atlas.colour));
     material.normalTexture = assets.addTexture(std::move(atlas.normal));
     material.metallicRoughnessTexture = assets.addTexture(std::move(atlas.roughness));

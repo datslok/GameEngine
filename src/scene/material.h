@@ -88,6 +88,10 @@ struct Material {
     // so a field is lit from above whichever way each blade faces.
     bool backKeepsNormal = false;
 
+    // Each leaf toned by its own seed (scene/foliage_shading.h): its texture coordinate across carries the seed in its
+    // whole part (twigs' modelled leaves, which the shaders number). The texture must repeat across.
+    bool leafTones = false;
+
     // An impostor (scene/impostor.h): its colour and normal textures are atlases of frames x frames pictures of a tree from
     // over the hemisphere, which the shaders blend on a card facing the viewer. 0 for every other material.
     int impostorFrames = 0;
