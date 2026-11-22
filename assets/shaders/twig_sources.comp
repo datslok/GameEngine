@@ -32,4 +32,8 @@ void main() {
     for (uint region = 0u; region < uint(TWIG_MOST_LEVEL_CLUSTERS); ++region) {
         twigCounts[region] = 0u;
     }
+
+    for (uint word = 0u; word < uint(TWIG_TALLY_WORDS); ++word) {
+        twigTally[word] = 0u;
+    }
 }

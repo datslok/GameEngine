@@ -58,6 +58,7 @@ std::vector<GpuTwigLevel> packTwigLevels(const MeshClusters& clusters, std::uint
             throw std::invalid_argument("A twig prototype's clusters are not a chain of levels");
         }
 
+        levels[expected].triangleCount += cluster.triangleCount;
         ++levels[expected].clusterCount;
     }
 
@@ -99,6 +100,7 @@ std::vector<GpuTwigLevel> packTwigLevels(std::span<const GpuMeshCluster> records
         }
 
         ++levels.back().clusterCount;
+        levels.back().triangleCount += cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
     }
 
     for (const GpuTwigLevel& level : levels) {
@@ -180,11 +182,31 @@ bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32
     return twigSphereKept(coarsest.sphere, twig, twig, entry, record, view);
 }
 
+TwigTally readTwigTally(std::span<const std::uint32_t, TWIG_TALLY_WORDS> words) {
+    TwigTally tally;
+    tally.tested = words[TWIG_TALLY_TESTED];
+    tally.kept = words[TWIG_TALLY_KEPT];
+    tally.swaying = words[TWIG_TALLY_SWAYING];
+
+    for (std::uint32_t level = 0; level < twigMostLevels; ++level) {
+        tally.levelTwigs[level] = words[TWIG_TALLY_LEVEL_TWIGS + level];
+        tally.levelTriangles[level] = words[TWIG_TALLY_LEVEL_TRIANGLES + level];
+    }
+
+    return tally;
+}
+
+// The tally as twig_cull.comp counts: every twig of every brick tested, whether its brick is kept or not.
 std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
-                                     const GpuCameraCull& view) {
+                                     const GpuCameraCull& view, TwigTally* tally) {
     std::vector<TwigDraw> draws;
+    const bool swaying = !meshClusterRigid(part, entry, record, view);
 
     for (const GpuTwigBrick& brick : tables.bricks) {
+        if (tally != nullptr) {
+            tally->tested += brick.twigCount;
+        }
+
         if (!twigBrickKept(brick, part, entry, record, view)) {
             continue;
         }
@@ -199,8 +221,16 @@ std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance
                 continue;
             }
 
-            const GpuTwigLevel& chosen = levels[twigLevel(levels, prototype.levelCount, placed, view)];
+            const std::uint32_t level = twigLevel(levels, prototype.levelCount, placed, view);
+            const GpuTwigLevel& chosen = levels[level];
             draws.push_back(TwigDraw{number, chosen.firstCluster, chosen.clusterCount});
+
+            if (tally != nullptr) {
+                ++tally->kept;
+                tally->swaying += swaying ? 1 : 0;
+                ++tally->levelTwigs[level];
+                tally->levelTriangles[level] += chosen.triangleCount;
+            }
         }
     }
 

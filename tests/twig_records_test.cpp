@@ -1,4 +1,5 @@
 #include "cull_helpers.h"
+#include "engine/debug_views.h"
 #include "games/forest/forest_ground.h"
 #include "games/forest/twigs.h"
 #include "math/transform.h"
@@ -7,12 +8,15 @@
 #include "render/gpu/twig_records.h"
 #include "scene/mesh.h"
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <random>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
@@ -72,6 +76,15 @@ namespace {
             next += levels[level].clusterCount;
             assert(levels[level].error == clusters.groups[level].error && levels[level].sphere[3] == clusters.groups[level].radius);
             assert(levels[level].sphere[0] == clusters.groups[level].centre.x);
+
+            // Its triangles: its clusters' together (F4's TWIGS line counts them).
+            std::uint32_t triangles = 0;
+
+            for (std::uint32_t cluster = levels[level].firstCluster; cluster < levels[level].firstCluster + levels[level].clusterCount; ++cluster) {
+                triangles += clusters.clusters[cluster - 1000].triangleCount;
+            }
+
+            assert(triangles > 0 && levels[level].triangleCount == triangles);
         }
 
         assert(next == 1000 + clusters.clusters.size() && levels.back().error == FLT_MAX);
@@ -84,6 +97,7 @@ namespace {
         for (std::size_t level = 0; level < levels.size(); ++level) {
             assert(fromRecords[level].firstCluster == levels[level].firstCluster && fromRecords[level].clusterCount == levels[level].clusterCount);
             assert(fromRecords[level].error == levels[level].error && fromRecords[level].sphere[3] == levels[level].sphere[3]);
+            assert(fromRecords[level].triangleCount == levels[level].triangleCount);
         }
 
         // A sphere's simplified levels mix groups within a level: not a chain.
@@ -216,8 +230,20 @@ namespace {
         const GpuInstance part = placedInstance(Mat4::identity());
         const GpuCullRecord record = stillRecord(Vec3{0.0f, 15.0f, 0.0f}, 14.0f);
         const GpuCameraCull view = cutView(Vec3{0.0f, 15.0f, 0.0f}, 0.0f, 1.0f);
-        const std::vector<TwigDraw> draws = twigDrawsOnCpu(tables, part, 0u, record, view);
+        TwigTally tally;
+        const std::vector<TwigDraw> draws = twigDrawsOnCpu(tables, part, 0u, record, view, &tally);
         assert(!draws.empty() && draws.size() < set.twigs.size() / 2 + set.twigs.size() / 4);
+
+        // The tally: every twig tested, the drawn kept, none for sway; each level's twigs and their triangles.
+        assert(tally.tested == set.twigs.size() && tally.kept == draws.size() && tally.swaying == 0);
+        std::uint32_t levelTwigs = 0;
+
+        for (std::size_t level = 0; level < tables.levels.size(); ++level) {
+            levelTwigs += tally.levelTwigs[level];
+            assert(tally.levelTriangles[level] == tally.levelTwigs[level] * tables.levels[level].triangleCount);
+        }
+
+        assert(levelTwigs == tally.kept);
 
         std::vector<bool> drawn(set.twigs.size(), false);
         std::size_t outBricks = 0;
@@ -251,7 +277,41 @@ namespace {
             made.levels = view.levels;
             return made;
         }();
-        assert(twigDrawsOnCpu(tables, part, 0u, swaying, swayView).size() == set.twigs.size());
+        TwigTally swayTally;
+        assert(twigDrawsOnCpu(tables, part, 0u, swaying, swayView, &swayTally).size() == set.twigs.size());
+        assert(swayTally.tested == set.twigs.size() && swayTally.kept == swayTally.tested && swayTally.swaying == swayTally.kept);
+
+        // Tallies add up over parts, as the pass's atomics do; the words the pass writes read back as the tally.
+        TwigTally both = tally;
+        twigDrawsOnCpu(tables, part, 0u, swaying, swayView, &both);
+        assert(both.tested == 2 * set.twigs.size() && both.kept == tally.kept + swayTally.kept && both.swaying == swayTally.swaying);
+        std::array<std::uint32_t, TWIG_TALLY_WORDS> words{};
+        words[TWIG_TALLY_TESTED] = 7;
+        words[TWIG_TALLY_KEPT] = 5;
+        words[TWIG_TALLY_SWAYING] = 2;
+        words[TWIG_TALLY_LEVEL_TWIGS + 1] = 4;
+        words[TWIG_TALLY_LEVEL_TRIANGLES + TWIG_MOST_LEVELS - 1] = 9;
+        const TwigTally read = readTwigTally(words);
+        assert(read.tested == 7 && read.kept == 5 && read.swaying == 2 && read.levelTwigs[1] == 4 && read.levelTwigs[0] == 0);
+        assert(read.levelTriangles[TWIG_MOST_LEVELS - 1] == 9 && read.levelTriangles[0] == 0);
+    }
+
+    // F4's TWIGS line: none without twigs tested; kept of tested, those kept for sway, then each level's twigs and
+    // thousands of triangles up to the coarsest level drawn.
+    void testTheTwigsLine() {
+        RenderStats stats;
+
+        for (const std::string& line : renderStatsLines(stats)) {
+            assert(line.find("TWIGS") == std::string::npos);
+        }
+
+        stats.twigsTested = 1000;
+        stats.twigsKept = 300;
+        stats.twigsSwaying = 50;
+        stats.twigsByLevel = {200, 60, 40};
+        stats.twigTrianglesByLevel = {36000, 4800, 1200};
+        const std::vector<std::string> lines = renderStatsLines(stats);
+        assert(std::find(lines.begin(), lines.end(), "TWIGS 300/1000  SWAY 50  LEVELS 200 60 40  TRIS 36K 4K 1K") != lines.end());
     }
 }
 
@@ -350,4 +410,5 @@ void testTwigRecords() {
     testATwigsInstance();
     testTheLevelIsTheCuts();
     testTheTwigPassOnTheCpu();
+    testTheTwigsLine();
 }

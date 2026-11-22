@@ -68,8 +68,15 @@ public:
     // A frame's region room (as prepare sized its entries), which the cluster passes' pair bound takes (twigMeshClusterPairBound).
     std::uint32_t getRoom(std::uint32_t frameIndex) const;
 
-    // After a frame's fence: its regions' counts, growing the room for the frames after when one overflowed.
-    std::optional<std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS>> collect(std::uint32_t frameIndex);
+    // What a frame's passes counted: each region's entries written, and the cull pass's tally (F4's TWIGS line).
+    struct Collected {
+        std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS> counts{};
+        TwigTally tally;
+    };
+
+    // After a frame's fence: what it counted (none when it drew no twigs), growing the room for the frames after when a
+    // region overflowed.
+    std::optional<Collected> collect(std::uint32_t frameIndex);
 
 private:
     struct PerFrame {

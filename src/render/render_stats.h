@@ -5,6 +5,7 @@
 #include "render/gpu/eye_adaptation.h"
 #include "render/gpu/gpu_timing.h"
 #include "render/gpu/probe_relocation.h"
+#include "render/gpu/twig_drawing_shared.h"
 #include "render/gpu/upscaling.h"
 #include "render/gpu/video_memory.h"
 #include "scene/mesh_level.h"
@@ -36,6 +37,14 @@ struct RenderStats {
     bool meshClusterOcclusion = false;
     std::size_t meshClustersLate = 0;
     std::size_t meshClustersHidden = 0;
+
+    // The camera's twigs (render/gpu/twig_records.h's TwigTally), while drawn: tested, kept, kept because their part
+    // sways, and the kept ones' twigs and triangles at each level; none tested while not drawn.
+    std::size_t twigsTested = 0;
+    std::size_t twigsKept = 0;
+    std::size_t twigsSwaying = 0;
+    std::array<std::size_t, TWIG_MOST_LEVELS> twigsByLevel{};
+    std::array<std::size_t, TWIG_MOST_LEVELS> twigTrianglesByLevel{};
 
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;

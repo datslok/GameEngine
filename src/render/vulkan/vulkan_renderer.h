@@ -578,6 +578,8 @@ private:
     std::unique_ptr<VulkanMeshClusterCulling> meshClusterCulling;
     std::vector<std::optional<MeshClusterCompare>> meshClusterCompares;
     std::optional<VulkanMeshClusterCulling::Collected> lastMeshClusters;
+    // The twig pass's tally from the last frame collected (F4's TWIGS line), none when that frame drew no twigs.
+    std::optional<TwigTally> lastTwigTally;
     bool clusterCompareAsked = false;
     std::string clusterCompareReport;
     double meshClusterBuildSeconds = 0.0;
