@@ -976,6 +976,17 @@ namespace {
             for (const TwigInstance& twig : set.twigs) {
                 assert(twig.prototype < set.prototypes.size());
             }
+
+            // The look draws them as its last part, casting nothing, swaying as its leaves, whose cards stand aside where
+            // twigs are drawn; the part's mesh stands for the twigs' box and ends where the leaves do.
+            const PlantedKindLook& kind = forest.game.getTreeLooks()[look];
+            const ModelRenderer& twigModel = kind.models.back();
+            const ModelRenderer& leaves = kind.models.at(treeLeavesModel);
+            assert(twigModel.parts.size() == 1 && twigModel.parts.front().twigs.get() == &set && !twigModel.castsShadows);
+            assert(leaves.twigFallback && !twigModel.twigFallback && twigModel.sway.kind == leaves.sway.kind);
+            const std::vector<MeshLevel>& standLevels = forest.assets.getMeshLevels().at(twigModel.parts.front().mesh.index);
+            const std::vector<MeshLevel>& leafLevels = forest.assets.getMeshLevels().at(leaves.parts.front().mesh.index);
+            assert(standLevels.size() == 1 && !standLevels.front().mesh.isValid() && standLevels.front().errorMetres == leafLevels.back().errorMetres);
         }
         assert(!stand.empty() && stand.size() == levels);
 

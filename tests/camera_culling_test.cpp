@@ -728,7 +728,51 @@ namespace {
 * The camera's lists built by the GPU's steps (render/gpu/camera_culling.h): equal to the CPU's batchByMesh lists, the
 * still table kept, and cull-compare's comparison.
 */
+namespace {
+    /*
+    * Twigs (ROADMAP phase 21 stage 3b-iii): a draw's twig set and fallback pack as its record's flags, a view drawing
+    * twigs as its levels' flag; a camera's view takes a twig part only where it draws twigs and what twigs replace only
+    * where it does not, everything else either way; a shadow view takes the fallback's shadow either way.
+    */
+    void testTwigsTakenWhereDrawn() {
+        assert(cameraTakesTwigs(CULL_TWIGS, CULL_LEVELS_TWIGS) && !cameraTakesTwigs(CULL_TWIGS, 0u));
+        assert(!cameraTakesTwigs(CULL_TWIG_FALLBACK, CULL_LEVELS_TWIGS) && cameraTakesTwigs(CULL_TWIG_FALLBACK, 0u));
+        assert(cameraTakesTwigs(0u, CULL_LEVELS_TWIGS) && cameraTakesTwigs(CULL_CASTS_SHADOWS, 0u));
+
+        const TwigSet set;
+        DrawItem twigs;
+        twigs.twigs = &set;
+        DrawItem cards;
+        cards.twigFallback = true;
+        assert((packCullRecord(twigs).flags & CULL_TWIGS) != 0u && (packCullRecord(twigs).flags & CULL_TWIG_FALLBACK) == 0u);
+        assert((packCullRecord(cards).flags & CULL_TWIG_FALLBACK) != 0u && (packCullRecord(cards).flags & CULL_TWIGS) == 0u);
+        assert((packCullRecord(DrawItem{}).flags & (CULL_TWIGS | CULL_TWIG_FALLBACK)) == 0u);
+
+        LevelView drawing;
+        drawing.twigs = true;
+        assert((packLevelView(drawing).flags & CULL_LEVELS_TWIGS) != 0u && (packLevelView(LevelView{}).flags & CULL_LEVELS_TWIGS) == 0u);
+
+        GpuCullRecord record = stillRecord(Vec3{10.0f, 2.0f, 0.0f}, 1.0f);
+        const GpuMeshLevels levels{};
+        GpuCameraCull withTwigs = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, false, 0.0f);
+        withTwigs.levels.flags |= CULL_LEVELS_TWIGS;
+        const GpuCameraCull withoutTwigs = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, false, 0.0f);
+        assert(cameraCandidateFlags(record, levels, withTwigs, 0) != 0u && cameraCandidateFlags(record, levels, withoutTwigs, 0) != 0u);
+
+        record.flags = CULL_TWIGS;
+        assert(cameraCandidateFlags(record, levels, withTwigs, 0) != 0u && cameraCandidateFlags(record, levels, withoutTwigs, 0) == 0u);
+        record.flags = CULL_TWIG_FALLBACK | CULL_CASTS_SHADOWS;
+        assert(cameraCandidateFlags(record, levels, withTwigs, 0) == 0u && cameraCandidateFlags(record, levels, withoutTwigs, 0) != 0u);
+
+        GpuCameraCull shadow = withTwigs;
+        shadow.flags |= CAMERA_CULL_SHADOW;
+        shadow.reach[3] = -1.0f;
+        assert(cameraCandidateFlags(record, levels, shadow, 0) != 0u);
+    }
+}
+
 void testCameraCulling() {
+    testTwigsTakenWhereDrawn();
     testChunksNeverHideADrawnDraw();
     testChangedChunksRebuildAlone();
     testListsMatchTheCpu();

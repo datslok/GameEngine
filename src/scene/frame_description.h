@@ -11,6 +11,7 @@
 #include "scene/debug_draw.h"
 #include "scene/deforming_mesh.h"
 #include "scene/liana_shape.h"
+#include "scene/twig_set.h"
 #include "scene/lighting.h"
 #include "scene/material.h"
 #include "scene/mesh_level.h"
@@ -77,6 +78,11 @@ struct DrawItem {
 
     // Drawn by no view and met by no ray, but part of the static level (ModelRenderer::hidden).
     bool hidden = false;
+
+    // Drawn as these twigs (RenderPart::twigs; held by the part's renderer), or none; and what twigs replace
+    // (ModelRenderer::twigFallback).
+    const TwigSet* twigs = nullptr;
+    bool twigFallback = false;
 
     // A terrain patch's index in FrameDescription::terrainPatches (scene/terrain.h), -1 for every other draw: its mesh is a
     // flat grid the vertex shaders lift onto the land.

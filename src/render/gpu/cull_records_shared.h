@@ -16,6 +16,8 @@
 #define CULL_SWAYS 256u       // it sways in the wind (DrawItem::sway not still), where the sway reaches
 #define CULL_FADES 512u       // its levels cross-fade in the camera's view (DrawItem::fadesLevels)
 #define CULL_CLUSTER_LEVELS 1024u // its mesh has cluster levels (DrawItem::clusterLevels): kept whole where a view draws them
+#define CULL_TWIGS 2048u      // a part drawn as twigs (DrawItem::twigs): only where a view draws twigs (CULL_LEVELS_TWIGS)
+#define CULL_TWIG_FALLBACK 4096u // what twigs replace (DrawItem::twigFallback): drawn only where a view does not draw twigs
 
 // The meshes a draw can be drawn with: its own and up to three levels (scene/mesh_level.h, meshLevelSlots).
 #define CULL_LEVEL_SLOTS 4
@@ -42,5 +44,6 @@
 #define CULL_LEVELS_IMPOSTORS 2u
 #define CULL_LEVELS_ORTHOGRAPHIC 4u
 #define CULL_LEVELS_CLUSTERS 8u // draws mesh clusters by their levels (LevelView::clusterLevels)
+#define CULL_LEVELS_TWIGS 16u // draws twigs (LevelView::twigs)
 
 #endif

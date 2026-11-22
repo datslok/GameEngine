@@ -375,6 +375,37 @@ namespace {
         }
     }
 
+    /*
+    * Twig parts (ROADMAP phase 21 stage 3b-iii): their groups draw nothing (no indices, no clusters: the twig pass draws
+    * their twigs), each names its twig set's number in the table's sets, a set shared by two parts listed once; the
+    * other parts' groups are as before.
+    */
+    void testTwigParts() {
+        TestKinds kinds = testKinds();
+        const TwigSet first;
+        const TwigSet second;
+        kinds.parts[0].twigs = &first;
+        kinds.parts[1].twigs = &second;
+        kinds.parts[2].twigs = &first;
+        const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
+        assert(table.twigSets.size() == 2);
+
+        for (std::size_t place = 0; place < table.parts.size(); ++place) {
+            const GpuPlacedPart& part = table.parts[place];
+            const DrawItem& draw = kinds.parts[table.draws[place]];
+
+            for (std::uint32_t slot = 0; slot <= part.levels.levels; ++slot) {
+                const GpuPlacedGroup& group = table.groups[part.firstGroup + slot];
+                const bool meshed = slot == 0 || draw.levels[slot - 1].mesh.isValid();
+                assert(draw.twigs != nullptr ? group.indexCount == 0 && group.clusterCount == 0 : !meshed || group.indexCount > 0);
+            }
+
+            if (draw.twigs != nullptr) {
+                assert((part.record.flags & CULL_TWIGS) != 0u && table.twigSets.at(part.unused[0]) == draw.twigs);
+            }
+        }
+    }
+
     void testTheTable() {
         const TestKinds kinds = testKinds();
         const PlacedTable table = buildPlacedTable(kinds.parts, kinds.kinds, 3, testPlacement);
@@ -1163,6 +1194,7 @@ void testPlacedDrawing() {
     testThePartsAreTheEntitys();
     testTheRegion();
     testTheTable();
+    testTwigParts();
     testTheVariants();
     testTheBlocks();
     testTheBlocksOfTwoSets();

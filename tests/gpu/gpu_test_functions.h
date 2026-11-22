@@ -267,6 +267,7 @@
 #define GPU_TEST_CHUNK_IN_VIEW 2
 #define GPU_TEST_LEVEL_FADE_SLOTS 3
 #define GPU_TEST_CANDIDATE_ENTRY 4
+#define GPU_TEST_TAKES_TWIGS 5
 
 // level_fade_test.comp
 #define GPU_TEST_LEVEL_FADE_FIELD 0

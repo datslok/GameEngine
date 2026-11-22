@@ -70,6 +70,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visitor.field("Mesh clusters", settings.meshClusters);
         visitor.field("Mesh cluster error", settings.meshClusterErrorPixels, {.min = 0.0f, .max = 1000.0f, .sliderMin = 0.25f, .sliderMax = 16.0f, .unit = "px"});
         visitor.field("Mesh cluster occlusion", settings.meshClusterOcclusion);
+        visitor.field("Twigs", settings.twigs);
         visitor.field("Clustered shading", settings.clusteredShading);
         visitor.field("Cluster heatmap", settings.clusterHeatmap);
         visitor.field("Normal map filtering", settings.normalMapFiltering);

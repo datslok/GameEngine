@@ -1756,6 +1756,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // 21, 2e); their old levels serve the shadows, the captures and GPUs without mesh shaders.
     LevelView cameraLevels = cameraLevelView(cameraOrigin, static_cast<float>(frameHeight), camera.getVerticalFov(), settings.levelOfDetail);
     cameraLevels.clusterLevels = drawsClusters;
+    cameraLevels.twigs = drawsClusters && settings.twigs;
     cameraThinning = thinningErrorPerMetre(cameraLevels);
     stats.drawnByLevel = lastCameraCull.levels;
     stats.drawnTriangles = lastCameraCull.triangles;

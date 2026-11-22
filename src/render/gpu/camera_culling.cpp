@@ -356,10 +356,16 @@ bool shadowThinKeeps(const GpuCullRecord& record, const GpuCameraCull& view) {
     return shadowThinNumber(record) < shadowThinShare(record, view);
 }
 
+// Mirrored in camera_culling.glsl.
+bool cameraTakesTwigs(std::uint32_t recordFlags, std::uint32_t levelFlags) {
+    const bool twigsDrawn = (levelFlags & CULL_LEVELS_TWIGS) != 0u;
+    return (recordFlags & CULL_TWIGS) != 0u ? twigsDrawn : (recordFlags & CULL_TWIG_FALLBACK) != 0u ? !twigsDrawn : true;
+}
+
 std::uint32_t cameraCandidateFlags(const GpuCullRecord& record, const GpuMeshLevels& levels, const GpuCameraCull& view, std::uint32_t slot) {
     const bool shadow = (view.flags & CAMERA_CULL_SHADOW) != 0u;
 
-    if (shadow ? !shadowTakes(record, view) : !cameraTakes(record, view.frustum)) {
+    if ((shadow ? !shadowTakes(record, view) : !cameraTakes(record, view.frustum)) || (!shadow && !cameraTakesTwigs(record.flags, view.levels.flags))) {
         return 0u;
     }
 

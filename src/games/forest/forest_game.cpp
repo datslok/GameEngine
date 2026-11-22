@@ -1815,6 +1815,62 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
     for (const std::vector<PlacedTwig>& twigs : treeTwigs) {
         treeTwigSets.push_back(std::make_shared<const TwigSet>(treeTwigSet(twigs, prototypeMeshes, reaches)));
     }
+
+    /*
+    * Each tree look draws its twigs as one more part (ROADMAP phase 21 stage 3b-iii): where a view draws twigs it takes
+    * them and leaves the leaf cards (its leaves model, twigFallback); elsewhere (shadows, captures, GPUs without mesh
+    * shaders, Passes "Twigs" off) the cards as before. The part's mesh only stands for it: a triangle across its twigs'
+    * box (the bounds it is culled by) with the leaves' last level, nothing past the crown's card (the twigs end where
+    * the leaves do), and the leaves' level options (their shared box). It casts nothing and sways as the leaves do.
+    */
+    for (std::size_t look = 0; look < treeLooks.size(); ++look) {
+        const TwigSet& set = *treeTwigSets[look];
+        PlantedKindLook& kind = treeLooks[look];
+        const MeshHandle leaves = kind.models.at(treeLeavesModel).parts.front().mesh;
+
+        if (set.twigs.empty()) {
+            continue;
+        }
+
+        Vec3 low = set.bricks.front().centre;
+        Vec3 high = low;
+
+        for (const TwigBrick& brick : set.bricks) {
+            const Vec3 reach{brick.radius, brick.radius, brick.radius};
+            low = Vec3{std::min(low.x, brick.centre.x - reach.x), std::min(low.y, brick.centre.y - reach.y), std::min(low.z, brick.centre.z - reach.z)};
+            high = Vec3{std::max(high.x, brick.centre.x + reach.x), std::max(high.y, brick.centre.y + reach.y), std::max(high.z, brick.centre.z + reach.z)};
+        }
+
+        IndexedMesh stand;
+        stand.vertices = {MeshVertex{low, Vec3{0.0f, 0.0f, 1.0f}, Vec2{}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}},
+                          MeshVertex{high, Vec3{0.0f, 0.0f, 1.0f}, Vec2{}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}},
+                          MeshVertex{Vec3{low.x, high.y, low.z}, Vec3{0.0f, 0.0f, 1.0f}, Vec2{}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}}};
+        stand.indices = {0, 1, 2};
+        const MeshHandle standIn = assets.addDrawnMesh(std::move(stand));
+        const std::vector<MeshLevel>& leafLevels = assets.getMeshLevels().at(leaves.index);
+        const float lastError = leafLevels.empty() ? 0.0f : leafLevels.back().errorMetres;
+
+        if (!leafLevels.empty() && !leafLevels.back().mesh.isValid()) {
+            assets.setMeshLevels(standIn, {MeshLevel{MeshHandle{}, lastError}});
+        }
+
+        if (leaves.index < assets.getMeshLevelOptions().size()) {
+            assets.setMeshLevelOptions(standIn, assets.getMeshLevelOptions()[leaves.index]);
+        }
+
+        ModelRenderer twigModel = makeMeshRenderer(standIn, leaf);
+        twigModel.parts.front().twigs = treeTwigSets[look];
+        twigModel.castsShadows = false;
+
+        for (const LookSwayer& swayer : std::vector<LookSwayer>(treeLookSwayers)) {
+            if (swayer.look == look && swayer.model == treeLeavesModel) {
+                treeLookSwayers.push_back(LookSwayer{look, kind.models.size(), swayer.swayer});
+            }
+        }
+
+        kind.models.at(treeLeavesModel).twigFallback = true;
+        kind.models.push_back(std::move(twigModel));
+    }
 }
 
 /*

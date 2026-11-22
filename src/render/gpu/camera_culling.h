@@ -235,6 +235,10 @@ bool boxInFrustum(const GpuFrustum& frustum, const float minimum[3], const float
 */
 bool chunkInView(const GpuCullChunk& chunk, const GpuCameraCull& view);
 
+// Whether a camera's view takes a draw as twigs go (ROADMAP phase 21 stage 3b-iii): a twig part (CULL_TWIGS) only where it
+// draws twigs (CULL_LEVELS_TWIGS), what twigs replace (CULL_TWIG_FALLBACK) only where it does not, anything else always.
+bool cameraTakesTwigs(std::uint32_t recordFlags, std::uint32_t levelFlags);
+
 // The candidate's CAMERA_CULL_* flags: drawn, moving and thinned, as visibleDraws, chosenMesh and drawSways choose, and
 // fading where its draw crosses a switch in the fade band (levelFadeSlots; both its slots drawn); for a shadow tile,
 // drawn as shadowTakes says (moved casters moving instead where it keeps them apart), never thinned, never fading.

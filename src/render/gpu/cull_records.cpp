@@ -26,7 +26,8 @@ GpuCullRecord packCullRecord(const DrawItem& draw) {
                    (draw.thinningEntry != 0 ? CULL_THINNABLE : 0u) |
                    (draw.previousModel && *draw.previousModel != draw.model ? CULL_MOVED : 0u) |
                    (draw.sway.kind != SwayKind::Still ? CULL_SWAYS : 0u) | (draw.fadesLevels ? CULL_FADES : 0u) |
-                   (draw.clusterLevels ? CULL_CLUSTER_LEVELS : 0u);
+                   (draw.clusterLevels ? CULL_CLUSTER_LEVELS : 0u) | (draw.twigs != nullptr ? CULL_TWIGS : 0u) |
+                   (draw.twigFallback ? CULL_TWIG_FALLBACK : 0u);
     record.mesh = draw.mesh.index;
     record.hiddenBelowError = draw.hiddenBelowError;
     record.shadowCascades = draw.shadowCascades;
@@ -120,7 +121,7 @@ GpuLevelView packLevelView(const LevelView& view) {
     packed.eye[3] = view.pixelsPerMetre;
     packed.pixelError = view.pixelError;
     packed.flags = (view.enabled ? CULL_LEVELS_ENABLED : 0u) | (view.impostors ? CULL_LEVELS_IMPOSTORS : 0u) |
-                   (view.orthographic ? CULL_LEVELS_ORTHOGRAPHIC : 0u) | (view.clusterLevels ? CULL_LEVELS_CLUSTERS : 0u);
+                   (view.orthographic ? CULL_LEVELS_ORTHOGRAPHIC : 0u) | (view.clusterLevels ? CULL_LEVELS_CLUSTERS : 0u) | (view.twigs ? CULL_LEVELS_TWIGS : 0u);
     packed.fadeBand = view.fadeBand;
     return packed;
 }

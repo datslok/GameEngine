@@ -154,6 +154,11 @@ struct PlacedTable {
     std::vector<bool> drawnLayers;
     std::vector<PlacedLayerReach> layerReach;
     std::uint32_t mostParts = 0;
+
+    // The twig sets its twig parts draw (DrawItem::twigs), each once, in the order first met; a twig part's
+    // GpuPlacedPart::unused[0] is its set's number here, and its groups draw nothing themselves (ROADMAP phase 21 stage
+    // 3b-iii: the twig pass draws its twigs).
+    std::vector<const TwigSet*> twigSets;
 };
 
 // The slot of its layer's kinds a plant of kind draws: the kind's own, or, with variants (its kind given several looks),
