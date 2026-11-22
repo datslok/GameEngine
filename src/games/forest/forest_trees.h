@@ -263,17 +263,15 @@ Vec3 coneFlattened(const Vec3& direction);
 /*
 * The foliage's normals: a card's own facing, its clump's way out and the crown's, blended (30%, 50%, 20%) and the
 * last two cone-flattened. Each clump gets its own lit top and shaded underside, which gives the crown its depth; the
-* card's own share keeps the clusters catching light one by one.
+* card's own share (foliageFacingShare, scene/foliage_shading.h) keeps the clusters catching light one by one.
 */
-inline constexpr float cardNormalShare = 0.3f;
 inline constexpr float clumpNormalShare = 0.5f;
 inline constexpr float crownNormalShare = 0.2f;
 Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOut);
 
 // The same blend split in two: the clump's and crown's shares together (the lean, the same for every leaf of a card or
-// twig), and a leaf's own facing bent by it (facing times its share plus the lean, made unit, never past square to it).
+// twig), and a leaf's own facing bent by it (scene/foliage_shading.h's bentFoliageNormal, which the twigs' shaders share).
 Vec3 foliageLean(const Vec3& clumpOut, const Vec3& crownOut);
-Vec3 bentFoliageNormal(const Vec3& facing, const Vec3& lean);
 
 /*
 * A twig of modelled leaves (games/forest/twigs.h) where a card is (ROADMAP phase 21 stage 3b-ii): its foot (the card's

@@ -4,6 +4,7 @@
 #include "games/forest/forest_terrain.h"
 #include "games/forest/island_hangings.h"
 #include "math/angles.h"
+#include "scene/foliage_shading.h"
 #include "scene/leaf_pruning.h"
 
 #include <algorithm>
@@ -163,8 +164,9 @@ TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& se
             place.side = placed.length * twigSize * made.growth;
             place.foldRadians = settings.foldDegrees * toRadians;
             place.curl = settings.curl;
-            place.uvMin = cell.uvMin;
-            place.uvMax = cell.uvMax;
+            // The leaf's number in the texture coordinate's whole part (scene/foliage_shading.h): the shaders tone it by it.
+            place.uvMin = Vec2{numberedLeafU(cell.uvMin.x, leaf), cell.uvMin.y};
+            place.uvMax = Vec2{numberedLeafU(cell.uvMax.x, leaf), cell.uvMax.y};
             appendModelledLeaf(made.leaves, shapeOf(leaf, level), place);
             made.error = std::max(made.error, placed.length * twigSize * (made.growth - 1.0f));
         }

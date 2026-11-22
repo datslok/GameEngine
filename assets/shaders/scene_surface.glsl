@@ -15,6 +15,7 @@
 #include "parallax.glsl"
 #include "ground_layers.glsl"
 #include "facet_variation.glsl"
+#include "foliage_shading.glsl"
 #include "window_mask.glsl"
 #include "impostor.glsl"
 #include "lighting.glsl"
@@ -1268,6 +1269,11 @@ void main() {
     if (material.facetVariation.x > 0.0 || material.facetVariation.y > 0.0) {
         albedo.rgb *= facetToneScale(textureUv, material.facetVariation.x);
         roughness = max(facetRoughness(roughness, textureUv, material.facetVariation.y), BRDF_SMALLEST_ROUGHNESS);
+    }
+
+    // A twig's leaf: its own tone and warmth from the seed its texture coordinate's whole part carries (foliage_shading.glsl).
+    if ((material.extra.y & MATERIAL_LEAF_TONES) != 0u) {
+        albedo.rgb *= leafToneScale(leafToneSeedOf(textureUv.x));
     }
 #ifdef TRANSPARENT
     // Glass's transmission, its texture's red channel times the factor.

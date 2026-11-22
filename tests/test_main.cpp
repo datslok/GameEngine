@@ -60,6 +60,7 @@ void testGroundLayers();
 void testForest();
 void testForestStructures();
 void testFacetVariation();
+void testFoliageShading();
 void testWindowMask();
 void testIslandHangings();
 void testHangingMoss();
@@ -409,6 +410,7 @@ const RoutineTest routineTests[] = {
     {"testForest", testForest},
     {"testForestStructures", testForestStructures},
     {"testFacetVariation", testFacetVariation},
+    {"testFoliageShading", testFoliageShading},
     {"testWindowMask", testWindowMask},
     {"testIslandHangings", testIslandHangings},
     {"testHangingMoss", testHangingMoss},

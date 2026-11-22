@@ -43,6 +43,9 @@ struct DrawnObject {
     uint entry;
     bool twig;
     mat4 twigMatrix;
+    uint twigNumber; // its number in the twig table, and its plant's pick's bits (its leaves' tones)
+    uint twigPlant;
+    vec3 twigLean;   // its leaves' normals' lean (foliage_shading.glsl)
 };
 
 /*
@@ -53,15 +56,23 @@ DrawnObject drawnObject(uint instanceIndex, uint baseInstance) {
     DrawnObject drawn;
     drawn.twig = false;
     drawn.twigMatrix = mat4(1.0);
+    drawn.twigNumber = 0u;
+    drawn.twigPlant = 0u;
+    drawn.twigLean = vec3(0.0);
 
     // A twig (the mesh shaders only: its entry is the instance and the base alike): its part as its placed entry's.
     if (baseInstance >= TWIG_INSTANCE_BASE) {
         uvec4 twig = sceneTwigEntries[instanceIndex - TWIG_INSTANCE_BASE];
         uvec2 placed = scenePlacedEntries[twig.x];
-        drawn.instance = placedInstance(scenePlacedParts[placed.y], scenePlacedPlants[drawnInstance(placed.x)]);
+        PlacedPlant plant = scenePlacedPlants[drawnInstance(placed.x)];
+        drawn.instance = placedInstance(scenePlacedParts[placed.y], plant);
         drawn.entry = placed.x;
         drawn.twig = true;
-        drawn.twigMatrix = twigMatrix(sceneTwigs[twig.y]);
+        drawn.twigPlant = floatBitsToUint(plant.pick);
+        Twig record = sceneTwigs[twig.y];
+        drawn.twigMatrix = twigMatrix(record);
+        drawn.twigNumber = twig.y;
+        drawn.twigLean = record.lean;
         return drawn;
     }
 

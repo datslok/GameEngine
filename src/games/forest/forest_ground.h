@@ -121,7 +121,8 @@ LeafAtlas forestTreeLeafAtlas(const std::string& assetFolder);
 
 /*
 * The twigs' modelled leaves' material (games/forest/twigs.h): the single-leaf atlas itself, tinted, double-sided and
-* opaque (the leaves are cut to their outlines as geometry, so nothing is alpha tested in any pass).
+* opaque (the leaves are cut to their outlines as geometry, so nothing is alpha tested in any pass), each leaf toned by
+* its own seed (Material::leafTones: its twig numbers its leaves in their texture coordinates).
 */
 Material forestTwigLeafMaterial(AssetManager& assets, LeafAtlas atlas, Pixel tint);
 

@@ -2698,6 +2698,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.materialOptions[1] = settings.materials.parallaxSelfShadows ? 1.0f : 0.0f;
     frameData.materialOptions[2] = static_cast<float>(std::clamp(settings.materials.parallaxSteps, parallaxFewestSteps, parallaxMostSteps));
     frameData.materialOptions[3] = settings.materials.lightThroughLeaves ? 1.0f : 0.0f;
+    frameData.leafOptions[0] = std::clamp(settings.materials.leafNormalBlend, 0.0f, 1.0f);
     frameData.levelOptions[0] = cameraThinning;
     // The frame, turning the level fades' dither (level_fade.glsl) for temporal anti-aliasing to blend; held without it.
     frameData.levelOptions[1] = temporalAntiAliasing(settings.upscaling) ? static_cast<float>(taaFrame % noiseCycleFrames) : 0.0f;

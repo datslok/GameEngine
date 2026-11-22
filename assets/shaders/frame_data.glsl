@@ -31,6 +31,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     mat4 motionPrevious;         // the main pass's motion vectors (taa.glsl, pixelMotion): last frame's view-projection without the jitter, taking points measured from this frame's camera
     vec4 motionOptions;          // x: 1 while the motion is worked out, else every pixel has none; yz: this frame's jitter (pixels)
     uvec4 meshClusterBuffers[3]; // the mesh shaders' buffers by address (low, high words): the list, its totals; the clusters, their vertex numbers; their triangle words, the vertex pool
+    vec4 leafOptions;            // x: the twigs' leaf normal blend (foliage_shading.glsl, blendedFoliageNormal)
 };
 
 #endif

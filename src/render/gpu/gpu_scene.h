@@ -125,9 +125,10 @@ struct GpuFrameData {
     // low and high words, all zero while no mesh shader draws: the list, its totals, the cluster records, their vertex
     // numbers, their triangle words, the vertex pool.
     std::uint32_t meshClusterBuffers[12];
+    float leafOptions[4]; // x: the twigs' leaf normal blend (MaterialSettings::leafNormalBlend, scene/foliage_shading.h)
 };
 
-static_assert(sizeof(GpuFrameData) == 560, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 576, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);

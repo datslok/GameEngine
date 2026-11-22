@@ -314,4 +314,8 @@
 #define GPU_TEST_TWIG_LEVEL_DRAWN 1
 #define GPU_TEST_TWIG_BRICK_KEPT 2
 
+// foliage_shading_test.comp
+#define GPU_TEST_FOLIAGE_NORMAL 0
+#define GPU_TEST_LEAF_TONE 1
+
 #endif

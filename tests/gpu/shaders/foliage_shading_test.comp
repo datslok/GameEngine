@@ -1,0 +1,23 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs foliage_shading.glsl's functions on the cases foliage_shading_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "foliage_shading.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+    vec4 b = testInput(1);
+
+    if (function == GPU_TEST_FOLIAGE_NORMAL) {
+        testOutput(0, vec4(blendedFoliageNormal(a.xyz, b.xyz, a.w), 0.0));
+    } else if (function == GPU_TEST_LEAF_TONE) {
+        uint seed = leafToneSeed(uint(a.x), uint(a.y), uint(a.z));
+        testOutput(0, vec4(leafToneScale(seed), float(seed)));
+        testOutput(1, vec4(tonedLeafU(b.x, uint(a.x), uint(a.y)), float(leafToneSeedOf(b.y)), 0.0, 0.0));
+    }
+}

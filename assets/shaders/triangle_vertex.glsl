@@ -17,6 +17,7 @@
 #include "frame_data.glsl"
 #include "ground_layers.glsl"
 #include "drawn_objects.glsl"
+#include "foliage_shading.glsl"
 #include "planar_reflection.glsl"
 #include "render/gpu/reflection_probe_shared.h"
 #include "terrain_data.glsl"
@@ -123,12 +124,16 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
     InstanceData instance = drawn.instance;
 
     // A twig (render/gpu/twig_records.h): its prototype's vertex placed in its part's frame by the twig's matrix first,
-    // so from here it is the part's own vertex (swaying with its tree); the normal turned with it (made unit below).
+    // so from here it is the part's own vertex (swaying with its tree); the normal turned with it, then bent by the twig's
+    // lean as the cards' were (the leaf normal blend), and the leaf's number in its texture coordinate swapped for its
+    // tone seed (foliage_shading.glsl; the fragment shader tones it when its material asks).
     if (drawn.twig) {
         mat3 twigTurn = mat3(drawn.twigMatrix);
         position = (drawn.twigMatrix * vec4(position, 1.0)).xyz;
         previousPosition = (drawn.twigMatrix * vec4(previousPosition, 1.0)).xyz;
         normal = twigTurn * normal;
+        normal = blendedFoliageNormal(normalize(normal), drawn.twigLean, leafOptions.x);
+        uv.x = tonedLeafU(uv.x, drawn.twigPlant, drawn.twigNumber);
         tangent = vec4(twigTurn * tangent.xyz, tangent.w);
     }
     VERTEX_OUT(levelFade) = drawListFade(entry);
