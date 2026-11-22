@@ -1770,6 +1770,10 @@ const std::vector<std::vector<PlacedTwig>>& ForestGame::getTreeTwigs() const {
     return treeTwigs;
 }
 
+const std::vector<std::shared_ptr<const TwigSet>>& ForestGame::getTreeTwigSets() const {
+    return treeTwigSets;
+}
+
 void ForestGame::buildTwigs(World& world, AssetManager& assets) {
     LeafAtlas atlas = forestTreeLeafAtlas(assetFolder);
     const TracedLeaves leaves = traceAtlasLeaves(atlas, twigSettings.leafRows, twigSettings.insetTexels);
@@ -1791,6 +1795,25 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
             world.add(entity, std::move(renderer).withVisible(false).withStill(true));
             twigStand.push_back(entity);
         }
+    }
+
+    // The prototypes as the trees will draw them: every level in one mesh with its levels given (twigLeafMesh), and each
+    // tree look's twigs over them, in bricks.
+    std::vector<MeshHandle> prototypeMeshes;
+    std::vector<float> reaches;
+
+    for (const TwigPrototype& twig : twigPrototypes) {
+        TwigLeafMesh made = twigLeafMesh(twig);
+        reaches.push_back(meshReach(made.mesh));
+        const MeshHandle mesh = assets.addDrawnMesh(std::move(made.mesh));
+        assets.setGivenClusterLevels(mesh, std::move(made.coarser));
+        prototypeMeshes.push_back(mesh);
+    }
+
+    treeTwigSets.clear();
+
+    for (const std::vector<PlacedTwig>& twigs : treeTwigs) {
+        treeTwigSets.push_back(std::make_shared<const TwigSet>(treeTwigSet(twigs, prototypeMeshes, reaches)));
     }
 }
 

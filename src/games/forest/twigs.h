@@ -1,7 +1,9 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "games/forest/forest_trees.h"
 #include "games/forest/leaf_clusters.h"
+#include "scene/twig_set.h"
 #include "scene/indexed_mesh.h"
 #include "scene/mesh_clusters.h"
 
@@ -91,6 +93,12 @@ TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& se
 
 // The prototype a placed twig's pick (0..1) chooses among count.
 std::uint32_t twigPrototypeOf(float pick, std::size_t count);
+
+/*
+* A tree variant's twigs as the renderer takes them (scene/twig_set.h): each placed twig's frame, scale and lean, its
+* pick choosing among the prototypes (their meshes and reaches, in order), in bricks.
+*/
+TwigSet treeTwigSet(const std::vector<PlacedTwig>& twigs, std::vector<MeshHandle> prototypes, const std::vector<float>& reaches);
 
 // The settings' prototypes, each from its own seed out of this one.
 std::vector<TwigPrototype> buildTwigPrototypes(const TracedLeaves& leaves, const ForestTwigSettings& settings, float twigSize, float leafShare,

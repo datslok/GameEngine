@@ -284,6 +284,8 @@ public:
     const std::vector<Entity>& getTwigStand() const;
     // Each tree look's twigs (getTreeLooks' order): a twig where each of its leaves' cards is (clusterTwigs).
     const std::vector<std::vector<PlacedTwig>>& getTreeTwigs() const;
+    // And as the renderer takes them (scene/twig_set.h): over the prototypes' meshes, each with its levels given.
+    const std::vector<std::shared_ptr<const TwigSet>>& getTreeTwigSets() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -397,6 +399,7 @@ private:
     std::vector<TwigPrototype> twigPrototypes;
     std::vector<Entity> twigStand;
     std::vector<std::vector<PlacedTwig>> treeTwigs; // each tree look's, as treeLooks
+    std::vector<std::shared_ptr<const TwigSet>> treeTwigSets; // and as the renderer takes them (buildTwigs)
 
     // The wind over the valley (docs/research/WIND.md): down it, along the path from the rim towards the Monolith (-z), a few m/s
     // above the canopy as measured over rainforests; under the canopy the plants' springs answer it less.
