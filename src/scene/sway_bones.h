@@ -17,6 +17,10 @@ struct SwayBone {
     int parent = -1;     // before it in the list; -1 for a root
     int level = 0;       // 0 for a trunk, 1 its branches, 2 theirs, ...
     float radius = 0.0f; // the line's radius at its pivot, for its stiffness
+    // Its chain (branch): its first bone, its length and its radius at its start, for the branch's swing.
+    int chainStart = 0;
+    float chainLength = 0.0f;
+    float chainRadius = 0.0f;
 };
 
 // How a vertex follows the bones: weight of its own bone, the rest its parent's (a root's weight is whole).

@@ -485,7 +485,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [ ] 3b's timings at the four spots, on an idle PC
   - [ ] 3c. Trees moved by bones
     - [x] 3c-i. Bones from each variant's skeleton, each bark vertex's and twig's binding (`tree-bones-3c-i`)
-    - [ ] 3c-ii. The bones' motion in `wind.glsl` and its C++ mirror
+    - [x] 3c-ii. The bones' motion in `wind_bones.glsl` and its C++ mirror (`tree-bones-3c-ii`)
     - [ ] 3c-iii. The bones pass; bark and twigs moved by their bones, the trees' per-vertex sway retired
     - [ ] 3c-iv. Clusters within chains, culled by their bones' bounds; animation stopped when small
   - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels

@@ -1,6 +1,6 @@
 # Wind
 
-Covers: `src/scene/wind`, `src/scene/sway_bones`, `src/scene/liana_shape`, `src/scene/liana_shared.h`, `assets/shaders/liana.glsl`, `assets/shaders/liana_data.glsl`, `src/render/gpu/wind`, `src/render/gpu/wind_shared.h`, `src/render/vulkan/vulkan_wind`, `assets/shaders/wind.glsl`, `assets/shaders/wind_data.glsl`, `assets/shaders/wind_field.comp`
+Covers: `src/scene/wind`, `src/scene/sway_bones`, `src/scene/liana_shape`, `src/scene/liana_shared.h`, `assets/shaders/liana.glsl`, `assets/shaders/liana_data.glsl`, `src/render/gpu/wind`, `src/render/gpu/wind_shared.h`, `src/render/vulkan/vulkan_wind`, `assets/shaders/wind.glsl`, `assets/shaders/wind_data.glsl`, `assets/shaders/wind_field.comp`, `src/render/gpu/wind_bones`, `src/render/gpu/wind_bones_shared.h`, `assets/shaders/wind_bones.glsl`, `assets/shaders/quat.glsl`
 
 A wind force field of springs round the camera, after Horizon Zero Dawn's, that every vertex shader bends growing and hanging things by. Research and plan: `docs/research/WIND.md`. Maths in `render/gpu/wind`, mirrored in `wind.glsl`. The forest's use (sway groups, lianas' anchors): [forest.md](forest.md), [forest-trees.md](forest-trees.md), [forest-rock.md](forest-rock.md).
 
@@ -101,12 +101,27 @@ A mesh without entries of kind `Hanging` sways as its own object on the short ba
 
 ## Bones (phase 21 stage 3c, being built)
 
-Trees will move by bones instead of `windSwayOffset` (research: `docs/research/LEAFGEOMETRY.md`, Wind with valid bounds). Built so far (3c-i): the bones and bindings; nothing moves by them yet.
+Trees will move by bones instead of `windSwayOffset` (research: `docs/research/LEAFGEOMETRY.md`, Wind with valid bounds). Built so far: the bones and bindings (3c-i) and their motion's maths (3c-ii); nothing moves by them yet (3c-iii runs it).
 
-- `SwayBone` (`scene/sway_bones`): pivot, tip, parent (before it in the list, -1 a root), level (0 the trunk, +1 a side chain), the line's radius at its pivot.
+- `SwayBone` (`scene/sway_bones`): pivot, tip, parent (before it in the list, -1 a root), level (0 the trunk, +1 a side chain), the line's radius at its pivot; its chain's first bone, length and radius at its start (`chainStart`, `chainLength`, `chainRadius`).
 - `SwayBinding`: a vertex's bone and its weight, the rest its parent's (two-bone blending, GPU Gems 3 ch. 6), so joints never open.
 - `appendSwayChain`: a line cut into whole bones of one length near `boneMetres`, each the one before's child; `swayArcOfPoint` (how far along a line a point lies); `swayChainBinding` (the bone at an arc, weight rising from 0 at its pivot over its first `blendShare`, a root's whole); `swayBonesOrdered`.
 - Trees: `treeBones` (`games/forest/forest_trees`) cuts each chain, chains taken by first node so parents come first, a side chain's first bone the child of the bone holding its start node; `TreeMeshes::bones`, `barkBindings` (each bark vertex by its own chain's arc), `PlacedTwig::binding` (its node's; a filler its nearest node's). `ForestTreeSettings::boneMetres` 2 m, `boneBlendShare` 0.5 (F5 Forest, at start-up).
+
+Motion (`render/gpu/wind_bones` and `wind_bones.glsl`, mirrored; quaternions in `quat.glsl`, mirroring `math/quat.h`); all in one frame, metres, the tree's lean given in it:
+
+| Function | Does |
+|---|---|
+| `windBoneShare` | the bone's share of the lean: `2 L / H min((r_foot / r)^k, most)`; an untapered trunk bends as `windSwayOffset`'s parabola |
+| `windBranchHertz` | its chain's swing, a cantilever's first mode `0.5596 (r / 2) sqrt(E / rho) / L^2` (`WIND_BONE_FIRST_MODE`), clamped |
+| `windBranchPhase` | its chain's phase, `pcg3d(tree seed, chain start)`: a branch's bones swing together |
+| `windBoneTurn` | its own turn (rotation vector) from its rest direction: `s (d x W)(1 + a sin t) + s b (W - d (d.W)) cos t`, an ellipse along and across the wind; none in still air |
+| `windBonePose` | `T(x) = q x + t` from its parent's, parents first: `T(p_b) = T_parent(p_b)`, so joints never open |
+| `windBlendedPlace`, `windBlendedDirection` | a vertex, a normal: its two bones' images blended by its weight |
+| `windPosedSphere`, `windSphereUnion` | a cluster's bound: its rest sphere posed by each bone of its run and their parents, merged; no pad |
+| `windTreePoses` | (C++ only) every pose of a tree in order, for tests and checks |
+
+`WindBoneMotion` (stiffness exponent 3, most 8, wood speed 3000 m/s, branches 0.2-3 Hz, swing along and across 0.3) has its `visit` and `validateWindBoneMotion`; 3c-iii hangs it on `WindSettings` and the field's record.
 
 ## Debug view
 
@@ -118,4 +133,4 @@ Trees will move by bones instead of `windSwayOffset` (research: `docs/research/L
 
 ## Tests
 
-`wind_test` (noise, velocity, springs, windows), `wind_sway_test`, `wind_hanging_test`, `sway_bones_test` (and `forest_trees_test`'s bones); GPU: `wind_gpu_test`.
+`wind_test` (noise, velocity, springs, windows), `wind_sway_test`, `wind_hanging_test`, `sway_bones_test` (and `forest_trees_test`'s bones), `wind_bones_test`; GPU: `wind_gpu_test`, `wind_bones_gpu_test`.

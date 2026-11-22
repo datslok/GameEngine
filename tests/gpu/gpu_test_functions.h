@@ -318,4 +318,12 @@
 #define GPU_TEST_FOLIAGE_NORMAL 0
 #define GPU_TEST_LEAF_TONE 1
 
+// wind_bones_test.comp
+#define GPU_TEST_QUAT 0
+#define GPU_TEST_WIND_BONE_SHARE 1
+#define GPU_TEST_WIND_BRANCH 2
+#define GPU_TEST_WIND_BONE_TURN 3
+#define GPU_TEST_WIND_BONE_POSE 4
+#define GPU_TEST_WIND_SPHERES 5
+
 #endif
