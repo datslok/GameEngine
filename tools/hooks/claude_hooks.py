@@ -3,7 +3,8 @@
 Registered in .claude/settings.json; how each works: docs/architecture/build.md ("Claude Code hooks"); tested by
 tools/hooks/test_claude_hooks.py.
 Usage: python -I tools/hooks/claude_hooks.py <check>, with the hook event as JSON on stdin.
-  commands      PreToolUse, Bash and PowerShell: forbidden flags, code commits on main, costly runs
+  commands      PreToolUse, Bash and PowerShell: forbidden flags, code commits on main, costly runs; before a
+                commit, a reminder naming facts (names, numbers, links) gone from every doc
   makefile      PreToolUse, Edit and Write: forbidden flags written into the Makefile
   line-endings  PostToolUse, Edit and Write: bare LF in the CRLF folders turned into CRLF
   games         Stop: Claude's own game copies (--port 47620) still running
@@ -46,6 +47,16 @@ GIT_MERGE = re.compile(r"\bgit\s+(-C\s+\S+\s+)?merge\b([^;&|\n]*)")
 
 # Folders whose files are CRLF (CLAUDE.md rule 10); root files such as README.md keep their own endings.
 CRLF_FOLDERS = ["src", "tests", "assets/shaders", "tools"]
+
+# A doc's facts a script can see (CLAUDE.md, "Compact, never lose meaning"): backticked names, links, and numbers that
+# say something (a decimal, two digits or more, or a unit), each with its unit. Bare one-digit numbers are left out:
+# they are in every doc, so one vanishing says nothing.
+BACKTICKED = re.compile(r"`([^`\n]+)`")
+LINK = re.compile(r"\]\(([^)\s]+)\)|https?://[^\s)>\]]+")
+NUMBER = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?(%|[kKMG]?B\b|ms\b|m/s\b|Hz\b|km\b|cm\b|mm\b|m\b|s\b|px\b|degrees\b)?")
+
+# The most vanished facts the reminder names, so a big rewrite stays readable.
+MOST_VANISHED = 30
 
 # Claude's own game copies always carry this port (drive-game skill); the user's copies never do.
 CLAUDE_GAME_PORT = re.compile(r"--port\s+47620\b")
@@ -115,6 +126,51 @@ def main_branch_problem(command, branch, merging, changed_paths):
     return None
 
 
+# The facts in a doc's text (BACKTICKED, LINK, NUMBER), each once, in the order first met; code blocks count too.
+def doc_facts(text):
+    facts = {}
+    for match in BACKTICKED.finditer(text):
+        facts.setdefault("`" + match.group(1) + "`", None)
+    for match in LINK.finditer(text):
+        facts.setdefault(match.group(1) or match.group(0).rstrip(".,;:"), None)  # a bare URL ends before its sentence's punctuation
+    for match in NUMBER.finditer(BACKTICKED.sub(" ", text)):
+        number, unit = match.group(1), match.group(2) or ""
+        if unit or "." in number or len(number) >= 2:
+            facts.setdefault(number + (" " + unit if unit else ""), None)
+    return list(facts)
+
+
+# Whether a doc records history (what was done, tried and planned) rather than how things are now.
+def is_history(path):
+    return path.startswith("docs/buildlog/") or path in ("docs/BUILDLOG.md", "ROADMAP.md")
+
+
+# What vanished: (path, fact) for each fact a changed doc had before (old_docs: path to its last committed text) that
+# no doc has now (new_docs: every doc's text now, by path). A fact moved to another doc, or kept in the same one, is
+# not reported. History keeps only history's facts: a name the build log mentions does not stand in for its
+# description dropped from an architecture file (moving one there on purpose is reported, a cheap false alarm).
+def vanished_facts(old_docs, new_docs):
+    kept_now = set()
+    kept_in_history = set()
+    for path, text in new_docs.items():
+        (kept_in_history if is_history(path) else kept_now).update(doc_facts(text))
+    vanished = []
+    for path, text in old_docs.items():
+        kept = kept_now | kept_in_history if is_history(path) else kept_now
+        vanished.extend((path, fact) for fact in doc_facts(text) if fact not in kept)
+    return vanished
+
+
+# The reminder for what vanished, or None when nothing did.
+def vanished_reminder(vanished):
+    if not vanished:
+        return None
+    named = "; ".join(f"{path}: {fact}" for path, fact in vanished[:MOST_VANISHED])
+    more = f" (and {len(vanished) - MOST_VANISHED} more)" if len(vanished) > MOST_VANISHED else ""
+    return (f"Docs kept check: gone from every doc since HEAD: {named}{more}. Compact, never lose meaning (CLAUDE.md): "
+            f"put back or move to its home what still holds; tell the user what was dropped and why.")
+
+
 # Whether a file lives in one of the repo's CRLF folders.
 def wants_crlf(path, root):
     try:
@@ -157,11 +213,34 @@ def processes_named(name):
 
 # Runs git in the repo and returns its output, or "" when git fails.
 def git(*arguments):
-    result = subprocess.run(["git", "-C", str(REPO_ROOT), *arguments], capture_output=True, text=True)
+    # UTF-8 as the docs are, not the Windows code page.
+    result = subprocess.run(["git", "-C", str(REPO_ROOT), *arguments], capture_output=True, encoding="utf-8", errors="replace")
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-# The commands check: blocks forbidden flags and code commits on main, asks before costly runs.
+# Every doc's text now (tracked or new, Markdown), by path from the repo's root; unreadable files left out.
+def docs_now():
+    docs = {}
+    for path in git("ls-files", "--cached", "--others", "--exclude-standard", "*.md").splitlines():
+        try:
+            docs[path] = (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+    return docs
+
+
+# The changed docs' last committed text, by path (none on a first commit).
+def docs_at_head():
+    docs = {}
+    for path in git("diff", "HEAD", "--name-only", "--", "*.md").splitlines():
+        text = git("show", f"HEAD:{path}")
+        if text:
+            docs[path] = text
+    return docs
+
+
+# The commands check: blocks forbidden flags and code commits on main, asks before costly runs; before a commit,
+# reminds of facts gone from every doc (never blocks: a number retuned on purpose vanishes too).
 def check_commands(event):
     command = event.get("tool_input", {}).get("command", "")
     problem = forbidden_flags(command)
@@ -176,6 +255,11 @@ def check_commands(event):
     if question is not None:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                                  "permissionDecisionReason": question}}))
+    elif GIT_COMMIT.search(command):
+        reminder = vanished_reminder(vanished_facts(docs_at_head(), docs_now()))
+        if reminder is not None:
+            print(json.dumps({"systemMessage": reminder,
+                              "hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": reminder}}))
 
 
 # The makefile check: the text an Edit or Write would put in the Makefile.

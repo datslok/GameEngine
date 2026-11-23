@@ -129,6 +129,42 @@ class LeftoverGames(unittest.TestCase):
         self.assertEqual(claude_hooks.claudes_games(processes), [10])
 
 
+class DocsKept(unittest.TestCase):
+    # A doc's facts: backticked names, link targets, numbers with a decimal, two digits or a unit (with it); not bare
+    # one-digit counts, and a number inside backticks only as the name it is part of.
+    def test_facts(self):
+        text = ("Still at 0.1 of the screen, 400 m off (`boneTreeWanted`, `BONE_MOST_TREES` 65536), 48 B a record, "
+                "3 bones, 1 m, [the plan](docs/research/LEAFGEOMETRY.md), https://example.com/a, `r.Size 0.1`.")
+        self.assertEqual(claude_hooks.doc_facts(text),
+                         ["`boneTreeWanted`", "`BONE_MOST_TREES`", "`r.Size 0.1`", "docs/research/LEAFGEOMETRY.md",
+                          "https://example.com/a", "0.1", "400 m", "65536", "48 B", "1 m"])
+
+    # A fact moved to another doc, or kept reworded around it, is kept; one gone from every doc is named, by the doc
+    # it was in. A doc deleted whole loses what no other doc holds.
+    def test_vanished(self):
+        old = {"docs/a.md": "The cut at `stillShare` 0.1, 400 m before, 48 B.", "docs/gone.md": "Only here: 17 ms."}
+        new = {"docs/a.md": "Cut at 0.1 (`stillShare`).", "docs/b.md": "It was 400 m."}
+        self.assertEqual(claude_hooks.vanished_facts(old, new), [("docs/a.md", "48 B"), ("docs/gone.md", "17 ms")])
+        self.assertEqual(claude_hooks.vanished_facts(old, {**new, "docs/c.md": "48 B, 17 ms"}), [])
+
+    # History keeps history's facts only: the build log naming a fact does not keep it for an architecture file,
+    # while a build log part's fact may move to another part or the roadmap.
+    def test_history_keeps_only_history(self):
+        old = {"docs/architecture/a.md": "Records are 48 B.", "docs/buildlog/x-1.md": "Measured 17 ms."}
+        new = {"docs/architecture/a.md": "Records.", "docs/buildlog/x-1.md": "Records went to 48 B.",
+               "ROADMAP.md": "17 ms"}
+        self.assertEqual(claude_hooks.vanished_facts(old, new), [("docs/architecture/a.md", "48 B")])
+
+    # The reminder names each vanished fact up to a limit, and none when nothing vanished.
+    def test_reminder(self):
+        self.assertIsNone(claude_hooks.vanished_reminder([]))
+        one = claude_hooks.vanished_reminder([("docs/a.md", "48 B")])
+        self.assertIn("docs/a.md: 48 B", one)
+        many = claude_hooks.vanished_reminder([("docs/a.md", f"{n} ms") for n in range(10, 50)])
+        self.assertIn("(and 10 more)", many)
+        self.assertNotIn("45 ms", many)
+
+
 class EndToEnd(unittest.TestCase):
     # A blocked call exits 2 with the reason on stderr; an allowed one exits 0 silently.
     def test_commands_hook(self):

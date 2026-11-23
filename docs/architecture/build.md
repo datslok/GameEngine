@@ -59,13 +59,14 @@ Covers: `makefile`, `tools/package_demo.py`, `tools/hooks/`
 
 | Check | When | Does |
 |---|---|---|
-| `commands` | Before every Bash or PowerShell command | Blocks a build with `-DNDEBUG` or `-ffast-math`; blocks committing code (any non-Markdown change) straight onto `main` outside a merge, and merges into `main` without `--no-ff`; asks the user before golden, GPU, slow, parked and yardstick runs |
+| `commands` | Before every Bash or PowerShell command | Blocks a build with `-DNDEBUG` or `-ffast-math`; blocks committing code (any non-Markdown change) straight onto `main` outside a merge, and merges into `main` without `--no-ff`; asks the user before golden, GPU, slow, parked and yardstick runs; before a commit, reminds Claude of facts gone from every doc (below) |
 | `makefile` | Before an Edit or Write of the Makefile | Blocks the two flags outside comments |
 | `line-endings` | After an Edit or Write | Turns bare LF into CRLF in `src/`, `tests/`, `assets/shaders/` and `tools/` (root files such as `README.md` keep theirs) |
 | `games` | When Claude ends a turn | Keeps the turn going while a game copy with `--port 47620` (Claude's, never the user's) runs |
 
 - **Paths from the project's root:** the hooks name their scripts by `$CLAUDE_PROJECT_DIR`, and `line-endings` measures folders from it, since a `cd` leaves the shell (and the hook's `cwd`) in a subfolder.
 - **Blocking:** exit code 2, the reason on stderr for Claude; a question is the PreToolUse `ask` permission decision.
-- **Cost:** about 80 ms a shell command (150 ms a `git commit`); the games check lists processes with `tasklist` and asks PowerShell for command lines only when a `game.exe` runs.
+- **Facts gone from every doc** (`doc_facts`, `vanished_facts`): a changed doc's backticked names, link targets and numbers (a decimal, two digits or a unit, kept with it) at `HEAD`, against every Markdown file now, tracked or new. A fact moved to another doc passes, but history (`docs/buildlog/`, `ROADMAP.md`) keeps only history's facts, so the build log naming a fact does not stand in for its description dropped elsewhere; one gone is named (up to 30), as a reminder, never a block: a number retuned on purpose vanishes too. Reworded meaning without a name or number is not seen: the rule in `CLAUDE.md` covers it.
+- **Cost:** about 80 ms a shell command (150 ms a `git commit`, about 300 ms with the docs read); the games check lists processes with `tasklist` and asks PowerShell for command lines only when a `game.exe` runs.
 - **Tests:** `python -I tools/hooks/test_claude_hooks.py`, each check's cases plus whole runs fed hook JSON.
 - The commit attribution check lives in the user's own Claude settings folder, outside the repo, since it covers every project.

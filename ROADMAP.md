@@ -717,6 +717,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
 - [x] Commands from the command line (`command-line-control`)
 - [x] Claude Code hooks: the hard rules a script can check, enforced (`claude-hooks`)
+- [x] Docs compacted, never losing meaning: a rule, and a pre-commit check naming facts gone from every doc (`docs-meaning-kept`)
 - [ ] Level editor or scene file format, every edit a command (undo on the same list)
 - [ ] API reference with Doxygen (`make docs`, comments as `/** */`)
 - [ ] Scripting for gameplay code
