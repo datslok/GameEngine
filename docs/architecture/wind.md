@@ -80,9 +80,9 @@ Lianas, roots, vines and moss move with what they hang from and swing below it.
 - `appendHanging` keeps the list one a vertex (vertices without entries get the default: own sway, no arm); `AssetManager::addDrawnMesh` pads the end.
 - Entries are found by the draw's own mesh: see [level-of-detail.md](level-of-detail.md), A mesh's levels.
 
-**Anchors on trees** (`GpuWindAnchor`: a tree's foot, height, scale, bend and the point; built from a liana's record, `lianaWindAnchor`): `windAnchorOffset` moves an anchor exactly as its tree's own vertex there would (the trees' spring at its foot, no flutter), so what hangs from a crown stays on it.
+**Anchors on trees** (`GpuWindAnchor`: a tree's foot, height, scale, bend and the point): `windAnchorOffset` moves an anchor exactly as its tree's per-vertex sway there would. Unused since the lianas' anchors move by their trees' bones ([wind-bones.md](wind-bones.md), Lianas' trees); retired with the per-vertex sway (3c-iii-c-iv).
 
-**Lianas** (`lianaSwayOffset`, `liana_data.glsl`): no hanging vertices; each vertex's share along, arm below the chord and the swing's length (the deepest sag) come from its record's curve, its anchors from its trees in the record (a rope's far end fixed), then as any hanging vertex below. An ivy card's corners all sway as its stem (`lianaDrawnVertex`'s `swaysAt`), so the card swings whole.
+**Lianas** (`lianaSwayOffset`, `liana_data.glsl`): no hanging vertices; each vertex's share along, arm below the chord and the swing's length (the deepest sag) come from its record's curve, its anchors as its trees' bark at its holds (`lianaAnchorMotion`, [wind-bones.md](wind-bones.md); still while a tree is not posed, a rope's far end fixed), then as any hanging vertex below. An ivy card's corners all sway as its stem (`lianaDrawnVertex`'s `swaysAt`), so the card swings whole.
 
 **The swing's speed:** a hanging chain's slowest swing is sqrt(g / L) / `WIND_CHAIN_PERIOD` Hz (5.2255: 2π over half J0's first zero), L floored at `WIND_SHORTEST_SWING` (`windChainHertz`). `windChainShares` blends the two bands round that frequency by log frequency (all short above the short band, all long below the long); `windChainSpringAt` reads only bands with a share. A gust kicks a short root at once and leans a long vine slowly, which swings on after.
 
@@ -97,7 +97,7 @@ A mesh without entries of kind `Hanging` sways as its own object on the short ba
 **On the GPU:**
 
 - `packHangingVertex`: three words (anchors as two 16-bit halves; along and arm as half floats; swing length as a half float), binding 40, read by `gl_VertexIndex`. `uploadMesh` returns the mesh's entry (`VertexEntries`), `attachVertexEntries` gives each draw `DrawItem::hangingEntry` → `GpuInstance::hanging[0]`. Copied whole when new ones arrive (`updateVertexRecords`).
-- Lianas' records: binding 41 (`LianaShape`, 128 bytes with the ivy's, `writeLianaShapes`: a slot's block copied when it is replaced). A draw's `hanging.w` is its record + 1, with `LIANA_IVY_BIT` (`scene/liana_shared.h`) for its ivy.
+- Lianas' records: binding 41 (`LianaShape`, 144 bytes with the ivy's and its anchors' bindings and trees' layers, `writeLianaShapes`: a slot's block copied when it is replaced). A draw's `hanging.w` is its record + 1, with `LIANA_IVY_BIT` (`scene/liana_shared.h`) for its ivy.
 
 ## Bones
 

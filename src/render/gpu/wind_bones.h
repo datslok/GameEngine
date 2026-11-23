@@ -98,6 +98,14 @@ Vec3 windBlendedDirection(const WindBonePose& own, const WindBonePose& parent, f
 */
 WindBonePose windRigidPose(const WindBonePose& own, const WindBonePose& parent, float weight, const Vec3& foot);
 
+/*
+* How a world point on a placed plant's bones moves (a liana's hold on its tree): in the plant's mesh frame
+* (swayPlantPoint), blended by its two poses (windBlendedPlace), the move scaled and turned back into the world, as the
+* plant's own vertex there moves.
+*/
+Vec3 windPlantPointOffset(const WindBonePose& own, const WindBonePose& parent, float weight, const Vec3& world, const Vec3& foot, float scale,
+                          float turnRadians);
+
 // A sphere (xyz its centre, w its radius) carried by a pose: moved, its radius kept.
 Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere);
 

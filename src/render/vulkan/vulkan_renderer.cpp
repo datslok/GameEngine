@@ -166,6 +166,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
     twigDrawing = std::make_unique<VulkanTwigDrawing>(device, framesInFlight);
     bonePosing = std::make_unique<VulkanBonePosing>(device, bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), framesInFlight);
+    lianaTrees = std::make_unique<VulkanLianaTrees>(device, framesInFlight);
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -1228,6 +1229,7 @@ std::string VulkanRenderer::compareBones() {
 */
 void VulkanRenderer::takeBonePoses(std::uint32_t frameIndex) {
     std::optional<VulkanBonePosing::Collected> collected = bonePosing->collect(frameIndex);
+    const std::optional<VulkanLianaTrees::Collected> lianas = lianaTrees->collect(frameIndex);
 
     if (!collected) {
         lastBones.reset();
@@ -1242,6 +1244,12 @@ void VulkanRenderer::takeBonePoses(std::uint32_t frameIndex) {
                 boneWantedPlants(*placed->table, placed->commands, placed->entries, bonesCompare->views, placed->plants, bonesCompare->eye, bonesCompare->fadeEnd);
             bonesCompareReport = describeBoneComparison(compareBonePoses(wanted, collected->posedTrees, collected->poses, bonePosing->getTables(), placed->plants,
                                                                          bonesCompare->motion, bonesCompare->seconds, bonesCompare->previousSeconds));
+
+            // The lianas' anchors' plants against the CPU's lookup on the same plants and counts.
+            if (lianas) {
+                bonesCompareReport += "\n" + describeLianaTreeComparison(compareLianaTrees(bonesCompare->lianas, lianas->found, lianas->tables, placed->plants,
+                                                                                          lianas->counts, bonesCompare->eye, bonesCompare->fadeEnd));
+            }
         } else {
             bonesCompareReport = "Bones: the frame's placed lists or poses were not read back.";
         }
@@ -1854,6 +1862,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                 static_cast<std::uint32_t>(planting->getPlantsBytes() / sizeof(GpuPlacedPlant)), settings.wind.bones,
                                                 frame.frameIndex);
     frameBones = posesBones ? std::optional{frame.frameIndex} : std::nullopt;
+
+    // The lianas' anchors' trees found while the bones are posed (render/vulkan/vulkan_liana_trees.h): room for two a
+    // record held, before the scene set names it.
+    const std::uint32_t lianaAnchors = static_cast<std::uint32_t>(2 * description.lianaShapes.slots.size() * description.lianaShapes.perSlot);
+
+    if (posesBones && lianaAnchors > 0) {
+        lianaTrees->prepare(lianaAnchors);
+    }
     ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
                                                  placedDrawing->getShadowChanges());
     stats.shadowDrawn += lastCameraCull.shadowDrawn;
@@ -2185,12 +2201,29 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         inputs.eye = cameraOrigin;
         inputs.fadeEnd = settings.wind.swayFadeEnd;
         inputs.readBackPoses = bonesComparing;
+
+        // The lianas' anchors' trees first: nothing the bones do depends on them, and the shaders after read both.
+        if (lianaAnchors > 0 && planting->getField()) {
+            VulkanLianaTrees::Inputs lianaInputs;
+            lianaInputs.records = lianaShapeRecords->get();
+            lianaInputs.plants = planting->getPlants();
+            lianaInputs.counts = planting->getCounts();
+            lianaInputs.countsBytes = planting->getCountsBytes();
+            lianaInputs.sets = planting->getSlots();
+            lianaInputs.fieldLayers = planting->getField()->layers.size();
+            lianaInputs.anchors = lianaAnchors;
+            lianaInputs.eye = cameraOrigin;
+            lianaInputs.fadeEnd = settings.wind.swayFadeEnd;
+            lianaInputs.readBack = bonesComparing;
+            lianaTrees->record(frame.commands, frame.descriptors, lianaInputs, frame.frameIndex);
+        }
+
         bonePosing->record(frame.commands, frame.descriptors, inputs, frame.frameIndex);
         endGpuPass(frame, GpuPass::Bones);
 
         if (bonesComparing) {
             bonesCompare = BonesCompare{frame.frameIndex, swayingPlacedViews, cameraOrigin, settings.wind.swayFadeEnd, frameWind.wind[3], frameWind.sway[3],
-                                        settings.wind.bones};
+                                        settings.wind.bones, description.lianaShapes};
         }
     }
 
@@ -2914,6 +2947,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.boneTrees = boneView(bonePosing->getTrees());
     views.bonePlantTrees = boneView(bonePosing->getPlantTrees());
     views.bonePoses = boneView(bonePosing->getPoses());
+    views.lianaTreePlants = boneView(lianaTrees->getFound());
     views.lianaShapes = lianaShapeRecords->describe();
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
@@ -4575,6 +4609,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     placedDrawing->setFramesInFlight(count);
     twigDrawing->setFramesInFlight(count);
     bonePosing->setFramesInFlight(count);
+    lianaTrees->setFramesInFlight(count);
     cullFrameStyles.assign(count, {});
     cullFrameViews.assign(count, {});
     cullFrameDraws.assign(count, 0);

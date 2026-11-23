@@ -278,9 +278,6 @@ struct GpuWindAnchor {
 
 static_assert(sizeof(GpuWindAnchor) == 48, "GpuWindAnchor must match wind_data.glsl's WindAnchorRecord");
 
-// A liana's anchor in its first tree's crown (far false), or in its second's at its far end (lianaWindAnchor in
-// liana.glsl): the tree's foot, height, scale and bend from its record (scene/liana_shape.h).
-GpuWindAnchor lianaWindAnchor(const LianaShape& shape, bool far);
 
 /*
 * How an anchor moves: as its tree's own vertex at its point would (windSwayOffset, the trees' category, no flutter),

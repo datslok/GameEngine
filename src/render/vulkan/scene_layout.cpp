@@ -61,7 +61,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex | compute},    // the wind's springs (compute for the bones pass)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex | compute},    // and last frame's (the velocity pass, the bones pass)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the hanging vertices' anchors and arms
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the anchors they hang from
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the lianas' records (scene/liana_shape.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the thinned meshes' cards
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the planting cells' slots' plants (render/gpu/placed_drawing.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each placed part's instance in its plant's frame
@@ -73,6 +73,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the posed trees (render/gpu/bone_poses.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each plant's tree this frame
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the bones' poses
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each liana anchor's tree's plant (render/gpu/liana_trees.h)
     }};
 }
 
@@ -272,6 +273,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.boneTrees,
         views.bonePlantTrees,
         views.bonePoses,
+        views.lianaTreePlants,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

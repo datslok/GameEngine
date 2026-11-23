@@ -1,6 +1,7 @@
 #include "scene/indexed_mesh.h"
 #include "scene/simplify_mesh.h"
 #include "scene/sway_bones.h"
+#include "math/quat.h"
 
 #include "mesh_helpers.h"
 #include "test_levels.h"
@@ -136,6 +137,23 @@ namespace {
         assert(threw);
     }
 
+    /*
+    * A world point in a plant's mesh frame: the placement (foot, turn about up, scale) undone, so placing it again
+    * gives the point back; a quarter turn takes the mesh's x to the world's -z.
+    */
+    void testAPointInItsPlant() {
+        const Vec3 foot{10.0f, 2.0f, -4.0f};
+        const Vec3 local = swayPlantPoint(Vec3{10.0f, 5.0f, -6.0f}, foot, 2.0f, 1.5707963f);
+        assert((local - Vec3{1.0f, 1.5f, 0.0f}).length() < 1e-5f);
+
+        for (const float turn : {0.0f, 0.7f, -2.4f}) {
+            const Vec3 point{3.0f, 7.5f, 1.25f};
+            const Vec3 inPlant = swayPlantPoint(point, foot, 1.3f, turn);
+            const Vec3 placed = foot + Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, turn).rotate(inPlant * 1.3f);
+            assert((placed - point).length() < 1e-5f);
+        }
+    }
+
     // A mesh's bindings ride along: its prefix keeps its first ones, its simplified level each kept vertex's own.
     void testMeshesKeepTheirBindings() {
         IndexedMesh sheet = rippledSheet(12);
@@ -167,5 +185,6 @@ void testSwayBones() {
     testTheBindingAlongAChain();
     testTheOrder();
     testTheNearestBinding();
+    testAPointInItsPlant();
     testMeshesKeepTheirBindings();
 }

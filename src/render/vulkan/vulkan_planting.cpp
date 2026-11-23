@@ -350,6 +350,10 @@ VkBuffer VulkanPlanting::getPlants() const {
     return plants.get();
 }
 
+VkBuffer VulkanPlanting::getCounts() const {
+    return counts.get();
+}
+
 VkDeviceSize VulkanPlanting::getPlantsBytes() const {
     return plants.getSize();
 }
@@ -362,7 +366,8 @@ std::vector<PlantingSetSlots> VulkanPlanting::getSlots() const {
     std::vector<PlantingSetSlots> slots;
 
     for (const CellSet& set : sets) {
-        slots.push_back(PlantingSetSlots{set.ring.getHeld(), set.layout, set.layers.fieldLayer, set.places, set.settings.cellMetres});
+        slots.push_back(PlantingSetSlots{set.ring.getHeld(), set.layout, set.layers.fieldLayer, set.places, set.settings.cellMetres,
+                                         static_cast<std::uint32_t>(plantingSlotSide(set.settings))});
     }
 
     return slots;

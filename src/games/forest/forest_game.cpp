@@ -725,8 +725,8 @@ void ForestGame::buildTrees(AssetManager& assets) {
                                      .moss = forestLayerMaterial(assets, assetFolder, forestLimbMossLayer)};
     TreeEpiphytes smallEpiphytes = bigEpiphytes;
     smallEpiphytes.bigTree = false;
-    canopyHeights = plantTrees(assets, ForestLayer::Canopy, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers, bigEpiphytes);
-    emergentHeights = plantTrees(assets, ForestLayer::Emergent, emergentSettings, emergentPlacements, emergentVariantSeed,
+    canopyVariants = plantTrees(assets, ForestLayer::Canopy, treeSettings, treePlacements, treeVariantSeed, canopyLeaf, &climbers, bigEpiphytes);
+    emergentVariants = plantTrees(assets, ForestLayer::Emergent, emergentSettings, emergentPlacements, emergentVariantSeed,
                                  sameLeaves ? canopyLeaf : leafFor(emergentSettings), &climbers, bigEpiphytes);
     const bool midSameLeaves = midSettings.clusterTexels == treeSettings.clusterTexels &&
                                midSettings.leafLength / midSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
@@ -1112,12 +1112,12 @@ void ForestGame::updateNearLianas(World& world, int most) {
                                   .heights = *groundHeights,
                                   .lianas = lianaSettings,
                                   .lianaSeed = lianaSeed};
-    const NearLianaTrees trees{.emergentHeights = emergentHeights, .canopyHeights = canopyHeights, .bend = swaySettings.trees.bend};
+    const NearLianaTrees trees{.emergents = emergentVariants, .canopy = canopyVariants, .bend = swaySettings.trees.bend};
     const Vec3 place = controls.getCamera().getPosition();
     nearLianas.update(world, air, Vec2{place.x, place.z}, nearTreeSettings, most, sources, trees, lianaLook, forestTreeBarkLayer.tileMetres, getJobs());
 }
 
-std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
+std::vector<NearTreeVariant> ForestGame::plantTrees(AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
                                           const std::vector<TreePlacement>& placements, std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes) {
     if (placements.empty()) {
         return {};
@@ -1179,6 +1179,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
     std::vector<MeshHandle> epiphyteLeafMeshes(grown.size());
     std::vector<MeshHandle> epiphyteMossMeshes(grown.size());
     std::vector<float> treeHeights(grown.size());
+    std::vector<NearTreeVariant> lianaVariants(grown.size());
     std::vector<std::shared_ptr<const SwaySkeleton>> treeSkeletons(grown.size());
     std::vector<Vec3> firstRosette(grown.size());
 
@@ -1234,6 +1235,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
         treeHeights[index] = std::max(treeBox.maximum.y, 1e-3f);
         treeSkeletons[index] = std::make_shared<const SwaySkeleton>(SwaySkeleton{.bones = variant.bones, .height = treeHeights[index]});
+        lianaVariants[index] = NearTreeVariant{.height = treeHeights[index], .bones = variant.bones, .lines = variant.swayLines, .blendShare = settings.boneBlendShare};
 
         barkMeshes.push_back(withClusterLevels(assets, assets.addDrawnMesh(std::move(variant.bark))));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
@@ -1353,7 +1355,7 @@ std::vector<float> ForestGame::plantTrees(AssetManager& assets, ForestLayer laye
         }
     }
 
-    return treeHeights;
+    return lianaVariants;
 }
 
 void ForestGame::onInput(World& world, const Input& input) {

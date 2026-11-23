@@ -272,9 +272,8 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
         LianaShape shape = bent.shape;
         vec3 hold = shape.from.xyz - cameraOrigin.xyz;
         vec3 world = shape.from.xyz + bent.offset;
-        vec3 swaysAt = shape.from.xyz + bent.swaysAt;
         float swing = uintBitsToFloat(instance.hanging.y);
-        vec3 lianaSway = lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, swaysAt, cameraOrigin.xyz, false);
+        vec3 lianaSway = lianaSwayOffset(bent, instance.sway, swing, cameraOrigin.xyz, false);
         relative = hold + bent.offset + lianaSway;
         VERTEX_POSITION = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relative, 1.0);
         VERTEX_CLIP = captureView ? planarClipDistance(captureClipPlane, relative) : 1.0;
@@ -288,7 +287,7 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
         stillMotion(vertexSlot, relative);
 
         if (motionOptions.x != 0.0 && lianaSway != vec3(0.0)) {
-            vec3 previousRelative = hold + bent.offset + lianaSwayOffset(shape, instance.sway, swing, bent.along, bent.arm, swaysAt, cameraOrigin.xyz, true);
+            vec3 previousRelative = hold + bent.offset + lianaSwayOffset(bent, instance.sway, swing, cameraOrigin.xyz, true);
             VERTEX_OUT(previousClip) = motionPrevious * vec4(previousRelative, 1.0);
             VERTEX_OUT(movement) = 1.0;
         }

@@ -43,6 +43,7 @@ int main() {
             gpuTestImpostor(runner, report);
             gpuTestWind(runner, report);
             gpuTestLiana(runner, report);
+            gpuTestLianaTrees(runner, report);
             gpuTestCardThinning(runner, report);
             gpuTestFacetVariation(runner, report);
             gpuTestFoliageShading(runner, report);

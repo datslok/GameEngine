@@ -493,7 +493,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
       - [ ] 3c-iii-c. Bark, twigs, shadows and lianas' anchors moved by the poses; the trees' per-vertex sway retired
         - [x] 3c-iii-c-i. Bound vertices posed in the camera's passes and swaying shadow tiles (`tree-bones-3c-iii-c-i`)
         - [x] 3c-iii-c-ii. Twigs rigid by their bone's pose, with today's flutter (`tree-bones-3c-iii-c-ii`)
-        - [ ] 3c-iii-c-iii. Lianas' tree anchors moved by their bones
+        - [x] 3c-iii-c-iii. Lianas' tree anchors moved by their bones (`tree-bones-3c-iii-c-iii`)
         - [ ] 3c-iii-c-iv. The trees' per-vertex sway retired
     - [ ] 3c-iv. Clusters within chains, culled by their bones' bounds; animation stopped when small
     - [ ] 3c-v. Optional: per-bone springs for a budget of near trees, pushed by forces (Unreal's promoted tier)

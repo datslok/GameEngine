@@ -5,6 +5,27 @@
 #include <stdexcept>
 #include <utility>
 
+std::uint32_t packSwayBinding(const SwayBinding& binding) {
+    if (binding.bone < 0 || static_cast<std::size_t>(binding.bone) >= swayMostBones) {
+        throw std::invalid_argument("A bound vertex's bone must be within a skeleton's 65535 bones");
+    }
+
+    const auto weight = static_cast<std::uint32_t>(std::lround(std::clamp(binding.weight, 0.0f, 1.0f) * 65535.0f));
+    return static_cast<std::uint32_t>(binding.bone) | (weight << 16u);
+}
+
+SwayBinding unpackSwayBinding(std::uint32_t packed) {
+    return SwayBinding{.bone = static_cast<int>(packed & 0xFFFFu), .weight = static_cast<float>(packed >> 16u) / 65535.0f};
+}
+
+// The turn about up undone by hand (Quat::fromAxisAngle's turn takes x to (cos, 0, -sin)), as windPlantPoint does it.
+Vec3 swayPlantPoint(const Vec3& world, const Vec3& foot, float scale, float turnRadians) {
+    const Vec3 apart = world - foot;
+    const float cosine = std::cos(turnRadians);
+    const float sine = std::sin(turnRadians);
+    return Vec3{cosine * apart.x - sine * apart.z, apart.y, sine * apart.x + cosine * apart.z} * (1.0f / scale);
+}
+
 namespace {
     // Each point's distance along the line from its first.
     std::vector<float> arcsOf(const std::vector<Vec3>& points) {

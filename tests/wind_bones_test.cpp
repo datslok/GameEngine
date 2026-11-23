@@ -1,5 +1,7 @@
 #include "render/gpu/wind_bones.h"
 #include "scene/sway_bones.h"
+#include "math/mat4.h"
+#include "math/transform.h"
 
 #include "test_levels.h"
 
@@ -223,6 +225,28 @@ namespace {
         assert((between - windBonePlace(own, leaf)).length() < (windBonePlace(parent, leaf) - windBonePlace(own, leaf)).length());
     }
 
+    /*
+    * A world point on a placed plant's bones (a liana's hold on its tree, windPlantPointOffset) moves exactly as the
+    * plant's own vertex there does (the model turning and scaling the blended move in the mesh's frame, as
+    * boneSwayOfVertex does), and not at all while the bones rest.
+    */
+    void testAPointOnAPlantMoves() {
+        const WindBonePose rest{};
+        const WindBonePose parent = windBonePose(rest, Vec3{0.1f, 0.0f, -0.05f}, Vec3{});
+        const WindBonePose own = windBonePose(parent, Vec3{0.0f, 0.2f, 0.25f}, Vec3{0.0f, 3.0f, 0.0f});
+        const Vec3 foot{120.0f, 4.0f, -35.0f};
+
+        for (const float turn : {0.0f, 0.9f, -2.2f}) {
+            const Transform placed{.position = foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, turn), .scale = Vec3{1.4f, 1.4f, 1.4f}};
+            const Mat4 model = placed.getMatrix();
+            const Vec3 inMesh{0.6f, 3.4f, -0.3f};
+            const Vec3 world = transformPoint(model, inMesh);
+            const Vec3 expected = transformDirection(model, windBlendedPlace(own, parent, 0.4f, inMesh) - inMesh);
+            assert((windPlantPointOffset(own, parent, 0.4f, world, foot, 1.4f, turn) - expected).length() < 1e-4f);
+            assert(windPlantPointOffset(rest, rest, 0.4f, world, foot, 1.4f, turn).length() < 1e-5f);
+        }
+    }
+
     // The union of two spheres holds both: the larger one when it holds the other, else just reaching both.
     void testSphereUnion() {
         const Vec4 big{0.0f, 0.0f, 0.0f, 5.0f};
@@ -330,6 +354,7 @@ void testWindBones() {
     testTheTurnFollowsTheWind();
     testBlending();
     testRigidPose();
+    testAPointOnAPlantMoves();
     testSphereUnion();
     testClusterBoundsHold();
     testMotionIsValidated();

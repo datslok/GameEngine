@@ -130,7 +130,8 @@ struct PlantingSetPlaces {
 /*
 * One set of cells' slots as the placed drawing reads them (render/vulkan/vulkan_planting.h holds them, a view for a
 * call): the cells held and their slots, the slots' layout, the field's number of each of the set's layers, where its
-* slots start and its cells' size. A slot's counts are its set's layers' (countBase + slot * layers + layer).
+* slots start, its cells' size and the most cells it holds across (plantingSlotSide; 0 where no one asks). A slot's
+* counts are its set's layers' (countBase + slot * layers + layer).
 */
 struct PlantingSetSlots {
     const std::map<PlantingCell, int>& held;
@@ -138,6 +139,7 @@ struct PlantingSetSlots {
     const std::vector<int>& fieldLayer;
     PlantingSetPlaces places;
     float cellMetres = 0.0f;
+    std::uint32_t side = 0;
 };
 
 /*

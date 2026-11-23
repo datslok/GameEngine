@@ -136,6 +136,73 @@ namespace {
         return leaf;
     }
 
+    // A tree variant for the lianas: 30 m tall, a trunk and two branches out either way, cut into bones 2 m long.
+    NearTreeVariant branchedVariant() {
+        NearTreeVariant variant;
+        variant.height = 30.0f;
+        variant.blendShare = 0.5f;
+        const std::vector<std::vector<Vec3>> lines{{Vec3{}, Vec3{0.0f, 30.0f, 0.0f}},
+                                                   {Vec3{0.0f, 20.0f, 0.0f}, Vec3{8.0f, 26.0f, 0.0f}},
+                                                   {Vec3{0.0f, 22.0f, 0.0f}, Vec3{0.0f, 27.0f, -8.0f}}};
+
+        for (std::size_t line = 0; line < lines.size(); ++line) {
+            const SwayChain chain = appendSwayChain(variant.bones, lines[line], {0.5f, 0.1f}, line == 0 ? -1 : 9, line == 0 ? 0 : 1, 2.0f);
+            variant.lines.push_back(makeSwayLine(chain, lines[line]));
+        }
+
+        return variant;
+    }
+
+    /*
+    * Each liana's anchors are bound to its trees' bones (ROADMAP phase 21 stage 3c-iii-c-iii): an anchor's binding the
+    * nearest line's to its hold in its tree's mesh frame (the placement undone), with the tree's field layer; a rope's
+    * far end fixed, unbound and of no tree.
+    */
+    void testNearLianasAreBoundToTheirTrees() {
+        const ForestLianaSettings lianaSettings;
+        const NearTreeSources sources = patchSources(lianaSettings);
+        const std::vector<NearTreeVariant> emergents(static_cast<std::size_t>(sources.species.emergent.variants), branchedVariant());
+        const std::vector<NearTreeVariant> canopy(static_cast<std::size_t>(sources.species.canopy.variants), branchedVariant());
+        const NearLianaTrees trees{.emergents = emergents, .canopy = canopy, .bend = 0.25f};
+        const NearTreeVariant variant = branchedVariant();
+        std::set<std::uint32_t> bindings;
+        std::size_t ropes = 0;
+        std::size_t turned = 0;
+
+        for (const PlantingCell& cell : nearCellsOver(regionBox(forestPatch), 64.0f)) {
+            const NearTreeCell made = makeNearTreeCell(cell, 64.0f, sources, testJobs());
+            const std::vector<LianaShape> shapes = nearLianaShapes(made, trees, lianaSettings, 2.0f, NearLianas::lianasASlot);
+            assert(shapes.size() == made.lianas.size());
+
+            for (std::size_t index = 0; index < shapes.size(); ++index) {
+                const Liana& liana = made.lianas[index];
+                const LianaShape& shape = shapes[index];
+
+                for (int end = 0; end < 2; ++end) {
+                    const int crown = end == 0 ? liana.crown : liana.otherCrown;
+
+                    if (crown < 0) {
+                        assert(shape.anchors[1] == swayUnbound && shape.anchors[3] == static_cast<std::uint32_t>(LIANA_NO_TREE));
+                        ++ropes;
+                        continue;
+                    }
+
+                    const NearTree& tree = made.trees[static_cast<std::size_t>(crown)];
+                    const Vec3 hold = end == 0 ? liana.from : liana.to;
+                    const Vec3 inTree = swayPlantPoint(hold, tree.placement.foot, tree.placement.scale, tree.placement.turnRadians);
+                    const SwayBinding expected = swayNearestBinding(variant.lines, variant.bones, inTree, 0.5f);
+                    assert(shape.anchors[end] == packSwayBinding(expected));
+                    assert(shape.anchors[2 + end] == static_cast<std::uint32_t>(tree.layer));
+                    bindings.insert(shape.anchors[end]);
+                    turned += tree.placement.turnRadians != 0.0f ? 1 : 0;
+                }
+            }
+        }
+
+        // The patch's lianas reach several bones, some to the ground, from turned trees.
+        assert(bindings.size() > 3 && ropes > 0 && turned > 0);
+    }
+
     // A world holding near lianas, with the templates and the trees' heights they are made with.
     struct LianaWorld {
         World world;
@@ -144,8 +211,8 @@ namespace {
         NearLianas lianas;
         ForestLianaSettings lianaSettings;
         NearTreeSources sources = patchSources(lianaSettings);
-        std::vector<float> heights{30.0f, 32.0f};
-        NearLianaTrees trees{.emergentHeights = heights, .canopyHeights = heights, .bend = 0.25f};
+        std::vector<NearTreeVariant> variants{branchedVariant(), branchedVariant()};
+        NearLianaTrees trees{.emergents = variants, .canopy = variants, .bend = 0.25f};
         NearLianaLook look{.tube = assets.addDrawnMesh(lianaTemplateMesh(4, 3)), .bark = Material{}, .sway = WindSway{}, .shadowCascades = 2,
                            .ivy = ivyTemplates(assets), .leaf = cutOutLeaf()};
         ForestNearTreeSettings settings;
@@ -260,4 +327,5 @@ void testNearTrees() {
     testNearTreeSettings();
     testNearLianasFollowThePlace();
     testNearLianasResway();
+    testNearLianasAreBoundToTheirTrees();
 }

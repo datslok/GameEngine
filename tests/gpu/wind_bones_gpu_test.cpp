@@ -276,11 +276,60 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A world point in a plant's mesh frame (windPlantPoint, the scene's swayPlantPoint) and its move on the plant's
+    * bones (windPlantPointOffset, a liana's hold on its tree): points within 40 m of feet across a valley, every turn
+    * and a range of scales, poses from any turns and shifts. Inputs: the point, the foot and scale, the turn; for the
+    * move first the parent's turn and shift, the own's, the point and weight.
+    */
+    void checkPlantPoints(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{47};
+        std::vector<GpuVec4> points;
+        std::vector<GpuVec4> moves;
+
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 foot{random.between(-3000.0f, 3000.0f), random.between(-20.0f, 200.0f), random.between(-3000.0f, 3000.0f)};
+            const Vec3 world = foot + random.direction() * random.between(0.0f, 40.0f);
+            const float scale = random.between(0.6f, 1.6f);
+            const float turn = random.between(-3.2f, 3.2f);
+            points.push_back(gpuVec4(world));
+            points.push_back(gpuVec4(foot, scale));
+            points.push_back(gpuVec4(turn));
+            moves.push_back(gpuVec4(asVec4(randomTurn(random))));
+            moves.push_back(gpuVec4(random.direction() * random.between(0.0f, 5.0f)));
+            moves.push_back(gpuVec4(asVec4(randomTurn(random))));
+            moves.push_back(gpuVec4(random.direction() * random.between(0.0f, 5.0f)));
+            moves.push_back(gpuVec4(world, random.between(0.0f, 1.0f)));
+            moves.push_back(gpuVec4(foot, scale));
+            moves.push_back(gpuVec4(turn));
+        }
+
+        const std::vector<GpuVec4> inPlant = runner.run(shader, GPU_TEST_WIND_PLANT_POINT, points, 3, 1);
+        const std::vector<GpuVec4> moved = runner.run(shader, GPU_TEST_WIND_PLANT_POINT_OFFSET, moves, 7, 1);
+
+        // The point's distance from its foot is a difference of places thousands of metres out (a few ulps of 3 km),
+        // turned by sine and cosine: about 1e-3 m either side; the move adds rotations of up to 40 m.
+        const FloatTolerance valley{.absolute = 2e-3f, .relative = 1e-4f};
+
+        for (std::size_t i = 0; i < inPlant.size(); ++i) {
+            const GpuVec4* in = &points[3 * i];
+            report.check("windPlantPoint", valley, swayPlantPoint(vec3From(in[0]), vec3From(in[1]), in[1][3], in[2][0]), vec3From(inPlant[i]));
+            const GpuVec4* m = &moves[7 * i];
+            const WindBonePose parent{.turn = Quat{m[0][0], m[0][1], m[0][2], m[0][3]}, .shift = vec3From(m[1])};
+            const WindBonePose own{.turn = Quat{m[2][0], m[2][1], m[2][2], m[2][3]}, .shift = vec3From(m[3])};
+            const Vec3 expected = windPlantPointOffset(own, parent, m[4][3], vec3From(m[4]), vec3From(m[5]), m[5][3], m[6][0]);
+            report.check("windPlantPointOffset", valley, expected, vec3From(moved[i]));
+        }
+    }
+}
+
 void gpuTestWindBones(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("wind_bones.glsl, quat.glsl, bone_poses.glsl");
     checkQuaternions(runner, report);
     checkSharesAndBranches(runner, report);
     checkTurns(runner, report);
     checkPoses(runner, report);
+    checkPlantPoints(runner, report);
     checkBonePass(runner, report);
 }

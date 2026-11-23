@@ -8,6 +8,9 @@
 // its tube; the rest is one past its record.
 #define LIANA_IVY_BIT 0x80000000u
 
+// A liana's anchor on no planted tree (LianaShape::anchors' layers): a rope's foot in the ground, fixed.
+#define LIANA_NO_TREE 0xFFFFFFFFu
+
 // The ivy atlas (LeafSet017): two leaves across, three up, each cell 3:2, so a card is this many times its length wide.
 #define LIANA_LEAF_COLUMNS 2
 #define LIANA_LEAF_ROWS 3

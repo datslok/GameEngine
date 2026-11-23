@@ -1,6 +1,5 @@
 #pragma once
 
-#include "render/gpu/bone_records_shared.h"
 #include "render/gpu/mesh_pool.h"
 #include "scene/indexed_mesh.h"
 #include "scene/sway_bones.h"
@@ -14,16 +13,6 @@
 * vertex's place in the pool, so a mesh's levels (their own vertices) and its clusters (the mesh's) need nothing more.
 * Render-only and API-free.
 */
-
-inline constexpr std::uint32_t swayUnbound = SWAY_UNBOUND;
-inline constexpr std::size_t swayMostBones = SWAY_MOST_BONES;
-
-// A binding in one word: its bone in the low 16 bits, its weight as a 16-bit unsigned normalized number above them.
-// Throws std::invalid_argument for a bone outside 0..SWAY_MOST_BONES - 1.
-std::uint32_t packSwayBinding(const SwayBinding& binding);
-
-// A packed binding back (its weight rounded to 1 / 65535).
-SwayBinding unpackSwayBinding(std::uint32_t packed);
 
 // A bone: its pivot and parent (within its skeleton, -1 a root), its tip and radius, its chain's first bone (within its
 // skeleton), length and radius, its level. Must match the shaders' SwayBoneRecord.
