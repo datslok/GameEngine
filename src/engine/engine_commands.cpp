@@ -365,6 +365,13 @@ void addClusterCompareCommand(CommandRegistry& registry, std::function<std::stri
                       std::move(compare));
 }
 
+void addBonesCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
+    addCompareCommand(registry, "bones-compare",
+                      "Reads back the next frame's posed trees and their bones' poses and checks them against the CPU's: every tree a swaying view "
+                      "draws posed once, each pose as the CPU makes it from the lean the GPU took.",
+                      std::move(compare));
+}
+
 void addPlacementCompareCommand(CommandRegistry& registry, std::function<std::string()> compare) {
     addCompareCommand(registry, "placement-compare",
                       "Reads the planting cells round the camera back from the GPU on the next frame they run (with engine.render.planting.enabled on) and "

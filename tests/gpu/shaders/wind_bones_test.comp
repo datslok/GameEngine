@@ -1,8 +1,9 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Runs wind_bones.glsl's and quat.glsl's functions on the cases wind_bones_gpu_test.cpp sends.
+// Runs wind_bones.glsl's, quat.glsl's and bone_poses.glsl's functions on the cases wind_bones_gpu_test.cpp sends.
 #include "gpu_test.glsl"
+#include "bone_poses.glsl"
 #include "wind_bones.glsl"
 
 void main() {
@@ -33,6 +34,16 @@ void main() {
         testOutput(1, vec4(pose.shift, 0.0));
         testOutput(2, vec4(windBlendedPlace(pose, parent, place.w, place.xyz), 0.0));
         testOutput(3, vec4(windBlendedDirection(pose, parent, place.w, testInput(5).xyz), 0.0));
+    } else if (function == GPU_TEST_WIND_BONE_OWN_TURN) {
+        vec4 c = testInput(2);
+        vec4 d = testInput(3);
+        vec4 e = testInput(4);
+        testOutput(0, vec4(windBoneOwnTurn(a.xyz, b.xyz, a.w, uint(b.w), c.x, c.y, d.xyz, uint(d.w), c.zw, e.x, testInput(5), testInput(6)), 0.0));
+    } else if (function == GPU_TEST_BONE_LEAN_IN_PLANT) {
+        testOutput(0, vec4(windLeanInPlant(a.xy, a.z), 0.0, 0.0));
+    } else if (function == GPU_TEST_BONE_CLAIM) {
+        uint firstPose = boneTreeFirstPose(floatBitsToUint(b.x), floatBitsToUint(b.y), floatBitsToUint(b.z));
+        testOutput(0, vec4(boneTreeWanted(a.xyz, testInput(2).xyz, a.w) ? 1.0 : 0.0, uintBitsToFloat(firstPose), uintBitsToFloat(boneTreeSeed(b.w)), 0.0));
     } else if (function == GPU_TEST_WIND_SPHERES) {
         WindBonePose pose = WindBonePose(a, b.xyz);
         vec4 first = testInput(2);

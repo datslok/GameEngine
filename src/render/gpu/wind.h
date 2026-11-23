@@ -193,6 +193,9 @@ float windSwayFade(float distance, float start, float end);
 // never flat, while a breeze's lean is nearly unchanged.
 Vec2 windSoftLean(const Vec2& lean);
 
+// The lean a spring gives something bending by bend per radian of it: softly held (windSoftLean), then faded.
+Vec2 windFadedLean(const Vec2& spring, float bend, float fade);
+
 /*
 * How much a place reads a cascade's window rather than the next coarser one: 1 inside, falling to 0 over the
 * WIND_BLEND_CELLS cells before its last cell from its edge (the cells beside the edge blend with the far side's under

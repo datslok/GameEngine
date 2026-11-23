@@ -46,6 +46,13 @@ struct RenderStats {
     std::array<std::size_t, TWIG_MOST_LEVELS> twigsByLevel{};
     std::array<std::size_t, TWIG_MOST_LEVELS> twigTrianglesByLevel{};
 
+    // The bones pass (render/gpu/bone_poses.h), while it runs: trees posed, those left still for want of room, the
+    // bones asked for and the pool's room; none posed while it does not run.
+    std::size_t boneTrees = 0;
+    std::size_t boneTreesStill = 0;
+    std::size_t bonesAsked = 0;
+    std::size_t bonePool = 0;
+
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
 

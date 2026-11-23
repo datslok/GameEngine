@@ -40,24 +40,46 @@ struct GpuSwayBone {
 
 static_assert(sizeof(GpuSwayBone) == 48, "GpuSwayBone must match the shaders' SwayBoneRecord");
 
-// A skeleton: its bones' run in the table, its height (its mesh's units) and its first bone's radius (the foot's).
+/*
+* A skeleton: its bones' run in the table, its height (its mesh's units) and its first bone's radius (the foot's); its
+* chain levels' starts from firstLevel in the table's levelStarts (levelCount + 1 of them: level l's chains run from
+* start l to start l + 1 in the chains); and the placed table's part its trees take their lean from (set by the bones
+* pass's caller, skeletonLeanParts; BONE_NO_PART none).
+*/
 struct GpuSwaySkeleton {
     std::uint32_t firstBone = 0;
     std::uint32_t boneCount = 0;
     float height = 1.0f;
     float footRadius = 0.0f;
+    std::uint32_t firstLevel = 0;
+    std::uint32_t levelCount = 0;
+    std::uint32_t leanPart = 0xFFFFFFFFu;
+    std::uint32_t unused = 0;
 };
 
-static_assert(sizeof(GpuSwaySkeleton) == 16, "GpuSwaySkeleton must match the shaders' SwaySkeletonRecord");
+static_assert(sizeof(GpuSwaySkeleton) == 32, "GpuSwaySkeleton must match the shaders' SwaySkeletonRecord");
+
+// A chain (a branch's run of bones, each the one before's child): its first bone within its skeleton and how many.
+struct GpuSwayChain {
+    std::uint32_t firstBone = 0;
+    std::uint32_t boneCount = 0;
+};
+
+static_assert(sizeof(GpuSwayChain) == 8, "GpuSwayChain must match the shaders' uvec2");
 
 struct SwaySkeletonTables {
     std::vector<GpuSwayBone> bones;
     std::vector<GpuSwaySkeleton> skeletons;
+    std::vector<GpuSwayChain> chains;
+    std::vector<std::uint32_t> levelStarts;
 };
 
 /*
-* The skeletons in their order, each its bones after the last's. Throws std::invalid_argument for a skeleton with no
-* bones, more than SWAY_MOST_BONES or bones not parents first (swayBonesOrdered).
+* The skeletons in their order, each its bones after the last's and its chains by level (the trunk's, then the
+* branches on it, ...; by first bone within a level), so the bones pass poses a level's chains at once once the level
+* before is done. Throws std::invalid_argument for a skeleton with no bones, more than SWAY_MOST_BONES or bones not
+* parents first (swayBonesOrdered); a chain not a run from its chainStart, each bone the one before's child and of one
+* level; or a chain starting on a bone not of a lower level.
 */
 SwaySkeletonTables packSwaySkeletons(const std::vector<const SwaySkeleton*>& skeletons);
 

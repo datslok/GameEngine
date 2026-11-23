@@ -129,6 +129,21 @@ namespace {
             report.check("windSoftLean", arithmeticTolerance, expected.x, outputs[i][0]);
             report.check("windSoftLean", arithmeticTolerance, expected.y, outputs[i][1]);
         }
+
+        // The same leans bent by a bend and faded (windFadedLean). Inputs: spring, bend, fade.
+        std::vector<GpuVec4> faded;
+
+        for (int i = 0; i < 300; ++i) {
+            faded.push_back(gpuVec4(random.between(-3.0f, 3.0f), random.between(-3.0f, 3.0f), random.between(0.0f, 2.0f), random.between(0.0f, 1.0f)));
+        }
+
+        const std::vector<GpuVec4> fadedOut = runner.run(shader, GPU_TEST_WIND_FADED_LEAN, faded, 1, 1);
+
+        for (std::size_t i = 0; i < faded.size(); ++i) {
+            const Vec2 expected = windFadedLean(Vec2{faded[i][0], faded[i][1]}, faded[i][2], faded[i][3]);
+            report.check("windFadedLean", arithmeticTolerance, expected.x, fadedOut[i][0]);
+            report.check("windFadedLean", arithmeticTolerance, expected.y, fadedOut[i][1]);
+        }
     }
 
     // Places in, near the edges of and outside windows anywhere. Inputs: the place and the window's first cell; the cell.

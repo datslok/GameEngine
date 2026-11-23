@@ -61,6 +61,7 @@
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_placed_drawing.h"
+#include "render/vulkan/vulkan_bone_posing.h"
 #include "render/vulkan/vulkan_twig_drawing.h"
 #include "render/vulkan/vulkan_planting.h"
 #include "render/vulkan/vulkan_wind.h"
@@ -151,6 +152,10 @@ public:
     // cluster-compare: asks for the next frame's camera mesh cluster list to be compared with the CPU's, and returns the
     // last comparison's report (empty while none has finished).
     std::string compareMeshClusters();
+
+    // bones-compare: asks for the next frame's posed trees and poses to be read back and checked against the CPU's, and
+    // returns the last comparison's report (empty while none has finished).
+    std::string compareBones();
 
     // The time (wall clock, every thread together) spent building the uploaded meshes' clusters and their levels, for the
     // start-up report.
@@ -403,6 +408,28 @@ private:
     std::optional<std::uint32_t> framePlaced;
     std::optional<std::uint32_t> frameTwigs; // the frame drawing twigs (twigDrawing prepared), if this one does
 
+    // The swaying trees' bones (phase 21 stage 3c-iii-b): the frame posing them, its swaying placed views, bones-compare's
+    // request and report, and the last counts for F4.
+    std::unique_ptr<VulkanBonePosing> bonePosing;
+    std::optional<std::uint32_t> frameBones;
+    std::vector<std::uint32_t> swayingPlacedViews;
+    bool bonesCompareAsked = false;
+    std::string bonesCompareReport;
+    std::optional<VulkanBonePosing::Collected> lastBones;
+
+    // A frame read back for bones-compare: its swaying views, eye, fade end, times and motion, as its passes took them.
+    struct BonesCompare {
+        std::uint32_t frameIndex = 0;
+        std::vector<std::uint32_t> views;
+        Vec3 eye;
+        float fadeEnd = 0.0f;
+        float seconds = 0.0f;
+        float previousSeconds = 0.0f;
+        WindBoneMotion motion;
+    };
+
+    std::optional<BonesCompare> bonesCompare;
+
     // The camera's placed plants are drawn as mesh clusters this frame, so its passes skip their indexed draws.
     bool framePlacedByClusters = false;
 
@@ -572,6 +599,7 @@ private:
         bool placed = false;
     };
 
+    void takeBonePoses(std::uint32_t frameIndex);
     void takeMeshClusterCull(const VulkanMeshClusterCulling::Collected& culled, const VulkanCameraCulling::Collected* cameraCulled,
                              std::uint32_t frameIndex);
 

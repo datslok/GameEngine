@@ -111,6 +111,13 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
         lines.insert(lines.begin() + 2, twigStatsText(stats));
     }
 
+    // The bones pass's (ROADMAP phase 21 stage 3c-iii-b): trees posed, those still for want of room, bones asked of the pool.
+    if (stats.boneTrees > 0) {
+        lines.insert(lines.begin() + (stats.twigsTested > 0 ? 3 : 2), "BONES TREES " + std::to_string(stats.boneTrees) + "  STILL " +
+                                                                         std::to_string(stats.boneTreesStill) + "  BONES " +
+                                                                         std::to_string(stats.bonesAsked) + "/" + std::to_string(stats.bonePool));
+    }
+
     return lines;
 }
 

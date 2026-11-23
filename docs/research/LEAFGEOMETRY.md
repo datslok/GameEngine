@@ -70,6 +70,10 @@ The culling algorithm itself is unpublished (no talk slides found).
   - Last frame's poses (2A) recomputed from last frame's springs and time, as the sway does today: no slot history.
   - Twigs (3A) rigid by their bone's blended pose at the foot, plus a flutter turn about it: work a twig, not a leaf vertex.
   - Every tree mesh bound (4A): bark's old levels and the shadows' leaf cards too, so a tree and its shadow move alike and the per-vertex sway can go.
+- **The bones pass (3c-iii-b, the user's picks A A A, Nov 22 2026):** wind and bones moved before the cluster passes (3c-iv's bounds need the poses); a tree claimed once by a word a held plant (frame stamp and tree, no clearing, one read a vertex); a workgroup a tree posing a chain a thread, chain level by level between barriers (each bone once, 3-5 barriers a tree).
+  - [S] Unreal Dynamic Wind ([Nanite Foliage](https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-foliage), [Dynamic Wind](https://dev.epicgames.com/documentation/unreal-engine/dynamic-wind-for-nanite-foliage-in-unreal-engine)): bones simulated on the GPU, each its own spring (mass, drag area, centres baked; "no full constraint solver"), `DynamicWind.Mode 0` stateless; plants under the global wind share "a small set of simulations, one per wind direction", a plant reached by a force, push capsule or volume promoted to its own (budget 256 a mesh, back after 3 s); animation off below 0.1 of the screen; 100k bones about 0.1 ms; ordering and layout not documented.
+  - [S] GPU hierarchies ([arXiv 2505.06703](https://arxiv.org/html/2505.06703v1)): a thread a joint walking to its root wastes work in deep skeletons; barriers near 40% of a shallow skeleton's cost, so few levels between barriers.
+  - [I] Ours is per tree and stateless (Mode 0's kind) but spatial: each tree's lean from the field at its foot. Later and optional: per-bone springs for a budget of near trees with push forces (phase 15's hero), shared poses a (variant, wind cell) for far trees if BONES shows in timings.
 - **Far:** the crown impostor card stays until volumes (`FARFOLIAGE.md`).
 
 ## The plan (phase 21 stage 3)

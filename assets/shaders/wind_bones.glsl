@@ -46,6 +46,21 @@ vec3 windBoneTurn(vec3 direction, float share, vec2 lean, float hertz, float pha
     return (towards + across) * share;
 }
 
+/*
+* A bone's own turn in its tree (windBoneOwnTurn): tree its height and foot radius (mesh units), metres a unit; motion
+* the field's two words of WindBoneMotion (exponent, most, wood speed, slowest; fastest, swing along, swing across).
+*/
+vec3 windBoneOwnTurn(vec3 pivot, vec3 tip, float radius, uint chainStart, float chainLength, float chainRadius, vec3 tree, uint seed, vec2 lean,
+                     float seconds, vec4 motion, vec4 swing) {
+    vec3 along = tip - pivot;
+    float boneLength = length(along);
+    vec3 direction = boneLength > 0.0 ? along / boneLength : vec3(0.0, 1.0, 0.0);
+    float share = windBoneShare(boneLength, tree.x, radius, tree.y, motion.x, motion.y);
+    float hertz = windBranchHertz(chainLength * tree.z, chainRadius * tree.z, motion.z, motion.w, swing.x);
+    float phase = windBranchPhase(seed, chainStart);
+    return windBoneTurn(direction, share, lean, hertz, phase, seconds, swing.yz);
+}
+
 vec3 windBonePlace(WindBonePose pose, vec3 place) {
     return quatRotate(pose.turn, place) + pose.shift;
 }

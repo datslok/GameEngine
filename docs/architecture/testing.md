@@ -111,7 +111,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `facet_variation.glsl` | `render/gpu/facet_variation` | `facet_variation_gpu_test.cpp` |
 | `foliage_shading.glsl` | `scene/foliage_shading` | `foliage_shading_gpu_test.cpp` |
 | `wind.glsl` | `render/gpu/wind` | `wind_gpu_test.cpp` |
-| `wind_bones.glsl`, `quat.glsl` | `render/gpu/wind_bones`, `math/quat` | `wind_bones_gpu_test.cpp` |
+| `wind_bones.glsl`, `quat.glsl`, `bone_poses.glsl` | `render/gpu/wind_bones`, `math/quat`, `render/gpu/bone_poses` | `wind_bones_gpu_test.cpp` |
 | `liana.glsl` | `scene/liana_shape` | `liana_gpu_test.cpp` |
 | `cloth.glsl`, `deform.glsl` | `src/cloth/` itself, `scene/deforming_mesh` | `cloth_gpu_test.cpp` (and the cloth passes) |
 

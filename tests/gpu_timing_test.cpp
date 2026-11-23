@@ -41,28 +41,28 @@ void testGpuTiming() {
         assert(std::string(gpuPassName(GpuPass::Cloth)) == "CLOTH");
     }
 
-    // The camera's lists are built on the GPU first of the scene's passes, once the scene's buffers are written, and its
-    // mesh clusters culled from them; then the ray tracing scene, the light probes traced through it, the wind's springs, the planting cells, the placed plants' lists and the clusters'
-    // light lists, before anything that could read any of them.
+    // The passes' stamps are written in this order, so it must be the order a frame records them in (a pass recorded
+    // after a later one would take no time, its time counted to the pass after it). After the camera's lists: the
+    // planting cells, the placed plants' lists, the wind's springs, the bones posed from them, the twigs and the mesh
+    // clusters (both reading the placed lists); then the ray tracing scene, the light probes traced through it and the
+    // clusters' light lists, before anything that could read any of them.
     {
-        assert(static_cast<int>(GpuPass::DebugUi) + 1 == static_cast<int>(GpuPass::CameraCull));
+        const GpuPass order[] = {GpuPass::DebugUi, GpuPass::CameraCull, GpuPass::Planting, GpuPass::Placed, GpuPass::Wind,
+                                 GpuPass::Bones,   GpuPass::Twigs,      GpuPass::MeshCull, GpuPass::RayScene, GpuPass::Atmosphere,
+                                 GpuPass::Probes,  GpuPass::Clusters,   GpuPass::Shadows};
+
+        for (std::size_t pass = 0; pass + 1 < std::size(order); ++pass) {
+            assert(static_cast<int>(order[pass]) + 1 == static_cast<int>(order[pass + 1]));
+        }
+
         assert(std::string(gpuPassName(GpuPass::CameraCull)) == "CULL");
-        assert(static_cast<int>(GpuPass::CameraCull) + 1 == static_cast<int>(GpuPass::MeshCull));
         assert(std::string(gpuPassName(GpuPass::MeshCull)) == "MESHCULL");
-        assert(static_cast<int>(GpuPass::MeshCull) + 1 == static_cast<int>(GpuPass::RayScene));
-        assert(static_cast<int>(GpuPass::RayScene) + 1 == static_cast<int>(GpuPass::Atmosphere));
-        assert(static_cast<int>(GpuPass::Atmosphere) + 1 == static_cast<int>(GpuPass::Probes));
         assert(std::string(gpuPassName(GpuPass::Atmosphere)) == "SKY");
-        assert(static_cast<int>(GpuPass::Probes) + 1 == static_cast<int>(GpuPass::Wind));
         assert(std::string(gpuPassName(GpuPass::Wind)) == "WIND");
-        assert(static_cast<int>(GpuPass::Wind) + 1 == static_cast<int>(GpuPass::Planting));
         assert(std::string(gpuPassName(GpuPass::Planting)) == "PLANTING");
-        assert(static_cast<int>(GpuPass::Planting) + 1 == static_cast<int>(GpuPass::Placed));
         assert(std::string(gpuPassName(GpuPass::Placed)) == "PLACED");
-        assert(static_cast<int>(GpuPass::Placed) + 1 == static_cast<int>(GpuPass::Twigs));
+        assert(std::string(gpuPassName(GpuPass::Bones)) == "BONES");
         assert(std::string(gpuPassName(GpuPass::Twigs)) == "TWIGS");
-        assert(static_cast<int>(GpuPass::Twigs) + 1 == static_cast<int>(GpuPass::Clusters));
-        assert(static_cast<int>(GpuPass::Clusters) + 1 == static_cast<int>(GpuPass::Shadows));
         assert(std::string(gpuPassName(GpuPass::Clusters)) == "CLUSTERS");
     }
 
@@ -164,7 +164,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];

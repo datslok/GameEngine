@@ -52,6 +52,9 @@ void Application::registerCommands() {
     addClusterCompareCommand(commands, [this] {
         return renderer.compareMeshClusters();
     });
+    addBonesCompareCommand(commands, [this] {
+        return renderer.compareBones();
+    });
     game.addCommands(commands, world);
 
     commands.add("screenshot", "screenshot <file.png> [width height]",

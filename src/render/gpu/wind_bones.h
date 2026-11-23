@@ -34,6 +34,13 @@ struct WindBoneMotion {
     float fastestHertz = 3.0f;
     float swingShare = 0.3f;
     float sideShare = 0.3f;
+
+    // The bones the bones pass may pose a frame at first (two poses each, this frame's and last's, 32 B each: 256K
+    // bones 16 MB). When a frame asks for more, the pool grows to the next power of two at or above the ask
+    // (boneGrownPool), never past poolMostBones (4M bones, 256 MB); a tree past the pool stands still meanwhile, F4's
+    // BONES line showing how many were asked for. Changing either starts again from poolBones.
+    int poolBones = 262144;
+    int poolMostBones = 4194304;
 };
 
 void visit(WindBoneMotion& motion, SettingsVisitor& visitor);
@@ -90,9 +97,36 @@ Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere);
 // The smallest sphere holding two spheres (xyz centre, w radius).
 Vec4 windSphereUnion(const Vec4& first, const Vec4& second);
 
+// A bone as its turn needs it, in its mesh's units: pivot, tip, radius at the pivot, its chain's first bone, length and
+// radius at its start.
+struct WindBoneShape {
+    Vec3 pivot;
+    Vec3 tip;
+    float radius = 0.0f;
+    std::uint32_t chainStart = 0;
+    float chainLength = 0.0f;
+    float chainRadius = 0.0f;
+};
+
+// Its tree: height and foot radius in the mesh's units, metres a unit (the plant's scale), seed (its branches' phases).
+struct WindTreeShape {
+    float height = 1.0f;
+    float footRadius = 0.0f;
+    float metresPerUnit = 1.0f;
+    std::uint32_t seed = 0;
+};
+
 /*
-* Every bone's pose (in their order, parents first: swayBonesOrdered) for a tree of a height and seed with a lean at a
-* time; its foot radius the first bone's. As the bones pass will, on the CPU: for tests and checks.
+* A bone's own turn in its tree: windBoneTurn of its rest direction (up for a bone of no length), its share
+* (windBoneShare: lengths and radii in mesh units, so the scale cancels) and its branch's hertz (its chain's length and
+* radius in metres) and phase.
 */
-std::vector<WindBonePose> windTreePoses(const std::vector<SwayBone>& bones, float treeHeight, std::uint32_t treeSeed, const Vec2& lean,
+Vec3 windBoneOwnTurn(const WindBoneShape& bone, const WindTreeShape& tree, const Vec2& lean, float seconds, const WindBoneMotion& motion);
+
+/*
+* Every bone's pose (in their order, parents first: swayBonesOrdered) for a tree of a height (mesh units), metres a
+* unit and seed with a lean at a time; its foot radius the first bone's. In list order on the CPU: the reference the
+* bones pass's level by level posing (boneTreePoses) is tested against.
+*/
+std::vector<WindBonePose> windTreePoses(const std::vector<SwayBone>& bones, float treeHeight, float metresPerUnit, std::uint32_t treeSeed, const Vec2& lean,
                                         float seconds, const WindBoneMotion& motion);
