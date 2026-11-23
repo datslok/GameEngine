@@ -7,7 +7,7 @@
           {
             "type": "command",
             "if": "Bash(*git commit*)",
-            "command": "powershell -NoProfile -File tools/docs_reminder.ps1",
+            "command": "powershell -NoProfile -File \"$CLAUDE_PROJECT_DIR/tools/docs_reminder.ps1\"",
             "timeout": 30,
             "statusMessage": "Checking the docs"
           }
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "if": "PowerShell(*git commit*)",
-            "command": "powershell -NoProfile -File tools/docs_reminder.ps1",
+            "command": "powershell -NoProfile -File \"$CLAUDE_PROJECT_DIR/tools/docs_reminder.ps1\"",
             "timeout": 30,
             "statusMessage": "Checking the docs"
           }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -I tools/hooks/claude_hooks.py commands",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/tools/hooks/claude_hooks.py\" commands",
             "timeout": 30
           }
         ]
@@ -41,13 +41,13 @@
           {
             "type": "command",
             "if": "Edit(**/[Mm]akefile)",
-            "command": "python -I tools/hooks/claude_hooks.py makefile",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/tools/hooks/claude_hooks.py\" makefile",
             "timeout": 30
           },
           {
             "type": "command",
             "if": "Write(**/[Mm]akefile)",
-            "command": "python -I tools/hooks/claude_hooks.py makefile",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/tools/hooks/claude_hooks.py\" makefile",
             "timeout": 30
           }
         ]
@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -I tools/hooks/claude_hooks.py line-endings",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/tools/hooks/claude_hooks.py\" line-endings",
             "timeout": 30
           }
         ]
@@ -70,7 +70,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -I tools/hooks/claude_hooks.py games",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/tools/hooks/claude_hooks.py\" games",
             "timeout": 30
           }
         ]

@@ -11,6 +11,7 @@ Exit 2 blocks the call and shows stderr to Claude; a costly run prints a permiss
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -189,7 +190,7 @@ def check_makefile(event):
 # The line-endings check: rewrites a just-written file in a CRLF folder with CRLF endings.
 def check_line_endings(event):
     path = Path(event.get("tool_input", {}).get("file_path", ""))
-    root = Path(event.get("cwd") or REPO_ROOT)
+    root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or REPO_ROOT)  # not the event's cwd: the shell's folder after a cd
     if not path.is_file() or not wants_crlf(path, root):
         return
     converted = with_crlf(path.read_bytes())

@@ -64,6 +64,7 @@ Covers: `makefile`, `tools/package_demo.py`, `tools/hooks/`
 | `line-endings` | After an Edit or Write | Turns bare LF into CRLF in `src/`, `tests/`, `assets/shaders/` and `tools/` (root files such as `README.md` keep theirs) |
 | `games` | When Claude ends a turn | Keeps the turn going while a game copy with `--port 47620` (Claude's, never the user's) runs |
 
+- **Paths from the project's root:** the hooks name their scripts by `$CLAUDE_PROJECT_DIR`, and `line-endings` measures folders from it, since a `cd` leaves the shell (and the hook's `cwd`) in a subfolder.
 - **Blocking:** exit code 2, the reason on stderr for Claude; a question is the PreToolUse `ask` permission decision.
 - **Cost:** about 80 ms a shell command (150 ms a `git commit`); the games check lists processes with `tasklist` and asks PowerShell for command lines only when a `game.exe` runs.
 - **Tests:** `python -I tools/hooks/test_claude_hooks.py`, each check's cases plus whole runs fed hook JSON.
