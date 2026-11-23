@@ -118,8 +118,10 @@ struct PlantingCell {
 
 PlantingBox plantingCellBox(const PlantingCell& cell, float cellMetres);
 
-// The most cells held at once: those touching a square of the drop distance either way round any place.
+// The most cells held at once: those touching a square of the drop distance either way round any place. Its side: the
+// most held across or down, so no two held cells share their columns and rows modulo it.
 int plantingSlotCount(const PlantingCellSetSettings& settings);
+int plantingSlotSide(const PlantingCellSetSettings& settings);
 
 /*
 * Where a slot keeps each layer's plants (layerFirst, at most layerCapacity: the lattice cells over a cell's box, each

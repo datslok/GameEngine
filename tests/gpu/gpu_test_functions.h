@@ -333,4 +333,9 @@
 #define GPU_TEST_BONE_CLAIMED_TREE 9
 #define GPU_TEST_WIND_RIGID_POSE 10
 
+// liana_trees_test.comp
+#define GPU_TEST_LIANA_TREE_CELL 0
+#define GPU_TEST_LIANA_CELL_PLACE 1
+#define GPU_TEST_LIANA_SAME_TREE 2
+
 #endif

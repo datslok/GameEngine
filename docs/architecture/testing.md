@@ -113,6 +113,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `wind.glsl` | `render/gpu/wind` | `wind_gpu_test.cpp` |
 | `wind_bones.glsl`, `quat.glsl`, `bone_poses.glsl` | `render/gpu/wind_bones`, `math/quat`, `render/gpu/bone_poses` | `wind_bones_gpu_test.cpp` |
 | `liana.glsl` | `scene/liana_shape` | `liana_gpu_test.cpp` |
+| `liana_trees.glsl` | `render/gpu/liana_trees` | `liana_trees_gpu_test.cpp` |
 | `cloth.glsl`, `deform.glsl` | `src/cloth/` itself, `scene/deforming_mesh` | `cloth_gpu_test.cpp` (and the cloth passes) |
 
 - Without a test shader of their own: `probe_cascades.glsl` (`render/gpu/probe_cascades`; checked through the real cascade passes in `ddgi_gpu_test.cpp`), `ray_scene.glsl` (through `ray_query_test.comp`), and helpers such as `hash.glsl`, `fibonacci.glsl`, `impostor_sampling.glsl` reached through the libraries that include them.

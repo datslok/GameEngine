@@ -1,0 +1,23 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs liana_trees.glsl's functions on the cases liana_trees_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "liana_trees.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+    vec4 b = testInput(1);
+
+    if (function == GPU_TEST_LIANA_TREE_CELL) {
+        testOutput(0, vec4(vec2(lianaTreeCell(a.xy, a.z)), 0.0, 0.0));
+    } else if (function == GPU_TEST_LIANA_CELL_PLACE) {
+        testOutput(0, vec4(float(lianaCellPlace(ivec2(a.xy), uint(a.z)))));
+    } else if (function == GPU_TEST_LIANA_SAME_TREE) {
+        testOutput(0, vec4(lianaSameTree(a.xyz, b.xyz) ? 1.0 : 0.0));
+    }
+}

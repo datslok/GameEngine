@@ -1,0 +1,101 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The lianas' trees found among the planted plants (render/vulkan/vulkan_liana_trees.h; render/gpu/liana_trees.h's
+* lianaTreePlant does the same on the CPU): a thread a liana's anchor, two a record. An anchor on a tree of a planted
+* layer, within the sway's reach, finds its foot's cell in its layer's set, the cell's slot from the set's table, and
+* the plant standing on that foot among the slot's plants of that layer; every other anchor finds BONE_NO_TREE, so
+* nothing is left from an earlier frame.
+*/
+#include "bone_poses.glsl"
+#include "liana.glsl"
+#include "liana_trees.glsl"
+#include "placed_plant.glsl"
+
+layout(local_size_x = LIANA_TREES_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer LianaRecords {
+    LianaShape lianaShapes[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer SlotPlants {
+    PlacedPlant placedPlants[];
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer SlotCounts {
+    uint plantingCounts[];
+};
+
+layout(std430, set = 0, binding = 3) readonly buffer TreeLayers {
+    LianaTreeLayer lianaTreeLayers[];
+};
+
+layout(std430, set = 0, binding = 4) readonly buffer TreeCells {
+    LianaCell lianaCells[];
+};
+
+layout(std430, set = 0, binding = 5) writeonly buffer TreePlants {
+    uint lianaTreePlants[];
+};
+
+// The eye, the sway's fade end, the field's layers and the anchors (two a record) to find.
+layout(push_constant) uniform LianaTreesPush {
+    vec4 eye;
+    float fadeEnd;
+    uint layerCount;
+    uint anchorCount;
+    uint unused;
+} push;
+
+// The plant an anchor's tree is, or BONE_NO_TREE.
+uint plantOf(LianaShape shape, uint end) {
+    uint layer = end == 0u ? shape.anchors.z : shape.anchors.w;
+
+    if (layer >= push.layerCount) {
+        return BONE_NO_TREE;
+    }
+
+    LianaTreeLayer record = lianaTreeLayers[layer];
+    vec3 foot = end == 0u ? shape.firstTree.xyz : shape.secondTree.xyz;
+
+    if (!(record.cellMetres > 0.0) || !boneTreeWanted(foot, push.eye.xyz, push.fadeEnd)) {
+        return BONE_NO_TREE;
+    }
+
+    ivec2 cell = lianaTreeCell(foot.xz, record.cellMetres);
+    uint place = record.firstCell + lianaCellPlace(cell, record.side);
+
+    if (place >= uint(lianaCells.length())) {
+        return BONE_NO_TREE;
+    }
+
+    LianaCell held = lianaCells[place];
+
+    if (held.slot == LIANA_CELL_EMPTY || held.column != cell.x || held.row != cell.y) {
+        return BONE_NO_TREE;
+    }
+
+    uint countPlace = record.firstCount + held.slot * record.countsASlot;
+    uint first = record.firstPlant + held.slot * record.plantsASlot;
+    uint count = countPlace < uint(plantingCounts.length()) ? plantingCounts[countPlace] : 0u;
+    uint last = min(first + count, uint(placedPlants.length()));
+
+    for (uint plant = first; plant < last; ++plant) {
+        if (lianaSameTree(placedPlants[plant].foot, foot)) {
+            return plant;
+        }
+    }
+
+    return BONE_NO_TREE;
+}
+
+void main() {
+    uint anchor = gl_GlobalInvocationID.x;
+
+    if (anchor >= push.anchorCount) {
+        return;
+    }
+
+    lianaTreePlants[anchor] = plantOf(lianaShapes[anchor / 2u], anchor % 2u);
+}

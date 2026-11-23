@@ -140,6 +140,7 @@ void gpuTestPlacedDrawing(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestImpostor(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestLiana(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestLianaTrees(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCardThinning(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestFacetVariation(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestFoliageShading(GpuFunctionRunner& runner, GpuCheckReport& report);

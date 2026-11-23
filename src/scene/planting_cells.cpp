@@ -109,9 +109,13 @@ PlantingBox plantingCellBox(const PlantingCell& cell, float cellMetres) {
 }
 
 // Cells touching a span of twice the drop distance along each axis: at most ceil(span / cell) + 1 a side.
-int plantingSlotCount(const PlantingCellSetSettings& settings) {
+int plantingSlotSide(const PlantingCellSetSettings& settings) {
     checkSettings(settings);
-    const int side = static_cast<int>(std::ceil(2.0f * dropDistance(settings) / settings.cellMetres)) + 1;
+    return static_cast<int>(std::ceil(2.0f * dropDistance(settings) / settings.cellMetres)) + 1;
+}
+
+int plantingSlotCount(const PlantingCellSetSettings& settings) {
+    const int side = plantingSlotSide(settings);
     return side * side;
 }
 
