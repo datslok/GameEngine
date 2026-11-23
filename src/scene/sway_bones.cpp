@@ -106,7 +106,8 @@ float swayArcOfPoint(const std::vector<Vec3>& points, const Vec3& point) {
     return closestOnLine(points, point).second;
 }
 
-SwayLine makeSwayLine(const SwayChain& chain, const std::vector<Vec3>& points) {
+// A sphere about the middle of some points' box (at least one), through the farthest of them.
+static SwaySphere boxMiddleSphere(const std::vector<Vec3>& points) {
     Vec3 low = points.front();
     Vec3 high = points.front();
 
@@ -115,14 +116,36 @@ SwayLine makeSwayLine(const SwayChain& chain, const std::vector<Vec3>& points) {
         high = Vec3{std::max(high.x, point.x), std::max(high.y, point.y), std::max(high.z, point.z)};
     }
 
-    const Vec3 centre = (low + high) * 0.5f;
-    float radius = 0.0f;
+    SwaySphere sphere{.centre = (low + high) * 0.5f};
 
     for (const Vec3& point : points) {
-        radius = std::max(radius, (point - centre).length());
+        sphere.radius = std::max(sphere.radius, (point - sphere.centre).length());
     }
 
-    return SwayLine{.chain = chain, .points = points, .centre = centre, .radius = radius};
+    return sphere;
+}
+
+SwayLine makeSwayLine(const SwayChain& chain, const std::vector<Vec3>& points) {
+    const SwaySphere sphere = boxMiddleSphere(points);
+    return SwayLine{.chain = chain, .points = points, .centre = sphere.centre, .radius = sphere.radius};
+}
+
+SwaySphere swaySkeletonSphere(const SwaySkeleton& skeleton) {
+    if (skeleton.bones.empty()) {
+        throw std::invalid_argument("A skeleton's sphere needs a bone");
+    }
+
+    std::vector<Vec3> ends;
+    ends.reserve(2 * skeleton.bones.size());
+
+    for (const SwayBone& bone : skeleton.bones) {
+        ends.push_back(bone.pivot);
+        ends.push_back(bone.tip);
+    }
+
+    SwaySphere sphere = boxMiddleSphere(ends);
+    sphere.radius += std::max(skeleton.reach, 0.0f);
+    return sphere;
 }
 
 SwayBinding swayNearestBinding(const std::vector<SwayLine>& lines, const std::vector<SwayBone>& bones, const Vec3& point, float blendShare) {

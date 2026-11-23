@@ -68,8 +68,7 @@ public:
         std::vector<std::uint32_t> swayingViews;
         VkDescriptorSet textures = VK_NULL_HANDLE;
         VkDescriptorSet scene = VK_NULL_HANDLE;
-        Vec3 eye;
-        float fadeEnd = 0.0f;
+        BoneScreen screen; // the camera's, deciding which trees sway for every view
         bool readBackPoses = false; // for bones-compare: the trees and pool copied back too
     };
 

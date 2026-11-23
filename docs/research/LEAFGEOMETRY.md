@@ -99,7 +99,8 @@ The culling algorithm itself is unpublished (no talk slides found).
     - Clusters built as today, each with up to 8 of its vertices' bones (`GpuMeshCluster::bones`, 128 B); more, its rest sphere grown by its tree's move.
     - Measured (seeds 7 and 21): full-detail bark 78-84% of big trees' clusters within 4 bones, the rest 5-8 (where about four chains meet); cards 80-89%, 3 of 611 past 8; the first coarser level 48-61% within 4, 2% past 8; the second a third past 8. So 8 (the user's pick for scale: a fixed cost a cluster) holds full detail exactly; a list of any length only if bones shrink.
     - A tree's move a frame (the bones pass): its bones' largest pivot or tip move E and largest `2 |turn.xyz|` A; any point within its skeleton's reach R (`SwaySkeleton::reach`) of its bones, blended or rigid between two, moves at most E + A R.
-    - Animation stopped below 0.1 of the screen (the tree's sphere's diameter over the screen's height), faded below it, decided by the camera for every view; F5.
+    - Animation stopped below 0.1 of the screen (the tree's sphere's diameter over the screen's height), decided by the camera for every view; F5.
+    - The screen cut (the user's picks A A A, Nov 23 2026): the lean fades in from still at 0.1 to full at 0.15; the share replaces the 400 m distance for trees with bones (plants without keep it); size is the skeleton's rest sphere (bones' box's middle, grown by the reach), so wide trees count as big.
     - Split: iv-a the bones and the move; iv-b culled by them (frustum, occlusion); iv-c the screen cut.
   - [I] No facing test on posed clusters (found building iv-b): a blend shears triangles near a joint, so a normal turns by more than its bones do and no widened cone is safe; the flutter moves leaves too. Twigs move rigidly, but flutter as well.
 - **Far:** the crown impostor card stays until volumes (`FARFOLIAGE.md`).

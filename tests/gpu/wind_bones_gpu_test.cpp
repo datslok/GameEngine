@@ -246,16 +246,50 @@ namespace {
             report.check("windLeanInPlant", transcendentalTolerance, own.y, leaned[i][1]);
 
             const GpuVec4* c = &claims[3 * i];
-            const bool wanted = boneTreeWanted(vec3From(c[0]), vec3From(c[2]), c[0][3]);
+            const bool wanted = boneFootInReach(vec3From(c[0]), vec3From(c[2]), c[0][3]);
             const std::uint32_t firstPose =
                 boneTreeFirstPose(std::bit_cast<std::uint32_t>(c[1][0]), std::bit_cast<std::uint32_t>(c[1][1]), std::bit_cast<std::uint32_t>(c[1][2]));
-            report.check("boneTreeWanted", arithmeticTolerance, wanted ? 1.0f : 0.0f, claimed[i][0]);
+            report.check("boneFootInReach", arithmeticTolerance, wanted ? 1.0f : 0.0f, claimed[i][0]);
             report.check("boneTreeFirstPose", arithmeticTolerance, static_cast<float>(firstPose == boneNoPose),
                          static_cast<float>(std::bit_cast<std::uint32_t>(claimed[i][1]) == boneNoPose));
             report.check("boneTreeFirstPose", arithmeticTolerance, static_cast<float>(firstPose), static_cast<float>(std::bit_cast<std::uint32_t>(claimed[i][1])));
             GpuPlacedPlant picked{};
             picked.pick = c[1][3];
             report.check("boneTreeSeed", arithmeticTolerance, static_cast<float>(boneTreeSeed(picked) == std::bit_cast<std::uint32_t>(claimed[i][2])), 1.0f);
+        }
+
+        // How big a tree looks (boneTreeSphere, boneScreenShare, boneScreenFade, boneTreeWanted): random plants, turns,
+        // skeleton spheres, eyes from inside the tree to a kilometre off, shares about the still one.
+        std::vector<GpuVec4> screens;
+
+        for (int i = 0; i < 400; ++i) {
+            const float still = random.between(0.0f, 0.3f);
+            screens.push_back(gpuVec4(random.direction() * random.between(0.0f, 300.0f), random.between(0.3f, 3.0f)));
+            screens.push_back(gpuVec4(random.between(-7.0f, 7.0f), still, still + random.between(0.01f, 0.2f), random.between(0.5f, 4.0f)));
+            screens.push_back(gpuVec4(random.direction() * random.between(0.0f, 10.0f), random.between(0.5f, 25.0f)));
+            screens.push_back(gpuVec4(random.direction() * random.between(0.0f, 1000.0f)));
+        }
+
+        const std::vector<GpuVec4> screened = runner.run(shader, GPU_TEST_BONE_SCREEN, screens, 4, 2);
+
+        for (std::size_t i = 0; i < screened.size() / 2; ++i) {
+            const GpuVec4* s = &screens[4 * i];
+            GpuSwaySkeleton skeleton;
+            std::copy(s[2].begin(), s[2].end(), skeleton.sphere);
+            const GpuPlacedPlant plant{.foot = {s[0][0], s[0][1], s[0][2]}, .scale = s[0][3], .turnRadians = s[1][0], .pick = 0.0f, .kind = 0, .threshold = 0.0f};
+            const BoundingSphere placed = boneTreeSphere(plant, skeleton);
+            const float share = boneScreenShare(placed, vec3From(s[3]), s[1][3]);
+            // A cosine and sine of up to 7 radians times centres up to 10 m at scale 3, then a length and a division.
+            report.check("boneTreeSphere", transcendentalTolerance, placed.centre, vec3From(screened[2 * i]));
+            report.check("boneTreeSphere", arithmeticTolerance, placed.radius, screened[2 * i][3]);
+            report.check("boneScreenShare", transcendentalTolerance, share, screened[2 * i + 1][0]);
+            // The fade of the GPU's own share: its smoothstep alone, not the share's rounding through its slope.
+            report.check("boneScreenFade", transcendentalTolerance, boneScreenFade(screened[2 * i + 1][0], s[1][1], s[1][2]), screened[2 * i + 1][1]);
+
+            // Wanted alike unless the two shares straddle the still one by rounding.
+            if (std::abs(share - s[1][1]) > 1e-4f * std::max(share, 1.0f)) {
+                report.check("boneTreeWanted", arithmeticTolerance, boneTreeWanted(share, s[1][1]) ? 1.0f : 0.0f, screened[2 * i + 1][2]);
+            }
         }
 
         // What a draw reads (boneClaimedTree, bonePoseSlot): stamps matching or not, 0 (no pass), wrapped; integers as

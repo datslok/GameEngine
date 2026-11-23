@@ -4,7 +4,7 @@
 /*
 * The bones passes' second (render/vulkan/vulkan_bone_posing.h; its CPU steps boneTreePoses): a workgroup a claimed
 * tree. Its lean, this frame's and last's, from the trees' spring at its foot through its skeleton's lean part's bend,
-* faded, turned into its plant's frame; then its skeleton's chains a level at a time, a thread a chain walking its bones
+* faded by its share of the camera's screen (boneScreenFade), turned into its plant's frame; then its skeleton's chains a level at a time, a thread a chain walking its bones
 * in order, each bone's own turn carried by its parent's pose (the bone before in its chain, or one a level below,
 * posed before the barrier). Both frames' poses at once: last frame's recomputed from last frame's springs and time.
 * Then the tree's move (boneTreeMove): each thread's largest bone moves gathered by atomicMax on their bits (a float at
@@ -42,7 +42,7 @@ void main() {
 
         if (skeleton.leanPart != BONE_NO_PART && windField.sway.x != 0.0) {
             float bend = placedPartInstances[skeleton.leanPart].sway.z;
-            float fade = windSwayFade(distance(plant.foot, push.eye.xyz), windField.sway.y, windField.sway.z);
+            float fade = boneScreenFade(boneTreeScreenShare(plant, skeleton), push.stillShare, push.fullShare);
             vec2 now = windFadedLean(windSpringAt(plant.foot.xz, WIND_CATEGORY_TREES, false), bend, fade);
             vec2 last = windFadedLean(windSpringAt(plant.foot.xz, WIND_CATEGORY_TREES, true), bend, fade);
             leans = vec4(windLeanInPlant(now, plant.turnRadians), windLeanInPlant(last, plant.turnRadians));

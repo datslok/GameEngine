@@ -391,6 +391,12 @@ namespace {
         motion.woodSpeed = 0.0f;
         assert(throwsInvalid(motion));
         motion = WindBoneMotion{};
+        motion.fullShare = motion.stillShare;
+        assert(throwsInvalid(motion));
+        motion = WindBoneMotion{};
+        motion.stillShare = -0.01f;
+        assert(throwsInvalid(motion));
+        motion = WindBoneMotion{};
         motion.slowestHertz = 4.0f;
         assert(throwsInvalid(motion));
         motion = WindBoneMotion{};

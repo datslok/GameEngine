@@ -82,7 +82,7 @@ bool lianaSameTree(const Vec3& planted, const Vec3& foot);
 
 /*
 * The plant (in the slots' plants) a liana's anchor's tree is, end 0 its first hold's and 1 its far end's: BONE_NO_TREE
-* for an anchor on no tree, past the sway's reach from the eye (boneTreeWanted: it would not be posed), in a cell not
+* for an anchor on no tree, past the sway's reach from the eye (boneFootInReach; nearer, its tree may be posed), in a cell not
 * held, or not found among its cell's plants. As liana_trees.comp finds it.
 */
 std::uint32_t lianaTreePlant(const LianaShape& shape, int end, const LianaTreeTables& tables, std::span<const GpuPlacedPlant> plants,

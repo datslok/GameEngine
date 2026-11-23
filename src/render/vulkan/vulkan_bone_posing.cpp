@@ -17,8 +17,8 @@ namespace {
     struct BonePush {
         std::uint32_t stamp = 0;
         std::uint32_t poolBones = 0;
-        float fadeEnd = 0.0f;
-        std::uint32_t unused = 0;
+        float stillShare = 0.0f;
+        float fullShare = 0.0f;
         float eye[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     };
 
@@ -174,7 +174,12 @@ void VulkanBonePosing::record(VkCommandBuffer commands, FrameDescriptors& descri
 
     // A frame's stamp is never 0, the plant table's cleared value; the draws were given it (getNextStamp).
     stamp = boneNextStamp(stamp);
-    BonePush push{.stamp = stamp, .poolBones = poolBones, .fadeEnd = inputs.fadeEnd, .eye = {inputs.eye.x, inputs.eye.y, inputs.eye.z, 0.0f}};
+    const BoneScreen& screen = inputs.screen;
+    BonePush push{.stamp = stamp,
+                  .poolBones = poolBones,
+                  .stillShare = screen.still,
+                  .fullShare = screen.full,
+                  .eye = {screen.eye.x, screen.eye.y, screen.eye.z, screen.scale}};
 
     std::vector<ComputeBinding> bindings{
         storageBufferBinding(inputs.commands), storageBufferBinding(inputs.entries), storageBufferBinding(inputs.parts),

@@ -41,6 +41,13 @@ namespace {
         assert(branch.pivot[0] == source.pivot.x && branch.tip[1] == source.tip.y && branch.radius == source.radius && branch.chainRadius == 0.1f);
         assert(tables.bones[1].parent == 0 && tables.bones[0].parent == -1);
 
+        // Each skeleton's rest sphere as swaySkeletonSphere makes it, grown by its reach.
+        second.reach = 0.5f;
+        const SwaySphere sphere = swaySkeletonSphere(second);
+        const float* packed = packSwaySkeletons({&first, &second}).skeletons[1].sphere;
+        assert(packed[0] == sphere.centre.x && packed[1] == sphere.centre.y && packed[2] == sphere.centre.z && packed[3] == sphere.radius);
+        assert(sphere.radius > 0.5f);
+
         // A skeleton with no bones, or a child before its parent, is refused.
         SwaySkeleton empty;
         assert(throwsInvalid([&] { packSwaySkeletons({&empty}); }));

@@ -56,7 +56,13 @@ void main() {
         testOutput(0, vec4(windLeanInPlant(a.xy, a.z), 0.0, 0.0));
     } else if (function == GPU_TEST_BONE_CLAIM) {
         uint firstPose = boneTreeFirstPose(floatBitsToUint(b.x), floatBitsToUint(b.y), floatBitsToUint(b.z));
-        testOutput(0, vec4(boneTreeWanted(a.xyz, testInput(2).xyz, a.w) ? 1.0 : 0.0, uintBitsToFloat(firstPose), uintBitsToFloat(boneTreeSeed(b.w)), 0.0));
+        testOutput(0, vec4(boneFootInReach(a.xyz, testInput(2).xyz, a.w) ? 1.0 : 0.0, uintBitsToFloat(firstPose), uintBitsToFloat(boneTreeSeed(b.w)), 0.0));
+    } else if (function == GPU_TEST_BONE_SCREEN) {
+        // Inputs: the foot and scale; the turn, still and full shares and the screen's scale; the skeleton's sphere; the eye.
+        vec4 placed = boneTreeSphere(a.xyz, a.w, b.x, testInput(2));
+        float share = boneScreenShare(placed, testInput(3).xyz, b.w);
+        testOutput(0, placed);
+        testOutput(1, vec4(share, boneScreenFade(share, b.y, b.z), boneTreeWanted(share, b.y) ? 1.0 : 0.0, 0.0));
     } else if (function == GPU_TEST_BONE_CLAIMED_TREE) {
         uvec4 words = floatBitsToUint(a);
         uint tree = boneClaimedTree(words.x, words.y, words.z);

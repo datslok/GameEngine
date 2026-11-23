@@ -41,12 +41,22 @@ struct WindBoneMotion {
     // BONES line showing how many were asked for. Changing either starts again from poolBones.
     int poolBones = 262144;
     int poolMostBones = 4194304;
+
+    /*
+    * How big on screen a tree must look to sway (ROADMAP phase 21 stage 3c-iv-c, render/gpu/bone_poses.h,
+    * boneScreenShare): its rest sphere's diameter over the screen's height, as the camera sees it, for every view. At
+    * stillShare or below it stands at rest and is not posed (Unreal's r.Skinning.DefaultAnimationMinScreenSize, 0.1:
+    * a 30 m tree about 150 m off at a 90 degree view); its lean fades in smoothly up to fullShare (the user's pick, Nov
+    * 23 2026), so it eases to rest rather than freezing mid-swing.
+    */
+    float stillShare = 0.1f;
+    float fullShare = 0.15f;
 };
 
 void visit(WindBoneMotion& motion, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for an exponent below 0, a most stiffness below 1, a wood speed not above 0, a slowest
-// hertz not above 0 or above the fastest, or a share below 0.
+// hertz not above 0 or above the fastest, a share below 0, or a still screen share below 0 or not below the full one.
 void validateWindBoneMotion(const WindBoneMotion& motion);
 
 /*

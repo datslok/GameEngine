@@ -80,3 +80,11 @@
   - **The posed-cluster test needed uneven bands:** 40 even bones gave every cluster more than 8, so the 8-bone path went untested; the packing test's bands (broad below, thin at the top) give both.
   - **10 planted bugs caught** (no sqrt 3, the parent's image left out, too many bones not grown, no flutter pad, the first bone only, the stamp ignored, a posed twig without its shift, a brick not grown, a twig at rest, bound draws swayed whole); the brick's was missed from one view and caught once the test looked from 16.
   - GPU tests written for the new maths, not run.
+- `tree-bones-3c-iv-c` (Nov 23 2026): trees stop swaying below 0.1 of the camera's screen, fading in up to 0.15 (the user's picks A A A).
+  - **Size by the skeleton's rest sphere** (`swaySkeletonSphere`, packed in `GpuSwaySkeleton`, 32 to 48 B): the claim runs once a part and view, so a part's own bounds would let parts disagree; the skeleton's sphere is one per tree.
+  - **Unreal's measure** (`r.Skinning.DefaultAnimationMinScreenSize` 0.1): diameter over the screen's height; at 90 degrees a 30 m tree stops about 150 m off, a 10 m one about 50 m, where all stopped at 400 m before.
+  - **Decided by the camera for every view** (its eye and `1 / tan(fovY / 2)` in the bones pass's push constants, which had room), so a tree's shadow stands still with it: what stage 4's cached shadow pages need.
+  - **Fade on the lean** (`boneScreenFade`, a smoothstep as the distance fade's), so the tree eases to rest; posed exactly where the fade is above none (tested over a sweep).
+  - **Lianas keep the distance** (`boneTreeWanted` of a foot renamed `boneFootInReach`): their anchors look for their trees within 400 m; a tree posed past that (a narrow zoom) leaves its lianas' anchors still, centimetres off at that distance.
+  - **8 planted bugs caught** (no reach in the sphere, the turn the wrong way, the diameter for the radius, the fade's band doubled, wanted at the still share, the screen ignored, the packed radius off, equal shares allowed).
+  - GPU test written for the new maths, not run.

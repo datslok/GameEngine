@@ -59,7 +59,7 @@ uint plantOf(LianaShape shape, uint end) {
     LianaTreeLayer record = lianaTreeLayers[layer];
     vec3 foot = end == 0u ? shape.firstTree.xyz : shape.secondTree.xyz;
 
-    if (!(record.cellMetres > 0.0) || !boneTreeWanted(foot, push.eye.xyz, push.fadeEnd)) {
+    if (!(record.cellMetres > 0.0) || !boneFootInReach(foot, push.eye.xyz, push.fadeEnd)) {
         return BONE_NO_TREE;
     }
 
