@@ -172,3 +172,4 @@
   - **Retired:** `lianaWindAnchor`, `windTreeAnchorMotion`; `windAnchorOffset` stays until iv.
   - **9 planted bugs caught** (turn undone the wrong way, the far end's layer, the hold not in the tree's frame, no cell edge fix, a negative modulo, the slot ignored, the counts' layer, the comparison flipped, the move turned back wrongly).
   - **A stale build file:** moving `bone_records_shared.h` left dependency files naming it, which stopped `make` for the GPU tests until deleted.
+  - **Checked by the user:** looks great. GPU tests written, not run.
