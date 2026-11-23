@@ -39,7 +39,7 @@ public:
     * The frame's tables from the placed table (after the placed drawing's prepare): none (returns false) without
     * skeletons. plantedParts: the frame's, as the table's draws index them (each skeleton's lean part). plants: the
     * slots' plants' room (a plant table word pair each). Remade when the skeletons or their lean parts change, the
-    * pool when its size or the plants' room does, the GPU idle first. Throws std::invalid_argument as packSwaySkeletons.
+    * pool when its size (the setting's, or grown by collect) or the plants' room does, the GPU idle first. Throws std::invalid_argument as packSwaySkeletons.
     */
     bool prepare(const PlacedTable& table, std::span<const DrawItem> plantedParts, std::uint32_t plants, const WindBoneMotion& motion,
                  std::uint32_t frameIndex);
@@ -74,7 +74,7 @@ public:
         std::vector<GpuBonePose> poses;
     };
 
-    // After a frame's fence: what it counted (none when it posed nothing).
+    // After a frame's fence: what it counted (none when it posed nothing); an ask past the pool grows it (boneGrownPool).
     std::optional<Collected> collect(std::uint32_t frameIndex);
 
     // The tables the frame's passes read (after prepare), for bones-compare.
@@ -117,5 +117,10 @@ private:
     VulkanBuffer poses;
     bool plantTreesCleared = false;
     std::uint32_t poolBones = 0;
+
+    // The pool's settings it started from, and the size frames have grown it to (boneGrownPool), made at the next prepare.
+    int poolSetting = 0;
+    int poolMostSetting = 0;
+    std::uint32_t grownBones = 0;
     std::uint32_t stamp = 0;
 };

@@ -200,6 +200,20 @@ namespace {
         assert(throwsInvalid([&] { claimBoneTrees(unknown, skeletons, 100); }));
     }
 
+    // The pool kept while the ask fits; past it, the next power of two at or above the ask, never above the cap (the
+    // cap itself when the ask passes it) and never smaller than the pool already is.
+    void testPoolGrows() {
+        assert(boneGrownPool(262144, 0, 4194304) == 262144);
+        assert(boneGrownPool(262144, 262144, 4194304) == 262144);
+        assert(boneGrownPool(262144, 343540, 4194304) == 524288);
+        assert(boneGrownPool(262144, 524289, 4194304) == 1048576);
+        assert(boneGrownPool(100, 101, 4194304) == 128);
+        assert(boneGrownPool(262144, 5000000, 4194304) == 4194304);
+        assert(boneGrownPool(262144, 343540, 300000) == 300000);
+        assert(boneGrownPool(524288, 300000, 4194304) == 524288);
+        assert(boneGrownPool(4194304, 0xFFFFFFFFu, 16777216) == 16777216);
+    }
+
     // A skeleton takes its lean from its first part swaying as a tree, not a climber on it; none without one.
     void testLeanParts() {
         PlacedTable table;
@@ -311,6 +325,7 @@ void testBonePoses() {
     testLeanInPlant();
     testWantedPlants();
     testClaims();
+    testPoolGrows();
     testLeanParts();
     testComparison();
     testCompareCommand();

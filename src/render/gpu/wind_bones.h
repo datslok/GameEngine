@@ -35,9 +35,12 @@ struct WindBoneMotion {
     float swingShare = 0.3f;
     float sideShare = 0.3f;
 
-    // The bones the bones pass may pose a frame (two poses each, this frame's and last's, 32 B each: 256K bones 16 MB);
-    // a tree past them stands still, F4's BONES line showing how many were asked for.
+    // The bones the bones pass may pose a frame at first (two poses each, this frame's and last's, 32 B each: 256K
+    // bones 16 MB). When a frame asks for more, the pool grows to the next power of two at or above the ask
+    // (boneGrownPool), never past poolMostBones (4M bones, 256 MB); a tree past the pool stands still meanwhile, F4's
+    // BONES line showing how many were asked for. Changing either starts again from poolBones.
     int poolBones = 262144;
+    int poolMostBones = 4194304;
 };
 
 void visit(WindBoneMotion& motion, SettingsVisitor& visitor);

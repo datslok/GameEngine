@@ -90,7 +90,15 @@ bool VulkanBonePosing::prepare(const PlacedTable& table, std::span<const DrawIte
     ensureBuffer(allocator, frame.readback, headerBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
     groups = boneGroups(table);
     const std::vector<std::uint32_t> leanParts = skeletonLeanParts(table, plantedParts);
-    const auto pool = static_cast<std::uint32_t>(motion.poolBones);
+
+    // The pool starts at the setting and grows as frames ask (collect); changing either setting starts it again.
+    if (motion.poolBones != poolSetting || motion.poolMostBones != poolMostSetting) {
+        poolSetting = motion.poolBones;
+        poolMostSetting = motion.poolMostBones;
+        grownBones = static_cast<std::uint32_t>(motion.poolBones);
+    }
+
+    const std::uint32_t pool = grownBones;
     const VkDeviceSize plantTreeBytes = VkDeviceSize{std::max(plants, 1u)} * 2 * sizeof(std::uint32_t);
     const bool tablesChanged = table.skeletons != madeFrom || leanParts != madeLeanParts;
     const bool poolChanged = pool != poolBones || plantTrees.getSize() < plantTreeBytes;
@@ -229,6 +237,9 @@ std::optional<VulkanBonePosing::Collected> VulkanBonePosing::collect(std::uint32
     collected.still = words[BONE_HEADER_TREES_STILL];
     collected.bonesAsked = words[BONE_HEADER_BONES_ASKED];
     collected.pool = poolBones;
+
+    // A frame that asked for more than the pool holds grows it for the next prepare (the trees past it stood still).
+    grownBones = boneGrownPool(grownBones, collected.bonesAsked, static_cast<std::uint32_t>(poolMostSetting));
 
     if (frame.posesPending) {
         frame.posesPending = false;

@@ -80,6 +80,13 @@ bool boneTreeWanted(const Vec3& foot, const Vec3& eye, float fadeEnd);
 // A tree's first pose, two a bone from twice the bones asked for before it, if all its bones fit the pool; else BONE_NO_POSE.
 std::uint32_t boneTreeFirstPose(std::uint32_t askedBefore, std::uint32_t boneCount, std::uint32_t poolBones);
 
+/*
+* The pool for the frames after one that asked for bonesAsked: pool while they fit; else the next power of two at or
+* above them (room to spare, so a view a little denser does not grow it again), held under most (the cap, at least
+* pool). Never smaller than pool: a pool stays as big as the densest view yet asked.
+*/
+std::uint32_t boneGrownPool(std::uint32_t pool, std::uint32_t bonesAsked, std::uint32_t most);
+
 // A tree's seed for its branches' phases: its plant's pick's bits (fixed for the plant wherever its slot is).
 std::uint32_t boneTreeSeed(const GpuPlacedPlant& plant);
 

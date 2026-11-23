@@ -81,6 +81,16 @@ std::uint32_t boneTreeFirstPose(std::uint32_t askedBefore, std::uint32_t boneCou
     return std::uint64_t{askedBefore} + boneCount <= poolBones ? 2u * askedBefore : boneNoPose;
 }
 
+std::uint32_t boneGrownPool(std::uint32_t pool, std::uint32_t bonesAsked, std::uint32_t most) {
+    if (bonesAsked <= pool) {
+        return pool;
+    }
+
+    // In 64 bits: the power of two above an ask past 2^31 does not fit 32.
+    const std::uint64_t grown = std::min<std::uint64_t>(std::bit_ceil(std::uint64_t{bonesAsked}), most);
+    return static_cast<std::uint32_t>(std::max<std::uint64_t>(grown, pool));
+}
+
 std::uint32_t boneTreeSeed(const GpuPlacedPlant& plant) {
     return std::bit_cast<std::uint32_t>(plant.pick);
 }

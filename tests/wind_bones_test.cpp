@@ -279,6 +279,12 @@ namespace {
         motion = WindBoneMotion{};
         motion.sideShare = -0.1f;
         assert(throwsInvalid(motion));
+        motion = WindBoneMotion{};
+        motion.poolMostBones = motion.poolBones - 1;
+        assert(throwsInvalid(motion));
+        motion = WindBoneMotion{};
+        motion.poolMostBones = (1 << 24) + 1;
+        assert(throwsInvalid(motion));
     }
 }
 

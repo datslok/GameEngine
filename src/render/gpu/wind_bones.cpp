@@ -22,6 +22,7 @@ void visit(WindBoneMotion& motion, SettingsVisitor& visitor) {
     visitor.field("Swing along", motion.swingShare, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
     visitor.field("Swing across", motion.sideShare, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
     visitor.field("Pool", motion.poolBones, {.min = 1, .max = 1 << 24, .sliderMax = 1 << 20, .unit = "bones"});
+    visitor.field("Pool most", motion.poolMostBones, {.min = 1, .max = 1 << 24, .sliderMax = 1 << 24, .unit = "bones"});
 }
 
 void validateWindBoneMotion(const WindBoneMotion& motion) {
@@ -39,6 +40,10 @@ void validateWindBoneMotion(const WindBoneMotion& motion) {
 
     if (motion.poolBones < 1 || motion.poolBones > (1 << 24)) {
         throw std::invalid_argument("the bones' pool must hold 1 to 16777216 bones");
+    }
+
+    if (motion.poolMostBones < motion.poolBones || motion.poolMostBones > (1 << 24)) {
+        throw std::invalid_argument("the bones' pool may grow to at least its first size and at most 16777216 bones");
     }
 }
 
