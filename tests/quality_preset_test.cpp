@@ -39,11 +39,12 @@ namespace {
         assert(RenderSettings{}.globalIllumination.raysPerProbe == 256 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 256);
     }
 
-    // Reflections per preset: off on Low, fewer steps and a smaller probe on Medium, the defaults' probe on Ultra.
+    // Reflections per preset: off on Low, fewer steps and a smaller probe on Medium, the defaults' probe on High and
+    // Ultra (128: at 256 the forest's probe faces took 16-22 ms of the frame, mostly shading stacked leaf cards).
     void testPresetsSetReflections() {
         const std::array<bool, 4> enabled{false, true, true, true};
         const std::array<int, 4> steps{32, 32, 64, 64};
-        const std::array<int, 4> probeSizes{64, 64, 128, 256};
+        const std::array<int, 4> probeSizes{64, 64, 128, 128};
 
         for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
             RenderSettings settings;
@@ -55,7 +56,7 @@ namespace {
             assert(matchingQualityPreset(settings) == preset);
         }
 
-        assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64 && RenderSettings{}.reflections.probeSize == 256);
+        assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64 && RenderSettings{}.reflections.probeSize == 128);
     }
 
     // Ray tracing, every feature that traces rays at once (the light probes, ray-traced reflections, mirrored lights,
@@ -268,9 +269,9 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
-    // High is Ultra without the ray-traced reflections and mirrored lights, with a little probe sharing, a reflection
-    // probe half as sharp and fewer ambient occlusion slices and steps, nothing else: the same 256 probe rays, the same
-    // 4096 cascades and the rest as tuned.
+    // High is Ultra without the ray-traced reflections and mirrored lights, with a little probe sharing and fewer
+    // ambient occlusion slices and steps, nothing else: the same 256 probe rays, the same 4096 cascades, the same
+    // reflection probe and the rest as tuned.
     void testHighIsUltraLighter() {
         RenderSettings high;
         applyQualityPreset(high, QualityPreset::High);
@@ -281,7 +282,6 @@ namespace {
         high.reflections.rayTraced = RenderSettings{}.reflections.rayTraced;
         high.mirroredLights.enabled = RenderSettings{}.mirroredLights.enabled;
         high.globalIllumination.probeSharing = RenderSettings{}.globalIllumination.probeSharing;
-        high.reflections.probeSize = RenderSettings{}.reflections.probeSize;
         high.ambientOcclusion.slices = RenderSettings{}.ambientOcclusion.slices;
         high.ambientOcclusion.steps = RenderSettings{}.ambientOcclusion.steps;
         assert(matchingQualityPreset(high) == QualityPreset::Ultra);

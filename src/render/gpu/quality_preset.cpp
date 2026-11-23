@@ -75,8 +75,7 @@ namespace {
     }
 
     // Ultra is read from the defaults, so retuning a default retunes Ultra with it, and High is Ultra without the
-    // ray-traced reflections and mirrored lights, with a little sharing between probes, a reflection probe half as
-    // sharp and lighter ambient occlusion.
+    // ray-traced reflections and mirrored lights, with a little sharing between probes and lighter ambient occlusion.
     QualityValues presetValues(QualityPreset preset) {
         switch (preset) {
             case QualityPreset::High: {
@@ -84,7 +83,6 @@ namespace {
                 high.rayTracedReflections = false;
                 high.mirroredLights = false;
                 high.probeSharing = 0.1f;
-                high.probeSize = 128;
                 high.occlusionSlices = 2;
                 high.occlusionSteps = 4;
                 return high;

@@ -57,8 +57,8 @@ struct ReflectionSettings {
     float edgeFade = 0.1f;
 
     // The reflection probe's faces, texels a side (a power of two, 16 to 1024): sharper reflections of what is off
-    // screen, each doubling costing four times the capture.
-    int probeSize = 256;
+    // screen, each doubling costing four times the capture. 128: at 256 the forest's faces took 16-22 ms of a frame.
+    int probeSize = 128;
 
     // How far the probe's capture sees (metres); beyond it the sky.
     float probeFar = 300.0f;
