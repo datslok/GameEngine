@@ -130,6 +130,11 @@ float windFlutterAmount(float flutter, vec2 lean, float modelHeight, float heigh
     return flutter * length(lean) * min(max(modelHeight, 0.0) / max(height, 1e-4), 1.0);
 }
 
+// The farthest a leaf's flutter moves it: sqrt(3) |flutter| |lean| (windFlutterReach).
+float windFlutterReach(float flutter, vec2 lean) {
+    return 1.7320508 * abs(flutter) * length(lean);
+}
+
 /*
 * Where the wind moves a vertex (windSwayOffset): fromFoot the vertex from its foot in the world, modelHeight its
 * height in the mesh's frame, place where it is, sway the instance's (category, height, bend, flutter), scale the

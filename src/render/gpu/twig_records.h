@@ -12,7 +12,12 @@
 #include <span>
 #include <vector>
 
-struct GpuMeshCluster; // render/gpu/mesh_cluster_culling.h, which includes this
+struct GpuMeshCluster;   // render/gpu/mesh_cluster_culling.h, which includes this
+struct MeshClusterPose;  // the same
+struct BoneCullTables;   // render/gpu/bone_poses.h
+struct GpuBoneTree;      // the same
+struct GpuBonePose;      // the same
+struct WindBonePose;     // render/gpu/wind_bones.h
 
 /*
 * A twig set's records as the GPU's twig pass reads them (ROADMAP phase 21 stage 3b-iii; scene/twig_set.h). Render-only
@@ -118,6 +123,10 @@ static_assert(TWIG_BRICK_SIZE == twigBrickSize, "The twig pass's workgroup is a 
 */
 GpuInstance twigInstance(const GpuInstance& part, const GpuTwig& twig);
 
+// A twig carried whole by a rigid pose in the plant's frame (its bones' windRigidPose at its foot): the pose after its
+// matrix, so twigInstance places it where its vertices are drawn (ROADMAP phase 21 stage 3c-iv-b).
+GpuTwig twigPosed(const GpuTwig& twig, const WindBonePose& pose);
+
 /*
 * The level a twig draws (the cluster cut on its prototype's chain, meshClusterInCut's test on whole levels): the level
 * whose own error (the level before's group's; none for the finest) fits the view's pixel error and whose group's does
@@ -132,12 +141,28 @@ bool twigLevelDrawn(const GpuTwigLevel& before, bool finest, const GpuTwigLevel&
 
 /*
 * Whether a view keeps a brick or a twig of a placed part (its record placed in the world, its entry's bits): kept whole
-* where the part is not rigid (meshClusterRigid: swaying where the view's sway reaches), else when its sphere (the
-* brick's in the plant's frame, placed by the part; a twig's coarsest group's in the prototype's, placed by the twig) is
-* in the frustum.
+* where the part's shape is not its mesh's or it sways unbound (meshClusterSeenWhole); else when its sphere is in the
+* frustum: pose's when posed (twigBrickPose, twigPose), else the brick's in the plant's frame placed by the part, a
+* twig's coarsest group's in the prototype's placed by the twig.
 */
-bool twigBrickKept(const GpuTwigBrick& brick, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view);
-bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view);
+bool twigBrickKept(const GpuTwigBrick& brick, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
+                   const MeshClusterPose& pose);
+bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
+              const MeshClusterPose& pose);
+
+/*
+* How a brick stands this frame (ROADMAP phase 21 stage 3c-iv-b): bound when its part is moved by bones; posed when its
+* tree is too (tree: boneCullTree's), its sphere grown by the tree's move (every twig of it, carried at its foot, moves
+* no farther), placed by the part, padded by the leaves' flutter (meshClusterPosed).
+*/
+MeshClusterPose twigBrickPose(const GpuTwigBrick& brick, const GpuInstance& part, bool partBound, const GpuBoneTree& tree);
+
+/*
+* How a twig stands: bound by its binding (not SWAY_UNBOUND); posed when its tree is, its coarsest group's sphere placed
+* by the twig carried by its rigid pose (windRigidPose of its two bones at its foot, twigPosed), padded by the flutter.
+*/
+MeshClusterPose twigPose(const GpuTwigLevel& coarsest, const GpuInstance& part, const GpuTwig& twig, std::uint32_t binding, std::span<const GpuBonePose> pool,
+                         const GpuBoneTree& tree);
 
 // ---- The twig pass's steps on the CPU ----
 
@@ -160,7 +185,7 @@ struct TwigTables {
 
 /*
 * What the twig pass counted (F4's TWIGS line, ROADMAP phase 21 stage 5-0): its sources' twigs tested, those kept
-* (drawn), those of them kept because their part sways (meshClusterRigid false: no frustum test), and the kept ones'
+* (drawn), those of them that move (posed by their bones, or kept whole as their part sways unbound), and the kept ones'
 * twigs and triangles at each level. The pass writes it as TWIG_TALLY_WORDS words (readTwigTally).
 */
 struct TwigTally {
@@ -178,7 +203,8 @@ TwigTally readTwigTally(std::span<const std::uint32_t, TWIG_TALLY_WORDS> words);
 /*
 * What the twig pass draws of a placed part (twig_cull.comp's steps): each brick kept (twigBrickKept), each of its
 * twigs kept (twigKept), each drawn at its level (twigLevel), in brick and twig order. A tally, when given, gains the
-* part's counts, as the pass's atomics add every part's.
+* part's counts, as the pass's atomics add every part's. bones, when given: the frame's (the entry's plant's tree poses
+* the bricks of a part bound to bones, partBound, and its bound twigs); without, nothing is posed.
 */
 std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
-                                     const GpuCameraCull& view, TwigTally* tally = nullptr);
+                                     const GpuCameraCull& view, TwigTally* tally = nullptr, const BoneCullTables* bones = nullptr, bool partBound = false);

@@ -6,6 +6,7 @@
 #include "math/transform.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/bone_poses.h"
 #include "render/gpu/mesh_cluster_culling.h"
 #include "render/gpu/twig_records.h"
 
@@ -60,41 +61,57 @@ namespace {
         inputs.push_back(gpuVec4(part.handedness[1]));
     }
 
-    // A twig's instance: the model and normal matrix within arithmetic rounding of the mirror's, the scale too.
+    // A twig's instance: the model and normal matrix within arithmetic rounding of the mirror's, the scale too; and the
+    // twig carried by a random small pose (twigPosed): its rows within a few ulps of the 25 m foot.
     void checkInstance(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{53};
         std::vector<GpuInstance> parts;
         std::vector<GpuTwig> twigs;
+        std::vector<WindBonePose> poses;
         std::vector<GpuVec4> inputs;
 
         for (int index = 0; index < 400; ++index) {
             parts.push_back(randomPart(random));
             twigs.push_back(randomTwig(random));
+            poses.push_back(WindBonePose{.turn = Quat::fromAxisAngle(random.direction(), random.between(0.0f, 0.3f)),
+                                         .shift = random.direction() * random.between(0.0f, 2.0f)});
             pushPart(inputs, parts.back());
 
             for (int row = 0; row < 3; ++row) {
                 inputs.push_back(gpuVec4(twigs.back().rows[row][0], twigs.back().rows[row][1], twigs.back().rows[row][2], twigs.back().rows[row][3]));
             }
+
+            const WindBonePose& pose = poses.back();
+            inputs.push_back(gpuVec4(pose.turn.x, pose.turn.y, pose.turn.z, pose.turn.w));
+            inputs.push_back(gpuVec4(pose.shift.x, pose.shift.y, pose.shift.z));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TWIG_INSTANCE, inputs, 12, 8);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TWIG_INSTANCE, inputs, 14, 11);
+        const FloatTolerance places{.absolute = 2e-5f, .relative = 1e-5f};
 
         for (std::size_t i = 0; i < parts.size(); ++i) {
             const GpuInstance expected = twigInstance(parts[i], twigs[i]);
+            const GpuTwig posed = twigPosed(twigs[i], poses[i]);
+
+            for (int row = 0; row < 3; ++row) {
+                const GpuVec4& got = outputs[11 * i + 8 + static_cast<std::size_t>(row)];
+                report.check("twigPosed", places, Vec3{posed.rows[row][0], posed.rows[row][1], posed.rows[row][2]}, Vec3{got[0], got[1], got[2]});
+                report.check("twigPosed foot", places, posed.rows[row][3], got[3]);
+            }
 
             for (int column = 0; column < 4; ++column) {
-                const GpuVec4& got = outputs[8 * i + static_cast<std::size_t>(column)];
+                const GpuVec4& got = outputs[11 * i + static_cast<std::size_t>(column)];
                 const float* want = &expected.model[4 * column];
                 report.check("twigInstance model", arithmeticTolerance, Vec3{want[0], want[1], want[2]}, Vec3{got[0], got[1], got[2]});
             }
 
             for (int column = 0; column < 3; ++column) {
-                const GpuVec4& got = outputs[8 * i + 4 + static_cast<std::size_t>(column)];
+                const GpuVec4& got = outputs[11 * i + 4 + static_cast<std::size_t>(column)];
                 const float* want = &expected.normalMatrix[4 * column];
                 report.check("twigInstance normal matrix", arithmeticTolerance, Vec3{want[0], want[1], want[2]}, Vec3{got[0], got[1], got[2]});
             }
 
-            report.check("twigInstance scale", arithmeticTolerance, expected.handedness[1], outputs[8 * i + 7][0]);
+            report.check("twigInstance scale", arithmeticTolerance, expected.handedness[1], outputs[11 * i + 7][0]);
         }
     }
 
@@ -159,8 +176,9 @@ namespace {
     }
 
     /*
-    * A brick kept equals the mirror's: still parts in the frustum or not, swaying ones near and far from the eye, cases
-    * within rounding of a plane or the sway's reach left out.
+    * A brick kept equals the mirror's: still parts in the frustum or not, swaying ones near and far from the eye, parts
+    * bound to bones with their trees posed or not, cases within rounding of a plane or the sway's reach left out; a
+    * posed brick's sphere (twigBrickPose) within arithmetic rounding.
     */
     void checkBrickKept(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{61};
@@ -169,6 +187,8 @@ namespace {
             GpuTwigBrick brick;
             GpuCullRecord record;
             GpuCameraCull view{};
+            bool partBound = false;
+            GpuBoneTree tree;
         };
         std::vector<Case> all;
         std::vector<GpuVec4> inputs;
@@ -185,6 +205,12 @@ namespace {
             c.record.bounds[2] = c.part.model[14];
             c.record.bounds[3] = 20.0f;
             c.record.flags = index % 3 == 1 ? CULL_SWAYS : 0u;
+            c.partBound = index % 5 >= 2;
+            c.tree.firstPose = index % 5 >= 3 ? 0u : boneNoPose;
+            c.tree.move = random.between(0.0f, 2.0f);
+            c.tree.lean[0] = random.between(-0.3f, 0.3f);
+            c.tree.lean[1] = random.between(-0.3f, 0.3f);
+            c.part.sway[3] = random.between(0.0f, 0.5f);
             const Vec3 eye{random.between(-80.0f, 80.0f), random.between(1.0f, 40.0f), random.between(-80.0f, 80.0f)};
             const float yaw = random.between(0.0f, 6.28f);
             const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.9f, 16.0f / 9.0f, 0.1f, 800.0f));
@@ -202,13 +228,24 @@ namespace {
             for (const auto& plane : c.view.frustum.planes) {
                 inputs.push_back(gpuVec4(plane[0], plane[1], plane[2], plane[3]));
             }
+
+            inputs.push_back(gpuVec4(c.partBound ? 1.0f : 0.0f, c.tree.firstPose == boneNoPose ? 0.0f : 1.0f, c.tree.move, c.part.sway[3]));
+            inputs.push_back(gpuVec4(c.tree.lean[0], c.tree.lean[1]));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TWIG_BRICK_KEPT, inputs, 19, 1);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TWIG_BRICK_KEPT, inputs, 21, 2);
 
         for (std::size_t i = 0; i < all.size(); ++i) {
             const Case& c = all[i];
-            const std::array<float, 4> placed = meshClusterPlacedSphere(c.brick.sphere, c.part);
+            const MeshClusterPose pose = twigBrickPose(c.brick, c.part, c.partBound, c.tree);
+            report.check("twigBrickPose posed", exactTolerance, pose.posed ? 1.0f : 0.0f, outputs[2 * i][1]);
+
+            if (pose.posed) {
+                report.check("twigBrickPose sphere", arithmeticTolerance, Vec3{pose.sphere[0], pose.sphere[1], pose.sphere[2]}, vec3From(outputs[2 * i + 1]));
+                report.check("twigBrickPose radius", arithmeticTolerance, pose.sphere[3], outputs[2 * i + 1][3]);
+            }
+
+            const std::array<float, 4> placed = pose.posed ? pose.sphere : meshClusterPlacedSphere(c.brick.sphere, c.part);
             bool nearEdge = false;
 
             for (const auto& plane : c.view.frustum.planes) {
@@ -223,7 +260,7 @@ namespace {
                 continue;
             }
 
-            report.check("twigBrickKept", exactTolerance, twigBrickKept(c.brick, c.part, 0u, c.record, c.view) ? 1.0f : 0.0f, outputs[i][0]);
+            report.check("twigBrickKept", exactTolerance, twigBrickKept(c.brick, c.part, 0u, c.record, c.view, pose) ? 1.0f : 0.0f, outputs[2 * i][0]);
         }
     }
 }

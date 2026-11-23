@@ -275,6 +275,11 @@ float windFlutterAmount(float flutter, const Vec2& lean, float modelHeight, floa
     return flutter * lean.length() * std::min(std::max(modelHeight, 0.0f) / std::max(height, 1e-4f), 1.0f);
 }
 
+// Each of windFlutterOffset's three sines is within the amount, so the offset within sqrt(3) of it; the height share at most 1.
+float windFlutterReach(float flutter, const Vec2& lean) {
+    return 1.7320508f * std::fabs(flutter) * lean.length();
+}
+
 /*
 * The main bend first: the lean's offset at the vertex's height share u, h^2 / height (the cantilever's u^2 times the
 * height in metres), then the vertex pulled back to its distance from the foot, so a tree bends rather than stretches.

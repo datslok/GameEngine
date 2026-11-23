@@ -1,5 +1,6 @@
 #include "render/gpu/twig_records.h"
 
+#include "render/gpu/bone_poses.h"
 #include "render/gpu/bone_records.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/mesh_cluster_culling.h"
@@ -135,14 +136,15 @@ namespace {
         return matrix;
     }
 
-    // Whether a sphere (plant or prototype frame) placed by an instance is kept: always where the part is not rigid.
+    // Whether a sphere (plant or prototype frame) placed by an instance is kept: always where the part is seen whole, else
+    // its posed sphere's or its own placed one's in the frustum.
     bool twigSphereKept(const float sphere[4], const GpuInstance& placedBy, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
-                        const GpuCameraCull& view) {
-        if (!meshClusterRigid(part, entry, record, view)) {
+                        const GpuCameraCull& view, const MeshClusterPose& pose) {
+        if (meshClusterSeenWhole(part, entry, record, view, pose)) {
             return true;
         }
 
-        const std::array<float, 4> placed = meshClusterPlacedSphere(sphere, placedBy);
+        const std::array<float, 4> placed = pose.posed ? pose.sphere : meshClusterPlacedSphere(sphere, placedBy);
         return sphereInFrustum(view.frustum, placed.data());
     }
 }
@@ -179,12 +181,50 @@ std::uint32_t twigLevel(const GpuTwigLevel* levels, std::uint32_t levelCount, co
     return levelCount - 1;
 }
 
-bool twigBrickKept(const GpuTwigBrick& brick, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view) {
-    return twigSphereKept(brick.sphere, part, part, entry, record, view);
+bool twigBrickKept(const GpuTwigBrick& brick, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
+                   const MeshClusterPose& pose) {
+    return twigSphereKept(brick.sphere, part, part, entry, record, view, pose);
 }
 
-bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view) {
-    return twigSphereKept(coarsest.sphere, twig, twig, entry, record, view);
+bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
+              const MeshClusterPose& pose) {
+    return twigSphereKept(coarsest.sphere, twig, twig, entry, record, view, pose);
+}
+
+// The pose's turn on each column, then on the foot with its shift: P(M x) for every x.
+GpuTwig twigPosed(const GpuTwig& twig, const WindBonePose& pose) {
+    GpuTwig posed = twig;
+
+    for (int column = 0; column < 4; ++column) {
+        const Vec3 turned = pose.turn.rotate(Vec3{twig.rows[0][column], twig.rows[1][column], twig.rows[2][column]}) + (column == 3 ? pose.shift : Vec3{});
+        posed.rows[0][column] = turned.x;
+        posed.rows[1][column] = turned.y;
+        posed.rows[2][column] = turned.z;
+    }
+
+    return posed;
+}
+
+MeshClusterPose twigBrickPose(const GpuTwigBrick& brick, const GpuInstance& part, bool partBound, const GpuBoneTree& tree) {
+    if (!partBound || tree.firstPose == boneNoPose) {
+        return MeshClusterPose{.bound = partBound};
+    }
+
+    const float grown[4] = {brick.sphere[0], brick.sphere[1], brick.sphere[2], brick.sphere[3] + tree.move};
+    return meshClusterPosed(grown, part, part.sway[3], Vec2{tree.lean[0], tree.lean[1]});
+}
+
+MeshClusterPose twigPose(const GpuTwigLevel& coarsest, const GpuInstance& part, const GpuTwig& twig, std::uint32_t binding, std::span<const GpuBonePose> pool,
+                         const GpuBoneTree& tree) {
+    const bool bound = binding != swayUnbound;
+
+    if (!bound || tree.firstPose == boneNoPose) {
+        return MeshClusterPose{.bound = bound};
+    }
+
+    const BoneVertexPoses poses = boneVertexPoses(pool, tree.firstPose, binding, false);
+    const WindBonePose rigid = windRigidPose(poses.own, poses.parent, poses.weight, Vec3{twig.rows[0][3], twig.rows[1][3], twig.rows[2][3]});
+    return meshClusterPosed(coarsest.sphere, twigInstance(part, twigPosed(twig, rigid)), part.sway[3], Vec2{tree.lean[0], tree.lean[1]});
 }
 
 TwigTally readTwigTally(std::span<const std::uint32_t, TWIG_TALLY_WORDS> words) {
@@ -203,16 +243,16 @@ TwigTally readTwigTally(std::span<const std::uint32_t, TWIG_TALLY_WORDS> words) 
 
 // The tally as twig_cull.comp counts: every twig of every brick tested, whether its brick is kept or not.
 std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
-                                     const GpuCameraCull& view, TwigTally* tally) {
+                                     const GpuCameraCull& view, TwigTally* tally, const BoneCullTables* bones, bool partBound) {
     std::vector<TwigDraw> draws;
-    const bool swaying = !meshClusterRigid(part, entry, record, view);
+    const GpuBoneTree tree = bones != nullptr ? boneCullTree(*bones, entry & DRAW_LIST_INSTANCE_MASK) : GpuBoneTree{};
 
     for (const GpuTwigBrick& brick : tables.bricks) {
         if (tally != nullptr) {
             tally->tested += brick.twigCount;
         }
 
-        if (!twigBrickKept(brick, part, entry, record, view)) {
+        if (!twigBrickKept(brick, part, entry, record, view, twigBrickPose(brick, part, partBound, tree))) {
             continue;
         }
 
@@ -222,7 +262,11 @@ std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance
             const GpuTwigLevel* levels = &tables.levels[prototype.firstLevel];
             const GpuInstance placed = twigInstance(part, twig);
 
-            if (!twigKept(levels[prototype.levelCount - 1], placed, entry, record, view)) {
+            const std::uint32_t binding = bones != nullptr && number < bones->twigBindings.size() ? bones->twigBindings[number] : swayUnbound;
+            const std::span<const GpuBonePose> pool = bones != nullptr ? bones->poses : std::span<const GpuBonePose>{};
+            const MeshClusterPose pose = twigPose(levels[prototype.levelCount - 1], part, twig, binding, pool, tree);
+
+            if (!twigKept(levels[prototype.levelCount - 1], placed, entry, record, view, pose)) {
                 continue;
             }
 
@@ -232,7 +276,7 @@ std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance
 
             if (tally != nullptr) {
                 ++tally->kept;
-                tally->swaying += swaying ? 1 : 0;
+                tally->swaying += pose.posed || meshClusterSeenWhole(part, entry, record, view, pose) ? 1 : 0;
                 ++tally->levelTwigs[level];
                 tally->levelTriangles[level] += chosen.triangleCount;
             }

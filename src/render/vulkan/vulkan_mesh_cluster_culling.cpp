@@ -28,19 +28,22 @@ namespace {
     constexpr VkDeviceSize noPlacedBytes = std::max({sizeof(GpuDrawCommand), sizeof(GpuPlacedGroup), sizeof(GpuPlacedEntry), sizeof(GpuInstance),
                                                      sizeof(GpuPlacedPart), sizeof(GpuPlacedPlant)});
 
-    // Every pass pushes the list it makes (mesh_cluster_pass.glsl's MeshClusterList); those testing pairs read the two
-    // pyramids after their storage buffers.
+    // Every pass pushes the list it makes and the frame's bones stamp (mesh_cluster_pass.glsl's MeshClusterList); those
+    // testing pairs read the two pyramids after their storage buffers.
+    constexpr std::uint32_t pushBytes = 2 * sizeof(std::uint32_t);
+
     ComputePipelineDescription passDescription(const char* shader, std::uint32_t buffers, bool pyramids) {
         ComputePipelineDescription description;
         description.shader = shader;
         description.storageBuffers = buffers;
         description.sampledImages = pyramids ? 2 : 0;
-        description.pushConstantBytes = sizeof(std::uint32_t);
+        description.pushConstantBytes = pushBytes;
         return description;
     }
 
-    void pushList(VkCommandBuffer commands, const ComputePipeline& pipeline, std::uint32_t list) {
-        vkCmdPushConstants(commands, pipeline.getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(list), &list);
+    void pushList(VkCommandBuffer commands, const ComputePipeline& pipeline, std::uint32_t list, std::uint32_t boneStamp) {
+        const std::uint32_t words[2] = {list, boneStamp};
+        vkCmdPushConstants(commands, pipeline.getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes, words);
     }
 
     constexpr VkDeviceSize totalBytes = MESH_CLUSTER_LISTS * MESH_CLUSTER_TOTAL_WORDS * sizeof(std::uint32_t);
@@ -121,6 +124,8 @@ std::vector<ComputeBinding> VulkanMeshClusterCulling::passBindings(const PerFram
         placedOr(placed.commands),                   placedOr(placed.groups),                    placedOr(placed.entries),
         placedOr(placed.partInstances.buffer),       placedOr(placed.parts),                     placedOr(placed.plants),
         placedOr(frame.inputs.twigs.regions),        placedOr(frame.inputs.twigs.entries),       placedOr(frame.inputs.twigs.twigs),
+        placedOr(frame.inputs.bones.plantTrees),     placedOr(frame.inputs.bones.trees),         placedOr(frame.inputs.bones.poses),
+        placedOr(frame.inputs.bones.twigBindings),
     };
     all[7].buffer = frame.inputs.instances;
 
@@ -223,7 +228,7 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
 
     // 1. The pairs to test: each place's end, the work, the dispatch's blocks (both lists').
     bindComputeSet(commands, device.getDevice(), descriptors, *countPass, passBindings(frame, {frame.dispatch.get()}, false));
-    pushList(commands, *countPass, MESH_CLUSTER_EARLY);
+    pushList(commands, *countPass, MESH_CLUSTER_EARLY, inputs.bones.stamp);
     vkCmdDispatch(commands, 1, 1, 1);
 
     for (VkBuffer buffer : {frame.workEnds.get(), frame.work.get()}) {
@@ -263,7 +268,7 @@ void VulkanMeshClusterCulling::recordList(VkCommandBuffer commands, FrameDescrip
 
     // 2. Each block's survivors.
     bindComputeSet(commands, device.getDevice(), descriptors, *testPass, passBindings(frame, {frame.blockCounts.get()}, true));
-    pushList(commands, *testPass, list);
+    pushList(commands, *testPass, list, frame.inputs.bones.stamp);
     vkCmdDispatchIndirect(commands, frame.dispatch.get(), 0);
     bufferBarrier(commands, frame.blockCounts.get(), computeWrite, computeRead);
 
@@ -271,7 +276,7 @@ void VulkanMeshClusterCulling::recordList(VkCommandBuffer commands, FrameDescrip
     // long finished.
     bindComputeSet(commands, device.getDevice(), descriptors, *scanPass,
                    passBindings(frame, {frame.blockCounts.get(), frame.blockFirst.get(), frame.totals.get(), frame.taskCommands.get()}, false));
-    pushList(commands, *scanPass, list);
+    pushList(commands, *scanPass, list, frame.inputs.bones.stamp);
     vkCmdDispatch(commands, 1, 1, 1);
     bufferBarrier(commands, frame.blockFirst.get(), computeWrite, computeRead);
     bufferBarrier(commands, frame.totals.get(), computeWrite, computeReadWrite);
@@ -279,7 +284,7 @@ void VulkanMeshClusterCulling::recordList(VkCommandBuffer commands, FrameDescrip
     // 4. Each survivor at its place, their triangles added to the totals.
     bindComputeSet(commands, device.getDevice(), descriptors, *writePass,
                    passBindings(frame, {frame.blockFirst.get(), frame.items.get(), frame.totals.get()}, true));
-    pushList(commands, *writePass, list);
+    pushList(commands, *writePass, list, frame.inputs.bones.stamp);
     vkCmdDispatchIndirect(commands, frame.dispatch.get(), 0);
 
     bufferBarrier(commands, frame.totals.get(), computeWrite, drawRead);

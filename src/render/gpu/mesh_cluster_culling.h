@@ -3,6 +3,8 @@
 #include "math/mat4.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
+#include "math/vec4.h"
+#include "render/gpu/bone_poses.h"
 #include "render/gpu/camera_culling.h"
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_scene.h"
@@ -144,20 +146,60 @@ float meshClusterErrorPixels(const float sphere[4], float error, const GpuInstan
 bool meshClusterInCut(const GpuMeshCluster& cluster, const GpuInstance& instance, const GpuCameraCull& view);
 
 /*
-* Whether the draw's vertices are where its mesh has them, moved only by its matrix: not a terrain patch, an impostor's
-* card, ground-following, a liana, cards thinned in this view (the entry's bit), or swaying where the view's sway reaches.
+* Whether the draw's shape is its mesh's, moved only by its matrix and (for vertices bound to bones) its bones: not a
+* terrain patch, an impostor's card, ground-following, a liana, or cards thinned in this view (the entry's bit).
 */
-bool meshClusterRigid(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view);
+bool meshClusterShapeFixed(const GpuInstance& instance, std::uint32_t entry);
 
-// What the view makes of the cluster (MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): hidden out of the cut (any draw); seen whole
-// for a draw not rigid; else hidden out of the frustum or, single-sided and not mirrored, facing away; else seen with
-// its sphere holding.
+// Whether the draw sways by the wind's per-vertex sway: it sways (CULL_SWAYS) where the view's sway reaches.
+bool meshClusterSways(const GpuCullRecord& record, const GpuCameraCull& view);
+
+/*
+* How a cluster stands this frame (ROADMAP phase 21 stage 3c-iv-b; docs/research/LEAFGEOMETRY.md, Bounds from the
+* poses): bound to bones (its mesh's vertices, or its twig), so never moved by the per-vertex sway (a bound vertex
+* whose tree is not posed stands still); posed when its tree is, with its sphere in the world (sphere) holding every
+* vertex as drawn, its leaves' flutter included. Mirrored by mesh_cluster_culling.glsl's MeshClusterPose.
+*/
+struct MeshClusterPose {
+    bool bound = false;
+    bool posed = false;
+    std::array<float, 4> sphere{};
+};
+
+/*
+* A posed thing's pose: its sphere in its mesh's frame as its bones carry it, placed by placedBy, grown by the farthest
+* its leaves flutter (windFlutterReach of flutter, its instance's sway's, and its tree's lean).
+*/
+MeshClusterPose meshClusterPosed(const float sphere[4], const GpuInstance& placedBy, float flutter, const Vec2& lean);
+
+// Whether the view keeps every cluster of the draw: its shape not its mesh's, or swaying per vertex and not bound to bones.
+bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
+                          const MeshClusterPose& pose);
+
+// Whether a cluster's vertices are bound to bones: its first bone slot not empty (a bone or MESH_CLUSTER_MANY_BONES).
+bool meshClusterBound(const GpuMeshCluster& cluster);
+
+/*
+* A bound cluster's sphere in its mesh's frame as its tree's bones carry it this frame (tree posed, pool its poses):
+* each of its bones' and their parents' images of its sphere merged (windBlendedSphere); with too many bones, its
+* sphere grown by the tree's move.
+*/
+Vec4 meshClusterBonesSphere(const GpuMeshCluster& cluster, std::span<const GpuBonePose> pool, const GpuBoneTree& tree);
+
+// The sphere the view tests a cluster by: its pose's when posed, else its own in the world.
+std::array<float, 4> meshClusterCullSphere(const GpuMeshCluster& cluster, const GpuInstance& instance, const MeshClusterPose& pose);
+
+/*
+* What the view makes of the cluster (MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): hidden out of the cut (any draw); seen whole
+* (meshClusterSeenWhole); else hidden out of the frustum (meshClusterCullSphere) or, single-sided, not mirrored and not
+* posed (a posed cluster's triangles turn and bend: its cone does not hold), facing away; else seen with its sphere holding.
+*/
 std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
-                                    const GpuCameraCull& view);
+                                    const GpuCameraCull& view, const MeshClusterPose& pose = {});
 
 // Whether the view draws the cluster, occlusion aside: its visibility not hidden.
 bool meshClusterKept(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
-                     const GpuCameraCull& view);
+                     const GpuCameraCull& view, const MeshClusterPose& pose = {});
 
 // A style's survivors as mesh shader workgroups: a row of up to MESH_CLUSTER_TASK_WIDTH, then as many rows as it takes
 // (x y z, VkDrawMeshTasksIndirectCommandEXT); none for none.
@@ -289,7 +331,7 @@ struct MeshClusterTwigTables {
 /*
 * What the passes read: the camera's commands by group (its culling's, unpacked), the drawing order (meshClusterDrawOrder:
 * a number past the groups is a placed group's, less their count; from twigGroupBase a twig region's), the groups (their
-* clusters), the frame's draw list, instances, records and clusters, the placed plants and the twigs.
+* clusters), the frame's draw list, instances, records and clusters, the placed plants, the twigs and the bones.
 */
 struct MeshClusterTables {
     std::span<const GpuDrawCommand> commands;
@@ -301,6 +343,7 @@ struct MeshClusterTables {
     std::span<const GpuMeshCluster> clusters;
     MeshClusterPlacedTables placed{};
     MeshClusterTwigTables twigs{};
+    BoneCullTables bones{};
 };
 
 /*
@@ -313,11 +356,20 @@ CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t dra
 // The most pairs the twig regions can hold: each region's room times its clusters (1 + 2 + ... + TWIG_MOST_LEVEL_CLUSTERS).
 std::uint64_t twigMeshClusterPairBound(std::uint32_t room);
 
-// What a pair's place draws: its instance, its entry's bits (thinned, fade, with its draw's or plant's number) and its record.
+/*
+* What a pair's place draws: its instance, its entry's bits (thinned, fade, with its draw's or plant's number) and its
+* record; a placed plant's number (BONE_NO_TREE for a frame's draw), and a twig's part (placed by its plant) and number
+* (in twigs.twigs; meshClusterNoTwig otherwise).
+*/
+inline constexpr std::uint32_t meshClusterNoTwig = MESH_CLUSTER_NO_TWIG;
+
 struct MeshClusterDrawn {
     GpuInstance instance{};
     std::uint32_t entry = 0;
     GpuCullRecord record{};
+    std::uint32_t plant = boneNoTree;
+    GpuInstance part{};
+    std::uint32_t twig = meshClusterNoTwig;
 };
 
 /*
@@ -326,6 +378,13 @@ struct MeshClusterDrawn {
 * shaders' drawnObject does. Mirrored by mesh_cluster_pass.glsl's meshClusterDrawnAt.
 */
 MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32_t place);
+
+/*
+* How a pair's cluster stands (MeshClusterPose), as mesh_cluster_pass.glsl's meshClusterPoseAt finds it: a twig's by its
+* binding and tree (twigPose on its cluster's own sphere); a placed plant's bound cluster by its tree (boneCullTree,
+* meshClusterBonesSphere, meshClusterPosed); a frame's draw's bound cluster stands still.
+*/
+MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster);
 
 // A list culled: its pairs in drawing order (at most the room), each style's run of them, the pairs tested and the
 // survivors (all of them, past the room too).
@@ -384,9 +443,10 @@ MeshClusterComparison compareMeshClusterLists(std::span<const GpuMeshClusterItem
 std::string describeMeshClusterComparison(const MeshClusterComparison& comparison, std::uint32_t tested, std::uint32_t kept, bool occlusion = false);
 
 // Whether the cluster's choice is within rounding of changing (its own or parent's error within 1e-4 of the pixel error,
-// its sphere within a millimetre of a plane, its cone's test within 1e-4), where the GPU and the CPU may each be right.
+// its sphere (posed, when posed) within a millimetre of a plane, its cone's test within 1e-4), where the GPU and the CPU
+// may each be right.
 bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
-                          const GpuCameraCull& view);
+                          const GpuCameraCull& view, const MeshClusterPose& pose = {});
 
 // The same for a pair of the tables: its cluster and what its place draws.
 bool nearAMeshClusterEdge(const MeshClusterTables& tables, const GpuMeshClusterItem& item, const GpuCameraCull& view);

@@ -134,6 +134,11 @@ Vec4 windSphereUnion(const Vec4& first, const Vec4& second) {
     return Vec4{centre.x, centre.y, centre.z, radius};
 }
 
+// Rigid poses carry a ball to a ball; a blend of a point's two images lies between them, so in any sphere holding both balls.
+Vec4 windBlendedSphere(const WindBonePose& own, const WindBonePose& parent, const Vec4& sphere) {
+    return windSphereUnion(windPosedSphere(own, sphere), windPosedSphere(parent, sphere));
+}
+
 Vec3 windBoneOwnTurn(const WindBoneShape& bone, const WindTreeShape& tree, const Vec2& lean, float seconds, const WindBoneMotion& motion) {
     const Vec3 along = bone.tip - bone.pivot;
     const float length = along.length();

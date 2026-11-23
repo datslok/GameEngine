@@ -5,6 +5,7 @@
 #include "render/gpu/mesh_pool.h"
 #include "render/gpu/placed_drawing.h"
 #include "render/gpu/twig_records.h"
+#include "render/vulkan/vulkan_bone_posing.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_memory.h"
@@ -56,9 +57,11 @@ public:
         VkBuffer plants = VK_NULL_HANDLE;
     };
 
-    // Record the passes (after the placed passes, before the cluster passes): view is the camera's as the cluster passes
-    // take it. Then the regions and entries readable by the cluster passes and mesh shaders, the counts copied back.
-    void record(VkCommandBuffer commands, FrameDescriptors& descriptors, const PlacedInputs& placed, const GpuCameraCull& view, std::uint32_t frameIndex);
+    // Record the passes (after the placed passes and the bones', before the cluster passes): view is the camera's as the
+    // cluster passes take it; bones the frame's (posed trees' bricks and twigs culled by their posed bounds). Then the
+    // regions and entries readable by the cluster passes and mesh shaders, the counts copied back.
+    void record(VkCommandBuffer commands, FrameDescriptors& descriptors, const PlacedInputs& placed, const BoneCullBuffers& bones, const GpuCameraCull& view,
+                std::uint32_t frameIndex);
 
     // What the cluster passes and mesh shaders read (after record): the regions' counts and room, the entries, the twigs.
     VkBuffer getRegions(std::uint32_t frameIndex) const;
@@ -66,6 +69,9 @@ public:
     VkBuffer getTwigs() const;
     // One binding word a twig beside its record (packTwigBinding), for the bones (ROADMAP phase 21 stage 3c-iii).
     VkBuffer getTwigBindings() const;
+
+    // The same words on the CPU, for cluster-compare.
+    std::span<const std::uint32_t> getTwigBindingRecords() const;
 
     // A frame's region room (as prepare sized its entries), which the cluster passes' pair bound takes (twigMeshClusterPairBound).
     std::uint32_t getRoom(std::uint32_t frameIndex) const;
@@ -103,6 +109,7 @@ private:
     VulkanBuffer bricks;
     VulkanBuffer twigs;
     VulkanBuffer twigBindings;
+    std::vector<std::uint32_t> twigBindingRecords;
     VulkanBuffer prototypes;
     VulkanBuffer levels;
     std::vector<const TwigSet*> madeFrom;

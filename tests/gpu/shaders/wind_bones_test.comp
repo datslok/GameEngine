@@ -70,5 +70,7 @@ void main() {
         // The same pose's moves for a bone from the first centre to the second, and a tree's move at the second's radius.
         vec2 moves = windPoseMoves(pose, first.xyz, testInput(3).xyz);
         testOutput(2, vec4(moves, windTreeMove(moves, testInput(3).w), 0.0));
+        // The first sphere blended between the pose and one only shifting it to the second centre.
+        testOutput(3, windBlendedSphere(pose, WindBonePose(vec4(0.0, 0.0, 0.0, 1.0), testInput(3).xyz), first));
     }
 }

@@ -262,8 +262,8 @@ namespace {
 
     /*
     * A cluster's bound holds over random poses: points along the tree's chains, each bound as swayChainBinding binds
-    * it, gathered by runs of bones; their rest sphere posed by each bone of the run and each one's parent, merged,
-    * holds every point's blended place in random winds and times, with no pad.
+    * it, gathered by runs of bones; their rest sphere blended by each bone of the run and its parent (windBlendedSphere),
+    * merged, holds every point's blended place in random winds and times, with no pad.
     */
     void testClusterBoundsHold() {
         std::vector<SwayBone> bones;
@@ -298,12 +298,8 @@ namespace {
                     const Vec2 lean{unit(random) * 0.4f, unit(random) * 0.4f};
                     const std::vector<WindBonePose> poses = windTreePoses(bones, 9.0f, 1.0f, 11u, lean, share(random) * 100.0f, WindBoneMotion{});
                     const int firstBone = chain.firstBone + first;
-                    Vec4 bound = windPosedSphere(poses[static_cast<std::size_t>(firstBone)], rest);
-
-                    for (int bone = firstBone; bone <= firstBone + 1; ++bone) {
-                        bound = windSphereUnion(bound, windPosedSphere(poses[static_cast<std::size_t>(bone)], rest));
-                        bound = windSphereUnion(bound, windPosedSphere(parentPose(bones, poses, bone), rest));
-                    }
+                    Vec4 bound = windBlendedSphere(poses[static_cast<std::size_t>(firstBone)], parentPose(bones, poses, firstBone), rest);
+                    bound = windSphereUnion(bound, windBlendedSphere(poses[static_cast<std::size_t>(firstBone + 1)], parentPose(bones, poses, firstBone + 1), rest));
 
                     for (std::size_t k = 0; k < points.size(); ++k) {
                         const int bone = bindings[k].bone;

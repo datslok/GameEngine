@@ -6,6 +6,7 @@
 
 #include "render/gpu/bone_poses_shared.h"
 #include "scene/sway_bones_shared.h"
+#include "wind_bones.glsl"
 
 // A bone of a skeleton (GpuSwayBone): pivot and parent within its skeleton (-1 a root), tip and radius, its chain's
 // first bone, length and radius at its start, its level.
@@ -80,5 +81,12 @@ uint boneClaimedTree(uint claimStamp, uint claimTree, uint frameStamp) {
 uint bonePoseSlot(uint firstPose, uint bone, bool previous) {
     return firstPose + 2u * bone + (previous ? 1u : 0u);
 }
+
+// What a bound vertex blends (BoneVertexPoses): its bone's pose, its parent's (the rest pose for a root), its weight.
+struct BoneVertexPoses {
+    WindBonePose own;
+    WindBonePose parent;
+    float weight;
+};
 
 #endif

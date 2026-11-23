@@ -1,9 +1,10 @@
 // Twigs drawn as instances of prototypes, included with #include "twig_drawing.glsl": mirrors render/gpu/twig_records.h
-// (twigInstance, twigLevel, twigBrickKept, twigKept) and declares its records. Pure functions, the errors' sides precise,
+// (twigInstance, twigPosed, twigLevel, twigBrickKept, twigKept, twigBrickPose) and declares its records. Pure functions, the errors' sides precise,
 // so the twig pass chooses what the cluster cut would.
 #ifndef TWIG_DRAWING_GLSL
 #define TWIG_DRAWING_GLSL
 
+#include "bone_poses.glsl"
 #include "mesh_cluster_culling.glsl"
 #include "twig_record.glsl"
 
@@ -46,6 +47,20 @@ InstanceData twigInstance(InstanceData part, Twig twig) {
     return instance;
 }
 
+// A twig carried whole by a rigid pose in the plant's frame: the pose after its matrix (twigPosed).
+Twig twigPosed(Twig twig, WindBonePose pose) {
+    Twig posed = twig;
+
+    for (int column = 0; column < 4; ++column) {
+        vec3 turned = quatRotate(pose.turn, vec3(twig.rows[0][column], twig.rows[1][column], twig.rows[2][column])) + (column == 3 ? pose.shift : vec3(0.0));
+        posed.rows[0][column] = turned.x;
+        posed.rows[1][column] = turned.y;
+        posed.rows[2][column] = turned.z;
+    }
+
+    return posed;
+}
+
 /*
 * Whether a twig draws a level (twigLevelDrawn; the pass walks a prototype's levels with it, as twigLevel does): its own
 * error (the level before's group's, none for the finest) fits the view and its group's does not.
@@ -56,23 +71,34 @@ bool twigLevelDrawn(TwigLevel before, bool finest, TwigLevel level, mat4 model, 
     return ownFits && !coarserFits;
 }
 
-// Whether a view keeps a sphere placed by a model: always where the part is not rigid, else in the frustum.
-bool twigSphereKept(vec4 sphere, mat4 placedBy, InstanceData part, uint entry, CullRecord record, CameraCull view) {
-    if (!meshClusterRigid(part, entry, record, view)) {
+// Whether a view keeps a sphere placed by a model: always where the part is seen whole, else its posed sphere or its
+// own placed one in the frustum.
+bool twigSphereKept(vec4 sphere, mat4 placedBy, InstanceData part, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
+    if (meshClusterSeenWhole(part, entry, record, view, pose)) {
         return true;
     }
 
-    return sphereInFrustum(view.frustum, meshClusterPlacedSphere(sphere, placedBy));
+    return sphereInFrustum(view.frustum, pose.posed ? pose.sphere : meshClusterPlacedSphere(sphere, placedBy));
 }
 
 // A brick (twigBrickKept): its sphere in the plant's frame, placed by the part.
-bool twigBrickKept(TwigBrick brick, InstanceData part, uint entry, CullRecord record, CameraCull view) {
-    return twigSphereKept(brick.sphere, part.model, part, entry, record, view);
+bool twigBrickKept(TwigBrick brick, InstanceData part, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
+    return twigSphereKept(brick.sphere, part.model, part, entry, record, view, pose);
 }
 
 // A twig (twigKept): its prototype's coarsest group's sphere, placed by the twig.
-bool twigKept(TwigLevel coarsest, InstanceData twig, uint entry, CullRecord record, CameraCull view) {
-    return twigSphereKept(coarsest.sphere, twig.model, twig, entry, record, view);
+bool twigKept(TwigLevel coarsest, InstanceData twig, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
+    return twigSphereKept(coarsest.sphere, twig.model, twig, entry, record, view, pose);
+}
+
+// How a brick stands (twigBrickPose): posed with its tree (tree.firstPose not BONE_NO_POSE) when its part is bound,
+// its sphere grown by the tree's move, placed by the part, padded by the flutter.
+MeshClusterPose twigBrickPose(TwigBrick brick, InstanceData part, bool partBound, BoneTree tree) {
+    if (!partBound || tree.firstPose == BONE_NO_POSE) {
+        return meshClusterUnposed(partBound);
+    }
+
+    return meshClusterPosed(vec4(brick.sphere.xyz, brick.sphere.w + tree.move), part.model, part.sway.w, tree.leans.xy);
 }
 
 #endif

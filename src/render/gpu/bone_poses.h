@@ -117,6 +117,28 @@ struct BoneVertexPoses {
 // A vertex's poses (binding: packSwayBinding's, not SWAY_UNBOUND) from its tree's (firstPose) in the pool, this frame's or last's.
 BoneVertexPoses boneVertexPoses(std::span<const GpuBonePose> pool, std::uint32_t firstPose, std::uint32_t binding, bool previous);
 
+/*
+* What the camera's culling reads of the bones (ROADMAP phase 21 stage 3c-iv-b; bone_cull_data.glsl): each held
+* plant's word pair (stamp, tree), the trees, the pool, each twig's binding (packTwigBinding), and the frame's stamp (0
+* when the bones pass did not run: nothing is posed).
+*/
+struct BoneCullTables {
+    std::span<const std::uint32_t> plantTrees;
+    std::span<const GpuBoneTree> trees;
+    std::span<const GpuBonePose> poses;
+    std::span<const std::uint32_t> twigBindings;
+    std::uint32_t stamp = 0;
+};
+
+/*
+* The tree posing a plant this frame, as the draws find it (boneDrawnBy): claimed with this frame's stamp and given room
+* in the pool; else a tree with firstPose BONE_NO_POSE (its bound vertices stand still). A plant past the table is none.
+*/
+GpuBoneTree boneCullTree(const BoneCullTables& tables, std::uint32_t plant);
+
+// The plant table the claims leave (for cluster-compare, from read-back trees): each tree's plant's pair (stamp, tree), plants' pairs long.
+std::vector<std::uint32_t> bonePlantTreesOf(std::span<const GpuBoneTree> trees, std::uint32_t stamp, std::size_t plants);
+
 // ---- The passes' steps on the CPU ----
 
 // A plant to pose and the skeleton its parts are moved by.

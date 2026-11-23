@@ -35,8 +35,9 @@ void main() {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the
         // record's bounds, the eye, the frustum's six planes, the own sphere, the parent sphere, (own error, parent
-        // error, pixel error, level flags). Outputs: (kept, rigid, faces away from the eye brought into the mesh,
-        // largest scale), the world sphere, (in the cut, own error's pixels, parent error's pixels).
+        // error, pixel error, level flags), (the pose's bound, posed), the pose's sphere. Outputs: (kept, seen whole,
+        // faces away from the eye brought into the mesh, largest scale), the world sphere, (in the cut, own error's
+        // pixels, parent error's pixels).
         MeshCluster cluster;
         cluster.sphere = testInput(0);
         cluster.cone = testInput(1);
@@ -51,8 +52,9 @@ void main() {
         cluster.ownError = errors.x;
         cluster.parentError = errors.y;
         cluster.level = 0u;
-        cluster.unused1 = 0u;
-        cluster.unused2 = 0u;
+        cluster.bones = uvec2(0xFFFFFFFFu);
+        cluster.moreBones = uvec2(0xFFFFFFFFu);
+        cluster.unused = uvec2(0u);
 
         InstanceData instance;
         instance.model = mat4(testInput(3), testInput(4), testInput(5), testInput(6));
@@ -87,7 +89,10 @@ void main() {
 
         float determinant = meshClusterDeterminant(instance.model);
         bool away = determinant > 0.0 && meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance.model, view.levels.eye.xyz, determinant));
-        testOutput(0, vec4(meshClusterKept(cluster, instance, entry, record, view) ? 1.0 : 0.0, meshClusterRigid(instance, entry, record, view) ? 1.0 : 0.0,
+        vec4 posing = testInput(20);
+        MeshClusterPose pose = MeshClusterPose(posing.x != 0.0, posing.y != 0.0, testInput(21));
+        testOutput(0, vec4(meshClusterKept(cluster, instance, entry, record, view, pose) ? 1.0 : 0.0,
+                           meshClusterSeenWhole(instance, entry, record, view, pose) ? 1.0 : 0.0,
                            away ? 1.0 : 0.0, meshClusterLargestScale(instance.model)));
         testOutput(1, meshClusterWorldSphere(cluster, instance.model));
         testOutput(2, vec4(meshClusterInCut(cluster, instance.model, view.levels) ? 1.0 : 0.0,

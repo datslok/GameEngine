@@ -100,7 +100,8 @@ The culling algorithm itself is unpublished (no talk slides found).
     - Measured (seeds 7 and 21): full-detail bark 78-84% of big trees' clusters within 4 bones, the rest 5-8 (where about four chains meet); cards 80-89%, 3 of 611 past 8; the first coarser level 48-61% within 4, 2% past 8; the second a third past 8. So 8 (the user's pick for scale: a fixed cost a cluster) holds full detail exactly; a list of any length only if bones shrink.
     - A tree's move a frame (the bones pass): its bones' largest pivot or tip move E and largest `2 |turn.xyz|` A; any point within its skeleton's reach R (`SwaySkeleton::reach`) of its bones, blended or rigid between two, moves at most E + A R.
     - Animation stopped below 0.1 of the screen (the tree's sphere's diameter over the screen's height), faded below it, decided by the camera for every view; F5.
-    - Split: iv-a the bones and the move; iv-b culled by them (frustum, cones turned and widened, occlusion); iv-c the screen cut.
+    - Split: iv-a the bones and the move; iv-b culled by them (frustum, occlusion); iv-c the screen cut.
+  - [I] No facing test on posed clusters (found building iv-b): a blend shears triangles near a joint, so a normal turns by more than its bones do and no widened cone is safe; the flutter moves leaves too. Twigs move rigidly, but flutter as well.
 - **Far:** the crown impostor card stays until volumes (`FARFOLIAGE.md`).
 
 ## The plan (phase 21 stage 3)
@@ -111,7 +112,7 @@ The culling algorithm itself is unpublished (no talk slides found).
 | 3b | Trees draw twigs, expanded on the GPU while culling (assemblies, over a CPU bake); the cards beyond the twigs' reach and for shadows until 3f | i: levels given by the caller, as 2b; ii: twigs laid out as the cards; iii: twig pass, normal blend, a leaf's tone from a hash |
 | 3c-ii | Bone motion in `wind_bones.glsl` and its C++ mirror: each bone's turn from the tree's spring, stiffness and phase, about the axis across its direction and the wind; parents composed first; the blended vertex; a cluster's bound from its bones | still air still, the foot fixed, joints continuous, bounds holding over random poses; a GPU test (not run) |
 | 3c-iii | The bones pass, its pool and buffers; bark and twigs moved by their bones in every view (twig flutter as its bone's turn); the trees' per-vertex sway retired | the user checks and tunes the sway |
-| 3c-iv | Clusters culled by their bones' bounds (up to 8 a cluster, else the tree's move; cones turned with them); nothing kept whole for sway on trees; animation stopped below 0.1 of the screen | F4 counts, `cluster-compare`, timings at the four spots |
+| 3c-iv | Clusters culled by their bones' bounds (up to 8 a cluster, else the tree's move; no facing test while posed); nothing kept whole for sway on trees; animation stopped below 0.1 of the screen | F4 counts, `cluster-compare`, timings at the four spots |
 | 3e | Far levels above the twigs: whole twigs pruned by rank and merged into each variant's coarse levels, the cut crossing from twigs to tree without cracks or pops | |
 | 3f | The leaf cards and shadow stand-ins retired, leaves casting opaque shadows in the cascades until stage 4; the crown's impostor card kept far until volumes | measured at the four spots |
 

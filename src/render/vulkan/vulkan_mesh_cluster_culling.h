@@ -6,6 +6,7 @@
 #include "render/gpu/mesh_cluster_culling.h"
 #include "render/gpu/upscaling.h"
 #include "render/vulkan/frame_descriptors.h"
+#include "render/vulkan/vulkan_bone_posing.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_depth_pyramid.h"
 #include "render/vulkan/vulkan_memory.h"
@@ -64,7 +65,7 @@ public:
     * groups, unpacked commands and records are given (render/vulkan/vulkan_camera_culling.h); the frame's draw list and
     * instances; the cluster pool; the placed plants. pairBound: meshClusterPairBound and placedMeshClusterPairBound.
     * occlusion: two lists; viewProjection: this frame's camera-relative view-projection as the depth is drawn
-    * (jittered), from origin.
+    * (jittered), from origin. bones: the trees posed this frame, culled by their posed bounds (ROADMAP phase 21 3c-iv-b).
     */
     // The camera's twigs (render/vulkan/vulkan_twig_drawing.h), the passes' own record each without: the regions' counts
     // and room, the entries, the twigs.
@@ -86,6 +87,7 @@ public:
         VkBuffer clusters = VK_NULL_HANDLE;
         PlacedInputs placed;
         TwigInputs twigs;
+        BoneCullBuffers bones;
         std::uint64_t pairBound = 0;
         bool occlusion = false;
         Mat4 viewProjection;

@@ -24,8 +24,8 @@ void main() {
     }
 
     if (function == GPU_TEST_TWIG_INSTANCE) {
-        // Inputs: the part's model, normal matrix and scale (9), the twig's three rows. Outputs: the twig's model (4
-        // columns), its normal matrix's first three columns, (its scale).
+        // Inputs: the part's model, normal matrix and scale (9), the twig's three rows, a pose's turn and shift. Outputs:
+        // the twig's model (4 columns), its normal matrix's first three columns, (its scale), the twig posed's three rows.
         InstanceData part = testInstance(0u);
         Twig twig;
         twig.rows[0] = testInput(9);
@@ -44,6 +44,12 @@ void main() {
         }
 
         testOutput(7, vec4(placed.handedness.y, 0.0, 0.0, 0.0));
+        Twig posed = twigPosed(twig, WindBonePose(testInput(12), testInput(13).xyz));
+
+        for (int row = 0; row < 3; ++row) {
+            testOutput(uint(8 + row), posed.rows[row]);
+        }
+
         return;
     }
 
@@ -63,7 +69,8 @@ void main() {
 
     if (function == GPU_TEST_TWIG_BRICK_KEPT) {
         // Inputs: the part's model, normal matrix and scale (9), the brick's sphere, (record flags, view flags, sway fade
-        // end), the record's bounds, the eye, the frustum's six planes. Output: (kept).
+        // end), the record's bounds, the eye, the frustum's six planes, (part bound, tree posed, tree's move, flutter),
+        // (the tree's lean). Outputs: (kept, posed), the pose's sphere.
         InstanceData part = testInstance(0u);
         TwigBrick brick = TwigBrick(testInput(9), 0u, 64u, 0u, 0u);
         vec4 flags = testInput(10);
@@ -85,6 +92,11 @@ void main() {
             view.frustum.planes[plane] = testInput(13u + uint(plane));
         }
 
-        testOutput(0, vec4(twigBrickKept(brick, part, 0u, record, view) ? 1.0 : 0.0, 0.0, 0.0, 0.0));
+        vec4 bones = testInput(19);
+        part.sway.w = bones.w;
+        BoneTree tree = BoneTree(0u, 0u, bones.y != 0.0 ? 0u : BONE_NO_POSE, bones.z, vec4(testInput(20).xy, 0.0, 0.0));
+        MeshClusterPose pose = twigBrickPose(brick, part, bones.x != 0.0, tree);
+        testOutput(0, vec4(twigBrickKept(brick, part, 0u, record, view, pose) ? 1.0 : 0.0, pose.posed ? 1.0 : 0.0, 0.0, 0.0));
+        testOutput(1, pose.sphere);
     }
 }

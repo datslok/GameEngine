@@ -38,8 +38,8 @@ struct RenderStats {
     std::size_t meshClustersLate = 0;
     std::size_t meshClustersHidden = 0;
 
-    // The camera's twigs (render/gpu/twig_records.h's TwigTally), while drawn: tested, kept, kept because their part
-    // sways, and the kept ones' twigs and triangles at each level; none tested while not drawn.
+    // The camera's twigs (render/gpu/twig_records.h's TwigTally), while drawn: tested, kept, kept moving (posed, or kept
+    // whole as their part sways unbound), and the kept ones' twigs and triangles at each level; none tested while not drawn.
     std::size_t twigsTested = 0;
     std::size_t twigsKept = 0;
     std::size_t twigsSwaying = 0;

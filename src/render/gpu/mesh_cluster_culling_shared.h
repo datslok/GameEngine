@@ -11,9 +11,13 @@
 // The ways of drawing, as the camera's culling has them (CAMERA_CULL_STYLES).
 #define MESH_CLUSTER_STYLES 4
 
-// The storage buffers every pass binds (mesh_cluster_pass.glsl: the camera's tables, then the placed plants'); each
-// pass's own come after.
-#define MESH_CLUSTER_PASS_BINDINGS 21
+// The storage buffers every pass binds (mesh_cluster_pass.glsl: the camera's tables, the placed plants', the twigs',
+// then from MESH_CLUSTER_BONE_BINDING the bones' four, bone_cull_data.glsl); each pass's own come after.
+#define MESH_CLUSTER_BONE_BINDING 21
+#define MESH_CLUSTER_PASS_BINDINGS 25
+
+// MeshClusterDrawn::twig for a place that is not a twig.
+#define MESH_CLUSTER_NO_TWIG 0xFFFFFFFFu
 
 // GpuMeshCluster::counts: the vertices in the low byte, the triangles from this bit.
 #define MESH_CLUSTER_TRIANGLE_SHIFT 8u
