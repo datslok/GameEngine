@@ -501,7 +501,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
       - [x] 3c-iv-c. Animation stopped below a share of the screen, faded (`tree-bones-3c-iv-c`)
     - [x] 3c-vi. Far trees sharing a pose a variant and wind cell: not needed, BONES about 0.1 ms (`probe-size-128`)
   - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels (`leaf-bricks-3e-plan`)
-    - [ ] 3e-i. Each variant's brick levels on the CPU, from its twigs' level-2 leaves as records
+    - [x] 3e-i. Each variant's brick levels on the CPU, from its twigs' level-2 leaves as records (`leaf-bricks-3e-i`)
     - [ ] 3e-ii. Leaf records on the GPU, expanded by the mesh shader, mirrored in C++
     - [ ] 3e-iii. Bricks drawn as their levels where level 0's error fits, culled by posed bounds
   - [ ] 3f. The leaf cards and shadow stand-ins retired; leaves cast opaque shadows

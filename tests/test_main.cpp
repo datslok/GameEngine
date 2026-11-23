@@ -99,6 +99,7 @@ void testCardThinning();
 void testLeafPruning();
 void testTwigs();
 void testTwigSet();
+void testTwigFarLevels();
 void testTwigRecords();
 void testTerrain();
 void testGroundFollow();
@@ -453,6 +454,7 @@ const RoutineTest routineTests[] = {
     {"testLeafPruning", testLeafPruning},
     {"testTwigs", testTwigs},
     {"testTwigSet", testTwigSet},
+    {"testTwigFarLevels", testTwigFarLevels},
     {"testTwigRecords", testTwigRecords},
     {"testTerrain", testTerrain},
     {"testGroundFollow", testGroundFollow},
