@@ -113,6 +113,12 @@ Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere);
 Vec4 windSphereUnion(const Vec4& first, const Vec4& second);
 
 /*
+* Where a sphere's points go when each is blended between two poses (a bone's and its parent's, any weight): within the
+* smallest sphere holding both poses' images of it (ROADMAP phase 21 stage 3c-iv-b), never padded for the wind.
+*/
+Vec4 windBlendedSphere(const WindBonePose& own, const WindBonePose& parent, const Vec4& sphere);
+
+/*
 * How far a bone's pose moves what it carries (ROADMAP phase 21 stage 3c-iv-a): x the larger of its pivot's and tip's
 * moves (a point on its segment moves at most that: the move is affine along it), y 2 |turn.xyz| = 2 sin(angle / 2),
 * the most a point a unit off the segment swings further.

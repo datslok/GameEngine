@@ -23,7 +23,8 @@ namespace {
     constexpr VkDeviceSize regionsTallyOffset = countBytes + 4 * sizeof(std::uint32_t);
     constexpr VkDeviceSize tallyBytes = TWIG_TALLY_WORDS * sizeof(std::uint32_t);
 
-    constexpr std::uint32_t pushBytes = 8;
+    // The most bricks, the most sources, the frame's bones stamp (twig_pass.glsl's TwigPush).
+    constexpr std::uint32_t pushBytes = 12;
 
     constexpr BufferUse computeWrite{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
     constexpr BufferUse computeReadWrite{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
@@ -165,6 +166,7 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
     uploadBytes(allocator, bricks, brickRecords.data(), std::max<std::size_t>(brickRecords.size(), 1) * sizeof(GpuTwigBrick));
     uploadBytes(allocator, twigs, twigRecords.data(), std::max<std::size_t>(twigRecords.size(), 1) * sizeof(GpuTwig));
     uploadBytes(allocator, twigBindings, bindingRecords.data(), std::max<std::size_t>(bindingRecords.size(), 1) * sizeof(std::uint32_t));
+    twigBindingRecords = std::move(bindingRecords);
     uploadBytes(allocator, prototypes, prototypeRecords.data(), prototypeRecords.size() * sizeof(GpuTwigPrototype));
     uploadBytes(allocator, levels, levelRecords.data(), levelRecords.size() * sizeof(GpuTwigLevel));
     madeFrom = table.twigSets;
@@ -177,8 +179,8 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
 * room; then the sources pass, the cull pass (indirect: its dispatch the sources pass wrote), and the regions and entries
 * made ready for the cluster passes, the mesh shaders and the copy back of the counts.
 */
-void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descriptors, const PlacedInputs& placed, const GpuCameraCull& view,
-                               std::uint32_t frameIndex) {
+void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descriptors, const PlacedInputs& placed, const BoneCullBuffers& bones,
+                               const GpuCameraCull& view, std::uint32_t frameIndex) {
     PerFrame& frame = frames.at(frameIndex);
     const VmaAllocator allocator = device.getAllocator();
     uploadBytes(allocator, frame.view, &view, sizeof(view));
@@ -197,10 +199,11 @@ void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descr
         storageBufferBinding(frame.groups.get()), storageBufferBinding(sets.get()),      storageBufferBinding(bricks.get()),
         storageBufferBinding(twigs.get()),        storageBufferBinding(prototypes.get()), storageBufferBinding(levels.get()),
         storageBufferBinding(frame.sources.get()), storageBufferBinding(frame.dispatch.get()), storageBufferBinding(frame.regions.get()),
-        storageBufferBinding(frame.entries.get()),
+        storageBufferBinding(frame.entries.get()), storageBufferBinding(bones.plantTrees), storageBufferBinding(bones.trees),
+        storageBufferBinding(bones.poses),        storageBufferBinding(bones.twigBindings),
     };
     bindings[3].buffer = placed.partInstances;
-    const std::uint32_t pushed[2] = {mostBricks, mostSources};
+    const std::uint32_t pushed[3] = {mostBricks, mostSources, bones.stamp};
 
     bindComputeSet(commands, device.getDevice(), descriptors, *sourcesPass, bindings);
     vkCmdPushConstants(commands, sourcesPass->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes, pushed);
@@ -238,6 +241,10 @@ VkBuffer VulkanTwigDrawing::getTwigs() const {
 
 VkBuffer VulkanTwigDrawing::getTwigBindings() const {
     return twigBindings.get();
+}
+
+std::span<const std::uint32_t> VulkanTwigDrawing::getTwigBindingRecords() const {
+    return twigBindingRecords;
 }
 
 std::uint32_t VulkanTwigDrawing::getRoom(std::uint32_t frameIndex) const {

@@ -29,8 +29,10 @@
 #define TWIG_TALLY_LEVEL_TRIANGLES (TWIG_TALLY_LEVEL_TWIGS + TWIG_MOST_LEVELS)
 #define TWIG_TALLY_WORDS (TWIG_TALLY_LEVEL_TRIANGLES + TWIG_MOST_LEVELS)
 
-// The twig passes' storage buffers (twig_pass.glsl), and the workgroup of the pass gathering their sources.
-#define TWIG_PASS_BINDINGS 16
+// The twig passes' storage buffers (twig_pass.glsl; from TWIG_BONE_BINDING the bones' four, bone_cull_data.glsl), and
+// the workgroup of the pass gathering their sources.
+#define TWIG_BONE_BINDING 16
+#define TWIG_PASS_BINDINGS 20
 #define TWIG_SOURCES_GROUP_SIZE 64
 
 // The scene set's twig entries, twigs and their bindings to their trees' bones (render/vulkan/scene_layout.h), for the

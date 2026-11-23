@@ -1035,11 +1035,14 @@ FrameContext VulkanRenderer::beginFrame() {
         takeCameraCull(*culled, frameIndex);
     }
 
+    // The bones first: a frame's cluster-compare culls again by its trees and poses.
+    takeBonePoses(frameIndex);
+
     if (const std::optional<VulkanMeshClusterCulling::Collected> clusters = meshClusterCulling->collect(frameIndex)) {
         takeMeshClusterCull(*clusters, culled ? &*culled : nullptr, frameIndex);
     }
 
-    takeBonePoses(frameIndex);
+    clusterCompareBones.reset();
     planting->collect(frameIndex, jobs);
     placedDrawing->collect(frameIndex);
     const std::optional<VulkanTwigDrawing::Collected> twigsCollected = twigDrawing->collect(frameIndex);
@@ -1257,6 +1260,11 @@ void VulkanRenderer::takeBonePoses(std::uint32_t frameIndex) {
         bonesCompare.reset();
     }
 
+    // Kept for this frame's cluster-compare, when it has one.
+    if (meshClusterCompares.at(frameIndex) && !collected->poses.empty()) {
+        clusterCompareBones = ClusterCompareBones{std::move(collected->posedTrees), std::move(collected->poses)};
+    }
+
     collected->posedTrees.clear();
     collected->poses.clear();
     lastBones = std::move(collected);
@@ -1301,6 +1309,14 @@ void VulkanRenderer::takeMeshClusterCull(const VulkanMeshClusterCulling::Collect
 
         tables.placed = MeshClusterPlacedTables{placed->commands.first(placed->table->groups.size()), placed->table->groups, placed->entries,
                                                 compare->placedParts, placed->table->parts, placed->plants};
+    }
+
+    // The trees posed that frame, read back with it: each plant's tree rebuilt from the trees' plants and the frame's stamp.
+    std::vector<std::uint32_t> plantTrees;
+
+    if (compare->placed && clusterCompareBones && compare->boneStamp != 0) {
+        plantTrees = bonePlantTreesOf(clusterCompareBones->trees, compare->boneStamp, tables.placed.plants.size());
+        tables.bones = BoneCullTables{plantTrees, clusterCompareBones->trees, clusterCompareBones->poses, compare->twigBindings, compare->boneStamp};
     }
 
     // With occlusion the GPU's two lists together against the CPU's frustum and facing alone: the GPU may lack pairs
@@ -2200,7 +2216,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         inputs.scene = sceneSet;
         inputs.eye = cameraOrigin;
         inputs.fadeEnd = settings.wind.swayFadeEnd;
-        inputs.readBackPoses = bonesComparing;
+        inputs.readBackPoses = bonesComparing || clusterComparing;
 
         // The lianas' anchors' trees first: nothing the bones do depends on them, and the shaders after read both.
         if (lianaAnchors > 0 && planting->getField()) {
@@ -2238,8 +2254,19 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         clusterView.levels.pixelError = settings.meshClusterErrorPixels;
     }
 
-    // The camera's twigs (render/vulkan/vulkan_twig_drawing.h): after its placed plants, before its mesh clusters, which
-    // take the twigs' regions as groups.
+    // The bones the camera's twigs and clusters are culled by (ROADMAP phase 21 stage 3c-iv-b): this frame's trees and
+    // poses, claimed with the frame's stamp (0, nothing posed, before the bones' buffers are made).
+    const bool bonesMade = bonePosing->getTrees() != VK_NULL_HANDLE && bonePosing->getPlantTrees() != VK_NULL_HANDLE && bonePosing->getPoses() != VK_NULL_HANDLE;
+    const BoneCullBuffers cullBones{
+        .plantTrees = bonesMade ? bonePosing->getPlantTrees() : noPlacedRecords.get(),
+        .trees = bonesMade ? bonePosing->getTrees() : noPlacedRecords.get(),
+        .poses = bonesMade ? bonePosing->getPoses() : noPlacedRecords.get(),
+        .twigBindings = frameTwigs && twigDrawing->getTwigBindings() != VK_NULL_HANDLE ? twigDrawing->getTwigBindings() : noPlacedRecords.get(),
+        .stamp = bonesMade ? static_cast<std::uint32_t>(frameWind.flags[1]) : 0u,
+    };
+
+    // The camera's twigs (render/vulkan/vulkan_twig_drawing.h): after its placed plants and the bones, before its mesh
+    // clusters, which take the twigs' regions as groups.
     const bool twigClusters = frameTwigs.has_value() && placedClusters;
 
     if (twigClusters) {
@@ -2248,7 +2275,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         twigDrawing->record(frame.commands, frame.descriptors,
                             VulkanTwigDrawing::PlacedInputs{placed.commands, placed.entries, frames[frame.frameIndex].scene->placedParts.describe(),
                                                             placed.parts, planting->getPlants()},
-                            clusterView, frame.frameIndex);
+                            cullBones, clusterView, frame.frameIndex);
         endGpuPass(frame, GpuPass::Twigs);
     }
 
@@ -2289,6 +2316,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                                 twigDrawing->getTwigs()};
         }
 
+        inputs.bones = cullBones;
         inputs.pairBound = meshClusterPairBound(cullFrame) + placed.pairBound + (twigClusters ? twigMeshClusterPairBound(twigDrawing->getRoom(frame.frameIndex)) : 0);
         inputs.occlusion = occludesClusters;
         inputs.viewProjection = relativeViewProjection;
@@ -2297,9 +2325,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::MeshCull);
 
         if (clusterComparing) {
+            const std::span<const std::uint32_t> twigBindings = twigClusters ? twigDrawing->getTwigBindingRecords() : std::span<const std::uint32_t>{};
             meshClusterCompares[frame.frameIndex] = MeshClusterCompare{inputs.view, cullFrame.groups, order.order, cullFrame.join().records,
                                                                       std::move(clusterCompareInstances), std::move(clusterComparePlacedParts),
-                                                                      placedClusters};
+                                                                      placedClusters, cullBones.stamp,
+                                                                      std::vector<std::uint32_t>(twigBindings.begin(), twigBindings.end())};
         }
     }
     stats.stillCells = description.stillCells;

@@ -5,7 +5,8 @@
 * The twig passes' second (render/vulkan/vulkan_twig_drawing.h; mirrored by twigDrawsOnCpu): a workgroup a source's
 * brick (x the brick within its set, y the source), a thread a twig. The brick kept (twigBrickKept), each twig kept
 * (twigKept), its level walked to the one it draws (twigLevelDrawn), its entry put in the region of its level's
-* cluster count. The regions' order is the atomics', so the cluster passes and cluster-compare take them as sets.
+* cluster count. A tree posed by its bones this frame culls its bricks and twigs by their posed bounds (twigBrickPose,
+* twigPose). The regions' order is the atomics', so the cluster passes and cluster-compare take them as sets.
 *
 * The tally (F4's TWIGS line, TwigTally) is counted in shared memory and added once a workgroup, so a frame's million
 * twigs do not all meet at the same few words.
@@ -38,15 +39,19 @@ void main() {
     PlacedPlant plant = placedPlants[placed.x & DRAW_LIST_INSTANCE_MASK];
     InstanceData part = placedInstance(placedPartInstances[placed.y], plant);
     CullRecord record = placedCullRecord(placedParts[placed.y].record, plant);
-    bool swaying = !meshClusterRigid(part, placed.x, record, view);
+    BoneTree tree = boneCullTree(placed.x & DRAW_LIST_INSTANCE_MASK, push.boneStamp);
+    MeshClusterPose brickPose = twigBrickPose(brick, part, placedParts[placed.y].unused1 != 0u, tree);
 
-    if (local < brick.twigCount && twigBrickKept(brick, part, placed.x, record, view)) {
+    if (local < brick.twigCount && twigBrickKept(brick, part, placed.x, record, view, brickPose)) {
         uint number = brick.firstTwig + local;
         Twig twig = twigs[number];
         TwigPrototype prototype = twigPrototypes[twig.prototype];
         InstanceData placedTwig = twigInstance(part, twig);
+        TwigLevel coarsest = twigLevels[prototype.firstLevel + prototype.levelCount - 1u];
+        uint binding = number < uint(boneCullTwigBindings.length()) ? boneCullTwigBindings[number] : SWAY_UNBOUND;
+        MeshClusterPose pose = twigPose(coarsest.sphere, part, twig, binding, tree);
 
-        if (twigKept(twigLevels[prototype.firstLevel + prototype.levelCount - 1u], placedTwig, placed.x, record, view)) {
+        if (twigKept(coarsest, placedTwig, placed.x, record, view, pose)) {
             uint chosen = prototype.levelCount - 1u;
 
             for (uint level = 0u; level < prototype.levelCount; ++level) {
@@ -70,7 +75,7 @@ void main() {
             atomicAdd(groupTally[TWIG_TALLY_LEVEL_TWIGS + chosen], 1u);
             atomicAdd(groupTally[TWIG_TALLY_LEVEL_TRIANGLES + chosen], drawn.triangleCount);
 
-            if (swaying) {
+            if (pose.posed || meshClusterSeenWhole(part, placed.x, record, view, pose)) {
                 atomicAdd(groupTally[TWIG_TALLY_SWAYING], 1u);
             }
         }

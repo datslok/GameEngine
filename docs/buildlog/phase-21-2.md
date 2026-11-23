@@ -71,3 +71,12 @@
   - **Shared test helper:** `throwsInvalid` moved into `test_levels.h` from two copies.
   - **5 planted bugs caught** (bones repeated in the slots, the limit at 4, the move without its reach, the reach ignoring the parent, the twigs left out of the reach).
   - Should look unchanged; GPU test written, not run.
+- `tree-bones-3c-iv-b` (Nov 23 2026): posed trees' clusters and twigs culled by their posed bounds (frustum and occlusion), no longer kept whole for sway.
+  - **Exact, no wind pad:** a blended vertex lies between its two bones' images, so each bone's and its parent's image of the rest sphere, merged, holds it (`windBlendedSphere`); a twig moves rigidly, so its sphere is placed by the twig carried by its pose (`twigPosed`). Only the leaves' flutter pads it: sqrt(3) |flutter| |lean| (`windFlutterReach`: three sines, each within the amount).
+  - **Facing dropped for posed clusters (changes the approved plan):** a blend shears triangles near a joint, so a normal turns by more than the bones do and no widened cone is safe. Posed clusters are tested by frustum and occlusion only; a bound tree not posed keeps its rest cone.
+  - **Bound means never swayed:** a bound vertex either follows its bones or stands still, so a bound draw is never kept whole for the per-vertex sway (`meshClusterSeenWhole` replaces `meshClusterRigid`).
+  - **The passes read the bones in set 0** (`bone_cull_data.glsl`): the draws' reader is tied to the scene set and the wind record's stamp, so the culling has its own four bindings and the stamp in its push constants.
+  - **`cluster-compare` reads the bones back** in the same frame, the plant table rebuilt from the trees' plants; it still does not know twigs (unchanged).
+  - **The posed-cluster test needed uneven bands:** 40 even bones gave every cluster more than 8, so the 8-bone path went untested; the packing test's bands (broad below, thin at the top) give both.
+  - **10 planted bugs caught** (no sqrt 3, the parent's image left out, too many bones not grown, no flutter pad, the first bone only, the stamp ignored, a posed twig without its shift, a brick not grown, a twig at rest, bound draws swayed whole); the brick's was missed from one view and caught once the test looked from 16.
+  - GPU tests written for the new maths, not run.

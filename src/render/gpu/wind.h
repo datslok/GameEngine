@@ -222,6 +222,12 @@ Vec3 windFlutterOffset(const Vec3& place, float amount, const Vec2& rate, float 
 float windFlutterAmount(float flutter, const Vec2& lean, float modelHeight, float height);
 
 /*
+* The farthest a leaf's flutter (windFlutterOffset of windFlutterAmount's, at any height and time) moves it, metres:
+* sqrt(3) |flutter| |lean|. What the culling pads a posed tree's bounds by (ROADMAP phase 21 stage 3c-iv-b).
+*/
+float windFlutterReach(float flutter, const Vec2& lean);
+
+/*
 * Where the wind moves a vertex (an offset in the world, metres). fromFoot: the vertex from its foot, in the world (the
 * model's rotation and scale applied); modelHeight: its height in the mesh's own frame; place: where it is in the
 * world; sway: packSway's; scale: the model's scale; spring: its spring's displacement (a lean, radians, along the

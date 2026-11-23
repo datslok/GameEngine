@@ -3,14 +3,18 @@
 #include "games/forest/forest_ground.h"
 #include "games/forest/twigs.h"
 #include "math/transform.h"
+#include "render/gpu/bone_poses.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/mesh_cluster_culling.h"
 #include "render/gpu/twig_records.h"
+#include "render/gpu/wind.h"
+#include "render/gpu/wind_bones.h"
 #include "scene/mesh.h"
 
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <numbers>
 #include <random>
 #include <cfloat>
 #include <cmath>
@@ -133,6 +137,7 @@ namespace {
 
     // A real twig prototype's clusters, packed as the pool holds them, and its levels.
     struct TestPrototype {
+        IndexedMesh mesh;
         MeshClusters clusters;
         PackedMeshClusters packed;
         std::vector<GpuTwigLevel> levels;
@@ -143,6 +148,7 @@ namespace {
         const TwigPrototype twig = buildTwig(traceAtlasLeaves(atlas, 3, 1.0f), ForestTwigSettings{}, 1.0f, 0.22f, 7);
         const TwigLeafMesh leaves = twigLeafMesh(twig);
         TestPrototype made;
+        made.mesh = leaves.mesh;
         made.clusters = buildGivenClusterLevels(leaves.mesh, leaves.coarser);
         made.packed = packMeshClusters(made.clusters, 0, 0, 0);
         made.levels = packTwigLevels(made.clusters, 0);
@@ -296,6 +302,165 @@ namespace {
         assert(read.levelTriangles[TWIG_MOST_LEVELS - 1] == 9 && read.levelTriangles[0] == 0);
     }
 
+    // A point carried by a twig's matrix (its rows) into the plant's frame.
+    Vec3 twigRowsPoint(const GpuTwig& twig, const Vec3& local) {
+        const float in[4] = {local.x, local.y, local.z, 1.0f};
+        float out[3] = {0.0f, 0.0f, 0.0f};
+
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                out[row] += twig.rows[row][column] * in[column];
+            }
+        }
+
+        return Vec3{out[0], out[1], out[2]};
+    }
+
+    // A point in the plant's frame placed by an instance into the world.
+    Vec3 placedPoint(const GpuInstance& instance, const Vec3& point) {
+        const float* m = instance.model;
+        return Vec3{m[0] * point.x + m[4] * point.y + m[8] * point.z + m[12], m[1] * point.x + m[5] * point.y + m[9] * point.z + m[13],
+                    m[2] * point.x + m[6] * point.y + m[10] * point.z + m[14]};
+    }
+
+    /*
+    * A posed tree's twigs (ROADMAP phase 21 stage 3c-iv-b): each bound to one of four bones up its trunk, carried whole
+    * by its rigid pose. The posed twig's matrix takes each point where the pose carries the twig's. Every twig the pass
+    * leaves out has every point of its prototype, carried as drawn and fluttering as far as it can, outside one of the
+    * view's planes; each drawn has its posed sphere in view; the posed tree keeps far fewer than the same part swaying
+    * unbound (kept whole), and its kept twigs count as moving. A stamp not this frame's leaves the tree standing still:
+    * its twigs culled as a still part's.
+    */
+    void testAPosedTreesTwigs() {
+        const TestPrototype prototype = testPrototype();
+        std::mt19937 random(13u);
+        std::uniform_real_distribution<float> place(-8.0f, 8.0f);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        std::vector<TwigInstance> twigs;
+
+        for (int index = 0; index < 2000; ++index) {
+            twigs.push_back(testTwig(Vec3{place(random), 15.0f + place(random) * 0.4f, place(random)}, 1.0f));
+        }
+
+        const TwigSet set = makeTwigSet({MeshHandle{0}}, {1.5f}, twigs);
+        TwigTables tables;
+        tables.levels = prototype.levels;
+        tables.prototypes.push_back(GpuTwigPrototype{0, static_cast<std::uint32_t>(prototype.levels.size())});
+
+        for (const TwigBrick& brick : set.bricks) {
+            tables.bricks.push_back(packTwigBrick(brick));
+        }
+
+        std::vector<std::uint32_t> bindings;
+
+        for (std::size_t twig = 0; twig < set.twigs.size(); ++twig) {
+            tables.twigs.push_back(packTwig(set.twigs[twig]));
+            bindings.push_back(packSwayBinding(SwayBinding{.bone = static_cast<int>(twig % 4), .weight = unit(random)}));
+        }
+
+        // Four bones up the trunk, each turned up to 0.25 radians about its pivot and carried by the one below.
+        std::vector<WindBonePose> poses;
+        std::vector<GpuBonePose> pool;
+
+        for (int bone = 0; bone < 4; ++bone) {
+            const WindBonePose below = bone == 0 ? WindBonePose{} : poses.back();
+            const Vec3 turn = Vec3{unit(random) - 0.5f, unit(random) - 0.5f, unit(random) - 0.5f} * 0.5f;
+            poses.push_back(windBonePose(below, turn, Vec3{0.0f, 4.0f * static_cast<float>(bone), 0.0f}));
+            pool.push_back(packBonePose(poses.back(), bone - 1));
+            pool.push_back(packBonePose(poses.back(), bone - 1));
+        }
+
+        // The tree's move: the farthest a twig's sphere goes (a rigid pose keeps its radius).
+        const float* coarsest = tables.levels.back().sphere;
+        std::vector<WindBonePose> rigid;
+        GpuBoneTree tree;
+        tree.firstPose = 0;
+        tree.lean[0] = 0.2f;
+        tree.lean[1] = -0.1f;
+
+        for (std::size_t twig = 0; twig < tables.twigs.size(); ++twig) {
+            const BoneVertexPoses both = boneVertexPoses(pool, 0, bindings[twig], false);
+            const GpuTwig& record = tables.twigs[twig];
+            rigid.push_back(windRigidPose(both.own, both.parent, both.weight, Vec3{record.rows[0][3], record.rows[1][3], record.rows[2][3]}));
+            const Vec3 centre = twigRowsPoint(record, Vec3{coarsest[0], coarsest[1], coarsest[2]});
+            tree.move = std::max(tree.move, (windBonePlace(rigid.back(), centre) - centre).length());
+        }
+
+        const std::vector<std::uint32_t> plantTrees{5u, 0u};
+        const std::vector<GpuBoneTree> trees{tree};
+        const BoneCullTables bones{plantTrees, trees, pool, bindings, 5u};
+
+        GpuInstance part = placedInstance(Transform{.position = Vec3{2.0f, 0.0f, -1.0f}, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.6f),
+                                                    .scale = Vec3{1.3f, 1.3f, 1.3f}}.getMatrix());
+        part.sway[3] = 0.3f;
+        const float reach = windFlutterReach(part.sway[3], Vec2{tree.lean[0], tree.lean[1]});
+        const GpuCullRecord still = stillRecord(Vec3{2.0f, 20.0f, -1.0f}, 20.0f);
+        GpuCullRecord swaying = still;
+        swaying.flags |= CULL_SWAYS;
+        // The posed twig's matrix carries points as its pose does.
+        for (std::size_t twig = 0; twig < 20; ++twig) {
+            const GpuTwig posed = twigPosed(tables.twigs[twig], rigid[twig]);
+            const Vec3 local{0.1f, 0.8f, -0.05f};
+            const Vec3 expected = windBonePlace(rigid[twig], twigRowsPoint(tables.twigs[twig], local));
+            assert((twigRowsPoint(posed, local) - expected).length() < 1e-4f);
+        }
+
+        // Views from inside the crown and from round it, looking past its edge, so planes cut through bricks and twigs.
+        std::size_t kept = 0;
+        std::size_t tested = 0;
+        GpuCameraCull view{};
+
+        for (int round = 0; round < 16; ++round) {
+            const float around = 0.4f * static_cast<float>(round);
+            const float distance = round == 0 ? 0.0f : 6.0f + 2.0f * static_cast<float>(round % 5);
+            const Vec3 eye{2.0f + distance * std::cos(around), 20.0f + place(random) * 0.5f, -1.0f + distance * std::sin(around)};
+            const float yaw = around + std::numbers::pi_v<float> + (unit(random) - 0.5f) * 1.6f;
+            view = testView(eye, yaw, true, 1000.0f);
+            view.levels = cutView(eye, yaw, 1.0f).levels;
+
+            TwigTally tally;
+            const std::vector<TwigDraw> draws = twigDrawsOnCpu(tables, part, 0u, swaying, view, &tally, &bones, true);
+            assert(twigDrawsOnCpu(tables, part, 0u, swaying, view).size() == set.twigs.size());
+            assert(tally.kept == draws.size() && tally.swaying == tally.kept);
+            kept += draws.size();
+            tested += set.twigs.size();
+            std::vector<bool> drawn(set.twigs.size(), false);
+
+            for (const TwigDraw& draw : draws) {
+                drawn[draw.twig] = true;
+                const MeshClusterPose pose = twigPose(tables.levels.back(), part, tables.twigs[draw.twig], bindings[draw.twig], pool, tree);
+                assert(pose.posed && sphereInFrustum(view.frustum, pose.sphere.data()));
+            }
+
+            for (std::size_t twig = 0; twig < set.twigs.size(); ++twig) {
+                if (drawn[twig]) {
+                    continue;
+                }
+
+                bool outside = false;
+
+                for (const auto& plane : view.frustum.planes) {
+                    bool allOut = true;
+
+                    for (const MeshVertex& vertex : prototype.mesh.vertices) {
+                        const Vec3 world = placedPoint(part, windBonePlace(rigid[twig], twigRowsPoint(tables.twigs[twig], vertex.position)));
+                        allOut = allOut && plane[0] * world.x + plane[1] * world.y + plane[2] * world.z + plane[3] + reach < 1e-4f;
+                    }
+
+                    outside = outside || allOut;
+                }
+
+                assert(outside);
+            }
+        }
+
+        assert(kept > 0 && kept < tested * 3 / 4);
+
+        // Not this frame's stamp: nothing posed, the bound twigs still, culled as a still part's are.
+        const BoneCullTables stale{plantTrees, trees, pool, bindings, 6u};
+        assert(twigDrawsOnCpu(tables, part, 0u, swaying, view, nullptr, &stale, true) == twigDrawsOnCpu(tables, part, 0u, still, view));
+    }
+
     // F4's TWIGS line: none without twigs tested; kept of tested, those kept for sway, then each level's twigs and
     // thousands of triangles up to the coarsest level drawn.
     void testTheTwigsLine() {
@@ -410,5 +575,6 @@ void testTwigRecords() {
     testATwigsInstance();
     testTheLevelIsTheCuts();
     testTheTwigPassOnTheCpu();
+    testAPosedTreesTwigs();
     testTheTwigsLine();
 }

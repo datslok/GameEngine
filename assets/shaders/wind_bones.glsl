@@ -137,4 +137,9 @@ vec4 windSphereUnion(vec4 first, vec4 second) {
     return vec4(first.xyz + (second.xyz - first.xyz) * ((radius - first.w) / apart), radius);
 }
 
+// Where a sphere's points go blended between two poses: within a sphere holding both images of it (windBlendedSphere).
+vec4 windBlendedSphere(WindBonePose own, WindBonePose parent, vec4 sphere) {
+    return windSphereUnion(windPosedSphere(own, sphere), windPosedSphere(parent, sphere));
+}
+
 #endif

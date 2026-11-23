@@ -497,7 +497,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
         - [x] 3c-iii-c-iv. The trees' per-vertex sway retired (`tree-bones-3c-iii-c-iv`)
     - [ ] 3c-iv. Clusters culled by their bones' bounds; animation stopped when small
       - [x] 3c-iv-a. Each cluster's bones (up to 8), each tree's move a frame from its poses (`tree-bones-3c-iv-a`)
-      - [ ] 3c-iv-b. Trees' clusters and twigs culled by their posed bounds: frustum, facing, occlusion
+      - [x] 3c-iv-b. Trees' clusters and twigs culled by their posed bounds: frustum, occlusion (`tree-bones-3c-iv-b`)
       - [ ] 3c-iv-c. Animation stopped below a share of the screen, faded
     - [ ] 3c-v. Optional: per-bone springs for a budget of near trees, pushed by forces (Unreal's promoted tier)
     - [ ] 3c-vi. Optional, if BONES shows in timings: far trees share a pose a variant and wind cell

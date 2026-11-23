@@ -6,6 +6,10 @@
 #include "placed_drawing.glsl"
 #include "twig_drawing.glsl"
 
+// The bones (bone_cull_data.glsl): each plant's tree, the trees, the pool, the twigs' bindings.
+#define BONE_CULL_BINDING TWIG_BONE_BINDING
+#include "bone_cull_data.glsl"
+
 // The camera's view as the mesh cluster passes take it (its sway, its pixel error).
 layout(std430, set = 0, binding = 0) readonly buffer TwigView {
     CameraCull view;
@@ -85,10 +89,12 @@ layout(std430, set = 0, binding = 15) writeonly buffer TwigEntries {
     uvec4 twigEntries[];
 };
 
-// The most bricks any twig set has (the dispatch's x), and the most sources the room takes.
+// The most bricks any twig set has (the dispatch's x), the most sources the room takes, and the frame's bones stamp
+// (GpuWindField::flags[1]: 0 when the bones pass did not run).
 layout(push_constant) uniform TwigPush {
     uint mostBricks;
     uint mostSources;
+    uint boneStamp;
 } push;
 
 #endif

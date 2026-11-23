@@ -1,7 +1,9 @@
 // Mesh clusters culled a view, included with #include "mesh_cluster_culling.glsl": mirrors render/gpu/mesh_cluster_culling.h
 // (meshClusterLargestScale, meshClusterPlacedSphere, meshClusterWorldSphere, meshClusterErrorPixels, meshClusterInCut,
-// meshClusterEyeInMesh, meshClusterFacesAway, meshClusterRigid, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure
-// functions: the pyramid's reads are the passes' (mesh_cluster_pass.glsl, meshClusterHidden).
+// meshClusterEyeInMesh, meshClusterFacesAway, meshClusterShapeFixed, meshClusterSways, meshClusterPosed, meshClusterSeenWhole,
+// meshClusterBound, meshClusterCullSphere, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterBoxPixels,
+// meshClusterPyramidLevel). Pure functions: the pyramid's and the bones' reads are the passes' (mesh_cluster_pass.glsl,
+// meshClusterHidden; bone_cull_data.glsl).
 #ifndef MESH_CLUSTER_CULLING_GLSL
 #define MESH_CLUSTER_CULLING_GLSL
 
@@ -12,6 +14,9 @@
 
 // pyramidCell, fartherDepth, ndcToPixel.
 #include "screen_reflections.glsl"
+
+// windFlutterReach.
+#include "wind.glsl"
 
 // A cluster of a mesh in the pools (scene/mesh_clusters.h). Must match GpuMeshCluster.
 struct MeshCluster {
@@ -118,27 +123,52 @@ bool meshClusterFacesAway(MeshCluster cluster, vec3 eye) {
 }
 
 /*
-* Whether the draw's vertices are where its mesh has them, moved only by its matrix, so its clusters' spheres and cones
-* hold (meshClusterRigid): not a terrain patch, an impostor's card, ground-following, a liana, cards thinned in this
-* view, or swaying where the view's sway reaches (as cameraCandidateFlags tests it).
+* Whether the draw's shape is its mesh's, moved only by its matrix and its bones (meshClusterShapeFixed): not a terrain
+* patch, an impostor's card, ground-following, a liana, or cards thinned in this view.
 */
-bool meshClusterRigid(InstanceData instance, uint entry, CullRecord record, CameraCull view) {
-    if (instance.material.z != 0u || instance.material.w != uint(INSTANCE_KIND_PLAIN) || instance.hanging.w != 0u) {
-        return false;
-    }
-
-    if ((entry & DRAW_LIST_THINNED_BIT) != 0u) {
-        return false;
-    }
-
-    return !((view.flags & CAMERA_CULL_SWAY) != 0u && (record.flags & CULL_SWAYS) != 0u &&
-             swayReaches(record.bounds, view.levels.eye.xyz, view.swayFadeEnd));
+bool meshClusterShapeFixed(InstanceData instance, uint entry) {
+    return instance.material.z == 0u && instance.material.w == uint(INSTANCE_KIND_PLAIN) && instance.hanging.w == 0u &&
+           (entry & DRAW_LIST_THINNED_BIT) == 0u;
 }
 
-/*
-* Whether the view draws a cluster of a drawn instance (meshClusterKept): every cluster of a draw that is not rigid;
-* else its sphere in the frustum, and, single-sided and not mirrored, not facing away from the eye.
-*/
+// Whether the draw sways per vertex where the view's sway reaches, as cameraCandidateFlags tests it (meshClusterSways).
+bool meshClusterSways(CullRecord record, CameraCull view) {
+    return (view.flags & CAMERA_CULL_SWAY) != 0u && (record.flags & CULL_SWAYS) != 0u && swayReaches(record.bounds, view.levels.eye.xyz, view.swayFadeEnd);
+}
+
+// How a cluster stands this frame (MeshClusterPose): bound to bones, posed, and then its sphere in the world.
+struct MeshClusterPose {
+    bool bound;
+    bool posed;
+    vec4 sphere;
+};
+
+MeshClusterPose meshClusterUnposed(bool bound) {
+    return MeshClusterPose(bound, false, vec4(0.0));
+}
+
+// A posed thing's pose: its posed sphere placed by the model, grown by its leaves' flutter's reach (meshClusterPosed).
+MeshClusterPose meshClusterPosed(vec4 sphere, mat4 placedBy, float flutter, vec2 lean) {
+    vec4 placed = meshClusterPlacedSphere(sphere, placedBy);
+    placed.w += windFlutterReach(flutter, lean);
+    return MeshClusterPose(true, true, placed);
+}
+
+// Whether the view keeps every cluster of the draw (meshClusterSeenWhole): its shape not its mesh's, or swaying unbound.
+bool meshClusterSeenWhole(InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
+    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && meshClusterSways(record, view));
+}
+
+// Whether a cluster's vertices are bound to bones: its first slot not empty (meshClusterBound).
+bool meshClusterBound(MeshCluster cluster) {
+    return (cluster.bones.x & 0xFFFFu) != MESH_CLUSTER_NO_BONE;
+}
+
+// The sphere the view tests a cluster by: its pose's when posed, else its own placed (meshClusterCullSphere).
+vec4 meshClusterCullSphere(MeshCluster cluster, mat4 model, MeshClusterPose pose) {
+    return pose.posed ? pose.sphere : meshClusterWorldSphere(cluster, model);
+}
+
 /*
 * A style's survivors as mesh shader workgroups (meshClusterTaskGroups): a row of up to MESH_CLUSTER_TASK_WIDTH, then as
 * many rows as it takes; none for none.
@@ -155,33 +185,33 @@ uint meshClusterTaskIndex(uvec3 group) {
 
 /*
 * What the view makes of a cluster (meshClusterVisibility: MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): hidden out of the cut
-* (any draw); seen whole for a draw not rigid; else hidden out of the frustum or, single-sided and not mirrored, facing
-* away; else seen, its sphere holding.
+* (any draw); seen whole (meshClusterSeenWhole); else hidden out of the frustum (meshClusterCullSphere) or, single-sided,
+* not mirrored and not posed, facing away; else seen, its sphere holding.
 */
-uint meshClusterVisibility(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view) {
+uint meshClusterVisibility(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
     if (!meshClusterInCut(cluster, instance.model, view.levels)) {
         return MESH_CLUSTER_HIDDEN;
     }
 
-    if (!meshClusterRigid(instance, entry, record, view)) {
+    if (meshClusterSeenWhole(instance, entry, record, view, pose)) {
         return MESH_CLUSTER_SEEN;
     }
 
-    if (!sphereInFrustum(view.frustum, meshClusterWorldSphere(cluster, instance.model))) {
+    if (!sphereInFrustum(view.frustum, meshClusterCullSphere(cluster, instance.model, pose))) {
         return MESH_CLUSTER_HIDDEN;
     }
 
     float determinant = meshClusterDeterminant(instance.model);
 
-    if ((record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0)) {
+    if (pose.posed || (record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0)) {
         return MESH_CLUSTER_SPHERE;
     }
 
     return meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance.model, view.levels.eye.xyz, determinant)) ? MESH_CLUSTER_HIDDEN : MESH_CLUSTER_SPHERE;
 }
 
-bool meshClusterKept(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view) {
-    return meshClusterVisibility(cluster, instance, entry, record, view) != MESH_CLUSTER_HIDDEN;
+bool meshClusterKept(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
+    return meshClusterVisibility(cluster, instance, entry, record, view, pose) != MESH_CLUSTER_HIDDEN;
 }
 
 // A sphere's box on screen (meshClusterScreenBox): the pixels it covers, least then most, and its nearest depth.

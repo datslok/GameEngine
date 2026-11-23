@@ -161,6 +161,19 @@ namespace {
             const float expected = windFlutterAmount(in[0], Vec2{in[1], in[2]}, in[3], amounts[2 * i + 1][0]);
             report.check("windFlutterAmount", arithmeticTolerance, expected, amountOut[i][0]);
         }
+
+        // How far leaves can flutter (windFlutterReach), a flutter of either sign. Input: flutter, lean.
+        std::vector<GpuVec4> reaches;
+
+        for (int i = 0; i < 300; ++i) {
+            reaches.push_back(gpuVec4(random.between(-0.5f, 0.5f), random.between(-1.0f, 1.0f), random.between(-1.0f, 1.0f)));
+        }
+
+        const std::vector<GpuVec4> reachOut = runner.run(shader, GPU_TEST_WIND_FLUTTER_REACH, reaches, 1, 1);
+
+        for (std::size_t i = 0; i < reachOut.size(); ++i) {
+            report.check("windFlutterReach", arithmeticTolerance, windFlutterReach(reaches[i][0], Vec2{reaches[i][1], reaches[i][2]}), reachOut[i][0]);
+        }
     }
 
     // Places in, near the edges of and outside windows anywhere. Inputs: the place and the window's first cell; the cell.

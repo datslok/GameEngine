@@ -3,6 +3,7 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/instance_shared.h"
 #include "render/gpu/taa.h"
+#include "render/gpu/wind.h"
 #include "scene/planting.h"
 
 #include <algorithm>
@@ -83,7 +84,8 @@ namespace {
                           const MeshClusterOcclusionView* occlusion) {
         const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, pair.entry);
         const GpuMeshCluster& cluster = tables.clusters[pair.cluster];
-        const std::uint32_t visibility = meshClusterVisibility(cluster, drawn.instance, drawn.entry, drawn.record, view);
+        const MeshClusterPose pose = meshClusterPoseAt(tables, drawn, cluster);
+        const std::uint32_t visibility = meshClusterVisibility(cluster, drawn.instance, drawn.entry, drawn.record, view, pose);
         const bool late = occlusion != nullptr && occlusion->list == MESH_CLUSTER_LATE;
 
         if (visibility == MESH_CLUSTER_HIDDEN) {
@@ -94,7 +96,7 @@ namespace {
             return {!late, false};
         }
 
-        const std::array<float, 4> world = meshClusterWorldSphere(cluster, drawn.instance);
+        const std::array<float, 4> world = meshClusterCullSphere(cluster, drawn.instance, pose);
         const std::array<float, 4> sphere{world[0] - occlusion->origin.x, world[1] - occlusion->origin.y, world[2] - occlusion->origin.z, world[3]};
         const bool hiddenBefore = occlusion->history && meshClusterHidden(*occlusion->lastPyramid, sphere, occlusion->previous);
 
@@ -287,30 +289,70 @@ bool meshClusterFacesAway(const GpuMeshCluster& cluster, const Vec3& eye) {
     return clusterFacesAway(cone, eye);
 }
 
-bool meshClusterRigid(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view) {
-    if (instance.material[2] != 0u || instance.material[3] != INSTANCE_KIND_PLAIN || instance.hanging[3] != 0u) {
-        return false;
-    }
+bool meshClusterShapeFixed(const GpuInstance& instance, std::uint32_t entry) {
+    return instance.material[2] == 0u && instance.material[3] == INSTANCE_KIND_PLAIN && instance.hanging[3] == 0u && (entry & DRAW_LIST_THINNED_BIT) == 0u;
+}
 
-    if ((entry & DRAW_LIST_THINNED_BIT) != 0u) {
-        return false;
-    }
-
+bool meshClusterSways(const GpuCullRecord& record, const GpuCameraCull& view) {
     const Vec3 eye{view.levels.eye[0], view.levels.eye[1], view.levels.eye[2]};
-    return !((view.flags & CAMERA_CULL_SWAY) != 0u && (record.flags & CULL_SWAYS) != 0u && swayReaches(record.bounds, eye, view.swayFadeEnd));
+    return (view.flags & CAMERA_CULL_SWAY) != 0u && (record.flags & CULL_SWAYS) != 0u && swayReaches(record.bounds, eye, view.swayFadeEnd);
+}
+
+MeshClusterPose meshClusterPosed(const float sphere[4], const GpuInstance& placedBy, float flutter, const Vec2& lean) {
+    std::array<float, 4> placed = meshClusterPlacedSphere(sphere, placedBy);
+    placed[3] += windFlutterReach(flutter, lean);
+    return MeshClusterPose{.bound = true, .posed = true, .sphere = placed};
+}
+
+bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
+                          const MeshClusterPose& pose) {
+    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && meshClusterSways(record, view));
+}
+
+bool meshClusterBound(const GpuMeshCluster& cluster) {
+    return meshClusterBone(cluster, 0) != meshClusterNoBone;
+}
+
+// Each bone's pose names its parent, so the pool alone gives both (boneVertexPoses, the bone as a binding of no weight).
+Vec4 meshClusterBonesSphere(const GpuMeshCluster& cluster, std::span<const GpuBonePose> pool, const GpuBoneTree& tree) {
+    const Vec4 rest{cluster.sphere[0], cluster.sphere[1], cluster.sphere[2], cluster.sphere[3]};
+
+    if (meshClusterBone(cluster, 0) == meshClusterManyBones) {
+        return Vec4{rest.x, rest.y, rest.z, rest.w + tree.move};
+    }
+
+    Vec4 posed = rest;
+
+    for (std::uint32_t slot = 0; slot < meshClusterMostBones; ++slot) {
+        const std::uint32_t bone = meshClusterBone(cluster, slot);
+
+        if (bone == meshClusterNoBone) {
+            break;
+        }
+
+        const BoneVertexPoses poses = boneVertexPoses(pool, tree.firstPose, bone, false);
+        const Vec4 blended = windBlendedSphere(poses.own, poses.parent, rest);
+        posed = slot == 0 ? blended : windSphereUnion(posed, blended);
+    }
+
+    return posed;
+}
+
+std::array<float, 4> meshClusterCullSphere(const GpuMeshCluster& cluster, const GpuInstance& instance, const MeshClusterPose& pose) {
+    return pose.posed ? pose.sphere : meshClusterWorldSphere(cluster, instance);
 }
 
 std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
-                                    const GpuCameraCull& view) {
+                                    const GpuCameraCull& view, const MeshClusterPose& pose) {
     if (!meshClusterInCut(cluster, instance, view)) {
         return MESH_CLUSTER_HIDDEN;
     }
 
-    if (!meshClusterRigid(instance, entry, record, view)) {
+    if (meshClusterSeenWhole(instance, entry, record, view, pose)) {
         return MESH_CLUSTER_SEEN;
     }
 
-    const std::array<float, 4> sphere = meshClusterWorldSphere(cluster, instance);
+    const std::array<float, 4> sphere = meshClusterCullSphere(cluster, instance, pose);
 
     if (!sphereInFrustum(view.frustum, sphere.data())) {
         return MESH_CLUSTER_HIDDEN;
@@ -318,7 +360,7 @@ std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInst
 
     const float determinant = meshClusterDeterminant(instance);
 
-    if ((record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0f)) {
+    if (pose.posed || (record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0f)) {
         return MESH_CLUSTER_SPHERE;
     }
 
@@ -327,8 +369,8 @@ std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInst
 }
 
 bool meshClusterKept(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
-                     const GpuCameraCull& view) {
-    return meshClusterVisibility(cluster, instance, entry, record, view) != MESH_CLUSTER_HIDDEN;
+                     const GpuCameraCull& view, const MeshClusterPose& pose) {
+    return meshClusterVisibility(cluster, instance, entry, record, view, pose) != MESH_CLUSTER_HIDDEN;
 }
 
 GpuMeshClusterOcclusion packMeshClusterOcclusion(const MeshClusterOcclusionView& view, RenderSize pyramid, std::uint32_t levels) {
@@ -539,16 +581,19 @@ MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32
     if (place >= twigInstanceBase) {
         const GpuTwigEntry& twig = tables.twigs.entries[place - twigInstanceBase];
         drawn = meshClusterDrawnAt(tables, placedInstanceBase + twig.placedEntry);
-        drawn.instance = twigInstance(drawn.instance, tables.twigs.twigs[twig.twig]);
+        drawn.instance = twigInstance(drawn.part, tables.twigs.twigs[twig.twig]);
+        drawn.twig = twig.twig;
         return drawn;
     }
 
     if (place >= placedInstanceBase) {
         const GpuPlacedEntry& placed = tables.placed.entries[place - placedInstanceBase];
-        const GpuPlacedPlant& plant = tables.placed.plants[placed.plant & DRAW_LIST_INSTANCE_MASK];
+        drawn.plant = placed.plant & DRAW_LIST_INSTANCE_MASK;
+        const GpuPlacedPlant& plant = tables.placed.plants[drawn.plant];
         drawn.instance = placedInstance(tables.placed.partInstances[placed.part], plant);
         drawn.record = placedCullRecord(tables.placed.parts[placed.part].record, plant);
         drawn.entry = placed.plant;
+        drawn.part = drawn.instance;
         return drawn;
     }
 
@@ -556,7 +601,32 @@ MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32
     const std::uint32_t draw = drawn.entry & DRAW_LIST_INSTANCE_MASK;
     drawn.instance = tables.instances[draw];
     drawn.record = tables.records[draw];
+    drawn.part = drawn.instance;
     return drawn;
+}
+
+// A twig's cluster sphere is in its prototype's frame, as its coarsest group's is: twigPose takes it the same way.
+MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster) {
+    const GpuBoneTree tree = drawn.plant == boneNoTree ? GpuBoneTree{} : boneCullTree(tables.bones, drawn.plant);
+
+    if (drawn.twig != meshClusterNoTwig) {
+        const std::uint32_t binding = drawn.twig < tables.bones.twigBindings.size() ? tables.bones.twigBindings[drawn.twig] : swayUnbound;
+        GpuTwigLevel own;
+        std::copy(std::begin(cluster.sphere), std::end(cluster.sphere), std::begin(own.sphere));
+        return twigPose(own, drawn.part, tables.twigs.twigs[drawn.twig], binding, tables.bones.poses, tree);
+    }
+
+    if (!meshClusterBound(cluster)) {
+        return {};
+    }
+
+    if (tree.firstPose == boneNoPose) {
+        return MeshClusterPose{.bound = true};
+    }
+
+    const Vec4 posed = meshClusterBonesSphere(cluster, tables.bones.poses, tree);
+    const float sphere[4] = {posed.x, posed.y, posed.z, posed.w};
+    return meshClusterPosed(sphere, drawn.instance, drawn.instance.sway[3], Vec2{tree.lean[0], tree.lean[1]});
 }
 
 // A part's level slots are firstGroup to firstGroup + levels; a block's layer is its first kind's.
@@ -647,7 +717,7 @@ MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const Gpu
 }
 
 bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
-                          const GpuCameraCull& view) {
+                          const GpuCameraCull& view, const MeshClusterPose& pose) {
     const Vec3 eye{view.levels.eye[0], view.levels.eye[1], view.levels.eye[2]};
     const float budget = view.levels.pixelError;
     const auto nearTheBudget = [&](const float sphere[4], float error) {
@@ -668,11 +738,11 @@ bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& inst
         }
     }
 
-    if (!meshClusterRigid(instance, entry, record, view)) {
+    if (meshClusterSeenWhole(instance, entry, record, view, pose)) {
         return false;
     }
 
-    const std::array<float, 4> sphere = meshClusterWorldSphere(cluster, instance);
+    const std::array<float, 4> sphere = meshClusterCullSphere(cluster, instance, pose);
 
     for (const auto& plane : view.frustum.planes) {
         const float distance = plane[0] * sphere[0] + plane[1] * sphere[1] + plane[2] * sphere[2] + plane[3];
@@ -684,7 +754,7 @@ bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& inst
 
     const float determinant = meshClusterDeterminant(instance);
 
-    if (cluster.cone[3] >= 1.0f || !(determinant > 0.0f)) {
+    if (pose.posed || cluster.cone[3] >= 1.0f || !(determinant > 0.0f)) {
         return false;
     }
 
@@ -697,7 +767,8 @@ bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& inst
 
 bool nearAMeshClusterEdge(const MeshClusterTables& tables, const GpuMeshClusterItem& item, const GpuCameraCull& view) {
     const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, item.entry);
-    return nearAMeshClusterEdge(tables.clusters[item.cluster], drawn.instance, drawn.entry, drawn.record, view);
+    const GpuMeshCluster& cluster = tables.clusters[item.cluster];
+    return nearAMeshClusterEdge(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(tables, drawn, cluster));
 }
 
 // Sorted, then walked together: equal pairs match, the rest are one side's only.

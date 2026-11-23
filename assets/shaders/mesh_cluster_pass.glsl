@@ -8,6 +8,10 @@
 #include "placed_drawing.glsl"
 #include "twig_drawing.glsl"
 
+// The bones (bone_cull_data.glsl): each plant's tree, the trees, the pool, the twigs' bindings.
+#define BONE_CULL_BINDING MESH_CLUSTER_BONE_BINDING
+#include "bone_cull_data.glsl"
+
 // The camera's view as its culling placed it, with the wind's sway (its own copy: the camera culls without it).
 layout(std430, set = 0, binding = 0) readonly buffer Views {
     CameraCull views[];
@@ -113,9 +117,11 @@ layout(std430, set = 0, binding = 20) readonly buffer Twigs {
     Twig twigs[];
 };
 
-// The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands.
+// The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands; and the
+// frame's bones stamp (GpuWindField::flags[1]: 0 when the bones pass did not run).
 layout(push_constant) uniform MeshClusterList {
     uint list;
+    uint boneStamp;
 } pass;
 
 // A group's command: a draw group's, past them a placed group's, from TWIG_GROUP_BASE a twig region's: its entries
@@ -154,11 +160,15 @@ uint groupPairs(uint group) {
     return groupCommand(group).instanceCount * groupClusters(group).y;
 }
 
-// What a pair's place draws (meshClusterDrawnAt): its instance, entry bits and record.
+// What a pair's place draws (meshClusterDrawnAt): its instance, entry bits and record; a placed plant's number
+// (BONE_NO_TREE for a frame's draw), and a twig's part and number (MESH_CLUSTER_NO_TWIG otherwise).
 struct MeshClusterDrawn {
     InstanceData instance;
     uint entry;
     CullRecord record;
+    uint plant;
+    InstanceData part;
+    uint twig;
 };
 
 /*
@@ -175,13 +185,17 @@ MeshClusterDrawn meshClusterDrawnAt(uint place) {
 
     if (place >= PLACED_INSTANCE_BASE) {
         uvec2 placed = placedEntries[place - PLACED_INSTANCE_BASE];
-        PlacedPlant plant = placedPlants[placed.x & DRAW_LIST_INSTANCE_MASK];
+        drawn.plant = placed.x & DRAW_LIST_INSTANCE_MASK;
+        PlacedPlant plant = placedPlants[drawn.plant];
         drawn.instance = placedInstance(placedPartInstances[placed.y], plant);
         drawn.record = placedCullRecord(placedParts[placed.y].record, plant);
         drawn.entry = placed.x;
+        drawn.part = drawn.instance;
+        drawn.twig = MESH_CLUSTER_NO_TWIG;
 
         if (twig) {
-            drawn.instance = twigInstance(drawn.instance, twigs[twigEntry.y]);
+            drawn.instance = twigInstance(drawn.part, twigs[twigEntry.y]);
+            drawn.twig = twigEntry.y;
         }
 
         return drawn;
@@ -191,7 +205,33 @@ MeshClusterDrawn meshClusterDrawnAt(uint place) {
     uint draw = drawn.entry & DRAW_LIST_INSTANCE_MASK;
     drawn.instance = instances[draw];
     drawn.record = records[draw];
+    drawn.plant = BONE_NO_TREE;
+    drawn.part = drawn.instance;
+    drawn.twig = MESH_CLUSTER_NO_TWIG;
     return drawn;
+}
+
+/*
+* How a pair's cluster stands (meshClusterPoseAt): a twig's by its binding and tree, on its cluster's own sphere; a placed
+* plant's bound cluster by its tree's bones, padded by the flutter; a frame's draw's bound cluster stands still.
+*/
+MeshClusterPose meshClusterPoseAt(MeshClusterDrawn drawn, MeshCluster cluster) {
+    BoneTree tree = drawn.plant == BONE_NO_TREE ? BoneTree(0u, 0u, BONE_NO_POSE, 0.0, vec4(0.0)) : boneCullTree(drawn.plant, pass.boneStamp);
+
+    if (drawn.twig != MESH_CLUSTER_NO_TWIG) {
+        uint binding = drawn.twig < uint(boneCullTwigBindings.length()) ? boneCullTwigBindings[drawn.twig] : SWAY_UNBOUND;
+        return twigPose(cluster.sphere, drawn.part, twigs[drawn.twig], binding, tree);
+    }
+
+    if (!meshClusterBound(cluster)) {
+        return meshClusterUnposed(false);
+    }
+
+    if (tree.firstPose == BONE_NO_POSE) {
+        return meshClusterUnposed(true);
+    }
+
+    return meshClusterPosed(meshClusterBonesSphere(cluster, tree), drawn.instance.model, drawn.instance.sway.w, tree.leans.xy);
 }
 
 // The first of the list's totals.
@@ -280,7 +320,8 @@ bool meshClusterPairKept(uint pair, out MeshClusterItem item, out bool candidate
     MeshClusterDrawn drawn = meshClusterDrawnAt(item.entry);
     MeshCluster cluster = clusters[item.cluster];
     InstanceData instance = drawn.instance;
-    uint visibility = meshClusterVisibility(cluster, instance, drawn.entry, drawn.record, views[0]);
+    MeshClusterPose pose = meshClusterPoseAt(drawn, cluster);
+    uint visibility = meshClusterVisibility(cluster, instance, drawn.entry, drawn.record, views[0], pose);
     bool late = pass.list == MESH_CLUSTER_LATE;
 
     if (visibility == MESH_CLUSTER_HIDDEN) {
@@ -291,7 +332,7 @@ bool meshClusterPairKept(uint pair, out MeshClusterItem item, out bool candidate
         return !late;
     }
 
-    vec4 world = meshClusterWorldSphere(cluster, instance.model);
+    vec4 world = meshClusterCullSphere(cluster, instance.model, pose);
     vec4 sphere = vec4(world.xyz - occlusion.origin.xyz, world.w);
     bool hiddenBefore = (occlusion.pyramid.w & MESH_CLUSTER_OCCLUSION_HISTORY) != 0u && meshClusterHiddenIn(lastPyramid, sphere, occlusion.previous);
 

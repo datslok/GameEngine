@@ -600,7 +600,17 @@ private:
         std::vector<GpuInstance> instances;
         std::vector<GpuInstance> placedParts;
         bool placed = false;
+        std::uint32_t boneStamp = 0;
+        std::vector<std::uint32_t> twigBindings;
     };
+
+    // The trees and poses of the frame being collected, read back for its cluster-compare (takeBonePoses keeps them).
+    struct ClusterCompareBones {
+        std::vector<GpuBoneTree> trees;
+        std::vector<GpuBonePose> poses;
+    };
+
+    std::optional<ClusterCompareBones> clusterCompareBones;
 
     void takeBonePoses(std::uint32_t frameIndex);
     void takeMeshClusterCull(const VulkanMeshClusterCulling::Collected& culled, const VulkanCameraCulling::Collected* cameraCulled,

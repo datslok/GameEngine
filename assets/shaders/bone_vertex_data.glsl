@@ -67,13 +67,6 @@ bool bonePosed(BoneDrawn drawn) {
     return drawn.firstPose != BONE_NO_POSE;
 }
 
-// What a bound vertex blends (BoneVertexPoses): its bone's pose, its parent's (the rest pose for a root), its weight.
-struct BoneVertexPoses {
-    WindBonePose own;
-    WindBonePose parent;
-    float weight;
-};
-
 WindBonePose bonePoseAt(uint slot) {
     BonePose pose = sceneBonePoses[slot];
     return WindBonePose(pose.turn, pose.shift.xyz);

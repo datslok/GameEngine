@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cmath>
 #include <map>
+#include <random>
 #include <stdexcept>
 #include <utility>
 
@@ -201,6 +202,33 @@ namespace {
         assert(near(windFlutterAmount(0.2f, lean, 5.0f, 10.0f), 0.05f, 1e-6f));
         assert(near(windFlutterAmount(0.2f, lean, 20.0f, 10.0f), 0.1f, 1e-6f));
         assert(windFlutterAmount(0.0f, lean, 20.0f, 10.0f) == 0.0f && windFlutterAmount(0.2f, Vec2{}, 20.0f, 10.0f) == 0.0f);
+    }
+
+    /*
+    * How far leaves can flutter (windFlutterReach, the culling's pad for posed trees, ROADMAP phase 21 stage 3c-iv-b):
+    * the flutter of any flutter (either sign), lean, height, place, rate and time stays within it, and comes near it.
+    */
+    void testTheFlutterReach() {
+        std::mt19937 random{41u};
+        std::uniform_real_distribution<float> unit{-1.0f, 1.0f};
+        float closest = 0.0f;
+
+        for (int trial = 0; trial < 20000; ++trial) {
+            const float flutter = 0.5f * unit(random);
+            const Vec2 lean{0.5f * unit(random), 0.5f * unit(random)};
+            const float height = 20.0f + 10.0f * unit(random);
+            const float modelHeight = 1.5f * height * (unit(random) + 0.5f);
+            const Vec3 place{100.0f * unit(random), 30.0f * unit(random), 100.0f * unit(random)};
+            const Vec2 rate{3.0f + 2.5f * unit(random), 10.0f + 9.0f * unit(random)};
+            const float amount = windFlutterAmount(flutter, lean, modelHeight, height);
+            const float reach = windFlutterReach(flutter, lean);
+            const float moved = windFlutterOffset(place, amount, rate, 50.0f * (unit(random) + 1.0f)).length();
+            assert(moved <= reach * (1.0f + 1e-5f) + 1e-7f);
+            closest = std::max(closest, reach > 1e-3f ? moved / reach : 0.0f);
+        }
+
+        assert(closest > 0.8f);
+        assert(windFlutterReach(0.0f, Vec2{0.3f, 0.4f}) == 0.0f && near(windFlutterReach(-0.2f, Vec2{0.3f, 0.4f}), 0.1f * std::sqrt(3.0f), 1e-6f));
     }
 
     /*
@@ -457,6 +485,7 @@ void testWindSway() {
     testTheBranches();
     testTheFlutter();
     testTheFlutterAmount();
+    testTheFlutterReach();
     testTheFlutterRate();
     testTheLeavesFlutterInStep();
     testWhichDrawsSway();

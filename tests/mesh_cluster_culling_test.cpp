@@ -3,6 +3,7 @@
 #include "engine/engine_commands.h"
 #include "math/frustum.h"
 #include "math/mat4.h"
+#include "math/transform.h"
 #include "cull_helpers.h"
 #include "mesh_helpers.h"
 #include "render/gpu/camera_culling.h"
@@ -14,6 +15,8 @@
 #include "render/gpu/planting_records.h"
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/taa.h"
+#include "render/gpu/wind.h"
+#include "render/gpu/wind_bones.h"
 #include "render/render_stats.h"
 #include "scene/indexed_mesh.h"
 #include "scene/level_of_detail.h"
@@ -208,6 +211,194 @@ namespace {
         }
 
         assert(culled > tested / 3);
+    }
+
+    // A ball bound to a chain of bones up its height (each vertex to its band's bone, weighted by how far up the band it
+    // is; broad bands below, thin ones near the top, so clusters hold one bone, a few or too many), and a pool of the
+    // chain's poses, each bone turned up to 0.3 radians about its pivot and carried by the one below.
+    struct PosedBall {
+        IndexedMesh mesh;
+        std::vector<SwayBinding> bindings;
+        std::vector<WindBonePose> poses;
+        std::vector<GpuBonePose> pool;
+        GpuBoneTree tree;
+    };
+
+    // A ball vertex where its bones carry it: its bone's pose and the one below, blended by its weight (as the GPU packs it).
+    Vec3 ballVertexPosed(const PosedBall& ball, std::size_t vertex) {
+        const BoneVertexPoses poses = boneVertexPoses(ball.pool, 0, packSwayBinding(ball.bindings[vertex]), false);
+        return windBlendedPlace(poses.own, poses.parent, poses.weight, ball.mesh.vertices[vertex].position);
+    }
+
+    PosedBall posedBall(std::mt19937& random) {
+        std::uniform_real_distribution<float> unit(-1.0f, 1.0f);
+        PosedBall ball;
+        ball.mesh = buildIndexedMesh(Mesh::sphere(64, 32));
+        constexpr int bones = 81;
+
+        for (const MeshVertex& vertex : ball.mesh.vertices) {
+            const float y = vertex.position.y;
+            const float band = std::min(y > 0.4f ? 20.0f + y * 60.0f : (y + 1.0f) * 3.0f, bones - 1e-3f);
+            ball.bindings.push_back(SwayBinding{.bone = static_cast<int>(band), .weight = band - std::floor(band)});
+        }
+
+        for (int bone = 0; bone < bones; ++bone) {
+            const WindBonePose below = bone == 0 ? WindBonePose{} : ball.poses.back();
+            const Vec3 pivot{0.0f, -1.0f + 2.0f * static_cast<float>(bone) / bones, 0.0f};
+            ball.poses.push_back(windBonePose(below, Vec3{unit(random), unit(random), unit(random)} * 0.17f, pivot));
+            ball.pool.push_back(packBonePose(ball.poses.back(), bone - 1));
+            ball.pool.push_back(packBonePose(ball.poses.back(), bone - 1));
+        }
+
+        ball.tree.firstPose = 0;
+        ball.tree.lean[0] = 0.25f;
+        ball.tree.lean[1] = 0.1f;
+
+        // The tree's move: the farthest any vertex goes.
+        for (std::size_t vertex = 0; vertex < ball.mesh.vertices.size(); ++vertex) {
+            ball.tree.move = std::max(ball.tree.move, (ballVertexPosed(ball, vertex) - ball.mesh.vertices[vertex].position).length());
+        }
+
+        return ball;
+    }
+
+    /*
+    * Clusters of a tree posed by its bones (ROADMAP phase 21 stage 3c-iv-b), swaying where the view's sway reaches:
+    * random views of the posed ball placed (turned, scaled evenly, as plants are), its own clusters (of one bone, a few
+    * and too many); a cluster culled by its posed sphere (meshClusterBonesSphere, meshClusterPosed) has every
+    * corner of every triangle, blended by its two bones and fluttering as far as it can, outside one plane. The same
+    * draw unbound keeps everything (it sways per vertex); bound and not posed it culls as a still draw. A good share culled.
+    */
+    void testAPosedClusterHidesNothing() {
+        std::mt19937 random(23);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const PosedBall ball = posedBall(random);
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(ball.mesh, ClusterLevels::One), 0, 0, 0, ball.bindings);
+        std::size_t culled = 0;
+        std::size_t tested = 0;
+        std::size_t many = 0;
+
+        for (int round = 0; round < 40; ++round) {
+            const Vec3 eye{(unit(random) - 0.5f) * 100.0f, 2.0f + unit(random) * 10.0f, (unit(random) - 0.5f) * 100.0f};
+            const float yaw = unit(random) * 2.0f * std::numbers::pi_v<float>;
+            const GpuCameraCull view = testView(eye, yaw, true, 1000.0f);
+
+            for (int copy = 0; copy < 6; ++copy) {
+                const Vec3 place = eye + Vec3{(unit(random) - 0.5f) * 30.0f, (unit(random) - 0.5f) * 8.0f, (unit(random) - 0.5f) * 30.0f};
+                const float scale = 0.5f + 3.0f * unit(random);
+                GpuInstance instance = placedInstance(
+                    Transform{.position = place, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 6.0f * unit(random)), .scale = Vec3{scale, scale, scale}}
+                        .getMatrix());
+                instance.sway[3] = 0.4f * unit(random);
+                const float reach = windFlutterReach(instance.sway[3], Vec2{ball.tree.lean[0], ball.tree.lean[1]});
+                const GpuCullRecord still = stillRecord(place, 4.0f * scale);
+                GpuCullRecord swaying = still;
+                swaying.flags |= CULL_SWAYS;
+
+                for (const GpuMeshCluster& cluster : packed.clusters) {
+                    if (!meshClusterInCut(cluster, instance, view)) {
+                        continue;
+                    }
+
+                    ++tested;
+                    many += meshClusterBone(cluster, 0) == meshClusterManyBones ? 1u : 0u;
+                    assert(meshClusterBound(cluster) && meshClusterKept(cluster, instance, 0u, swaying, view));
+                    assert(meshClusterKept(cluster, instance, 0u, swaying, view, MeshClusterPose{.bound = true}) ==
+                           meshClusterKept(cluster, instance, 0u, still, view));
+                    const Vec4 posed = meshClusterBonesSphere(cluster, ball.pool, ball.tree);
+                    const float sphere[4] = {posed.x, posed.y, posed.z, posed.w};
+                    const MeshClusterPose pose = meshClusterPosed(sphere, instance, instance.sway[3], Vec2{ball.tree.lean[0], ball.tree.lean[1]});
+
+                    if (meshClusterKept(cluster, instance, 0u, swaying, view, pose)) {
+                        continue;
+                    }
+
+                    ++culled;
+                    bool outside = false;
+
+                    for (const auto& plane : view.frustum.planes) {
+                        bool allOut = true;
+
+                        for (std::uint32_t triangle = 0; triangle < (cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT); ++triangle) {
+                            for (const std::uint32_t corner : packedTriangle(packed, cluster, 0, 0, triangle)) {
+                                const Vec3 world = worldPoint(instance, ballVertexPosed(ball, corner));
+                                allOut = allOut && plane[0] * world.x + plane[1] * world.y + plane[2] * world.z + plane[3] + reach < 1e-4f;
+                            }
+                        }
+
+                        outside = outside || allOut;
+                    }
+
+                    assert(outside);
+                }
+            }
+        }
+
+        assert(many > 0 && many < tested / 2 && culled > tested / 4);
+    }
+
+    /*
+    * How a pair's cluster stands (meshClusterPoseAt): a placed plant's bound cluster posed by its tree when claimed with
+    * the frame's stamp and given room, else standing still (bound); a frame's draw's bound cluster stands still; an
+    * unbound cluster is neither. A twig by its own binding: posed as twigPose has it, unbound without one.
+    */
+    void testThePoseOfAPair() {
+        std::mt19937 random(5);
+        const PosedBall ball = posedBall(random);
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(ball.mesh, ClusterLevels::One), 0, 0, 0, ball.bindings);
+        const PackedMeshClusters unbound = packMeshClusters(buildMeshClusters(ball.mesh, ClusterLevels::One), 0, 0, 0);
+        const GpuMeshCluster& cluster = packed.clusters[3];
+        GpuBoneTree noRoom = ball.tree;
+        noRoom.firstPose = boneNoPose;
+        const std::vector<GpuBoneTree> trees{noRoom, ball.tree};
+        const std::vector<std::uint32_t> plantTrees{8u, 1u, 9u, 0u, 0u, 0u, 9u, 1u};
+        const std::vector<std::uint32_t> twigBindings{packSwayBinding(SwayBinding{.bone = 7, .weight = 0.3f}), swayUnbound};
+        MeshClusterTables tables{};
+        tables.bones = BoneCullTables{plantTrees, trees, ball.pool, twigBindings, 9u};
+        const std::vector<GpuTwig> twigs{packTwig(TwigInstance{.foot = Vec3{0.2f, 0.3f, 0.0f}, .across = Vec3{1.0f, 0.0f, 0.0f}, .towardsTip = Vec3{0.0f, 1.0f, 0.0f},
+                                                               .facing = Vec3{0.0f, 0.0f, 1.0f}, .scale = 0.5f, .prototype = 0, .lean = Vec3{}}),
+                                         packTwig(TwigInstance{.foot = Vec3{0.0f, -0.3f, 0.1f}, .across = Vec3{1.0f, 0.0f, 0.0f}, .towardsTip = Vec3{0.0f, 1.0f, 0.0f},
+                                                               .facing = Vec3{0.0f, 0.0f, 1.0f}, .scale = 0.5f, .prototype = 0, .lean = Vec3{}})};
+        tables.twigs.twigs = twigs;
+
+        MeshClusterDrawn drawn;
+        drawn.instance = placedInstance(Mat4::translation(4.0f, 0.0f, 1.0f) * Mat4::scaling(2.0f, 2.0f, 2.0f));
+        drawn.instance.sway[3] = 0.3f;
+        drawn.part = drawn.instance;
+        drawn.plant = 3;
+        const Vec4 posed = meshClusterBonesSphere(cluster, ball.pool, ball.tree);
+        const float sphere[4] = {posed.x, posed.y, posed.z, posed.w};
+        const MeshClusterPose expected = meshClusterPosed(sphere, drawn.instance, 0.3f, Vec2{ball.tree.lean[0], ball.tree.lean[1]});
+        const MeshClusterPose found = meshClusterPoseAt(tables, drawn, cluster);
+        assert(found.bound && found.posed && found.sphere == expected.sphere);
+
+        const auto standsStill = [&](const MeshClusterDrawn& at) {
+            const MeshClusterPose pose = meshClusterPoseAt(tables, at, cluster);
+            return pose.bound && !pose.posed;
+        };
+        MeshClusterDrawn other = drawn;
+        other.plant = 1; // claimed, given no room
+        assert(standsStill(other));
+        other.plant = 0; // claimed by another frame
+        assert(standsStill(other));
+        other.plant = 40; // past the table
+        assert(standsStill(other));
+        other.plant = boneNoTree; // a frame's draw
+        assert(standsStill(other));
+        assert(!meshClusterPoseAt(tables, drawn, unbound.clusters[3]).bound);
+        tables.bones.stamp = 10;
+        assert(standsStill(drawn));
+        tables.bones.stamp = 9;
+
+        MeshClusterDrawn twig = drawn;
+        twig.twig = 0;
+        const MeshClusterPose twigFound = meshClusterPoseAt(tables, twig, unbound.clusters[3]);
+        GpuTwigLevel unboundOwn;
+        std::copy(std::begin(unbound.clusters[3].sphere), std::end(unbound.clusters[3].sphere), std::begin(unboundOwn.sphere));
+        const MeshClusterPose twigExpected = twigPose(unboundOwn, drawn.part, twigs[0], twigBindings[0], ball.pool, ball.tree);
+        assert(twigFound.posed && twigFound.sphere == twigExpected.sphere);
+        twig.twig = 1;
+        assert(!meshClusterPoseAt(tables, twig, unbound.clusters[3]).bound);
     }
 
     // A draw not rigid keeps every cluster, even one far out of view: terrain, an impostor, ground-following, a liana,
@@ -1136,6 +1327,8 @@ void testMeshClusterCulling() {
     testPackingKeepsEachClustersBones();
     testACulledClusterHidesNothing();
     testADrawNotRigidKeepsEverything();
+    testAPosedClusterHidesNothing();
+    testThePoseOfAPair();
     testPackingKeepsTheCut();
     testTheCut();
     testThePassesEqualAPlainWalk();

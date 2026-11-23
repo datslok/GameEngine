@@ -16,6 +16,19 @@
 class VulkanDevice;
 
 /*
+* What the camera's culling passes read of the bones (ROADMAP phase 21 stage 3c-iv-b; bone_cull_data.glsl, in its
+* order): each plant's tree, the trees, the pool and the twigs' bindings (never VK_NULL_HANDLE: an unused record when
+* there are none), and the frame's stamp (GpuWindField::flags[1]; 0 when nothing is posed).
+*/
+struct BoneCullBuffers {
+    VkBuffer plantTrees = VK_NULL_HANDLE;
+    VkBuffer trees = VK_NULL_HANDLE;
+    VkBuffer poses = VK_NULL_HANDLE;
+    VkBuffer twigBindings = VK_NULL_HANDLE;
+    std::uint32_t stamp = 0;
+};
+
+/*
 * The trees' bones posed on the GPU (ROADMAP phase 21 stage 3c-iii-b; render/gpu/bone_poses.h), after the wind's springs
 * are stepped and before the twigs' and mesh clusters' passes: bones_claim (a workgroup a group of a part moved by bones
 * and swaying view: each plant drawn claimed once by its frame stamp, a tree and its bones' room in the pool) and

@@ -115,6 +115,28 @@ BoneVertexPoses boneVertexPoses(std::span<const GpuBonePose> pool, std::uint32_t
     return BoneVertexPoses{.own = unpackBonePose(own), .parent = parent, .weight = bound.weight};
 }
 
+GpuBoneTree boneCullTree(const BoneCullTables& tables, std::uint32_t plant) {
+    if (2u * std::size_t{plant} + 1u >= tables.plantTrees.size()) {
+        return GpuBoneTree{};
+    }
+
+    const std::uint32_t tree = boneClaimedTree(tables.plantTrees[2u * plant], tables.plantTrees[2u * plant + 1u], tables.stamp);
+    return tree == boneNoTree || tree >= tables.trees.size() ? GpuBoneTree{} : tables.trees[tree];
+}
+
+std::vector<std::uint32_t> bonePlantTreesOf(std::span<const GpuBoneTree> trees, std::uint32_t stamp, std::size_t plants) {
+    std::vector<std::uint32_t> table(2 * plants, 0u);
+
+    for (std::uint32_t tree = 0; tree < trees.size(); ++tree) {
+        if (trees[tree].plant < plants) {
+            table[2u * trees[tree].plant] = stamp;
+            table[2u * trees[tree].plant + 1u] = tree;
+        }
+    }
+
+    return table;
+}
+
 std::vector<BoneWanted> boneWantedPlants(const PlacedTable& table, std::span<const GpuDrawCommand> commands, std::span<const GpuPlacedEntry> entries,
                                          std::span<const std::uint32_t> swayingViews, std::span<const GpuPlacedPlant> plants, const Vec3& eye,
                                          float fadeEnd) {
