@@ -4,6 +4,7 @@ Run from the repo root: python -I tools/hooks/test_claude_hooks.py (docs/archite
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -18,10 +19,12 @@ import claude_hooks  # noqa: E402
 SCRIPT = HOOKS_FOLDER / "claude_hooks.py"
 
 
-# Runs the hook script as Claude Code does: the check's name as argument, the event as JSON on stdin.
-def run_hook(check, event):
+# Runs the hook script as Claude Code does: the check's name as argument, the event as JSON on stdin, the repo's
+# root in CLAUDE_PROJECT_DIR when given.
+def run_hook(check, event, project=None):
+    environment = dict(os.environ, CLAUDE_PROJECT_DIR=str(project)) if project is not None else None
     return subprocess.run([sys.executable, "-I", str(SCRIPT), check], input=json.dumps(event), capture_output=True,
-                          text=True, timeout=60)
+                          text=True, timeout=60, env=environment)
 
 
 class CostlyRuns(unittest.TestCase):
@@ -149,14 +152,15 @@ class EndToEnd(unittest.TestCase):
         decision = json.loads(asked.stdout)["hookSpecificOutput"]
         self.assertEqual((decision["hookEventName"], decision["permissionDecision"]), ("PreToolUse", "ask"))
 
-    # The line-ending hook rewrites a written file in a CRLF folder.
+    # The line-ending hook rewrites a written file in a CRLF folder, measured from the project's root, not from the
+    # shell's folder (a cd into src leaves the shell there).
     def test_line_endings_hook(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "src" / "a.cpp"
             source.parent.mkdir()
             source.write_bytes(b"int a;\nint b;\n")
-            result = run_hook("line-endings", {"tool_name": "Write", "cwd": folder,
-                                               "tool_input": {"file_path": str(source)}})
+            result = run_hook("line-endings", {"tool_name": "Write", "cwd": str(source.parent),
+                                               "tool_input": {"file_path": str(source)}}, project=folder)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(source.read_bytes(), b"int a;\r\nint b;\r\n")
 
