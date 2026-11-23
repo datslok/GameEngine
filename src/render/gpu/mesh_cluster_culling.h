@@ -12,6 +12,7 @@
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/twig_records.h"
 #include "scene/mesh_clusters.h"
+#include "scene/sway_bones.h"
 
 #include <array>
 #include <cstdint>
@@ -49,10 +50,12 @@ struct GpuMeshCluster {
     float parentSphere[4] = {};
     float parentError = 0.0f;
     std::uint32_t level = 0;              // the level of the group it was simplified with (MeshClusterGroup::level)
+    // Its vertices' own bones (meshClusterBones): up to MESH_CLUSTER_MOST_BONES, 16 bits each, low half first.
+    std::uint32_t bones[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
     std::uint32_t unused[2] = {};
 };
 
-static_assert(sizeof(GpuMeshCluster) == 112, "GpuMeshCluster must match mesh_cluster_culling.glsl's MeshCluster");
+static_assert(sizeof(GpuMeshCluster) == 128, "GpuMeshCluster must match mesh_cluster_culling.glsl's MeshCluster");
 
 // A pair the camera draws: the draw list entry's place (the instance index the vertex shaders read) and the cluster's number.
 // Must match mesh_cluster_culling.glsl's MeshClusterItem.
@@ -76,8 +79,29 @@ struct PackedMeshClusters {
     std::vector<std::uint32_t> triangleWords;
 };
 
+inline constexpr std::uint32_t meshClusterMostBones = MESH_CLUSTER_MOST_BONES;
+inline constexpr std::uint32_t meshClusterNoBone = MESH_CLUSTER_NO_BONE;
+inline constexpr std::uint32_t meshClusterManyBones = MESH_CLUSTER_MANY_BONES;
+static_assert(swayMostBones <= meshClusterManyBones, "A bone must never read as a cluster's empty or many slot");
+
+/*
+* bindings: the mesh's (IndexedMesh::swayBindings, one a vertex, or none), each cluster's bones taken from them
+* (meshClusterBones). Throws std::invalid_argument for bindings not one a vertex the clusters name.
+*/
 PackedMeshClusters packMeshClusters(const MeshClusters& built, std::uint32_t meshFirstVertex, std::uint32_t firstClusterVertex,
-                                    std::uint32_t firstTriangleWord);
+                                    std::uint32_t firstTriangleWord, std::span<const SwayBinding> bindings = {});
+
+/*
+* A cluster's bones (ROADMAP phase 21 stage 3c-iv-a, docs/research/LEAFGEOMETRY.md, Bounds from the poses): its
+* vertices' own bones (each blends with its parent, which the bone's pose names), ascending, up to
+* MESH_CLUSTER_MOST_BONES, the rest MESH_CLUSTER_NO_BONE; MESH_CLUSTER_MANY_BONES first when there are more (its tree's
+* move bounds it); all MESH_CLUSTER_NO_BONE without bindings. Packed two to a word, the first low. Throws
+* std::invalid_argument as packMeshClusters.
+*/
+std::array<std::uint32_t, 4> meshClusterBones(const MeshClusters& built, const MeshCluster& cluster, std::span<const SwayBinding> bindings);
+
+// A packed cluster's bone in a slot (0 to MESH_CLUSTER_MOST_BONES - 1).
+std::uint32_t meshClusterBone(const GpuMeshCluster& cluster, std::uint32_t slot);
 
 // The words a cluster's triangles take (three corner bytes each, four to a word).
 std::uint32_t meshClusterTriangleWords(std::uint32_t triangles);

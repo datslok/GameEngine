@@ -112,6 +112,20 @@ Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere);
 // The smallest sphere holding two spheres (xyz centre, w radius).
 Vec4 windSphereUnion(const Vec4& first, const Vec4& second);
 
+/*
+* How far a bone's pose moves what it carries (ROADMAP phase 21 stage 3c-iv-a): x the larger of its pivot's and tip's
+* moves (a point on its segment moves at most that: the move is affine along it), y 2 |turn.xyz| = 2 sin(angle / 2),
+* the most a point a unit off the segment swings further.
+*/
+Vec2 windPoseMoves(const WindBonePose& pose, const Vec3& pivot, const Vec3& tip);
+
+/*
+* The farthest a tree moves anything bound within reach of its bones (SwaySkeleton::reach), from its bones' largest
+* windPoseMoves (each component the most over the bones): x + y reach. Holds for a vertex blended between a bone and
+* its parent (between their images) and a twig carried rigidly at its foot (its turn between theirs).
+*/
+float windTreeMove(const Vec2& largestMoves, float reach);
+
 // A bone as its turn needs it, in its mesh's units: pivot, tip, radius at the pivot, its chain's first bone, length and
 // radius at its start.
 struct WindBoneShape {

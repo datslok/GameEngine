@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <vector>
 
+struct IndexedMesh;
+
 /*
 * Bones a swaying thing is moved by (ROADMAP phase 21 stage 3c, docs/research/LEAFGEOMETRY.md, Wind with valid bounds):
 * as Nanite Foliage's skinning and GPU Gems 3 ch. 6's branches, each bone turns about its pivot and carries its children,
@@ -82,7 +84,20 @@ bool swayBonesOrdered(const std::vector<SwayBone>& bones);
 struct SwaySkeleton {
     std::vector<SwayBone> bones;
     float height = 1.0f;
+    // The farthest anything bound to it lies from its bones (swayBindingReach; a twig's foot's plus the twig's own
+    // length), in its mesh's units: how far off a bone a point can be when the tree's move is bounded (ROADMAP phase 21
+    // stage 3c-iv-a, render/gpu/wind_bones.h, windTreeMove).
+    float reach = 0.0f;
 };
+
+/*
+* How far a point bound to bones lies from them: from its bone's segment (pivot to tip), and from its parent's too while
+* it blends with it (weight below 1, the bone not a root), since its place is between the two bones' images of it.
+*/
+float swayBindingReach(const std::vector<SwayBone>& bones, const Vec3& point, const SwayBinding& binding);
+
+// The farthest of a mesh's bound vertices from its bones (swayBindingReach); 0 for a mesh without bindings.
+float swayMeshReach(const std::vector<SwayBone>& bones, const IndexedMesh& mesh);
 
 // A chain and the line it was cut from, with a sphere holding the line, for binding things near it (swayNearestBinding).
 struct SwayLine {

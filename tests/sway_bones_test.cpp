@@ -179,6 +179,27 @@ namespace {
     }
 }
 
+    /*
+    * How far a bound point lies from its bones (ROADMAP phase 21 stage 3c-iv-a): from its own bone's segment (beside
+    * it, past its tip, before its pivot), and from its parent's too while it blends with it; a root has no parent to
+    * blend with. A mesh's reach is its farthest bound vertex's, none without bindings.
+    */
+    void testTheReachOfABinding() {
+        std::vector<SwayBone> bones{SwayBone{.pivot = Vec3{}, .tip = Vec3{0.0f, 2.0f, 0.0f}}};
+        bones.push_back(SwayBone{.pivot = Vec3{0.0f, 2.0f, 0.0f}, .tip = Vec3{3.0f, 2.0f, 0.0f}, .parent = 0, .level = 1});
+        assert(near(swayBindingReach(bones, Vec3{0.5f, 1.0f, 0.0f}, SwayBinding{.bone = 0, .weight = 1.0f}), 0.5f, 1e-6f));
+        assert(near(swayBindingReach(bones, Vec3{0.0f, 3.0f, 0.0f}, SwayBinding{.bone = 0, .weight = 1.0f}), 1.0f, 1e-6f));
+        assert(near(swayBindingReach(bones, Vec3{0.0f, -0.5f, 0.0f}, SwayBinding{.bone = 0, .weight = 0.5f}), 0.5f, 1e-6f));
+        assert(near(swayBindingReach(bones, Vec3{2.0f, 2.25f, 0.0f}, SwayBinding{.bone = 1, .weight = 1.0f}), 0.25f, 1e-6f));
+        assert(near(swayBindingReach(bones, Vec3{2.0f, 2.25f, 0.0f}, SwayBinding{.bone = 1, .weight = 0.75f}), std::sqrt(4.0f + 0.0625f), 1e-5f));
+
+        IndexedMesh mesh;
+        mesh.vertices = {MeshVertex{Vec3{0.5f, 1.0f, 0.0f}, Vec3{}, Vec2{}, Vec4{}}, MeshVertex{Vec3{2.0f, 2.25f, 0.0f}, Vec3{}, Vec2{}, Vec4{}}};
+        assert(swayMeshReach(bones, mesh) == 0.0f);
+        mesh.swayBindings = {SwayBinding{.bone = 0, .weight = 1.0f}, SwayBinding{.bone = 1, .weight = 0.75f}};
+        assert(near(swayMeshReach(bones, mesh), std::sqrt(4.0f + 0.0625f), 1e-5f));
+    }
+
 void testSwayBones() {
     testAChainIsCut();
     testTheArcOfAPoint();
@@ -187,4 +208,5 @@ void testSwayBones() {
     testTheNearestBinding();
     testAPointInItsPlant();
     testMeshesKeepTheirBindings();
+    testTheReachOfABinding();
 }

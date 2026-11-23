@@ -20,7 +20,7 @@ struct SwayBoneRecord {
     uint level;
 };
 
-// A skeleton (GpuSwaySkeleton): its bones' run, height and foot radius, its chain levels' starts, its lean's part.
+// A skeleton (GpuSwaySkeleton): its bones' run, height and foot radius, its chain levels' starts, its lean's part, its reach.
 struct SwaySkeletonRecord {
     uint firstBone;
     uint boneCount;
@@ -29,15 +29,16 @@ struct SwaySkeletonRecord {
     uint firstLevel;
     uint levelCount;
     uint leanPart;
-    uint unused;
+    float reach;
 };
 
-// A posed tree (GpuBoneTree): its plant, skeleton, first pose (BONE_NO_POSE still), its lean now (xy) and last frame's (zw).
+// A posed tree (GpuBoneTree): its plant, skeleton, first pose (BONE_NO_POSE still), its move this frame (boneTreeMove),
+// its lean now (xy) and last frame's (zw).
 struct BoneTree {
     uint plant;
     uint skeleton;
     uint firstPose;
-    uint unused;
+    float move;
     vec4 leans;
 };
 

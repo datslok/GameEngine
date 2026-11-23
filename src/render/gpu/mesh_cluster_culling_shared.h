@@ -67,6 +67,13 @@
 // take 65535): meshClusterTaskGroups, meshClusterTaskIndex.
 #define MESH_CLUSTER_TASK_WIDTH 32768u
 
+// A cluster's bones (GpuMeshCluster::bones, meshClusterBones): up to this many of its vertices' own bones, 16 bits each,
+// ascending, empty slots MESH_CLUSTER_NO_BONE; MESH_CLUSTER_MANY_BONES in the first slot when it has more (its tree's
+// move bounds it instead). Bones stay below both (SWAY_MOST_BONES).
+#define MESH_CLUSTER_MOST_BONES 8
+#define MESH_CLUSTER_NO_BONE 0xFFFFu
+#define MESH_CLUSTER_MANY_BONES 0xFFFEu
+
 // The mesh shader's workgroup: one warp on NVIDIA's GPUs, each thread placing up to two vertices and four triangles.
 #define MESH_CLUSTER_MESH_THREADS 32
 

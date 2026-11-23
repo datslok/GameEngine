@@ -110,6 +110,17 @@ vec4 windPosedSphere(WindBonePose pose, vec4 sphere) {
     return vec4(windBonePlace(pose, sphere.xyz), sphere.w);
 }
 
+// How far a pose moves what it carries: x its pivot's or tip's larger move, y 2 |turn.xyz| (windPoseMoves).
+vec2 windPoseMoves(WindBonePose pose, vec3 pivot, vec3 tip) {
+    float ends = max(length(windBonePlace(pose, pivot) - pivot), length(windBonePlace(pose, tip) - tip));
+    return vec2(ends, 2.0 * length(pose.turn.xyz));
+}
+
+// The farthest a tree moves anything within reach of its bones, from its bones' largest moves (windTreeMove).
+float windTreeMove(vec2 largestMoves, float reach) {
+    return largestMoves.x + largestMoves.y * reach;
+}
+
 // The smallest sphere holding two (windSphereUnion).
 vec4 windSphereUnion(vec4 first, vec4 second) {
     float apart = length(second.xyz - first.xyz);

@@ -1,0 +1,73 @@
+# Build log: Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 2)
+
+## Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 2)
+
+- `tree-bones-3c-i` (Nov 22 2026): trees' bones built from the skeleton (`scene/sway_bones`, `treeBones`), each bark vertex's and twig's binding; nothing moves by them yet.
+  - **Rigid twigs on today's bend, measured and dropped:** a 1 m twig moved as one piece (its pivot's offset plus the best turn from the bend's central differences) missed today's per-vertex offset by 8-14 cm at 7 m/s, 15-25 cm at 10 m/s, 37-64 cm in a storm (mid and emergent trees): mostly the branch bob's 4 m wave across the twig; the bend's own shear 1.5-6 cm. Padding culling for it instead was the easy fix, not the scalable one (the user); bones were the research's answer all along (Nanite skinning, GPU Gems 3 ch. 6).
+  - **Picks (the user):** bones about 2 m along a chain, blended (1A); clusters within a chain holding their run of bones (2A); animation stopped below 0.1 of the screen with a fade (3A).
+  - **Ordering:** chains taken by first node: a chain's first node lies on its parent chain after that chain's first node, so parents always come first.
+  - **Counts (laptop release, seed 7):** emergent 610 bones in 5 levels (389 chains, 18.0K bark vertices, 7,668 twigs); canopy 749 in 6 (474, 17.5K, 9,768); mid 50 in 4 (34, 2.9K, 894). Whole variant build 45.5 / 44.1 / 5.6 ms with the bindings.
+  - **4 planted bugs caught** (the blend reversed, a chain's bones all children of its parent, bark bound along the trunk's chain, every twig on the root's bone).
+- `tree-bones-3c-ii` (Nov 22 2026): the bones' motion as maths (`render/gpu/wind_bones`, `wind_bones.glsl`, `quat.glsl`), tested on the CPU; nothing moves by it yet.
+  - **Picks (the user):** the beam law with exponent and clamp as settings (1A), an ellipse along and across the wind (2A), turns from rest directions (3A).
+  - **Frequency a branch, not a bone (corrected while building):** at one length the beam's mode goes as r / L^2, so thin 2 m bones would swing slower; short branches are what swing fast. Each chain's mode from its length and base radius: a 30 m trunk 0.3 m thick 0.28 Hz, a 4 m branch 5 cm thick 2.6 Hz.
+  - **No special case for a bone along the wind:** the axis `d x W` is left unnormalised, its length the wind's share across the bone (drag on a cylinder).
+  - **Across the wind:** `W - d (d.W)` moves a bone at right angles to itself and the wind, so a horizontal branch across the wind bobs, as today's branch bob does, from the same term that sways a trunk sideways.
+  - **New library `wind_bones.glsl`** rather than `wind.glsl` (its mirror `wind.h` already long); `quat.glsl` is the first GLSL quaternion code, mirroring `math/quat.h`. GPU test written, not run.
+  - **7 planted bugs caught** (a pose not carried by its parent, the share's factor 2 dropped, no swing across, the union's radius short, a turn in still air, the mode's r / 2 lost, a posed sphere shrunk).
+- `tree-bones-3c-iii-a` (Nov 22 2026): every tree mesh bound to its variant's bones and the records on the GPU; nothing moves by them yet.
+  - **Picks (the user, 3c-iii):** poses only for trees a swaying view draws, each once (1A); last frame's poses recomputed (2A); twigs rigid on their bone plus flutter (3A); every tree mesh bound, shadows' too (4A).
+  - **Bindings beside the vertex pool, not a mesh's entry:** a placed part's level meshes have their own vertices but share the part's instance, so a per-mesh entry (as hanging and thinning use) cannot reach them; a word a pool vertex can, from the mesh shaders' cluster vertices too. 4 B beside each 48 B vertex, no cost a frame.
+  - **Cards whole:** each card's four corners take its node's binding (a filler its nearest node's, the twigs' rule, now `nodeOrNearest`), so a card moves rigidly as its twig will.
+  - **Climbers and epiphytes** sit on the bark, so they follow the nearest bark's binding (`swayNearestBinding`, lines skipped by their spheres); bound in the variants' parallel jobs.
+  - **9 planted bugs caught** (simplified levels' bindings not their vertices', the nearest line's sphere skip, fillers' cards unbound, the weight's bits, the pool's gaps 0 not unbound, a skeleton numbered from 0, the record's wood speed, the shadow bark without its skeleton, climbers unbound).
+- `tree-bones-3c-iii-b` (Nov 22 2026): the bones pass: every tree a swaying view draws posed once a frame, this frame's and last's poses, F4 `BONES`, `bones-compare`; nothing reads the poses yet.
+  - **Picks (the user, after asking what scales best and what Unreal does):** wind and bones before the cluster passes (A), a chain a thread level by level (A), a word pair a held plant with a frame stamp (A). Unreal's shared poses and per-bone springs are later options (3c-v, 3c-vi).
+  - **Stamp, not clearing:** the plant table is cleared once when made; a frame's stamp marks its claims, so a frame costs nothing for plants it does not draw. 8 B a held plant (stamp and tree in two words, not one: a 12-bit stamp would wrap and match a stale claim).
+  - **Shared, not per frame:** the pool and tables are one copy; each frame's passes wait for every earlier use (frames on one queue run in order anyway), so memory does not double with frames in flight.
+  - **The lean's part:** a skeleton's climbers sway as hanging things (bend 0), so a tree's lean comes from its skeleton's first part swaying as a tree (`skeletonLeanParts`), not from whichever entry claimed it.
+  - **Hertz from metres:** bones are in mesh units, so a chain's length and radius are scaled by the plant's scale for its swing; a test checks a tree at scale s turns as the same tree built s times larger.
+  - **Shared maths:** `windFadedLean` (the soft, faded lean) now one function for the sway, the swing and the bones; `windBoneOwnTurn` shared by `windTreePoses` and the pass's level order (`boneTreePoses`).
+  - **12 planted bugs caught** (a chain on its own level, a broken chain, a chain's radius or length not in metres, the lean turned the wrong way, entry bits kept, a pool filled exactly refused, twice not counted, a climber's lean part, levels posed in reverse, the F4 line, WIND and BONES swapped in the timers).
+  - **GPU timers in recording order:** stamps are written in `GpuPass` order, so a pass recorded after a later one counts 0 and its time goes to the next pass. Moving WIND would have hidden it in BONES; MESHCULL had the same fault since stage 2f, recorded after PLANTING, PLACED and TWIGS, its time (with TLAS, SKY, PROBES and WIND) shown under CLUSTERS in the forest. The enum now follows the frame, tested as a list.
+  - **Checked on the GPU (Nov 23):** validation silent; `bones-compare` agrees (2982 trees, 687080 poses, worst turn 3e-6). The 256K pool left 1537 of the 2982 trees still (343540 bones asked), so it now grows to the next power of two above the ask, under `poolMostBones` (4M); 524288 at the forest's start. GPU tests written, not run.
+- `tree-bones-3c-iii-c-i` (Nov 23 2026): bound vertices (bark and its levels, cards, climbers, epiphytes) moved by their bones in the camera's passes and swaying shadow tiles; twigs and lianas keep the sway until ii and iii.
+  - **Picks (the user):** 3c-iii-c split in four; a tree not posed stands still (one path, no fallback to the sway); the leaves' flutter reused (`windFlutterAmount`, now shared by the sway and the bones).
+  - **The stamp in the wind record, not the header:** the draws' scene set is written before the pass runs, and a stand-in buffer's contents are undefined; `GpuWindField::flags[1]` is set by the renderer, 0 when the pass does not run, so stale claims never match.
+  - **The parent in the pose:** a pose's spare fourth word names its parent, so a vertex blends two poses without the bone table; `bones-compare` checks it.
+  - **Bones in the plant's frame:** a bound part must sit at its plant's origin (none of the forest's is moved), refused otherwise, so a vertex is posed in its mesh's frame.
+  - **6 planted bugs caught;** a seventh (a root reading its parent past its tree) slipped through while the slots before the tree held rest poses, so the test fills them with another tree's.
+  - **Hooks** (`claude-hooks-paths`): a `cd` into `assets/shaders` broke every shell command's hook (relative script path) and the line-endings check judged folders from the shell's folder; both now from `$CLAUDE_PROJECT_DIR`.
+  - **Checked by the user:** the sway looks great and more realistic than the per-vertex sway. GPU tests written, not run.
+- `tree-bones-3c-iii-c-ii` (Nov 23 2026): twigs moved whole by their bone's pose at their foot, leaves keeping today's shiver; lianas keep the sway until iii.
+  - **Rigid, not skinned:** a twig is small, so it is carried whole (`windRigidPose`): its two bones' turns blended the short way (nlerp: a sway's turns are small, so nearly slerp), its foot blended as the bark there is, so it stays on its branch.
+  - **Once a twig:** a mesh shader's workgroup draws one twig's cluster, so its first thread makes the pose (and last frame's in the main pass) and shares it; every vertex is then posed as by one bone through c-i's path, the flutter and motion vectors with it.
+  - **No pop risk yet:** swaying twigs skip the per-twig frustum test (`meshClusterRigid`), so the old sway's padding does not limit the bones; 3c-iv's posed bounds will.
+  - **4 planted bugs caught** (no short way, not normalised, foot not blended, weight swapped).
+  - **A silent build:** `make` from Git Bash cannot find the compiler (exit 127) and a filtered output hid it, so a stale test binary ran; builds stay in PowerShell.
+  - **Checked by the user:** looks great. GPU test written, not run.
+- `tree-bones-3c-iii-c-iii` (Nov 23 2026): lianas' anchors moved by their trees' bones, the swing below as before; the per-vertex sway is left only for iv to retire.
+  - **The plant number was the gap:** the CPU knows a liana's tree by its foot, the bones by its plant number, which the GPU's cells pack by prefix sums. The user picked a GPU lookup a frame (A) over the CPU re-planting the cells (B) or lianas posing their own trees (C).
+  - **A table by column and row modulo the ring's side:** a ring's held cells never share a place, so a set's cell finds its slot in one read; tested on a walking camera.
+  - **Cells by the box, not by division:** `floor(x / size)` can land a float on the wrong side of `plantingCellBox`'s edge; and a cell's east edge and the next one's west can differ by a rounding, a sliver no cell plants in (the first test caught it).
+  - **Feet within 1 cm, not bit-equal:** the same planting gives the same feet, but trunks stand metres apart, so a centimetre costs nothing and survives any rounding difference.
+  - **One plant-frame inverse:** `swayPlantPoint` (the CPU's binding) and `windPlantPoint` (the GPU's pose) are mirrors; the move is turned back by the plant's turn and scale, tested equal to a bound vertex's.
+  - **Not claimed by the lianas:** a crown is nearly always drawn in a swaying view when its liana is; claiming would need each kind's skeleton in the lookup and in `bones-compare`.
+  - **Retired:** `lianaWindAnchor`, `windTreeAnchorMotion`; `windAnchorOffset` stays until iv.
+  - **9 planted bugs caught** (turn undone the wrong way, the far end's layer, the hold not in the tree's frame, no cell edge fix, a negative modulo, the slot ignored, the counts' layer, the comparison flipped, the move turned back wrongly).
+  - **A stale build file:** moving `bone_records_shared.h` left dependency files naming it, which stopped `make` for the GPU tests until deleted.
+  - **Checked by the user:** looks great. GPU tests written, not run.
+- `tree-bones-3c-iii-c-iv` (Nov 23 2026): what was left of the trees' per-vertex sway retired; bones are a tree's only motion.
+  - **Smaller than planned:** the branch bob is not the trees' own but `windSwayOffset`'s, which still moves the palms and understorey (no bones), so it stays; the plan's line said otherwise and is corrected.
+  - **Retired:** `windAnchorOffset`, `GpuWindAnchor`, `WindAnchorRecord` (unused since iii) and their tests; the liana record's tree height, scale and bend, written but never read, so `LianaShape` is 128 B again and `NearLianas::resway` no longer replaces every block for a bend.
+  - **The one path guarded (the user's pick A, a test):** `forest_test` already failed for a tree-swayed part without a skeleton or a vertex unbound (both planted: the epiphytes' moss unbound, the shadow bark without its skeleton); its comment now says what it guards. Other games keep the per-vertex sway for things without bones.
+  - **3 planted bugs caught** (moss unbound, a part without its skeleton, the lianas' sway not given).
+- `tree-bones-3c-iv-a` (Nov 23 2026): each cluster's bones and each tree's move a frame, what 3c-iv-b will cull swaying trees by; nothing reads them yet.
+  - **Research** (`LEAFGEOMETRY.md`, Bounds from the poses): Nanite Foliage bounds by skinning matrices (method unpublished); Unterguggenberger et al. 2021 bound meshlets offline over every pose of a clip, which a stateless wind does not need; the common way poses each bone's rest bound.
+  - **Clusters within chains dropped (the user's pick B over 3c-i's 2A):** 37-85 vertices a chain (about one cluster's 64) would split clusters at chain ends and stop the levels merging below one cluster a chain (389 for an emergent tree).
+  - **Measured, so 8 bones and not 4 (the user's pick, for scale):** full-detail bark 78-84% within 4 bones, the rest 5-8; cards 80-89%, 3 of 611 past 8; the first coarser level 2% past 8. A list of any length would cost without bound on coarse clusters, which iv-c leaves still far off. Record 112 to 128 B.
+  - **A tree's move, provably enough:** a pose's move along its segment is affine (largest at an end), off it grows by `2 sin(angle / 2)` a metre; a blend lies between two images and a rigid twig's turn between two turns, so E + A reach bounds both.
+  - **The twigs' reach needed their prototypes first:** made before the trees now (`makeTwigPrototypes`), the atlas kept for their material.
+  - **Shared test helper:** `throwsInvalid` moved into `test_levels.h` from two copies.
+  - **5 planted bugs caught** (bones repeated in the slots, the limit at 4, the move without its reach, the reach ignoring the parent, the twigs left out of the reach).
+  - Should look unchanged; GPU test written, not run.

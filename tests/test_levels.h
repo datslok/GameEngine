@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <numbers>
+#include <stdexcept>
 
 /*
 * Small levels and comparisons shared by the physics tests, so each test file does not grow its own copy.
@@ -14,6 +15,18 @@
 
 inline bool near(float actual, float expected, float tolerance) {
     return std::abs(actual - expected) <= tolerance;
+}
+
+// Whether a call throws std::invalid_argument.
+template <typename Call>
+bool throwsInvalid(Call call) {
+    try {
+        call();
+    } catch (const std::invalid_argument&) {
+        return true;
+    }
+
+    return false;
 }
 
 // A solid box from minimum to maximum, as level triangles (the unit cube stretched and moved).

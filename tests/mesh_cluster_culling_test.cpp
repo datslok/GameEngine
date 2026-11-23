@@ -19,6 +19,8 @@
 #include "scene/level_of_detail.h"
 #include "scene/mesh.h"
 #include "scene/mesh_clusters.h"
+#include "scene/sway_bones.h"
+#include "test_levels.h"
 
 #include <algorithm>
 #include <cassert>
@@ -50,6 +52,67 @@ namespace {
         }
 
         return corners;
+    }
+
+    /*
+    * Each cluster's bones (ROADMAP phase 21 stage 3c-iv-a): its vertices' own bones, ascending, up to the most, the rest
+    * empty; the many mark when it has more; every slot empty without bindings; bindings not one a vertex refused. A ball
+    * bound by latitude bands has clusters of one bone, of a few, of more than four and of too many, at every level.
+    */
+    void testPackingKeepsEachClustersBones() {
+        const IndexedMesh ball = buildIndexedMesh(Mesh::sphere(64, 32));
+        std::vector<SwayBinding> bindings;
+
+        for (const MeshVertex& vertex : ball.vertices) {
+            // Broad bands below, thin ones near the top, so clusters hold one bone, a few, or too many.
+            const float y = vertex.position.y;
+            const int bone = y > 0.4f ? 20 + static_cast<int>(y * 60.0f) : static_cast<int>((y + 1.0f) * 3.0f);
+            bindings.push_back(SwayBinding{.bone = bone, .weight = 0.5f});
+        }
+
+        for (const ClusterLevels levels : {ClusterLevels::One, ClusterLevels::All}) {
+            const MeshClusters built = buildMeshClusters(ball, levels);
+            const PackedMeshClusters packed = packMeshClusters(built, 0, 0, 0, bindings);
+            std::array<std::size_t, meshClusterMostBones + 2> seen{};
+
+            for (std::size_t k = 0; k < built.clusters.size(); ++k) {
+                const MeshCluster& cluster = built.clusters[k];
+                std::vector<std::uint32_t> bones;
+
+                for (std::uint32_t vertex = 0; vertex < cluster.vertexCount; ++vertex) {
+                    bones.push_back(static_cast<std::uint32_t>(bindings[built.vertices[cluster.firstVertex + vertex]].bone));
+                }
+
+                std::sort(bones.begin(), bones.end());
+                bones.erase(std::unique(bones.begin(), bones.end()), bones.end());
+                const GpuMeshCluster& record = packed.clusters[k];
+
+                if (bones.size() > meshClusterMostBones) {
+                    assert(meshClusterBone(record, 0) == meshClusterManyBones);
+                    ++seen.back();
+                    continue;
+                }
+
+                for (std::uint32_t slot = 0; slot < meshClusterMostBones; ++slot) {
+                    assert(meshClusterBone(record, slot) == (slot < bones.size() ? bones[slot] : meshClusterNoBone));
+                }
+
+                ++seen[bones.size()];
+            }
+
+            assert(seen[0] == 0 && seen[1] > 0 && seen[2] + seen[3] + seen[4] > 0 && seen[5] + seen[6] + seen[7] + seen[8] > 0 && seen.back() > 0);
+        }
+
+        const PackedMeshClusters unbound = packMeshClusters(buildMeshClusters(ball, ClusterLevels::One), 0, 0, 0);
+
+        for (const GpuMeshCluster& record : unbound.clusters) {
+            for (std::uint32_t slot = 0; slot < meshClusterMostBones; ++slot) {
+                assert(meshClusterBone(record, slot) == meshClusterNoBone);
+            }
+        }
+
+        bindings.pop_back();
+        assert(throwsInvalid([&] { packMeshClusters(buildMeshClusters(ball, ClusterLevels::One), 0, 0, 0, bindings); }));
     }
 
     // Packed for the pools: every cluster's vertices and triangles as built, numbered from where they go.
@@ -1070,6 +1133,7 @@ namespace {
 */
 void testMeshClusterCulling() {
     testPackingKeepsEveryTriangle();
+    testPackingKeepsEachClustersBones();
     testACulledClusterHidesNothing();
     testADrawNotRigidKeepsEverything();
     testPackingKeepsTheCut();

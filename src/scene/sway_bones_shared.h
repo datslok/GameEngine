@@ -6,7 +6,8 @@
 // A vertex bound to no bone (it sways by its own vertices, or stands still): every pool vertex not bound has it.
 #define SWAY_UNBOUND 0xFFFFFFFFu
 
-// The most bones a skeleton holds: a binding keeps its bone in 16 bits, the all-ones bone left for SWAY_UNBOUND.
-#define SWAY_MOST_BONES 65535
+// The most bones a skeleton holds: a binding keeps its bone in 16 bits, the all-ones bone left for SWAY_UNBOUND and
+// the one below it for a cluster bound by too many bones (MESH_CLUSTER_MANY_BONES).
+#define SWAY_MOST_BONES 65534
 
 #endif

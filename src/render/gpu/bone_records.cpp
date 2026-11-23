@@ -52,7 +52,7 @@ SwaySkeletonTables packSwaySkeletons(const std::vector<const SwaySkeleton*>& ske
 
     for (const SwaySkeleton* skeleton : skeletons) {
         if (skeleton->bones.empty() || skeleton->bones.size() > swayMostBones || !swayBonesOrdered(skeleton->bones)) {
-            throw std::invalid_argument("A skeleton needs 1 to 65535 bones, parents first");
+            throw std::invalid_argument("A skeleton needs 1 to 65534 bones, parents first");
         }
 
         const auto firstLevel = static_cast<std::uint32_t>(tables.levelStarts.size());
@@ -62,7 +62,8 @@ SwaySkeletonTables packSwaySkeletons(const std::vector<const SwaySkeleton*>& ske
                                                    .height = skeleton->height,
                                                    .footRadius = skeleton->bones.front().radius,
                                                    .firstLevel = firstLevel,
-                                                   .levelCount = static_cast<std::uint32_t>(tables.levelStarts.size()) - firstLevel - 1});
+                                                   .levelCount = static_cast<std::uint32_t>(tables.levelStarts.size()) - firstLevel - 1,
+                                                   .reach = skeleton->reach});
 
         for (const SwayBone& bone : skeleton->bones) {
             tables.bones.push_back(GpuSwayBone{.pivot = {bone.pivot.x, bone.pivot.y, bone.pivot.z},

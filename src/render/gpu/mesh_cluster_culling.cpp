@@ -111,11 +111,62 @@ std::uint32_t meshClusterTriangleWords(std::uint32_t triangles) {
 }
 
 /*
+* The bones gathered in a small sorted list: a cluster has at most 64 vertices, and stopping past the most keeps it
+* short. A bone appears once however many vertices hold it.
+*/
+std::array<std::uint32_t, 4> meshClusterBones(const MeshClusters& built, const MeshCluster& cluster, std::span<const SwayBinding> bindings) {
+    constexpr std::uint32_t noBones = meshClusterNoBone | (meshClusterNoBone << 16u);
+
+    if (bindings.empty()) {
+        return {noBones, noBones, noBones, noBones};
+    }
+
+    std::array<std::uint32_t, meshClusterMostBones> bones{};
+    std::uint32_t count = 0;
+
+    for (std::uint32_t vertex = 0; vertex < cluster.vertexCount; ++vertex) {
+        const std::uint32_t number = built.vertices.at(cluster.firstVertex + vertex);
+
+        if (number >= bindings.size()) {
+            throw std::invalid_argument("A cluster's vertex has no binding: bindings must be one a mesh vertex");
+        }
+
+        const auto bone = static_cast<std::uint32_t>(bindings[number].bone);
+
+        if (std::find(bones.begin(), bones.begin() + count, bone) != bones.begin() + count) {
+            continue;
+        }
+
+        if (count == meshClusterMostBones) {
+            return {meshClusterManyBones | (meshClusterNoBone << 16u), noBones, noBones, noBones};
+        }
+
+        bones[count++] = bone;
+    }
+
+    std::sort(bones.begin(), bones.begin() + count);
+    std::array<std::uint32_t, meshClusterMostBones> slots{};
+    slots.fill(meshClusterNoBone);
+    std::copy(bones.begin(), bones.begin() + count, slots.begin());
+    std::array<std::uint32_t, 4> words{};
+
+    for (std::size_t word = 0; word < words.size(); ++word) {
+        words[word] = slots[2 * word] | (slots[2 * word + 1] << 16u);
+    }
+
+    return words;
+}
+
+std::uint32_t meshClusterBone(const GpuMeshCluster& cluster, std::uint32_t slot) {
+    return (cluster.bones[slot / 2] >> (16u * (slot % 2))) & 0xFFFFu;
+}
+
+/*
 * Vertex numbers become the vertex pool's (the mesh's first vertex added), so a mesh shader needs no offset; each
 * cluster's corner bytes start a word of their own, so a cluster reads whole words.
 */
 PackedMeshClusters packMeshClusters(const MeshClusters& built, std::uint32_t meshFirstVertex, std::uint32_t firstClusterVertex,
-                                    std::uint32_t firstTriangleWord) {
+                                    std::uint32_t firstTriangleWord, std::span<const SwayBinding> bindings) {
     PackedMeshClusters packed;
     packed.clusters.reserve(built.clusters.size());
     packed.vertices.reserve(built.vertices.size());
@@ -140,6 +191,8 @@ PackedMeshClusters packMeshClusters(const MeshClusters& built, std::uint32_t mes
         writeGroupSphere(built.groups[cluster.group], record.parentSphere);
         record.parentError = built.groups[cluster.group].error;
         record.level = built.groups[cluster.group].level;
+        const std::array<std::uint32_t, 4> bones = meshClusterBones(built, cluster, bindings);
+        std::copy(bones.begin(), bones.end(), std::begin(record.bones));
 
         if (cluster.refinedGroup == meshClusterNoGroup) {
             std::copy(std::begin(record.sphere), std::end(record.sphere), std::begin(record.ownSphere));

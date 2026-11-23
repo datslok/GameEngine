@@ -197,6 +197,19 @@ std::vector<WindBonePose> boneTreePoses(const SwaySkeletonTables& tables, std::u
     return poses;
 }
 
+float boneTreeMove(const SwaySkeletonTables& tables, std::uint32_t skeleton, std::span<const WindBonePose> poses) {
+    const GpuSwaySkeleton& record = tables.skeletons.at(skeleton);
+    Vec2 largest{0.0f, 0.0f};
+
+    for (std::uint32_t bone = 0; bone < record.boneCount; ++bone) {
+        const GpuSwayBone& b = tables.bones.at(record.firstBone + bone);
+        const Vec2 moves = windPoseMoves(poses[bone], Vec3{b.pivot[0], b.pivot[1], b.pivot[2]}, Vec3{b.tip[0], b.tip[1], b.tip[2]});
+        largest = Vec2{std::max(largest.x, moves.x), std::max(largest.y, moves.y)};
+    }
+
+    return windTreeMove(largest, record.reach);
+}
+
 WindTreeShape boneTreeShape(const GpuSwaySkeleton& skeleton, const GpuPlacedPlant& plant) {
     return WindTreeShape{.height = skeleton.height, .footRadius = skeleton.footRadius, .metresPerUnit = plant.scale, .seed = boneTreeSeed(plant)};
 }
@@ -235,6 +248,7 @@ BoneComparison compareBonePoses(std::span<const BoneWanted> wanted, std::span<co
         const std::vector<WindBonePose> now = boneTreePoses(tables, tree.skeleton, shape, Vec2{tree.lean[0], tree.lean[1]}, seconds, motion);
         const std::vector<WindBonePose> last =
             boneTreePoses(tables, tree.skeleton, shape, Vec2{tree.previousLean[0], tree.previousLean[1]}, previousSeconds, motion);
+        comparison.worstMove = std::max(comparison.worstMove, std::abs(boneTreeMove(tables, tree.skeleton, now) - tree.move));
 
         for (std::size_t bone = 0; bone < now.size(); ++bone) {
             for (const auto& [expected, place] : {std::pair{&now[bone], 2 * bone}, std::pair{&last[bone], 2 * bone + 1}}) {
@@ -258,13 +272,14 @@ BoneComparison compareBonePoses(std::span<const BoneWanted> wanted, std::span<co
 
 std::string describeBoneComparison(const BoneComparison& comparison) {
     const bool agrees = comparison.missing == 0 && comparison.extra == 0 && comparison.twice == 0 && comparison.wrongParents == 0 &&
-                        comparison.worstTurn <= 1e-4f && comparison.worstShift <= 1e-3f;
+                        comparison.worstTurn <= 1e-4f && comparison.worstShift <= 1e-3f &&
+                        comparison.worstMove <= 1e-3f;
     char line[320];
     std::snprintf(line, sizeof(line),
                   "Bones %s: %zu trees wanted, %zu claimed (%zu still for want of room), %zu missing, %zu extra, %zu twice; %zu poses checked, worst turn %.2g, "
-                  "shift %.2g, %zu wrong parents.",
+                  "shift %.2g, move %.2g, %zu wrong parents.",
                   agrees ? "agree" : "DIFFER", comparison.wanted, comparison.claimed, comparison.still, comparison.missing, comparison.extra,
                   comparison.twice, comparison.posesChecked, static_cast<double>(comparison.worstTurn), static_cast<double>(comparison.worstShift),
-                  comparison.wrongParents);
+                  static_cast<double>(comparison.worstMove), comparison.wrongParents);
     return line;
 }
