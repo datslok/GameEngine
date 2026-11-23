@@ -268,23 +268,6 @@ Vec3 windHangingBands(const WindSettings& settings);
 */
 Vec3 windChainShares(float swingLength, const Vec3& bands);
 
-// A point hanging things hang from on a swaying tree, as the shaders build it (lianaWindAnchor): foot (xyz, w its
-// tree's height in its mesh's units), point (xyz, w the tree's scale) and the tree's bend (x).
-struct GpuWindAnchor {
-    float foot[4];
-    float point[4];
-    float bend[4];
-};
-
-static_assert(sizeof(GpuWindAnchor) == 48, "GpuWindAnchor must match wind_data.glsl's WindAnchorRecord");
-
-
-/*
-* How an anchor moves: as its tree's own vertex at its point would (windSwayOffset, the trees' category, no flutter),
-* spring the tree's spring at its foot, fade windSwayFade's at its foot.
-*/
-Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fade, float seconds);
-
 /*
 * A hanging vertex's own swing (an offset, metres): the hanging spring times swing, softened and faded, is a lean
 * (radians) the vertex swings out by over its arm, rising to keep its distance from where it hangs (a pendulum's arc);

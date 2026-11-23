@@ -13,9 +13,8 @@ struct LianaShape {
     vec4 from;       // xyz the first hold, w the radius
     vec4 to;         // xyz the far end, w the length along it
     vec4 curve;      // x a (0 straight), y u0 (the slope at the first hold), z its deepest sag below its chord, w the bark's tile in metres
-    vec4 firstTree;  // xyz the first tree's foot, w its height in its mesh's units
-    vec4 secondTree; // xyz the second tree's foot, w its height
-    vec4 trees;      // x the first tree's scale, y the second's (0: fixed), z the trees' bend
+    vec4 firstTree;  // xyz the first tree's foot, w unused
+    vec4 secondTree; // xyz the second tree's foot (the far end without one), w unused
     vec4 leaves;     // x the metres from the first hold inside its crown, y from the far end inside the second's, z the ivy's spacing there, w along the rest
     vec4 leafLook;   // x a leaf's length (0: no ivy), y the distance its cards start thinning, z the distance they are gone by, w its seed
     uvec4 anchors;   // x the first hold's binding, y the far end's (SWAY_UNBOUND none), z w their trees' layers (LIANA_NO_TREE none)

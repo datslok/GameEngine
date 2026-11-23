@@ -3,6 +3,7 @@
 
 #include "scene/liana_shape.h"
 
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -14,21 +15,24 @@ namespace {
 
     // Lianas as the forest hangs them: loops, a nearly taut one, a steep rope, one rising, one hanging straight.
     std::vector<LianaShape> lianas() {
-        const LianaTree tree{Vec3{3.0f, 0.0f, -2.0f}, 30.0f, 1.1f};
+        const LianaTree tree{.foot = Vec3{3.0f, 0.0f, -2.0f}};
         return {
-            makeLianaShape(Vec3{2.0f, 20.0f, 1.0f}, Vec3{26.0f, 21.0f, -6.0f}, 35.0f, 0.03f, 2.0f, tree, &tree, 0.2f),
-            makeLianaShape(Vec3{0.0f, 25.0f, 0.0f}, Vec3{18.0f, 24.0f, 4.0f}, 18.6f, 0.02f, 2.0f, tree, &tree, 0.2f),
-            makeLianaShape(Vec3{5.0f, 22.0f, 5.0f}, Vec3{7.0f, -0.2f, 7.5f}, 23.0f, 0.05f, 2.0f, tree, nullptr, 0.2f),
-            makeLianaShape(Vec3{-3.0f, 15.0f, 2.0f}, Vec3{12.0f, 27.0f, 9.0f}, 26.0f, 0.01f, 2.0f, tree, &tree, 0.2f),
-            makeLianaShape(Vec3{1.0f, 18.0f, 1.0f}, Vec3{1.0f, 0.0f, 1.0f}, 18.5f, 0.03f, 2.0f, tree, nullptr, 0.2f),
+            makeLianaShape(Vec3{2.0f, 20.0f, 1.0f}, Vec3{26.0f, 21.0f, -6.0f}, 35.0f, 0.03f, 2.0f, tree, &tree),
+            makeLianaShape(Vec3{0.0f, 25.0f, 0.0f}, Vec3{18.0f, 24.0f, 4.0f}, 18.6f, 0.02f, 2.0f, tree, &tree),
+            makeLianaShape(Vec3{5.0f, 22.0f, 5.0f}, Vec3{7.0f, -0.2f, 7.5f}, 23.0f, 0.05f, 2.0f, tree, nullptr),
+            makeLianaShape(Vec3{-3.0f, 15.0f, 2.0f}, Vec3{12.0f, 27.0f, 9.0f}, 26.0f, 0.01f, 2.0f, tree, &tree),
+            makeLianaShape(Vec3{1.0f, 18.0f, 1.0f}, Vec3{1.0f, 0.0f, 1.0f}, 18.5f, 0.03f, 2.0f, tree, nullptr),
         };
     }
 
-    // A case's record: its eight rows.
+    // A case's record: its eight rows, the anchors' words as their bits.
     void appendRecord(std::vector<GpuVec4>& inputs, const LianaShape& shape) {
-        for (const float* row : {shape.from, shape.to, shape.curve, shape.firstTree, shape.secondTree, shape.trees, shape.leaves, shape.leafLook}) {
+        for (const float* row : {shape.from, shape.to, shape.curve, shape.firstTree, shape.secondTree, shape.leaves, shape.leafLook}) {
             inputs.push_back(gpuVec4(row[0], row[1], row[2], row[3]));
         }
+
+        inputs.push_back(gpuVec4(std::bit_cast<float>(shape.anchors[0]), std::bit_cast<float>(shape.anchors[1]), std::bit_cast<float>(shape.anchors[2]),
+                                 std::bit_cast<float>(shape.anchors[3])));
     }
 
     // A case: the record, then share, u round, cos and sin round, then an unused eye.

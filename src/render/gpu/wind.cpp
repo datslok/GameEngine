@@ -359,15 +359,6 @@ Vec3 windChainShares(float swingLength, const Vec3& bands) {
     return Vec3{0.0f, 1.0f - share, share};
 }
 
-Vec3 windAnchorOffset(const GpuWindAnchor& anchor, const Vec2& spring, float fade, float seconds) {
-    const Vec3 foot{anchor.foot[0], anchor.foot[1], anchor.foot[2]};
-    const Vec3 point{anchor.point[0], anchor.point[1], anchor.point[2]};
-    const float scale = anchor.point[3];
-    const Vec4 sway{static_cast<float>(WIND_CATEGORY_TREES), anchor.foot[3], anchor.bend[0], 0.0f};
-    // No flutter (the sway's w is 0), so any rate does: one of a hertz and a metre.
-    return windSwayOffset(point - foot, (point.y - foot.y) / std::max(scale, 1e-4f), point, sway, scale, spring, fade, Vec2{1.0f, 1.0f}, seconds);
-}
-
 Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, const Vec2& flutterRate, float seconds) {
     const Vec2 lean = windFadedLean(spring, swing, fade);
     const float reach = std::max(arm, 0.0f);

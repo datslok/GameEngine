@@ -17,9 +17,9 @@ void main() {
     shape.curve = testInput(2);
     shape.firstTree = testInput(3);
     shape.secondTree = testInput(4);
-    shape.trees = testInput(5);
-    shape.leaves = testInput(6);
-    shape.leafLook = testInput(7);
+    shape.leaves = testInput(5);
+    shape.leafLook = testInput(6);
+    shape.anchors = floatBitsToUint(testInput(7));
     vec4 place = testInput(8);
     vec4 eye = testInput(9);
 

@@ -87,20 +87,18 @@ struct NearLianaLook {
     Material leaf;
 };
 
-// A tree variant as its lianas need it: its mesh's height (its units), its bones and their lines, and how a point bound
-// to them blends towards a bone's parent (ForestTreeSettings::boneBlendShare), so a hold moves as the bark there.
+// A tree variant as its lianas need it: its bones and their lines, and how a point bound to them blends towards a
+// bone's parent (ForestTreeSettings::boneBlendShare), so a hold moves as the bark there.
 struct NearTreeVariant {
-    float height = 1.0f;
     std::vector<SwayBone> bones;
     std::vector<SwayLine> lines;
     float blendShare = 0.5f;
 };
 
-// What a liana's records take from the trees: each tree layer's variants, and the bend.
+// What a liana's records take from the trees: each tree layer's variants.
 struct NearLianaTrees {
     const std::vector<NearTreeVariant>& emergents;
     const std::vector<NearTreeVariant>& canopy;
-    float bend = 1.0f;
 };
 
 /*
@@ -130,8 +128,8 @@ public:
     bool update(World& world, Entity holder, const Vec2& place, const ForestNearTreeSettings& settings, int most, const NearTreeSources& sources,
                 const NearLianaTrees& trees, const NearLianaLook& look, float barkTileMetres, JobSystem& jobs);
 
-    // Every liana's sway given anew, and every record's bend (each block replaced), the component given anew.
-    void resway(World& world, Entity holder, const WindSway& sway, float bend);
+    // Every liana's sway given anew (the records keep their trees' bones, which bend as the trees do).
+    void resway(World& world, const WindSway& sway);
 
     // The lianas' entities, cell by cell in their slots' order, and the cells held.
     const std::vector<Entity>& getEntities() const;

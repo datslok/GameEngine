@@ -154,8 +154,8 @@ namespace {
 
     // A liana hung from a tree at foot in field layer 1 (its first hold), its far end a rope's in the ground.
     LianaShape lianaFrom(const Vec3& foot) {
-        const LianaTree tree{.foot = foot, .height = 30.0f, .scale = 1.0f, .layer = 1, .binding = SwayBinding{.bone = 4, .weight = 1.0f}};
-        return makeLianaShape(foot + Vec3{2.0f, 25.0f, 0.0f}, foot + Vec3{6.0f, 0.0f, 1.0f}, 30.0f, 0.02f, 2.0f, tree, nullptr, 0.3f);
+        const LianaTree tree{.foot = foot, .layer = 1, .binding = SwayBinding{.bone = 4, .weight = 1.0f}};
+        return makeLianaShape(foot + Vec3{2.0f, 25.0f, 0.0f}, foot + Vec3{6.0f, 0.0f, 1.0f}, 30.0f, 0.02f, 2.0f, tree, nullptr);
     }
 
     // A placed plant standing at a foot.
