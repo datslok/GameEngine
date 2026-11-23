@@ -1,5 +1,6 @@
 #include "render/gpu/bone_poses.h"
 
+#include "math/smooth_step.h"
 #include "render/gpu/instance_shared.h"
 
 #include <algorithm>
@@ -73,8 +74,33 @@ Vec2 windLeanInPlant(const Vec2& lean, float turnRadians) {
     return Vec2{lean.x * c - lean.y * s, lean.x * s + lean.y * c};
 }
 
-bool boneTreeWanted(const Vec3& foot, const Vec3& eye, float fadeEnd) {
+bool boneFootInReach(const Vec3& foot, const Vec3& eye, float fadeEnd) {
     return (foot - eye).length() < fadeEnd;
+}
+
+// The turn about up by hand (Quat::fromAxisAngle's: x to (cos, 0, -sin), z to (sin, 0, cos)), as the shader does it.
+BoundingSphere boneTreeSphere(const GpuPlacedPlant& plant, const GpuSwaySkeleton& skeleton) {
+    const float cosine = std::cos(plant.turnRadians);
+    const float sine = std::sin(plant.turnRadians);
+    const float* sphere = skeleton.sphere;
+    const Vec3 turned{cosine * sphere[0] + sine * sphere[2], sphere[1], cosine * sphere[2] - sine * sphere[0]};
+    return BoundingSphere{.centre = Vec3{plant.foot[0], plant.foot[1], plant.foot[2]} + turned * plant.scale, .radius = sphere[3] * plant.scale};
+}
+
+float boneScreenShare(const BoundingSphere& sphere, const Vec3& eye, float screenScale) {
+    return sphere.radius * screenScale / std::max((sphere.centre - eye).length(), 1e-4f);
+}
+
+float boneScreenFade(float share, float still, float full) {
+    return smoothStep(still, full, share);
+}
+
+bool boneTreeWanted(float share, float still) {
+    return share > still;
+}
+
+float boneTreeScreenShare(const GpuPlacedPlant& plant, const GpuSwaySkeleton& skeleton, const BoneScreen& screen) {
+    return boneScreenShare(boneTreeSphere(plant, skeleton), screen.eye, screen.scale);
 }
 
 std::uint32_t boneTreeFirstPose(std::uint32_t askedBefore, std::uint32_t boneCount, std::uint32_t poolBones) {
@@ -138,8 +164,8 @@ std::vector<std::uint32_t> bonePlantTreesOf(std::span<const GpuBoneTree> trees, 
 }
 
 std::vector<BoneWanted> boneWantedPlants(const PlacedTable& table, std::span<const GpuDrawCommand> commands, std::span<const GpuPlacedEntry> entries,
-                                         std::span<const std::uint32_t> swayingViews, std::span<const GpuPlacedPlant> plants, const Vec3& eye,
-                                         float fadeEnd) {
+                                         std::span<const std::uint32_t> swayingViews, std::span<const GpuPlacedPlant> plants,
+                                         std::span<const GpuSwaySkeleton> skeletons, const BoneScreen& screen) {
     const std::vector<std::uint32_t> groups = boneGroups(table);
     std::map<std::uint32_t, std::uint32_t> wanted;
 
@@ -150,10 +176,14 @@ std::vector<BoneWanted> boneWantedPlants(const PlacedTable& table, std::span<con
             for (std::uint32_t instance = 0; instance < command.instanceCount; ++instance) {
                 const GpuPlacedEntry& entry = entries[command.firstInstance - placedInstanceBase + instance];
                 const std::uint32_t plant = entry.plant & DRAW_LIST_INSTANCE_MASK;
-                const GpuPlacedPlant& placed = plants[plant];
+                const std::uint32_t skeleton = partSkeleton(table.parts[entry.part]) - 1;
 
-                if (boneTreeWanted(Vec3{placed.foot[0], placed.foot[1], placed.foot[2]}, eye, fadeEnd)) {
-                    wanted.emplace(plant, partSkeleton(table.parts[entry.part]) - 1);
+                if (skeleton >= skeletons.size()) {
+                    throw std::invalid_argument("A part's skeleton lies past the packed skeletons");
+                }
+
+                if (boneTreeWanted(boneTreeScreenShare(plants[plant], skeletons[skeleton], screen), screen.still)) {
+                    wanted.emplace(plant, skeleton);
                 }
             }
         }

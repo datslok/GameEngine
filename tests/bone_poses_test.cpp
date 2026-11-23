@@ -131,7 +131,7 @@ namespace {
     /*
     * Two parts: a bark part (skeleton 1, two level slots, groups 0 and 1) and a plain part (group 2); three views. The
     * swaying views 0 and 2 take plants their bark draws, each once and its bits off; not view 1's, the plain part's, or
-    * a plant past the reach.
+    * a plant too small on screen (plant 6, 500 m off) unless the still share is lowered. A skeleton past those given is refused.
     */
     void testWantedPlants() {
         PlacedTable table;
@@ -147,7 +147,18 @@ namespace {
         assert((boneGroups(table) == std::vector<std::uint32_t>{0, 1}));
 
         std::vector<GpuPlacedPlant> plants(8);
+
+        for (GpuPlacedPlant& plant : plants) {
+            plant.scale = 1.0f;
+        }
+
         plants[6].foot[0] = 500.0f;
+        std::vector<GpuSwaySkeleton> skeletons(1);
+        skeletons[0].sphere[1] = 10.0f;
+        skeletons[0].sphere[3] = 10.0f;
+        const BoneScreen screen{.eye = Vec3{}, .scale = 1.0f, .still = 0.1f, .full = 0.15f};
+        BoneScreen lower = screen;
+        lower.still = 0.01f;
         // Each view's groups' commands, every view's entries after each other.
         std::vector<GpuDrawCommand> commands(9);
         std::vector<GpuPlacedEntry> entries;
@@ -164,10 +175,58 @@ namespace {
         add(2, 1, {{2, 0}, {1, 0}});
 
         const std::vector<std::uint32_t> swaying{0, 2};
-        const std::vector<BoneWanted> wanted = boneWantedPlants(table, commands, entries, swaying, plants, Vec3{}, 400.0f);
+        const std::vector<BoneWanted> wanted = boneWantedPlants(table, commands, entries, swaying, plants, skeletons, screen);
         assert((wanted == std::vector<BoneWanted>{{1, 0}, {2, 0}, {3, 0}}));
         const std::vector<std::uint32_t> all{0, 1, 2};
-        assert(boneWantedPlants(table, commands, entries, all, plants, Vec3{}, 1000.0f).size() == 5);
+        assert(boneWantedPlants(table, commands, entries, all, plants, skeletons, screen).size() == 4);
+        assert(boneWantedPlants(table, commands, entries, all, plants, skeletons, lower).size() == 5);
+        assert(throwsInvalid([&] { boneWantedPlants(table, commands, entries, all, plants, {}, screen); }));
+    }
+
+    /*
+    * How big a tree looks (ROADMAP phase 21 stage 3c-iv-c): its skeleton's sphere placed as its plant is (turned about
+    * up as Quat::fromAxisAngle turns, scaled, at its foot; swayPlantPoint takes its centre back); its diameter's share of
+    * a 90 degree screen's height, Unreal's 0.1 for a 30 m tree 150 m off, past 1 from inside it; the fade smooth from
+    * none at the still share to all at the full one; posed exactly where the fade is above none.
+    */
+    void testScreenShare() {
+        GpuSwaySkeleton skeleton;
+        skeleton.sphere[0] = 1.5f;
+        skeleton.sphere[1] = 7.0f;
+        skeleton.sphere[2] = -2.0f;
+        skeleton.sphere[3] = 6.0f;
+        const GpuPlacedPlant plant{.foot = {3.0f, 1.0f, -2.0f}, .scale = 2.0f, .turnRadians = 0.7f, .pick = 0.0f, .kind = 0, .threshold = 0.0f};
+        const BoundingSphere placed = boneTreeSphere(plant, skeleton);
+        const Vec3 expected = Vec3{3.0f, 1.0f, -2.0f} + Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.7f).rotate(Vec3{1.5f, 7.0f, -2.0f}) * 2.0f;
+        assert((placed.centre - expected).length() < 1e-5f && near(placed.radius, 12.0f, 1e-6f));
+        const Vec3 back = swayPlantPoint(placed.centre, Vec3{3.0f, 1.0f, -2.0f}, 2.0f, 0.7f);
+        assert((back - Vec3{1.5f, 7.0f, -2.0f}).length() < 1e-5f);
+
+        const float ninetyDegrees = Mat4::perspective(1.57079632679f, 1.7f, 0.1f, 1000.0f).values[1][1];
+        assert(near(ninetyDegrees, 1.0f, 1e-5f));
+        const BoundingSphere tree{.centre = Vec3{0.0f, 15.0f, 150.0f}, .radius = 15.0f};
+        assert(near(boneScreenShare(tree, Vec3{0.0f, 15.0f, 0.0f}, ninetyDegrees), 0.1f, 1e-5f));
+        assert(near(boneScreenShare(tree, Vec3{0.0f, 15.0f, 75.0f}, ninetyDegrees), 0.2f, 1e-5f));
+        assert(near(boneScreenShare(tree, Vec3{0.0f, 15.0f, 0.0f}, 2.0f * ninetyDegrees), 0.2f, 1e-5f));
+        assert(boneScreenShare(tree, Vec3{0.0f, 15.0f, 145.0f}, ninetyDegrees) > 1.0f);
+        assert(boneScreenShare(tree, tree.centre, ninetyDegrees) > 1.0f);
+
+        assert(boneScreenFade(0.05f, 0.1f, 0.15f) == 0.0f && boneScreenFade(0.1f, 0.1f, 0.15f) == 0.0f);
+        assert(boneScreenFade(0.15f, 0.1f, 0.15f) == 1.0f && boneScreenFade(3.0f, 0.1f, 0.15f) == 1.0f);
+        assert(near(boneScreenFade(0.125f, 0.1f, 0.15f), 0.5f, 1e-5f));
+        float before = 0.0f;
+
+        for (int step = 0; step <= 200; ++step) {
+            const float share = 0.09f + 0.0004f * static_cast<float>(step);
+            const float fade = boneScreenFade(share, 0.1f, 0.15f);
+            assert(fade >= before && boneTreeWanted(share, 0.1f) == (fade > 0.0f));
+            before = fade;
+        }
+
+        assert(!boneTreeWanted(0.1f, 0.1f) && boneTreeWanted(0.1001f, 0.1f));
+
+        const BoneScreen screen{.eye = Vec3{40.0f, 3.0f, 9.0f}, .scale = 1.3f, .still = 0.1f, .full = 0.15f};
+        assert(boneTreeScreenShare(plant, skeleton, screen) == boneScreenShare(placed, screen.eye, 1.3f));
     }
 
     // Claims in order: room for each tree's bones (two poses a bone) until the pool is full; after that every tree
@@ -405,6 +464,7 @@ void testBonePoses() {
     testScaleIsMetres();
     testLeanInPlant();
     testWantedPlants();
+    testScreenShare();
     testClaims();
     testPoolGrows();
     testLeanParts();

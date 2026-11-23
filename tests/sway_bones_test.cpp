@@ -200,6 +200,31 @@ namespace {
         assert(near(swayMeshReach(bones, mesh), std::sqrt(4.0f + 0.0625f), 1e-5f));
     }
 
+    /*
+    * A skeleton's rest sphere (ROADMAP phase 21 stage 3c-iv-c): about its bones' box's middle, through its farthest
+    * pivot or tip, grown by its reach, so every bone end lies reach inside it and a point reach past the farthest end
+    * is on it. No bones is refused.
+    */
+    void testASkeletonsSphere() {
+        SwaySkeleton tree;
+        appendSwayChain(tree.bones, {Vec3{}, Vec3{0.0f, 8.0f, 0.0f}}, {0.3f, 0.1f}, -1, 0, 2.0f);
+        appendSwayChain(tree.bones, {Vec3{0.0f, 4.0f, 0.0f}, Vec3{5.0f, 6.0f, -1.0f}}, {0.1f, 0.05f}, 1, 1, 2.0f);
+        tree.reach = 0.75f;
+        const SwaySphere sphere = swaySkeletonSphere(tree);
+        assert(near(sphere.centre.x, 2.5f, 1e-6f) && near(sphere.centre.y, 4.0f, 1e-6f) && near(sphere.centre.z, -0.5f, 1e-6f));
+        float farthest = 0.0f;
+
+        for (const SwayBone& bone : tree.bones) {
+            for (const Vec3& end : {bone.pivot, bone.tip}) {
+                assert((end - sphere.centre).length() + tree.reach <= sphere.radius + 1e-5f);
+                farthest = std::max(farthest, (end - sphere.centre).length());
+            }
+        }
+
+        assert(near(sphere.radius, farthest + tree.reach, 1e-5f));
+        assert(throwsInvalid([] { swaySkeletonSphere(SwaySkeleton{}); }));
+    }
+
 void testSwayBones() {
     testAChainIsCut();
     testTheArcOfAPoint();
@@ -209,4 +234,5 @@ void testSwayBones() {
     testAPointInItsPlant();
     testMeshesKeepTheirBindings();
     testTheReachOfABinding();
+    testASkeletonsSphere();
 }

@@ -78,8 +78,24 @@ std::vector<std::uint32_t> boneGroups(const PlacedTable& table);
 // A lean along the ground (x, z) in a plant's own frame: the world's turned back by the plant's turn about up.
 Vec2 windLeanInPlant(const Vec2& lean, float turnRadians);
 
-// Whether a tree is posed: its foot nearer the eye than the sway's fade end (past it nothing sways).
-bool boneTreeWanted(const Vec3& foot, const Vec3& eye, float fadeEnd);
+// Whether a foot lies nearer the eye than the sway's fade end (the lianas' anchors look for their trees only there).
+bool boneFootInReach(const Vec3& foot, const Vec3& eye, float fadeEnd);
+
+// A tree's rest sphere in the world: its skeleton's (GpuSwaySkeleton::sphere) turned about up, scaled and at the foot as its plant is.
+BoundingSphere boneTreeSphere(const GpuPlacedPlant& plant, const GpuSwaySkeleton& skeleton);
+
+/*
+* How much of the screen's height a sphere's diameter covers seen from the eye: radius times screenScale (the
+* projection's 1 / tan(half the vertical field of view)) over its centre's distance; past 1 when the eye is inside.
+* Unreal's screen size (r.Skinning.DefaultAnimationMinScreenSize, docs/research/LEAFGEOMETRY.md).
+*/
+float boneScreenShare(const BoundingSphere& sphere, const Vec3& eye, float screenScale);
+
+// How much a tree sways at a screen share: smoothly from none at still (or below) to all at full (or above).
+float boneScreenFade(float share, float still, float full);
+
+// Whether a tree is posed this frame: it covers more than the still share of the screen (below, it stands at rest).
+bool boneTreeWanted(float share, float still);
 
 // A tree's first pose, two a bone from twice the bones asked for before it, if all its bones fit the pool; else BONE_NO_POSE.
 std::uint32_t boneTreeFirstPose(std::uint32_t askedBefore, std::uint32_t boneCount, std::uint32_t poolBones);
@@ -141,6 +157,21 @@ std::vector<std::uint32_t> bonePlantTreesOf(std::span<const GpuBoneTree> trees, 
 
 // ---- The passes' steps on the CPU ----
 
+/*
+* How the camera decides which trees sway, for every view (ROADMAP phase 21 stage 3c-iv-c): its eye, its projection's
+* vertical scale (boneScreenShare), and the screen shares a tree stands still at and below and sways fully from
+* (WindBoneMotion::stillShare, fullShare).
+*/
+struct BoneScreen {
+    Vec3 eye;
+    float scale = 1.0f;
+    float still = 0.0f;
+    float full = 0.0f;
+};
+
+// A placed tree's screen share as the passes find it: its skeleton's sphere placed as the plant is, from the screen's eye.
+float boneTreeScreenShare(const GpuPlacedPlant& plant, const GpuSwaySkeleton& skeleton, const BoneScreen& screen);
+
 // A plant to pose and the skeleton its parts are moved by.
 struct BoneWanted {
     std::uint32_t plant = 0;
@@ -151,12 +182,13 @@ struct BoneWanted {
 
 /*
 * What the claim pass takes: every plant a swaying view (its number among the placed views) draws a part moved by bones
-* of, its foot within reach (boneTreeWanted), each once, by plant. commands: every view's, groups a view (as the placed
-* passes write them); entries: every view's.
+* of, past the still share of the screen (boneTreeWanted of boneTreeScreenShare by its part's skeleton), each once, by
+* plant. commands: every view's, groups a view (as the placed passes write them); entries: every view's; skeletons: the
+* packed table's (packSwaySkeletons of the table's). Throws std::invalid_argument for a part's skeleton past them.
 */
 std::vector<BoneWanted> boneWantedPlants(const PlacedTable& table, std::span<const GpuDrawCommand> commands, std::span<const GpuPlacedEntry> entries,
-                                         std::span<const std::uint32_t> swayingViews, std::span<const GpuPlacedPlant> plants, const Vec3& eye,
-                                         float fadeEnd);
+                                         std::span<const std::uint32_t> swayingViews, std::span<const GpuPlacedPlant> plants,
+                                         std::span<const GpuSwaySkeleton> skeletons, const BoneScreen& screen);
 
 // The claims in an order (the GPU's is its atomics'): each a tree, its bones' room in the pool if they fit, the bones asked and the trees left still.
 struct BoneClaims {

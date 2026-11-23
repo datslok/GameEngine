@@ -21,7 +21,8 @@ struct SwayBoneRecord {
     uint level;
 };
 
-// A skeleton (GpuSwaySkeleton): its bones' run, height and foot radius, its chain levels' starts, its lean's part, its reach.
+// A skeleton (GpuSwaySkeleton): its bones' run, height and foot radius, its chain levels' starts, its lean's part, its
+// reach, its rest sphere (centre, radius).
 struct SwaySkeletonRecord {
     uint firstBone;
     uint boneCount;
@@ -31,6 +32,7 @@ struct SwaySkeletonRecord {
     uint levelCount;
     uint leanPart;
     float reach;
+    vec4 sphere;
 };
 
 // A posed tree (GpuBoneTree): its plant, skeleton, first pose (BONE_NO_POSE still), its move this frame (boneTreeMove),
@@ -57,9 +59,32 @@ vec2 windLeanInPlant(vec2 lean, float turnRadians) {
     return vec2(lean.x * c - lean.y * s, lean.x * s + lean.y * c);
 }
 
-// Whether a tree is posed: its foot within the sway's reach (boneTreeWanted).
-bool boneTreeWanted(vec3 foot, vec3 eye, float fadeEnd) {
+// Whether a foot lies within the sway's reach of the eye (boneFootInReach).
+bool boneFootInReach(vec3 foot, vec3 eye, float fadeEnd) {
     return length(foot - eye) < fadeEnd;
+}
+
+// A skeleton's rest sphere placed as its plant is: turned about up, scaled, at its foot (boneTreeSphere).
+vec4 boneTreeSphere(vec3 foot, float scale, float turnRadians, vec4 sphere) {
+    float cosine = cos(turnRadians);
+    float sine = sin(turnRadians);
+    vec3 turned = vec3(cosine * sphere.x + sine * sphere.z, sphere.y, cosine * sphere.z - sine * sphere.x);
+    return vec4(foot + turned * scale, sphere.w * scale);
+}
+
+// How much of the screen's height a sphere's diameter covers from the eye (boneScreenShare).
+float boneScreenShare(vec4 sphere, vec3 eye, float screenScale) {
+    return sphere.w * screenScale / max(length(sphere.xyz - eye), 1e-4);
+}
+
+// How much a tree sways at a screen share: none at or below still, all from full (boneScreenFade).
+float boneScreenFade(float share, float still, float full) {
+    return smoothstep(still, full, share);
+}
+
+// Whether a tree is posed: it covers more than the still share of the screen (boneTreeWanted).
+bool boneTreeWanted(float share, float still) {
+    return share > still;
 }
 
 // A tree's first pose, or BONE_NO_POSE when its bones do not fit the pool (boneTreeFirstPose); no overflow in 32 bits.

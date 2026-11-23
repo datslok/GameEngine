@@ -3,7 +3,7 @@
 
 /*
 * The bones passes' first (render/vulkan/vulkan_bone_posing.h): a workgroup a (group of a part moved by bones, swaying
-* view), a thread an entry of that view's group. A plant within the sway's reach is claimed once a frame by its stamp;
+* view), a thread an entry of that view's group. A plant past the still share of the camera's screen is claimed once a frame by its stamp;
 * the thread that claims it takes the next tree, room for its bones in the pool (none when they do not fit: it stands
 * still) and raises the pose pass's dispatch to hold the tree. The order trees are numbered in is the atomics', not fixed;
 * nothing a tree's poses depend on comes from its number.
@@ -23,8 +23,16 @@ void main() {
         uvec2 entry = placedEntries[first + instance];
         uint plant = drawnInstance(entry.x);
 
-        // Taken already this frame (the common case: a tree's parts and views), or out of reach: nothing to do.
-        if (plantTrees[2u * plant] == push.stamp || !boneTreeWanted(placedPlants[plant].foot, push.eye.xyz, push.fadeEnd)) {
+        // Taken already this frame (the common case: a tree's parts and views): nothing to do.
+        if (plantTrees[2u * plant] == push.stamp) {
+            continue;
+        }
+
+        // Too small on the camera's screen to sway: it stands at rest. Its sphere is its skeleton's, so every part and
+        // view of the plant decides alike.
+        uint skeleton = placedParts[entry.y].unused1 - 1u;
+
+        if (!boneTreeWanted(boneTreeScreenShare(placedPlants[plant], swaySkeletons[skeleton]), push.stillShare)) {
             continue;
         }
 
@@ -39,7 +47,6 @@ void main() {
             continue;
         }
 
-        uint skeleton = placedParts[entry.y].unused1 - 1u;
         uint bones = swaySkeletons[skeleton].boneCount;
         uint asked = atomicAdd(boneHeader[BONE_HEADER_BONES_ASKED], bones);
         uint firstPose = boneTreeFirstPose(asked, bones, push.poolBones);

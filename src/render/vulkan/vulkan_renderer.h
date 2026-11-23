@@ -419,10 +419,11 @@ private:
     std::string bonesCompareReport;
     std::optional<VulkanBonePosing::Collected> lastBones;
 
-    // A frame read back for bones-compare: its swaying views, eye, fade end, times and motion, as its passes took them.
+    // A frame read back for bones-compare: its swaying views, screen, eye and fade end (the lianas'), times and motion, as its passes took them.
     struct BonesCompare {
         std::uint32_t frameIndex = 0;
         std::vector<std::uint32_t> views;
+        BoneScreen screen;
         Vec3 eye;
         float fadeEnd = 0.0f;
         float seconds = 0.0f;
@@ -785,6 +786,8 @@ private:
     Mat4 viewProjection = Mat4::identity();
     Mat4 relativeViewProjection = Mat4::identity();
     Vec3 cameraOrigin{0.0f, 0.0f, 0.0f};
+    // The camera's projection's vertical scale (1 / tan(half its vertical field of view)): how big things look (boneScreenShare).
+    float cameraScreenScale = 1.0f;
 
     RenderStats stats;
 

@@ -57,13 +57,15 @@ SwaySkeletonTables packSwaySkeletons(const std::vector<const SwaySkeleton*>& ske
 
         const auto firstLevel = static_cast<std::uint32_t>(tables.levelStarts.size());
         appendChainsByLevel(skeleton->bones, tables);
+        const SwaySphere sphere = swaySkeletonSphere(*skeleton);
         tables.skeletons.push_back(GpuSwaySkeleton{.firstBone = static_cast<std::uint32_t>(tables.bones.size()),
                                                    .boneCount = static_cast<std::uint32_t>(skeleton->bones.size()),
                                                    .height = skeleton->height,
                                                    .footRadius = skeleton->bones.front().radius,
                                                    .firstLevel = firstLevel,
                                                    .levelCount = static_cast<std::uint32_t>(tables.levelStarts.size()) - firstLevel - 1,
-                                                   .reach = skeleton->reach});
+                                                   .reach = skeleton->reach,
+                                                   .sphere = {sphere.centre.x, sphere.centre.y, sphere.centre.z, sphere.radius}});
 
         for (const SwayBone& bone : skeleton->bones) {
             tables.bones.push_back(GpuSwayBone{.pivot = {bone.pivot.x, bone.pivot.y, bone.pivot.z},

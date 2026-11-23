@@ -1244,7 +1244,8 @@ void VulkanRenderer::takeBonePoses(std::uint32_t frameIndex) {
 
         if (placed && !collected->poses.empty()) {
             const std::vector<BoneWanted> wanted =
-                boneWantedPlants(*placed->table, placed->commands, placed->entries, bonesCompare->views, placed->plants, bonesCompare->eye, bonesCompare->fadeEnd);
+                boneWantedPlants(*placed->table, placed->commands, placed->entries, bonesCompare->views, placed->plants, bonePosing->getTables().skeletons,
+                                 bonesCompare->screen);
             bonesCompareReport = describeBoneComparison(compareBonePoses(wanted, collected->posedTrees, collected->poses, bonePosing->getTables(), placed->plants,
                                                                          bonesCompare->motion, bonesCompare->seconds, bonesCompare->previousSeconds));
 
@@ -1661,6 +1662,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
     relativeViewProjection = cameraRelativeViewProjection(camera);
     cameraOrigin = camera.getPosition();
+    cameraScreenScale = camera.getProjectionMatrix().values[1][1];
 
     // Temporal anti-aliasing: the main pass, and everything drawn with it, moves by this frame's jitter; the motion
     // vectors and the reprojection use the camera without it, and last frame's camera made to take this frame's
@@ -2214,8 +2216,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         inputs.swayingViews = swayingPlacedViews;
         inputs.textures = bindlessTextures->getSet();
         inputs.scene = sceneSet;
-        inputs.eye = cameraOrigin;
-        inputs.fadeEnd = settings.wind.swayFadeEnd;
+        inputs.screen = BoneScreen{.eye = cameraOrigin, .scale = cameraScreenScale, .still = settings.wind.bones.stillShare, .full = settings.wind.bones.fullShare};
         inputs.readBackPoses = bonesComparing || clusterComparing;
 
         // The lianas' anchors' trees first: nothing the bones do depends on them, and the shaders after read both.
@@ -2238,7 +2239,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::Bones);
 
         if (bonesComparing) {
-            bonesCompare = BonesCompare{frame.frameIndex, swayingPlacedViews, cameraOrigin, settings.wind.swayFadeEnd, frameWind.wind[3], frameWind.sway[3],
+            bonesCompare = BonesCompare{frame.frameIndex, swayingPlacedViews, inputs.screen, cameraOrigin, settings.wind.swayFadeEnd, frameWind.wind[3], frameWind.sway[3],
                                         settings.wind.bones, description.lianaShapes};
         }
     }

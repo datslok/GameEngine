@@ -102,7 +102,7 @@ std::uint32_t lianaTreePlant(const LianaShape& shape, int end, const LianaTreeTa
     const float* tree = end == 0 ? shape.firstTree : shape.secondTree;
     const Vec3 foot{tree[0], tree[1], tree[2]};
 
-    if (!(record.cellMetres > 0.0f) || !boneTreeWanted(foot, eye, fadeEnd)) {
+    if (!(record.cellMetres > 0.0f) || !boneFootInReach(foot, eye, fadeEnd)) {
         return BONE_NO_TREE;
     }
 

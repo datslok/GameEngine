@@ -90,6 +90,19 @@ struct SwaySkeleton {
     float reach = 0.0f;
 };
 
+// A sphere in a skeleton's mesh units.
+struct SwaySphere {
+    Vec3 centre;
+    float radius = 0.0f;
+};
+
+/*
+* A sphere holding everything bound to a skeleton at rest (ROADMAP phase 21 stage 3c-iv-c: how big its tree looks on
+* screen): about the middle of its bones' box, through its farthest pivot or tip, grown by its reach (a bound point lies
+* within reach of a bone's segment, which the sphere holds). Throws std::invalid_argument for no bones.
+*/
+SwaySphere swaySkeletonSphere(const SwaySkeleton& skeleton);
+
 /*
 * How far a point bound to bones lies from them: from its bone's segment (pivot to tip), and from its parent's too while
 * it blends with it (weight below 1, the bone not a root), since its place is between the two bones' images of it.

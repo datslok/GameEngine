@@ -77,13 +77,19 @@ layout(std430, set = 2, binding = BONE_PART_INSTANCES_BINDING) readonly buffer B
     InstanceData placedPartInstances[];
 };
 
-// The frame's stamp (never 0), the pool's bones, the sway's fade end and the eye.
+// The frame's stamp (never 0), the pool's bones, the screen shares a tree stands still at and sways fully from, the
+// camera's eye (xyz) and its projection's vertical scale (w) (BoneScreen).
 layout(push_constant) uniform BonePush {
     uint stamp;
     uint poolBones;
-    float fadeEnd;
-    uint unused;
+    float stillShare;
+    float fullShare;
     vec4 eye;
 } push;
+
+// A plant's screen share as the camera sees it, by its skeleton's rest sphere (boneTreeScreenShare).
+float boneTreeScreenShare(PlacedPlant plant, SwaySkeletonRecord skeleton) {
+    return boneScreenShare(boneTreeSphere(plant.foot, plant.scale, plant.turnRadians, skeleton.sphere), push.eye.xyz, push.eye.w);
+}
 
 #endif
