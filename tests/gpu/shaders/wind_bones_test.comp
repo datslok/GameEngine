@@ -39,6 +39,14 @@ void main() {
         WindBonePose rigid = windRigidPose(WindBonePose(testInput(2), testInput(3).xyz), WindBonePose(a, b.xyz), foot.w, foot.xyz);
         testOutput(0, rigid.turn);
         testOutput(1, vec4(rigid.shift, 0.0));
+    } else if (function == GPU_TEST_WIND_PLANT_POINT) {
+        testOutput(0, vec4(windPlantPoint(a.xyz, b.xyz, b.w, testInput(2).x), 0.0));
+    } else if (function == GPU_TEST_WIND_PLANT_POINT_OFFSET) {
+        vec4 world = testInput(4);
+        vec4 foot = testInput(5);
+        vec3 moved = windPlantPointOffset(WindBonePose(testInput(2), testInput(3).xyz), WindBonePose(a, b.xyz), world.w, world.xyz, foot.xyz, foot.w,
+                                          testInput(6).x);
+        testOutput(0, vec4(moved, 0.0));
     } else if (function == GPU_TEST_WIND_BONE_OWN_TURN) {
         vec4 c = testInput(2);
         vec4 d = testInput(3);

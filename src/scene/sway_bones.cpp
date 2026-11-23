@@ -1,5 +1,4 @@
 #include "scene/sway_bones.h"
-#include "math/quat.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,8 +18,12 @@ SwayBinding unpackSwayBinding(std::uint32_t packed) {
     return SwayBinding{.bone = static_cast<int>(packed & 0xFFFFu), .weight = static_cast<float>(packed >> 16u) / 65535.0f};
 }
 
+// The turn about up undone by hand (Quat::fromAxisAngle's turn takes x to (cos, 0, -sin)), as windPlantPoint does it.
 Vec3 swayPlantPoint(const Vec3& world, const Vec3& foot, float scale, float turnRadians) {
-    return Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, -turnRadians).rotate(world - foot) * (1.0f / scale);
+    const Vec3 apart = world - foot;
+    const float cosine = std::cos(turnRadians);
+    const float sine = std::sin(turnRadians);
+    return Vec3{cosine * apart.x - sine * apart.z, apart.y, sine * apart.x + cosine * apart.z} * (1.0f / scale);
 }
 
 namespace {

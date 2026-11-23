@@ -58,13 +58,6 @@ vec3 windOwnSway(mat4 model, vec4 sway, float scale, vec3 position, vec3 world, 
     return windSwayOffset(fromFoot, position.y, world, sway, scale, spring, fade, windField.flutters[category].xy, seconds);
 }
 
-// How an anchor on a tree moves: as the tree does there (windAnchorOffset), its spring and fade at the tree's foot.
-vec3 windTreeAnchorMotion(WindAnchorRecord record, vec3 eye, float seconds, bool previous) {
-    vec2 spring = windSpringAt(record.foot.xz, WIND_CATEGORY_TREES, previous);
-    float fade = windSwayFade(distance(record.foot.xyz, eye), windField.sway.y, windField.sway.z);
-    return windAnchorOffset(record, spring, fade, seconds);
-}
-
 // How an anchor of a hanging vertex moves: not at all when fixed, else as its own object sways at the vertex (own).
 vec3 windAnchorMotion(uint anchor, vec3 own) {
     return anchor == uint(WIND_ANCHOR_FIXED) ? vec3(0.0) : own;

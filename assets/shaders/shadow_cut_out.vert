@@ -42,8 +42,7 @@ void main() {
         vec3 lianaWorld = bent.shape.from.xyz + bent.offset;
 
         if (tileOptions.x != 0.0) {
-            lianaWorld += lianaSwayOffset(bent.shape, instance.sway, uintBitsToFloat(instance.hanging.y), bent.along, bent.arm, bent.shape.from.xyz + bent.swaysAt,
-                                          cameraOrigin.xyz, false);
+            lianaWorld += lianaSwayOffset(bent, instance.sway, uintBitsToFloat(instance.hanging.y), cameraOrigin.xyz, false);
         }
 
         gl_Position = tileMatrix * vec4(lianaWorld, 1.0);

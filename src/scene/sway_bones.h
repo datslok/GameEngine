@@ -43,6 +43,7 @@ std::uint32_t packSwayBinding(const SwayBinding& binding);
 SwayBinding unpackSwayBinding(std::uint32_t packed);
 
 // A world point in a plant's mesh frame (where its bones live): its placement (foot, turn about up, scale) undone.
+// Mirrored by wind_bones.glsl's windPlantPoint.
 Vec3 swayPlantPoint(const Vec3& world, const Vec3& foot, float scale, float turnRadians);
 
 // A line's bones: boneCount from firstBone on, each length / boneCount long along it.

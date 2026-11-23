@@ -81,6 +81,23 @@ vec3 windBlendedDirection(WindBonePose own, WindBonePose parent, float weight, v
     return normalize(quatRotate(own.turn, direction) * weight + quatRotate(parent.turn, direction) * (1.0 - weight));
 }
 
+// A world point in a plant's mesh frame: its placement (foot, turn about up, scale) undone (swayPlantPoint).
+vec3 windPlantPoint(vec3 world, vec3 foot, float scale, float turnRadians) {
+    vec3 apart = world - foot;
+    float cosine = cos(turnRadians);
+    float sine = sin(turnRadians);
+    return vec3(cosine * apart.x - sine * apart.z, apart.y, sine * apart.x + cosine * apart.z) * (1.0 / scale);
+}
+
+// How a world point on a placed plant's bones moves: blended in its mesh frame, back in the world (windPlantPointOffset).
+vec3 windPlantPointOffset(WindBonePose own, WindBonePose parent, float weight, vec3 world, vec3 foot, float scale, float turnRadians) {
+    vec3 inPlant = windPlantPoint(world, foot, scale, turnRadians);
+    vec3 moved = (windBlendedPlace(own, parent, weight, inPlant) - inPlant) * scale;
+    float cosine = cos(turnRadians);
+    float sine = sin(turnRadians);
+    return vec3(cosine * moved.x + sine * moved.z, moved.y, cosine * moved.z - sine * moved.x);
+}
+
 // A rigid thing bound at its foot carried whole: the turns blended the short way, its foot blended (windRigidPose).
 WindBonePose windRigidPose(WindBonePose own, WindBonePose parent, float weight, vec3 foot) {
     vec4 ownTurn = dot(own.turn, parent.turn) < 0.0 ? -own.turn : own.turn;

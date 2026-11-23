@@ -222,15 +222,4 @@ LianaLeafVertex lianaLeafTemplateVertex(LianaShape shape, vec2 uv, vec3 eye) {
     return lianaLeafVertex(shape, card, uv.x - 2.0 * card, uv.y, eye);
 }
 
-// The liana's anchor in its first tree's crown, or (far) in its second's at its far end (lianaWindAnchor).
-WindAnchorRecord lianaWindAnchor(LianaShape shape, bool far) {
-    vec4 tree = far ? shape.secondTree : shape.firstTree;
-    vec3 point = far ? shape.to.xyz : shape.from.xyz;
-    WindAnchorRecord anchor;
-    anchor.foot = tree;
-    anchor.point = vec4(point, far ? shape.trees.y : shape.trees.x);
-    anchor.bend = vec4(shape.trees.z, 0.0, 0.0, 0.0);
-    return anchor;
-}
-
 #endif

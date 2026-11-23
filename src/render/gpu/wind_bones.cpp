@@ -93,6 +93,15 @@ WindBonePose windRigidPose(const WindBonePose& own, const WindBonePose& parent, 
     return WindBonePose{.turn = turn, .shift = windBlendedPlace(own, parent, weight, foot) - turn.rotate(foot)};
 }
 
+Vec3 windPlantPointOffset(const WindBonePose& own, const WindBonePose& parent, float weight, const Vec3& world, const Vec3& foot, float scale,
+                          float turnRadians) {
+    const Vec3 inPlant = swayPlantPoint(world, foot, scale, turnRadians);
+    const Vec3 moved = (windBlendedPlace(own, parent, weight, inPlant) - inPlant) * scale;
+    const float cosine = std::cos(turnRadians);
+    const float sine = std::sin(turnRadians);
+    return Vec3{cosine * moved.x + sine * moved.z, moved.y, cosine * moved.z - sine * moved.x};
+}
+
 Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere) {
     const Vec3 centre = windBonePlace(pose, Vec3{sphere.x, sphere.y, sphere.z});
     return Vec4{centre.x, centre.y, centre.z, sphere.w};

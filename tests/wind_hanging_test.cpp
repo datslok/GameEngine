@@ -245,17 +245,14 @@ namespace {
     }
 
     /*
-    * A liana's anchor (its hold in its tree's crown, from its record) moves exactly as its tree's own vertex at its
-    * point does, so what hangs from it stays on: the same offset windSwayOffset gives that vertex of a tree sway of the
-    * same height, scale and bend, no flutter. A rope's far end has no tree: its scale 0.
+    * An anchor on a tree (its foot, height, scale and bend, and the point) moves exactly as the tree's own vertex at
+    * its point does, so what hangs from it stays on: the same offset windSwayOffset gives that vertex of a tree sway of
+    * the same height, scale and bend, no flutter.
     */
     void testAnchorsMoveWithTheirTree() {
         const Vec3 foot{10.0f, -2.0f, 5.0f};
         const Vec3 point{14.0f, 22.0f, 6.0f};
-        const LianaShape shape = makeLianaShape(point, Vec3{16.0f, -2.0f, 6.0f}, 25.0f, 0.02f, 2.0f, LianaTree{foot, 20.0f, 1.5f}, nullptr, 0.3f);
-        const GpuWindAnchor anchor = lianaWindAnchor(shape, false);
-        assert(anchor.foot[3] == 20.0f && anchor.point[0] == 14.0f && anchor.point[3] == 1.5f && anchor.bend[0] == 0.3f);
-        assert(lianaWindAnchor(shape, true).point[3] == 0.0f);
+        const GpuWindAnchor anchor{{foot.x, foot.y, foot.z, 20.0f}, {point.x, point.y, point.z, 1.5f}, {0.3f, 0.0f, 0.0f, 0.0f}};
         const Vec2 spring{0.06f, -0.03f};
         const Vec3 moved = windAnchorOffset(anchor, spring, 0.8f, 7.0f);
         const Vec3 fromFoot = point - foot;
