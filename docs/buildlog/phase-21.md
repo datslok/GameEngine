@@ -162,3 +162,13 @@
   - **4 planted bugs caught** (no short way, not normalised, foot not blended, weight swapped).
   - **A silent build:** `make` from Git Bash cannot find the compiler (exit 127) and a filtered output hid it, so a stale test binary ran; builds stay in PowerShell.
   - **Checked by the user:** looks great. GPU test written, not run.
+- `tree-bones-3c-iii-c-iii` (Nov 23 2026): lianas' anchors moved by their trees' bones, the swing below as before; the per-vertex sway is left only for iv to retire.
+  - **The plant number was the gap:** the CPU knows a liana's tree by its foot, the bones by its plant number, which the GPU's cells pack by prefix sums. The user picked a GPU lookup a frame (A) over the CPU re-planting the cells (B) or lianas posing their own trees (C).
+  - **A table by column and row modulo the ring's side:** a ring's held cells never share a place, so a set's cell finds its slot in one read; tested on a walking camera.
+  - **Cells by the box, not by division:** `floor(x / size)` can land a float on the wrong side of `plantingCellBox`'s edge; and a cell's east edge and the next one's west can differ by a rounding, a sliver no cell plants in (the first test caught it).
+  - **Feet within 1 cm, not bit-equal:** the same planting gives the same feet, but trunks stand metres apart, so a centimetre costs nothing and survives any rounding difference.
+  - **One plant-frame inverse:** `swayPlantPoint` (the CPU's binding) and `windPlantPoint` (the GPU's pose) are mirrors; the move is turned back by the plant's turn and scale, tested equal to a bound vertex's.
+  - **Not claimed by the lianas:** a crown is nearly always drawn in a swaying view when its liana is; claiming would need each kind's skeleton in the lookup and in `bones-compare`.
+  - **Retired:** `lianaWindAnchor`, `windTreeAnchorMotion`; `windAnchorOffset` stays until iv.
+  - **9 planted bugs caught** (turn undone the wrong way, the far end's layer, the hold not in the tree's frame, no cell edge fix, a negative modulo, the slot ignored, the counts' layer, the comparison flipped, the move turned back wrongly).
+  - **A stale build file:** moving `bone_records_shared.h` left dependency files naming it, which stopped `make` for the GPU tests until deleted.
