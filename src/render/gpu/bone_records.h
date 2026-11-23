@@ -32,8 +32,8 @@ static_assert(sizeof(GpuSwayBone) == 48, "GpuSwayBone must match the shaders' Sw
 /*
 * A skeleton: its bones' run in the table, its height (its mesh's units) and its first bone's radius (the foot's); its
 * chain levels' starts from firstLevel in the table's levelStarts (levelCount + 1 of them: level l's chains run from
-* start l to start l + 1 in the chains); and the placed table's part its trees take their lean from (set by the bones
-* pass's caller, skeletonLeanParts; BONE_NO_PART none).
+* start l to start l + 1 in the chains); the placed table's part its trees take their lean from (set by the bones
+* pass's caller, skeletonLeanParts; BONE_NO_PART none); and its reach (SwaySkeleton::reach, mesh units).
 */
 struct GpuSwaySkeleton {
     std::uint32_t firstBone = 0;
@@ -43,7 +43,7 @@ struct GpuSwaySkeleton {
     std::uint32_t firstLevel = 0;
     std::uint32_t levelCount = 0;
     std::uint32_t leanPart = 0xFFFFFFFFu;
-    std::uint32_t unused = 0;
+    float reach = 0.0f;
 };
 
 static_assert(sizeof(GpuSwaySkeleton) == 32, "GpuSwaySkeleton must match the shaders' SwaySkeletonRecord");

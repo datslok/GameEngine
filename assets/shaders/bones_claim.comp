@@ -48,7 +48,7 @@ void main() {
             atomicAdd(boneHeader[BONE_HEADER_TREES_STILL], 1u);
         }
 
-        boneTrees[tree] = BoneTree(plant, skeleton, firstPose, 0u, vec4(0.0));
+        boneTrees[tree] = BoneTree(plant, skeleton, firstPose, 0.0, vec4(0.0));
         plantTrees[2u * plant + 1u] = tree;
         atomicMax(boneHeader[BONE_HEADER_DISPATCH], tree + 1u);
     }

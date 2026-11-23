@@ -8,17 +8,6 @@
 #include <vector>
 
 namespace {
-    template <typename Call>
-    bool throwsInvalid(Call call) {
-        try {
-            call();
-        } catch (const std::invalid_argument&) {
-            return true;
-        }
-
-        return false;
-    }
-
     // A binding is one word: its bone low, its weight in 16 bits above; back again within 1 / 65535. Bones past the
     // word's room, or below 0, are refused; no bound vertex can read as unbound.
     void testABindingInAWord() {
@@ -26,8 +15,8 @@ namespace {
         assert(packSwayBinding(SwayBinding{.bone = 0, .weight = 0.0f}) == 0u);
         const SwayBinding back = unpackSwayBinding(packSwayBinding(SwayBinding{.bone = 1234, .weight = 0.3f}));
         assert(back.bone == 1234 && near(back.weight, 0.3f, 1.0f / 65535.0f));
-        assert(packSwayBinding(SwayBinding{.bone = 65534, .weight = 1.0f}) != swayUnbound);
-        assert(throwsInvalid([] { packSwayBinding(SwayBinding{.bone = 65535, .weight = 1.0f}); }));
+        assert(packSwayBinding(SwayBinding{.bone = 65533, .weight = 1.0f}) != swayUnbound);
+        assert(throwsInvalid([] { packSwayBinding(SwayBinding{.bone = 65534, .weight = 1.0f}); }));
         assert(throwsInvalid([] { packSwayBinding(SwayBinding{.bone = -1, .weight = 1.0f}); }));
     }
 

@@ -384,6 +384,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildGround(world, assets);
     buildShapes(world, assets);
     buildPlantingMaps();
+    makeTwigPrototypes();
     buildTrees(assets);
     buildTwigs(world, assets);
     buildLianas(assets);
@@ -1234,7 +1235,17 @@ std::vector<NearTreeVariant> ForestGame::plantTrees(AssetManager& assets, Forest
         }
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
         treeHeights[index] = std::max(treeBox.maximum.y, 1e-3f);
-        treeSkeletons[index] = std::make_shared<const SwaySkeleton>(SwaySkeleton{.bones = variant.bones, .height = treeHeights[index]});
+        std::vector<const IndexedMesh*> bound{&variant.bark,      &variant.leaves,    &variant.shadowLeaves, &variant.shadowBark,
+                                              &variant.leafLevel, &variant.barkLevel, &perched.leaves,       &perched.moss};
+
+        if (climbed) {
+            bound.push_back(&climber.stems);
+            bound.push_back(&climber.leaves);
+        }
+
+        const float twigReach = twigReaches.empty() ? 0.0f : *std::max_element(twigReaches.begin(), twigReaches.end());
+        treeSkeletons[index] = std::make_shared<const SwaySkeleton>(SwaySkeleton{
+            .bones = variant.bones, .height = treeHeights[index], .reach = treeBoneReach(variant.bones, bound, variant.twigs, twigReach)});
         lianaVariants[index] = NearTreeVariant{.bones = variant.bones, .lines = variant.swayLines, .blendShare = settings.boneBlendShare};
 
         barkMeshes.push_back(withClusterLevels(assets, assets.addDrawnMesh(std::move(variant.bark))));
@@ -1787,11 +1798,19 @@ const std::vector<std::shared_ptr<const TwigSet>>& ForestGame::getTreeTwigSets()
     return treeTwigSets;
 }
 
-void ForestGame::buildTwigs(World& world, AssetManager& assets) {
-    LeafAtlas atlas = forestTreeLeafAtlas(assetFolder);
-    const TracedLeaves leaves = traceAtlasLeaves(atlas, twigSettings.leafRows, twigSettings.insetTexels);
+void ForestGame::makeTwigPrototypes() {
+    twigAtlas = forestTreeLeafAtlas(assetFolder);
+    const TracedLeaves leaves = traceAtlasLeaves(twigAtlas, twigSettings.leafRows, twigSettings.insetTexels);
     twigPrototypes = buildTwigPrototypes(leaves, twigSettings, treeSettings.clusterSize, treeSettings.leafLength / treeSettings.clusterSize, twigSeed);
-    const Material leaf = withLeafLight(forestTwigLeafMaterial(assets, std::move(atlas), forestTreeLeafTint), leafLightSettings);
+    twigReaches.clear();
+
+    for (const TwigPrototype& twig : twigPrototypes) {
+        twigReaches.push_back(meshReach(twigLeafMesh(twig).mesh));
+    }
+}
+
+void ForestGame::buildTwigs(World& world, AssetManager& assets) {
+    const Material leaf = withLeafLight(forestTwigLeafMaterial(assets, std::move(twigAtlas), forestTreeLeafTint), leafLightSettings);
     const Material stem = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
 
     for (const TwigPrototype& twig : twigPrototypes) {
@@ -1813,11 +1832,9 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
     // The prototypes as the trees will draw them: every level in one mesh with its levels given (twigLeafMesh), and each
     // tree look's twigs over them, in bricks.
     std::vector<MeshHandle> prototypeMeshes;
-    std::vector<float> reaches;
 
     for (const TwigPrototype& twig : twigPrototypes) {
         TwigLeafMesh made = twigLeafMesh(twig);
-        reaches.push_back(meshReach(made.mesh));
         const MeshHandle mesh = assets.addDrawnMesh(std::move(made.mesh));
         assets.setGivenClusterLevels(mesh, std::move(made.coarser));
         prototypeMeshes.push_back(mesh);
@@ -1826,7 +1843,7 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
     treeTwigSets.clear();
 
     for (const std::vector<PlacedTwig>& twigs : treeTwigs) {
-        treeTwigSets.push_back(std::make_shared<const TwigSet>(treeTwigSet(twigs, prototypeMeshes, reaches)));
+        treeTwigSets.push_back(std::make_shared<const TwigSet>(treeTwigSet(twigs, prototypeMeshes, twigReaches)));
     }
 
     /*

@@ -407,6 +407,14 @@ struct TreeBones {
 
 TreeBones treeBones(const TreeSkeleton& skeleton, float boneMetres, float blendShare);
 
+/*
+* The farthest anything bound to a tree's bones lies from them (SwaySkeleton::reach, ROADMAP phase 21 stage 3c-iv-a):
+* its meshes' bound vertices (swayMeshReach), and each twig's foot (swayBindingReach) plus twigReach (the farthest a
+* prototype reaches from its foot) times its scale.
+*/
+float treeBoneReach(const std::vector<SwayBone>& bones, const std::vector<const IndexedMesh*>& meshes, const std::vector<PlacedTwig>& twigs,
+                    float twigReach);
+
 // The node a card or twig grows from: its own, or for a filler (-1) the node nearest its foot.
 int nodeOrNearest(int node, const Vec3& foot, const std::vector<TreeNode>& nodes);
 

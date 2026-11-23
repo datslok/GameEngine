@@ -156,7 +156,7 @@ namespace {
             // The shift: a foot up to 20 m turned, as windBonePose's (a few ulps of 30 m).
             report.check("windRigidPose shift", FloatTolerance{.absolute = 2e-5f, .relative = 1e-5f}, expected.shift, vec3From(carried[2 * i + 1]));
         }
-        const std::vector<GpuVec4> merged = runner.run(shader, GPU_TEST_WIND_SPHERES, spheres, 4, 2);
+        const std::vector<GpuVec4> merged = runner.run(shader, GPU_TEST_WIND_SPHERES, spheres, 4, 3);
 
         // Rotations of places up to 30 m: rounding a few ulps of 30 m.
         const FloatTolerance places{.absolute = 2e-5f, .relative = 1e-5f};
@@ -176,9 +176,13 @@ namespace {
             const Vec4 first{s[2][0], s[2][1], s[2][2], s[2][3]};
             const Vec4 movedSphere = windPosedSphere(carried, first);
             const Vec4 union_ = windSphereUnion(first, Vec4{s[3][0], s[3][1], s[3][2], s[3][3]});
-            report.check("windPosedSphere", places, Vec3{movedSphere.x, movedSphere.y, movedSphere.z}, vec3From(merged[2 * i]));
-            report.check("windSphereUnion centre", places, Vec3{union_.x, union_.y, union_.z}, vec3From(merged[2 * i + 1]));
-            report.check("windSphereUnion radius", places, union_.w, merged[2 * i + 1][3]);
+            report.check("windPosedSphere", places, Vec3{movedSphere.x, movedSphere.y, movedSphere.z}, vec3From(merged[3 * i]));
+            report.check("windSphereUnion centre", places, Vec3{union_.x, union_.y, union_.z}, vec3From(merged[3 * i + 1]));
+            report.check("windSphereUnion radius", places, union_.w, merged[3 * i + 1][3]);
+            const Vec2 moves = windPoseMoves(carried, Vec3{first.x, first.y, first.z}, Vec3{s[3][0], s[3][1], s[3][2]});
+            report.check("windPoseMoves ends", places, moves.x, merged[3 * i + 2][0]);
+            report.check("windPoseMoves turn", FloatTolerance{.absolute = 1e-6f, .relative = 1e-6f}, moves.y, merged[3 * i + 2][1]);
+            report.check("windTreeMove", places, windTreeMove(moves, s[3][3]), merged[3 * i + 2][2]);
         }
     }
 }

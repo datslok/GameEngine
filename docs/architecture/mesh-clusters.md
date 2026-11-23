@@ -26,7 +26,7 @@ Meshes cut into small pieces culled one by one (ROADMAP phase 21, stage 1; resea
 ## In the pools (`render/gpu/mesh_cluster_culling`, `VulkanMeshPool`)
 
 - Meshes go up in batches (`VulkanRenderer::uploadMeshes`; the loading screen's batches hold up to 1M triangles or 256 meshes): the pooled meshes' clusters built at once on the job system (timed, `getMeshClusterBuildSeconds`, logged after the start-up line), then each mesh added in order with its clusters (`VulkanMeshPool::add`).
-- Every level goes into the pools and `MeshPlacement::clusterCount` counts them all (the cut picks). Packed by `packMeshClusters` into three more pools grown as the others are: `GpuMeshCluster` records (112 B: sphere, cone, axis, runs, counts, its mesh's first vertex; the cut's own and parent spheres and errors), vertex numbers (the vertex pool's own, so no offset is needed), triangle words (four corner bytes a word, each cluster's from a word).
+- Every level goes into the pools and `MeshPlacement::clusterCount` counts them all (the cut picks). Packed by `packMeshClusters` into three more pools grown as the others are: `GpuMeshCluster` records (128 B: sphere, cone, axis, runs, counts, its mesh's first vertex; the cut's own and parent spheres and errors; up to 8 of its vertices' bones, `meshClusterBones`), vertex numbers (the vertex pool's own, so no offset is needed), triangle words (four corner bytes a word, each cluster's from a word).
 - `MeshPlacement::firstCluster`, `clusterCount`; `GpuCullGroup` carries them (`placedCullGroup`), so the GPU finds a group's clusters.
 - The records are kept on the CPU too (`getClusterRecords`), for `cluster-compare`; F4's MESHES counts the cluster pools.
 

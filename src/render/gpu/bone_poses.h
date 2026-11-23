@@ -33,14 +33,15 @@ inline constexpr std::uint32_t boneNoPart = BONE_NO_PART;
 
 /*
 * A posed tree: its plant (in the slots' plants), its skeleton, its first pose in the pool (two a bone, this frame's
-* then last frame's; BONE_NO_POSE when the pool was full: it stands still), and its lean in its plant's frame this frame
-* and last (written by the pose pass, for bones-compare). Must match bone_poses.glsl's BoneTree.
+* then last frame's; BONE_NO_POSE when the pool was full: it stands still), the farthest it moves anything bound to it
+* this frame (boneTreeMove, mesh units; for the culling's bounds), and its lean in its plant's frame this frame and last
+* (for bones-compare); the pose pass writes the move and leans. Must match bone_poses.glsl's BoneTree.
 */
 struct GpuBoneTree {
     std::uint32_t plant = 0;
     std::uint32_t skeleton = 0;
     std::uint32_t firstPose = boneNoPose;
-    std::uint32_t unused = 0;
+    float move = 0.0f;
     float lean[2] = {0.0f, 0.0f};
     float previousLean[2] = {0.0f, 0.0f};
 };
@@ -153,6 +154,12 @@ BoneClaims claimBoneTrees(std::span<const BoneWanted> wanted, std::span<const Gp
 std::vector<WindBonePose> boneTreePoses(const SwaySkeletonTables& tables, std::uint32_t skeleton, const WindTreeShape& tree, const Vec2& lean,
                                         float seconds, const WindBoneMotion& motion);
 
+/*
+* A tree's move this frame as the pose pass makes it (ROADMAP phase 21 stage 3c-iv-a): windTreeMove of its bones'
+* largest windPoseMoves (poses by bone, within its skeleton) and its skeleton's reach, in its mesh's units.
+*/
+float boneTreeMove(const SwaySkeletonTables& tables, std::uint32_t skeleton, std::span<const WindBonePose> poses);
+
 // A tree's shape for its poses: its skeleton's height and foot radius, its plant's scale and seed.
 WindTreeShape boneTreeShape(const GpuSwaySkeleton& skeleton, const GpuPlacedPlant& plant);
 
@@ -162,7 +169,7 @@ WindTreeShape boneTreeShape(const GpuSwaySkeleton& skeleton, const GpuPlacedPlan
 * A frame's trees and poses read back against the CPU's: the plants it should have posed (boneWantedPlants over its
 * read-back lists, by plant), those the GPU claimed, still for want of room, missing, extra (claimed though not wanted),
 * claimed twice; and every posed tree's poses against boneTreePoses with the leans the GPU wrote (the springs stay on
-* the GPU), the worst difference in turn (quaternion components) and shift (mesh units).
+* the GPU), the worst difference in turn (quaternion components), shift and move (mesh units).
 */
 struct BoneComparison {
     std::size_t wanted = 0;
@@ -175,11 +182,12 @@ struct BoneComparison {
     std::size_t wrongParents = 0;
     float worstTurn = 0.0f;
     float worstShift = 0.0f;
+    float worstMove = 0.0f;
 };
 
 BoneComparison compareBonePoses(std::span<const BoneWanted> wanted, std::span<const GpuBoneTree> trees, std::span<const GpuBonePose> poses,
                                 const SwaySkeletonTables& tables, std::span<const GpuPlacedPlant> plants, const WindBoneMotion& motion, float seconds,
                                 float previousSeconds);
 
-// The comparison in a line: agrees (turns within 1e-4, shifts within 1e-3 units, every parent right) or DIFFERS, with the counts.
+// The comparison in a line: agrees (turns within 1e-4, shifts and moves within 1e-3 units, every parent right) or DIFFERS, with the counts.
 std::string describeBoneComparison(const BoneComparison& comparison);

@@ -15,17 +15,6 @@
 #include <vector>
 
 namespace {
-    template <typename Call>
-    bool throwsInvalid(Call call) {
-        try {
-            call();
-        } catch (const std::invalid_argument&) {
-            return true;
-        }
-
-        return false;
-    }
-
     /*
     * A trunk of three bones (level 0); a branch from its second bone and one from its third (level 1); a twig from the
     * first branch's end (level 2). Parents first, as treeBones lays them out: each chain after the bone it starts on.
@@ -235,7 +224,8 @@ namespace {
 
     // Poses made as the pass makes them agree; a turned pose, a tree missing, one claimed twice or not wanted differ.
     void testComparison() {
-        const SwaySkeleton tree = threeLevelTree();
+        SwaySkeleton tree = threeLevelTree();
+        tree.reach = 0.7f;
         const SwaySkeletonTables tables = packSwaySkeletons({&tree});
         std::vector<GpuPlacedPlant> plants(4);
         plants[1].scale = 1.3f;
@@ -250,9 +240,10 @@ namespace {
         const WindBoneMotion motion;
         std::vector<GpuBonePose> poses(2 * claims.bonesAsked);
 
-        for (const GpuBoneTree& posed : claims.trees) {
+        for (GpuBoneTree& posed : claims.trees) {
             const WindTreeShape shape = boneTreeShape(tables.skeletons[0], plants[posed.plant]);
             const std::vector<WindBonePose> now = boneTreePoses(tables, 0, shape, Vec2{posed.lean[0], posed.lean[1]}, 5.0f, motion);
+            posed.move = boneTreeMove(tables, 0, now);
             const std::vector<WindBonePose> last = boneTreePoses(tables, 0, shape, Vec2{posed.previousLean[0], posed.previousLean[1]}, 4.98f, motion);
 
             for (std::size_t bone = 0; bone < now.size(); ++bone) {
@@ -285,6 +276,33 @@ namespace {
         const std::vector<BoneWanted> fewer{{3, 0}};
         const BoneComparison extra = compareBonePoses(fewer, claims.trees, poses, tables, plants, motion, 5.0f, 4.98f);
         assert(extra.extra == 1 && describeBoneComparison(extra).find("DIFFER") != std::string::npos);
+
+        std::vector<GpuBoneTree> moved = claims.trees;
+        moved[1].move += 0.01f;
+        const BoneComparison wrongMove = compareBonePoses(wanted, moved, poses, tables, plants, motion, 5.0f, 4.98f);
+        assert(same.worstMove == 0.0f && wrongMove.worstMove > 0.009f && describeBoneComparison(wrongMove).find("DIFFER") != std::string::npos);
+    }
+
+    /*
+    * A tree's move as the pose pass makes it (ROADMAP phase 21 stage 3c-iv-a): its bones' largest pivot or tip move and
+    * largest turn, with its skeleton's reach (carried in its record); none at rest; more with a longer reach when turned.
+    */
+    void testTheTreesMove() {
+        SwaySkeleton tree = threeLevelTree();
+        tree.reach = 1.5f;
+        const SwaySkeletonTables tables = packSwaySkeletons({&tree});
+        assert(tables.skeletons[0].reach == 1.5f);
+        const WindTreeShape shape{.height = 9.0f, .footRadius = 0.4f, .metresPerUnit = 1.0f, .seed = 3u};
+        const std::vector<WindBonePose> poses = boneTreePoses(tables, 0, shape, Vec2{0.2f, -0.1f}, 2.5f, WindBoneMotion{});
+        Vec2 largest{0.0f, 0.0f};
+
+        for (std::size_t bone = 0; bone < tree.bones.size(); ++bone) {
+            const Vec2 moves = windPoseMoves(poses[bone], tree.bones[bone].pivot, tree.bones[bone].tip);
+            largest = Vec2{std::max(largest.x, moves.x), std::max(largest.y, moves.y)};
+        }
+
+        assert(largest.y > 0.0f && near(boneTreeMove(tables, 0, poses), windTreeMove(largest, 1.5f), 1e-6f));
+        assert(boneTreeMove(tables, 0, std::vector<WindBonePose>(tree.bones.size())) == 0.0f);
     }
 
     // Each bones-compare call asks for a comparison and shows the last one; it takes no arguments.
@@ -391,6 +409,7 @@ void testBonePoses() {
     testPoolGrows();
     testLeanParts();
     testComparison();
+    testTheTreesMove();
     testClaimedTreeAndSlots();
     testVertexPoses();
     testCompareCommand();

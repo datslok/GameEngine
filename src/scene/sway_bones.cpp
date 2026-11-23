@@ -1,4 +1,6 @@
 #include "scene/sway_bones.h"
+#include "math/closest_points.h"
+#include "scene/indexed_mesh.h"
 
 #include <algorithm>
 #include <cmath>
@@ -7,7 +9,7 @@
 
 std::uint32_t packSwayBinding(const SwayBinding& binding) {
     if (binding.bone < 0 || static_cast<std::size_t>(binding.bone) >= swayMostBones) {
-        throw std::invalid_argument("A bound vertex's bone must be within a skeleton's 65535 bones");
+        throw std::invalid_argument("A bound vertex's bone must be within a skeleton's 65534 bones");
     }
 
     const auto weight = static_cast<std::uint32_t>(std::lround(std::clamp(binding.weight, 0.0f, 1.0f) * 65535.0f));
@@ -174,4 +176,26 @@ bool swayBonesOrdered(const std::vector<SwayBone>& bones) {
     }
 
     return true;
+}
+
+float swayBindingReach(const std::vector<SwayBone>& bones, const Vec3& point, const SwayBinding& binding) {
+    const SwayBone& own = bones.at(static_cast<std::size_t>(binding.bone));
+    float reach = (closestPointOnSegment(point, own.pivot, own.tip) - point).length();
+
+    if (binding.weight < 1.0f && own.parent >= 0) {
+        const SwayBone& parent = bones.at(static_cast<std::size_t>(own.parent));
+        reach = std::max(reach, (closestPointOnSegment(point, parent.pivot, parent.tip) - point).length());
+    }
+
+    return reach;
+}
+
+float swayMeshReach(const std::vector<SwayBone>& bones, const IndexedMesh& mesh) {
+    float reach = 0.0f;
+
+    for (std::size_t vertex = 0; vertex < mesh.swayBindings.size(); ++vertex) {
+        reach = std::max(reach, swayBindingReach(bones, mesh.vertices.at(vertex).position, mesh.swayBindings[vertex]));
+    }
+
+    return reach;
 }

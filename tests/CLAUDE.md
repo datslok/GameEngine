@@ -17,7 +17,7 @@
 
 | File | Holds |
 |---|---|
-| `test_levels.h` | `near`, `block`, `flatLevel`, `addRamp` |
+| `test_levels.h` | `near`, `throwsInvalid`, `block`, `flatLevel`, `addRamp` |
 | `demo_helpers.h` | `tickSeconds`, `mobaInput`, `firstPersonInput`, `runTicks`, `runFrame` |
 | `test_jobs.h` | `testJobs`: give it to every game a test builds (`Game::useJobs`) |
 | `forest_helpers.h` | `TestForest`, `FieldCounter`, `trianglesFaceTheirNormals` |

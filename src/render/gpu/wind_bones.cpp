@@ -107,6 +107,15 @@ Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere) {
     return Vec4{centre.x, centre.y, centre.z, sphere.w};
 }
 
+Vec2 windPoseMoves(const WindBonePose& pose, const Vec3& pivot, const Vec3& tip) {
+    const float ends = std::max((windBonePlace(pose, pivot) - pivot).length(), (windBonePlace(pose, tip) - tip).length());
+    return Vec2{ends, 2.0f * Vec3{pose.turn.x, pose.turn.y, pose.turn.z}.length()};
+}
+
+float windTreeMove(const Vec2& largestMoves, float reach) {
+    return largestMoves.x + largestMoves.y * reach;
+}
+
 Vec4 windSphereUnion(const Vec4& first, const Vec4& second) {
     const Vec3 a{first.x, first.y, first.z};
     const Vec3 b{second.x, second.y, second.z};

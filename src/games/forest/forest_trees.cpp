@@ -514,6 +514,21 @@ namespace {
     }
 }
 
+float treeBoneReach(const std::vector<SwayBone>& bones, const std::vector<const IndexedMesh*>& meshes, const std::vector<PlacedTwig>& twigs,
+                    float twigReach) {
+    float reach = 0.0f;
+
+    for (const IndexedMesh* mesh : meshes) {
+        reach = std::max(reach, swayMeshReach(bones, *mesh));
+    }
+
+    for (const PlacedTwig& twig : twigs) {
+        reach = std::max(reach, swayBindingReach(bones, twig.foot, twig.binding) + twigReach * twig.scale);
+    }
+
+    return reach;
+}
+
 TreeBones treeBones(const TreeSkeleton& skeleton, float boneMetres, float blendShare) {
     TreeBones result;
     result.chains.assign(skeleton.chains.size(), SwayChain{});

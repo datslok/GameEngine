@@ -365,7 +365,11 @@ private:
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
 
-    // The twig prototypes, from the canopy's leaves, and their stand's entities, hidden (ROADMAP phase 21 stage 3a).
+    // The twig prototypes, from the canopy's leaves (ROADMAP phase 21 stage 3a), and how far each reaches from its foot,
+    // before the trees, whose bones' reach takes the twigs' (SwaySkeleton::reach). The atlas is kept for buildTwigs.
+    void makeTwigPrototypes();
+
+    // The twig prototypes' meshes and their stand's entities, hidden, and each tree look's twigs over them.
     void buildTwigs(World& world, AssetManager& assets);
 
     // The stand shown in front of the camera (a row a prototype, its levels left to right, facing the camera), or hidden.
@@ -401,6 +405,8 @@ private:
     ForestGrassSettings grassSettings;
     ForestTwigSettings twigSettings;
     std::vector<TwigPrototype> twigPrototypes;
+    std::vector<float> twigReaches; // each prototype's farthest point from its foot (meshReach of twigLeafMesh)
+    LeafAtlas twigAtlas;            // the prototypes' leaves, until buildTwigs makes their material
     std::vector<Entity> twigStand;
     std::vector<std::vector<PlacedTwig>> treeTwigs; // each tree look's, as treeLooks
     std::vector<std::shared_ptr<const TwigSet>> treeTwigSets; // and as the renderer takes them (buildTwigs)

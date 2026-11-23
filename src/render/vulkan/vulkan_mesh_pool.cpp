@@ -62,7 +62,7 @@ MeshPlacement VulkanMeshPool::add(const IndexedMesh& mesh, const MeshClusters& c
         meshUploadBarrier(commands, device);
     });
 
-    addClusters(clusters, placement);
+    addClusters(clusters, mesh.swayBindings, placement);
     return placement;
 }
 
@@ -70,7 +70,7 @@ MeshPlacement VulkanMeshPool::add(const IndexedMesh& mesh, const MeshClusters& c
 * Packed with the vertex pool's numbers, then copied in as the mesh was. The records are kept on the CPU too, for
 * cluster-compare.
 */
-void VulkanMeshPool::addClusters(const MeshClusters& built, MeshPlacement& placement) {
+void VulkanMeshPool::addClusters(const MeshClusters& built, std::span<const SwayBinding> bindings, MeshPlacement& placement) {
     std::uint32_t words = 0;
 
     for (const MeshCluster& cluster : built.clusters) {
@@ -85,7 +85,7 @@ void VulkanMeshPool::addClusters(const MeshClusters& built, MeshPlacement& place
            sizeof(std::uint32_t), clusterUsage);
     const ClusterPlacement place =
         layout.placeClusters(static_cast<std::uint32_t>(clusterCount), static_cast<std::uint32_t>(built.vertices.size()), words);
-    const PackedMeshClusters packed = packMeshClusters(built, placement.firstVertex, place.firstVertex, place.firstTriangleWord);
+    const PackedMeshClusters packed = packMeshClusters(built, placement.firstVertex, place.firstVertex, place.firstTriangleWord, bindings);
     placement.firstCluster = place.firstCluster;
     placement.clusterCount = static_cast<std::uint32_t>(clusterCount); // every level: the culling passes' cut picks among them
     clusterRecords.insert(clusterRecords.end(), packed.clusters.begin(), packed.clusters.end());

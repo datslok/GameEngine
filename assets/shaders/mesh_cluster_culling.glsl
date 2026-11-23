@@ -27,8 +27,9 @@ struct MeshCluster {
     vec4 parentSphere;     // the group it was simplified with: its sphere
     float parentError;     // and the error of what was made from it (above MESH_CLUSTER_NEVER_COARSER: nothing was)
     uint level;            // the level of the group it was simplified with (scene/mesh_clusters.h)
-    uint unused1;
-    uint unused2;
+    uvec2 bones;           // up to MESH_CLUSTER_MOST_BONES of its vertices' bones, 16 bits each (meshClusterBones): the first four
+    uvec2 moreBones;       // and the last four (two uvec2, not a uvec4, which would align past level)
+    uvec2 unused;
 };
 
 // A (draw list entry, cluster) pair a list draws. Must match GpuMeshClusterItem.

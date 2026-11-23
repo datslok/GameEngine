@@ -458,7 +458,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 
 ## Phase 21: Virtual geometry and virtual shadow maps
 
-Shadows and levels without popping, at a cost that grows with the screen, not the valley (hard rule 11). Research and stage 4: `docs/research/VIRTUALGEOMETRY.md`; choices and outcomes: `docs/buildlog/phase-21.md`.
+Shadows and levels without popping, at a cost that grows with the screen, not the valley (hard rule 11). Research and stage 4: `docs/research/VIRTUALGEOMETRY.md`; choices and outcomes: `docs/buildlog/phase-21-1.md` and `phase-21-2.md`.
 
 - [x] 1. Clusters culled a view on the GPU and drawn by mesh shaders in the prepass and main pass
   - [x] 1a. Clusters built from a render mesh: up to 64 vertices and 124 triangles, a sphere and a cone each (`clusters`)
@@ -495,7 +495,10 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
         - [x] 3c-iii-c-ii. Twigs rigid by their bone's pose, with today's flutter (`tree-bones-3c-iii-c-ii`)
         - [x] 3c-iii-c-iii. Lianas' tree anchors moved by their bones (`tree-bones-3c-iii-c-iii`)
         - [x] 3c-iii-c-iv. The trees' per-vertex sway retired (`tree-bones-3c-iii-c-iv`)
-    - [ ] 3c-iv. Clusters within chains, culled by their bones' bounds; animation stopped when small
+    - [ ] 3c-iv. Clusters culled by their bones' bounds; animation stopped when small
+      - [x] 3c-iv-a. Each cluster's bones (up to 8), each tree's move a frame from its poses (`tree-bones-3c-iv-a`)
+      - [ ] 3c-iv-b. Trees' clusters and twigs culled by their posed bounds: frustum, facing, occlusion
+      - [ ] 3c-iv-c. Animation stopped below a share of the screen, faded
     - [ ] 3c-v. Optional: per-bone springs for a budget of near trees, pushed by forces (Unreal's promoted tier)
     - [ ] 3c-vi. Optional, if BONES shows in timings: far trees share a pose a variant and wind cell
   - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels

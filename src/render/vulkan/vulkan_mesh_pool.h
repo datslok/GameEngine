@@ -7,6 +7,7 @@
 #include "volk/volk.h"
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 class ImmediateCommands;
@@ -54,8 +55,8 @@ private:
     void ensure(VulkanBuffer& pool, std::uint64_t& capacity, std::uint64_t used, std::uint64_t needed, std::uint64_t smallest, VkDeviceSize elementBytes,
                 VkBufferUsageFlags usage);
 
-    // The mesh's clusters packed and copied in; their place.
-    void addClusters(const MeshClusters& built, MeshPlacement& placement);
+    // The mesh's clusters packed (each with its bones from the mesh's bindings) and copied in; their place.
+    void addClusters(const MeshClusters& built, std::span<const SwayBinding> bindings, MeshPlacement& placement);
 
     const VulkanDevice& device;
     ImmediateCommands& uploads;

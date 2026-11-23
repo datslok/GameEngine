@@ -5,6 +5,7 @@
 
 #include "test_levels.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <random>
@@ -314,6 +315,73 @@ namespace {
         }
     }
 
+    /*
+    * A tree's move (ROADMAP phase 21 stage 3c-iv-a): a pose moves nothing at rest; a turn about the pivot keeps it and
+    * swings the tip by 2 sin(angle / 2) of the bone; a shift moves both by it. Over random winds every point near the
+    * tree's bones, blended between its bone and that bone's parent or carried rigidly at a foot as a twig, moves no
+    * farther than its bones' largest moves give for the farthest point's reach.
+    */
+    void testATreesMoveBoundsItsPoints() {
+        const WindBonePose rest{};
+        const Vec2 still = windPoseMoves(rest, Vec3{1.0f, 2.0f, 3.0f}, Vec3{1.0f, 4.0f, 3.0f});
+        assert(still.x == 0.0f && still.y == 0.0f);
+        const Vec3 pivot{1.0f, 2.0f, 3.0f};
+        const float angle = 0.3f;
+        const WindBonePose turned = windBonePose(rest, Vec3{0.0f, 0.0f, angle}, pivot);
+        const Vec2 turnMoves = windPoseMoves(turned, pivot, pivot + Vec3{0.0f, 2.0f, 0.0f});
+        assert(near(turnMoves.x, 2.0f * 2.0f * std::sin(angle * 0.5f), 1e-5f) && near(turnMoves.y, 2.0f * std::sin(angle * 0.5f), 1e-6f));
+        const WindBonePose shifted{.turn = Quat{}, .shift = Vec3{0.0f, 0.0f, 0.25f}};
+        const Vec2 shiftMoves = windPoseMoves(shifted, pivot, pivot + Vec3{0.0f, 2.0f, 0.0f});
+        assert(near(shiftMoves.x, 0.25f, 1e-6f) && near(shiftMoves.y, 0.0f, 1e-6f));
+        assert(near(windTreeMove(Vec2{0.5f, 0.1f}, 2.0f), 0.7f, 1e-6f));
+
+        const std::vector<SwayBone> bones = branchedTree();
+        std::mt19937 random{41u};
+        std::uniform_real_distribution<float> unit{-1.0f, 1.0f};
+        std::uniform_real_distribution<float> share{0.0f, 1.0f};
+        std::uniform_int_distribution<int> anyBone{0, static_cast<int>(bones.size()) - 1};
+        std::vector<Vec3> points;
+        std::vector<SwayBinding> bindings;
+        std::vector<Vec3> twigTips;
+        float reach = 0.0f;
+
+        for (int k = 0; k < 400; ++k) {
+            const int bone = anyBone(random);
+            const SwayBone& b = bones[static_cast<std::size_t>(bone)];
+            points.push_back(b.pivot + (b.tip - b.pivot) * share(random) + Vec3{unit(random), unit(random), unit(random)} * 0.4f);
+            bindings.push_back(SwayBinding{.bone = bone, .weight = share(random)});
+            twigTips.push_back(points.back() + Vec3{unit(random), unit(random), unit(random)} * 0.6f);
+            reach = std::max(reach, swayBindingReach(bones, points.back(), bindings.back()) + (twigTips.back() - points.back()).length());
+        }
+
+        for (int trial = 0; trial < 60; ++trial) {
+            const Vec2 lean{unit(random) * 0.5f, unit(random) * 0.5f};
+            const std::vector<WindBonePose> poses = windTreePoses(bones, 12.0f, 1.0f, 5u, lean, share(random) * 100.0f, WindBoneMotion{});
+            Vec2 largest{0.0f, 0.0f};
+
+            for (std::size_t bone = 0; bone < bones.size(); ++bone) {
+                const Vec2 moves = windPoseMoves(poses[bone], bones[bone].pivot, bones[bone].tip);
+                largest = Vec2{std::max(largest.x, moves.x), std::max(largest.y, moves.y)};
+            }
+
+            const float move = windTreeMove(largest, reach);
+            float farthest = 0.0f;
+
+            for (std::size_t k = 0; k < points.size(); ++k) {
+                const int bone = bindings[k].bone;
+                const WindBonePose& own = poses[static_cast<std::size_t>(bone)];
+                const WindBonePose parent = parentPose(bones, poses, bone);
+                const float blended = (windBlendedPlace(own, parent, bindings[k].weight, points[k]) - points[k]).length();
+                const float twig = (windBonePlace(windRigidPose(own, parent, bindings[k].weight, points[k]), twigTips[k]) - twigTips[k]).length();
+                assert(blended <= move + 1e-4f && twig <= move + 1e-4f);
+                farthest = std::max({farthest, blended, twig});
+            }
+
+            // Not padded past use: within a few times the farthest move seen.
+            assert(lean.length() < 0.1f || move < 4.0f * farthest + 1e-3f);
+        }
+    }
+
     // The settings refuse what makes no sense.
     void testMotionIsValidated() {
         validateWindBoneMotion(WindBoneMotion{});
@@ -357,5 +425,6 @@ void testWindBones() {
     testAPointOnAPlantMoves();
     testSphereUnion();
     testClusterBoundsHold();
+    testATreesMoveBoundsItsPoints();
     testMotionIsValidated();
 }

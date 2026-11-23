@@ -67,5 +67,8 @@ void main() {
         vec4 first = testInput(2);
         testOutput(0, windPosedSphere(pose, first));
         testOutput(1, windSphereUnion(first, testInput(3)));
+        // The same pose's moves for a bone from the first centre to the second, and a tree's move at the second's radius.
+        vec2 moves = windPoseMoves(pose, first.xyz, testInput(3).xyz);
+        testOutput(2, vec4(moves, windTreeMove(moves, testInput(3).w), 0.0));
     }
 }

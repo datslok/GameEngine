@@ -992,7 +992,8 @@ namespace {
             * Moved by bones (ROADMAP phase 21 stage 3c-iii): every part but the still impostor card (and the twig part's
             * stand-in) carries the look's one skeleton, and each mesh it or its levels draw is bound one a vertex to
             * bones it has; every twig rides on one of them. The bones are a tree's one way to move (3c-iii-c-iv): a part
-            * or vertex left unbound would quietly sway by the old per-vertex sway instead.
+            * or vertex left unbound would quietly sway by the old per-vertex sway instead. The skeleton's reach holds
+            * every bound vertex and every twig's farthest point (3c-iv-a), so the tree's move bounds them all.
             */
             const SwaySkeleton* skeleton = leaves.parts.front().skeleton.get();
             assert(skeleton != nullptr && !skeleton->bones.empty() && skeleton->height > 1.0f && twigModel.parts.front().skeleton.get() == skeleton);
@@ -1022,6 +1023,7 @@ namespace {
                             assert(binding.bone >= 0 && static_cast<std::size_t>(binding.bone) < skeleton->bones.size());
                         }
 
+                        assert(swayMeshReach(skeleton->bones, indexed) <= skeleton->reach);
                         ++bound;
                     }
                 }
@@ -1029,8 +1031,16 @@ namespace {
 
             assert(bound >= 6);
 
+            std::vector<float> prototypeReaches;
+
+            for (const MeshHandle prototype : set.prototypes) {
+                prototypeReaches.push_back(meshReach(forest.assets.getDrawnMesh(prototype)));
+            }
+
             for (const TwigInstance& twig : set.twigs) {
                 assert(twig.binding.bone >= 0 && static_cast<std::size_t>(twig.binding.bone) < skeleton->bones.size());
+                assert(swayBindingReach(skeleton->bones, twig.foot, twig.binding) + prototypeReaches.at(twig.prototype) * twig.scale <=
+                       skeleton->reach * (1.0f + 1e-6f));
             }
         }
         assert(!stand.empty() && stand.size() == levels);
