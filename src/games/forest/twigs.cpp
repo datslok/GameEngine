@@ -203,6 +203,26 @@ TwigFarLeaves twigFarLeaves(const TwigPrototype& twig) {
     return TwigFarLeaves{.leaves = level.places, .growth = level.growth, .error = level.error};
 }
 
+FarLeafShapes twigFarLeafShapes(const TracedLeaves& leaves, const ForestTwigSettings& settings) {
+    FarLeafShapes shapes{.cells = {}, .foldRadians = settings.foldDegrees * fullTurnRadians / 360.0f, .curl = settings.curl};
+
+    for (int cell = 0; cell < leaves.columns * leaves.rows; ++cell) {
+        const LeafShape& shape = leaves.byRows.front()[static_cast<std::size_t>(cell)];
+        const AtlasCell rectangle = atlasCell(cell, leaves.columns, leaves.rows);
+        FarLeafShape& made = shapes.cells.emplace_back(FarLeafShape{.base = 0.0f, .tip = 0.0f, .up = 0.0f, .uvMin = rectangle.uvMin, .uvMax = rectangle.uvMax});
+
+        if (!shape.rows.empty()) {
+            made.base = shape.base;
+            made.tip = shape.tip;
+            made.up = shape.rows.front().up;
+            made.left = shape.rows.front().left;
+            made.right = shape.rows.front().right;
+        }
+    }
+
+    return shapes;
+}
+
 std::uint32_t twigPrototypeOf(float pick, std::size_t count) {
     if (count == 0) {
         return 0;

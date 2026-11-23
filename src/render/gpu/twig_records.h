@@ -4,7 +4,10 @@
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/twig_drawing_shared.h"
+#include "math/vec2.h"
+#include "math/vec4.h"
 #include "scene/mesh_clusters.h"
+#include "scene/twig_far_levels_shared.h"
 #include "scene/twig_set.h"
 
 #include <array>
@@ -113,6 +116,62 @@ inline constexpr std::uint32_t twigGroupBase = TWIG_GROUP_BASE;
 inline constexpr std::uint32_t twigMostLevelClusters = TWIG_MOST_LEVEL_CLUSTERS;
 inline constexpr std::uint32_t twigMostLevels = TWIG_MOST_LEVELS;
 static_assert(TWIG_BRICK_SIZE == twigBrickSize, "The twig pass's workgroup is a brick");
+
+/*
+* A far leaf's record as the GPU holds it (scene/twig_set.h's FarLeaf; ROADMAP phase 21 stage 3e-ii), 28 B: its foot
+* (plant's frame), its frame as the unit quaternion taking x, y and z to across, towardsTip and facing (four snorm16,
+* x and y in the first word's low and high halves, z and w in the second's), a word of its side (a half float, low),
+* its cell (bits 16-23) and its number (bits 24-31), and its twig's number.
+*/
+struct GpuFarLeaf {
+    float foot[3] = {0.0f, 0.0f, 0.0f};
+    std::uint32_t turn[2] = {0, 0};
+    std::uint32_t sideCellNumber = 0;
+    std::uint32_t twig = 0;
+};
+
+static_assert(sizeof(GpuFarLeaf) == 28, "GpuFarLeaf must match twig_record.glsl's FarLeaf");
+
+// An atlas cell's shape (scene/twig_set.h's FarLeafShape) with the fold and curl every leaf shares: base, tip, the
+// row's height and left half width; its right half width, the fold's raise (its tangent), the curl, unused; its texture
+// rectangle (u and v low, u and v high).
+struct GpuFarLeafShape {
+    float shape[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float right = 0.0f;
+    float raise = 0.0f;
+    float curl = 0.0f;
+    float unused = 0.0f;
+    float uvRect[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+static_assert(sizeof(GpuFarLeafShape) == 48, "GpuFarLeafShape must match twig_record.glsl's FarLeafShape");
+
+// A far leaf's record from its CPU record. Throws std::invalid_argument for a cell or number past 255.
+GpuFarLeaf packFarLeaf(const FarLeaf& leaf);
+
+// A cell's shape record, with every leaf's fold (radians) and curl.
+GpuFarLeafShape packFarLeafShape(const FarLeafShape& shape, float foldRadians, float curl);
+
+// ---- Mirrored by twig_record.glsl ----
+
+// A far leaf's vertex as the mesh shader makes it: in the plant's frame, its normal unit, its texture coordinate's
+// whole part its leaf's number (as a twig prototype's, numberedLeafU), its tangent across the leaf.
+struct FarLeafVertex {
+    Vec3 position;
+    Vec3 normal;
+    Vec2 uv;
+    Vec4 tangent;
+};
+
+/*
+* Vertex (0 to FAR_LEAF_VERTICES - 1: base, the row's left edge, midrib and right edge, tip) of a far leaf, made as
+* games/forest/leaf_clusters.h's appendModelledLeaf makes a one-row leaf: its frame from the record's quaternion,
+* each point raised by the fold and dropped by the curl, its normal its triangles' facings summed (area weighted).
+*/
+FarLeafVertex farLeafVertex(const GpuFarLeaf& leaf, const GpuFarLeafShape& shape, std::uint32_t vertex);
+
+// A far leaf's triangle (0 to FAR_LEAF_TRIANGLES - 1) as its three vertices, wound as appendModelledLeaf winds them.
+std::array<std::uint32_t, 3> farLeafTriangle(std::uint32_t triangle);
 
 // ---- Mirrored by twig_drawing.glsl ----
 

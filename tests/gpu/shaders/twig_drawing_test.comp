@@ -98,5 +98,28 @@ void main() {
         MeshClusterPose pose = twigBrickPose(brick, part, bones.x != 0.0, tree);
         testOutput(0, vec4(twigBrickKept(brick, part, 0u, record, view, pose) ? 1.0 : 0.0, pose.posed ? 1.0 : 0.0, 0.0, 0.0));
         testOutput(1, pose.sphere);
+        return;
+    }
+
+    if (function == GPU_TEST_FAR_LEAF_VERTEX) {
+        // Inputs: (the foot, the first turn word's bits), (the second turn word's, the side cell number word's and the
+        // twig's bits, the vertex), the shape's three vec4s. Outputs: the position, normal, (uv), tangent.
+        vec4 first = testInput(0);
+        vec4 second = testInput(1);
+        FarLeaf leaf;
+        leaf.foot[0] = first.x;
+        leaf.foot[1] = first.y;
+        leaf.foot[2] = first.z;
+        leaf.turn[0] = floatBitsToUint(first.w);
+        leaf.turn[1] = floatBitsToUint(second.x);
+        leaf.sideCellNumber = floatBitsToUint(second.y);
+        leaf.twig = floatBitsToUint(second.z);
+        vec4 rest = testInput(3);
+        FarLeafShape shape = FarLeafShape(testInput(2), rest.x, rest.y, rest.z, 0.0, testInput(4));
+        FarLeafVertex made = farLeafVertex(leaf, shape, uint(second.w));
+        testOutput(0, vec4(made.position, 0.0));
+        testOutput(1, vec4(made.normal, 0.0));
+        testOutput(2, vec4(made.uv, 0.0, 0.0));
+        testOutput(3, made.tangent);
     }
 }

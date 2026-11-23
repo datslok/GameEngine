@@ -107,3 +107,11 @@
   - **Measured:** 625K records for 11 variants, about 14 MB at 24 B (the plan's 3-5 MB counted fewer twigs); built in 48 ms at start-up (`LEAFGEOMETRY.md`).
   - **Twigs keep their leaves' places** (`TwigLevel::places`), tested to rebuild level 2's mesh exactly.
   - **9 planted bugs caught** (growth without its square root, no error floor, no twig scale, the split halved down, children's spheres left out, ranks shifted a level, the hand-over a level early, reach not over the side, numbers lost).
+- `leaf-bricks-3e-ii` (Nov 24 2026): far leaf records packed for the GPU (`GpuFarLeaf`, 28 B) and their vertices made as the mesh shader will (`farLeafVertex`, `twig_record.glsl`), mirrored in C++.
+  - **Tested against the twigs themselves:** every brick-level-0 record, packed and expanded, lands on its twig's level-2 vertex (within 0.2% of the side), normal, texture coordinate and tangent; its triangles wound as the prototype's.
+  - **Uploading moved to 3e-iii:** the records' buffers go up with the node and level tables that read them, so no buffer sits unused for a step; the roadmap says so.
+  - **`Quat::fromBasis` added** (Shepperd's method, from whichever component is largest), tested on every branch and half turns.
+  - **The shapes ride with the far levels** (`TwigFarLevels::shapes`, `makeTwigFarLevels` refuses a cell without one): one pair of fold and curl for every leaf, so the records stay at 28 B.
+  - **A missed planted bug:** swapping a leaf's half widths passed, as the stand-in leaves are symmetric; a leaf bitten on one side now catches it (the bite had to cover the one-row trace's height, which moves with the leaf).
+  - **9 planted bugs caught** (two signs in `fromBasis`, the winding, the curl's sign, the number left off the texture coordinate, the quaternion's halves swapped, one triangle a normal, the fold's angle for its tangent, half widths swapped).
+  - GPU test written (`twig_drawing_gpu_test`'s far leaf vertices), not run.

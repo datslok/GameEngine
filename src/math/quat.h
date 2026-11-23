@@ -3,6 +3,7 @@
 #include "math/mat4.h"
 #include "math/vec3.h"
 
+#include <algorithm>
 #include <cmath>
 
 /*
@@ -40,6 +41,31 @@ struct Quat {
         return fromAxisAngle(Vec3{0.0f, 0.0f, 1.0f}, radians.z) *
                fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, radians.y) *
                fromAxisAngle(Vec3{1.0f, 0.0f, 0.0f}, radians.x);
+    }
+
+    /*
+    * The turn taking x, y and z to a right-handed unit basis (the rotation matrix's columns), by Shepperd's method:
+    * from whichever of w, x, y, z is largest (the trace or a diagonal term), so no division by a near-zero component.
+    */
+    static Quat fromBasis(const Vec3& xTo, const Vec3& yTo, const Vec3& zTo) {
+        const float trace = xTo.x + yTo.y + zTo.z;
+        Quat turn;
+
+        if (trace >= xTo.x && trace >= yTo.y && trace >= zTo.z) {
+            const float fourW = std::sqrt(std::max(1.0f + trace, 0.0f)) * 2.0f;
+            turn = Quat{(yTo.z - zTo.y) / fourW, (zTo.x - xTo.z) / fourW, (xTo.y - yTo.x) / fourW, fourW * 0.25f};
+        } else if (xTo.x >= yTo.y && xTo.x >= zTo.z) {
+            const float fourX = std::sqrt(std::max(1.0f + xTo.x - yTo.y - zTo.z, 0.0f)) * 2.0f;
+            turn = Quat{fourX * 0.25f, (yTo.x + xTo.y) / fourX, (zTo.x + xTo.z) / fourX, (yTo.z - zTo.y) / fourX};
+        } else if (yTo.y >= zTo.z) {
+            const float fourY = std::sqrt(std::max(1.0f + yTo.y - xTo.x - zTo.z, 0.0f)) * 2.0f;
+            turn = Quat{(yTo.x + xTo.y) / fourY, fourY * 0.25f, (zTo.y + yTo.z) / fourY, (zTo.x - xTo.z) / fourY};
+        } else {
+            const float fourZ = std::sqrt(std::max(1.0f + zTo.z - xTo.x - yTo.y, 0.0f)) * 2.0f;
+            turn = Quat{(zTo.x + xTo.z) / fourZ, (zTo.y + yTo.z) / fourZ, fourZ * 0.25f, (xTo.y - yTo.x) / fourZ};
+        }
+
+        return turn.normalized();
     }
 
     /*

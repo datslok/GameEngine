@@ -96,6 +96,10 @@ TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& se
 // A twig's leaves at twigBrickLevel (its coarsest if it has fewer levels), as the bricks above it take them over.
 TwigFarLeaves twigFarLeaves(const TwigPrototype& twig);
 
+// Every atlas cell's leaf traced with one row as far leaves draw it, its texture rectangle, and the settings' fold and
+// curl: what buildTwig gives a one-row leaf. A cell with no leaf gets an empty shape (its leaves draw nothing).
+FarLeafShapes twigFarLeafShapes(const TracedLeaves& leaves, const ForestTwigSettings& settings);
+
 // The prototype a placed twig's pick (0..1) chooses among count.
 std::uint32_t twigPrototypeOf(float pick, std::size_t count);
 
