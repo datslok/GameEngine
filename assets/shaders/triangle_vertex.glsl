@@ -64,6 +64,59 @@ layout(location = 4) in vec3 previousPosition;
 #endif
 #endif
 
+// Each twig's binding to its tree's bones, beside the twigs (render/gpu/twig_records.h, packTwigBinding).
+layout(std430, set = 1, binding = SCENE_TWIG_BINDINGS_BINDING) readonly buffer SceneTwigBindings {
+    uint sceneTwigBindings[];
+};
+
+/*
+* A twig's bones (stage 3c-iii-c-ii): what it is posed by, and its rigid pose now and last frame (windRigidPose at its
+* foot, the twig matrix's place), the same for every vertex of it, so a mesh shader's workgroup makes it once.
+*/
+struct TwigPose {
+    BoneDrawn drawn;
+    WindBonePose now;
+    WindBonePose last;
+};
+
+TwigPose noTwigPose() {
+    return TwigPose(BoneDrawn(BONE_NO_POSE, SWAY_UNBOUND, vec4(0.0)), windRestPose(), windRestPose());
+}
+
+// The pose of the twig a mesh cluster pair draws (instanceIndex from TWIG_INSTANCE_BASE), none for any other draw.
+TwigPose twigPoseOf(uint instanceIndex) {
+    TwigPose pose = noTwigPose();
+
+    if (instanceIndex < uint(TWIG_INSTANCE_BASE)) {
+        return pose;
+    }
+
+    uvec4 twig = sceneTwigEntries[instanceIndex - TWIG_INSTANCE_BASE];
+    pose.drawn = boneDrawnBy(drawnInstance(scenePlacedEntries[twig.x].x), sceneTwigBindings[twig.y]);
+
+    if (bonePosed(pose.drawn)) {
+        vec3 foot = twigMatrix(sceneTwigs[twig.y])[3].xyz;
+        BoneVertexPoses now = boneVertexPoses(pose.drawn, false);
+        pose.now = windRigidPose(now.own, now.parent, now.weight, foot);
+#ifdef MAIN_MOTION
+        BoneVertexPoses last = boneVertexPoses(pose.drawn, true);
+        pose.last = windRigidPose(last.own, last.parent, last.weight, foot);
+#endif
+    }
+
+    return pose;
+}
+
+// What a posed vertex blends: its own two bones', or its twig's rigid pose for both (weight 1).
+BoneVertexPoses drawnPoses(bool twig, TwigPose twigPose, BoneDrawn bones, bool previous) {
+    if (twig) {
+        WindBonePose rigid = previous ? twigPose.last : twigPose.now;
+        return BoneVertexPoses(rigid, rigid, 1.0);
+    }
+
+    return boneVertexPoses(bones, previous);
+}
+
 #ifdef MAIN_MOTION
 // Each instance's model matrix last frame (its current one when it did not move).
 layout(std430, set = 1, binding = 21) readonly buffer PreviousModels {
@@ -114,10 +167,10 @@ invariant gl_Position;
 * normal, uv, tangent, and last frame's position), the draw list entry it is drawn as (instanceIndex, and the draw's
 * first: baseInstance, placed plants' from PLACED_INSTANCE_BASE), its number in its own mesh (meshVertex: the per-vertex
 * records of hanging things and thinned cards count from the mesh's first vertex) and in the vertex pool (poolVertex:
-* its binding to its tree's bones).
+* its binding to its tree's bones); for a twig, its pose (twigPoseOf, made once a workgroup; noTwigPose otherwise).
 */
 void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tangent, vec3 previousPosition, uint instanceIndex, uint baseInstance,
-                 int meshVertex, uint poolVertex) {
+                 int meshVertex, uint poolVertex, TwigPose twigPose) {
     // A frame's draw, or a placed plant's part (drawn_objects.glsl).
     // The vertex measured from the camera, kept here and written once at the end (a mesh shader may not read its outputs).
     vec3 relative = vec3(0.0);
@@ -254,14 +307,10 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
     /*
     * The wind (render/gpu/wind.h): the same sway in every view, so the prepass and the main pass agree to the bit. A
     * vertex bound to its tree's bones (bone_vertex_data.glsl) moves by them instead, its normal and tangent turned with
-    * them; one whose tree is not posed this frame, and every vertex in a capture, stands still. A twig's (its prototype's
-    * vertex) is not bound: it keeps the sway until stage 3c-iii-c-ii.
+    * them; one whose tree is not posed this frame, and every vertex in a capture, stands still. A twig moves whole by
+    * its rigid pose (twigPose), its leaves fluttering as the sway's did.
     */
-    BoneDrawn bones = BoneDrawn(BONE_NO_POSE, SWAY_UNBOUND, vec4(0.0));
-
-    if (!drawn.twig) {
-        bones = boneDrawn(drawn.plant, poolVertex);
-    }
+    BoneDrawn bones = drawn.twig ? twigPose.drawn : boneDrawn(drawn.plant, poolVertex);
 
     if (captureView) {
         bones.firstPose = BONE_NO_POSE;
@@ -270,7 +319,7 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
     vec3 swayOffset;
 
     if (bonePosed(bones)) {
-        BoneVertexPoses poses = boneVertexPoses(bones, false);
+        BoneVertexPoses poses = drawnPoses(drawn.twig, twigPose, bones, false);
         swayOffset = boneSwayOfVertex(bones, poses, instance.model, instance.sway, instance.hanging, meshVertex, shaped, relative + cameraOrigin.xyz,
                                       cameraOrigin.xyz, false);
         normal = windBlendedDirection(poses.own, poses.parent, poses.weight, normal);
@@ -306,7 +355,7 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
         vec3 previousRelative = (beforeRelative * vec4(previousShaped, 1.0)).xyz;
         previousRelative.y += groundLift(instance.material.w, previousRelative + cameraOrigin.xyz, before[3].y);
         previousRelative += bonePosed(bones)
-                                ? boneSwayOfVertex(bones, boneVertexPoses(bones, true), before, instance.sway, instance.hanging, meshVertex, previousShaped,
+                                ? boneSwayOfVertex(bones, drawnPoses(drawn.twig, twigPose, bones, true), before, instance.sway, instance.hanging, meshVertex, previousShaped,
                                                    previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true)
                                 : bones.binding != SWAY_UNBOUND
                                       ? vec3(0.0)
@@ -351,6 +400,6 @@ void main() {
     vec3 previous = position;
 #endif
     shadeVertex(0u, position, normal, uv, tangent, previous, uint(gl_InstanceIndex), uint(gl_BaseInstanceARB), gl_VertexIndex - gl_BaseVertexARB,
-                uint(gl_VertexIndex));
+                uint(gl_VertexIndex), noTwigPose());
 }
 #endif

@@ -87,6 +87,12 @@ Vec3 windBlendedDirection(const WindBonePose& own, const WindBonePose& parent, f
     return (own.turn.rotate(direction) * weight + parent.turn.rotate(direction) * (1.0f - weight)).normalized();
 }
 
+WindBonePose windRigidPose(const WindBonePose& own, const WindBonePose& parent, float weight, const Vec3& foot) {
+    const Quat ownTurn = own.turn.dot(parent.turn) < 0.0f ? -own.turn : own.turn;
+    const Quat turn = (parent.turn * (1.0f - weight) + ownTurn * weight).normalized();
+    return WindBonePose{.turn = turn, .shift = windBlendedPlace(own, parent, weight, foot) - turn.rotate(foot)};
+}
+
 Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere) {
     const Vec3 centre = windBonePlace(pose, Vec3{sphere.x, sphere.y, sphere.z});
     return Vec4{centre.x, centre.y, centre.z, sphere.w};

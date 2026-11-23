@@ -155,3 +155,10 @@
   - **6 planted bugs caught;** a seventh (a root reading its parent past its tree) slipped through while the slots before the tree held rest poses, so the test fills them with another tree's.
   - **Hooks** (`claude-hooks-paths`): a `cd` into `assets/shaders` broke every shell command's hook (relative script path) and the line-endings check judged folders from the shell's folder; both now from `$CLAUDE_PROJECT_DIR`.
   - **Checked by the user:** the sway looks great and more realistic than the per-vertex sway. GPU tests written, not run.
+- `tree-bones-3c-iii-c-ii` (Nov 23 2026): twigs moved whole by their bone's pose at their foot, leaves keeping today's shiver; lianas keep the sway until iii.
+  - **Rigid, not skinned:** a twig is small, so it is carried whole (`windRigidPose`): its two bones' turns blended the short way (nlerp: a sway's turns are small, so nearly slerp), its foot blended as the bark there is, so it stays on its branch.
+  - **Once a twig:** a mesh shader's workgroup draws one twig's cluster, so its first thread makes the pose (and last frame's in the main pass) and shares it; every vertex is then posed as by one bone through c-i's path, the flutter and motion vectors with it.
+  - **No pop risk yet:** swaying twigs skip the per-twig frustum test (`meshClusterRigid`), so the old sway's padding does not limit the bones; 3c-iv's posed bounds will.
+  - **4 planted bugs caught** (no short way, not normalised, foot not blended, weight swapped).
+  - **A silent build:** `make` from Git Bash cannot find the compiler (exit 127) and a filtered output hid it, so a stale test binary ran; builds stay in PowerShell.
+  - **Checked by the user:** looks great. GPU test written, not run.

@@ -95,7 +95,8 @@ static_assert(BoneTreesBinding == SCENE_BONE_TREES_BINDING && BonePlantTreesBind
 static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsBinding == SCENE_PLACED_PARTS_BINDING &&
                   PlacedEntriesBinding == SCENE_PLACED_ENTRIES_BINDING,
               "The placed bindings must match drawn_objects.glsl's");
-static_assert(TwigEntriesBinding == SCENE_TWIG_ENTRIES_BINDING && TwigsBinding == SCENE_TWIGS_BINDING, "The twig bindings must match drawn_objects.glsl's");
+static_assert(TwigEntriesBinding == SCENE_TWIG_ENTRIES_BINDING && TwigsBinding == SCENE_TWIGS_BINDING && TwigBindingsBinding == SCENE_TWIG_BINDINGS_BINDING,
+              "The twig bindings must match drawn_objects.glsl's and triangle_vertex.glsl's");
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
 // so the sets bound for one stay bound for the next.

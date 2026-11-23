@@ -81,6 +81,13 @@ vec3 windBlendedDirection(WindBonePose own, WindBonePose parent, float weight, v
     return normalize(quatRotate(own.turn, direction) * weight + quatRotate(parent.turn, direction) * (1.0 - weight));
 }
 
+// A rigid thing bound at its foot carried whole: the turns blended the short way, its foot blended (windRigidPose).
+WindBonePose windRigidPose(WindBonePose own, WindBonePose parent, float weight, vec3 foot) {
+    vec4 ownTurn = dot(own.turn, parent.turn) < 0.0 ? -own.turn : own.turn;
+    vec4 turn = normalize(parent.turn * (1.0 - weight) + ownTurn * weight);
+    return WindBonePose(turn, windBlendedPlace(own, parent, weight, foot) - quatRotate(turn, foot));
+}
+
 // A sphere (xyz centre, w radius) carried by a pose (windPosedSphere).
 vec4 windPosedSphere(WindBonePose pose, vec4 sphere) {
     return vec4(windBonePlace(pose, sphere.xyz), sphere.w);

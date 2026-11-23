@@ -191,6 +191,38 @@ namespace {
         assert(near(normal.length(), 1.0f, 1e-5f) && normal.y > 0.0f && normal.y < turned.turn.rotate(Vec3{1.0f, 0.0f, 0.0f}).y);
     }
 
+    /*
+    * A twig's rigid pose (windRigidPose): its foot lands where a vertex bound there blends to (the bark it grows from),
+    * its turn the two turns blended along the short way and unit; all its own bone's at weight 1, its parent's at 0. A
+    * turn given as its negative (the same rotation) blends alike. Every other point keeps its distance from the foot.
+    */
+    void testRigidPose() {
+        const WindBonePose rest{};
+        const WindBonePose parent = windBonePose(rest, Vec3{0.1f, 0.0f, -0.05f}, Vec3{});
+        const WindBonePose own = windBonePose(parent, Vec3{0.0f, 0.2f, 0.25f}, Vec3{0.0f, 3.0f, 0.0f});
+        const Vec3 foot{0.4f, 3.6f, -0.2f};
+        const Vec3 leaf = foot + Vec3{0.3f, 0.1f, 0.25f};
+
+        for (const float weight : {0.0f, 0.3f, 1.0f}) {
+            const WindBonePose rigid = windRigidPose(own, parent, weight, foot);
+            assert((windBonePlace(rigid, foot) - windBlendedPlace(own, parent, weight, foot)).length() < 1e-5f);
+            assert(near(rigid.turn.length(), 1.0f, 1e-5f));
+            assert(near((windBonePlace(rigid, leaf) - windBonePlace(rigid, foot)).length(), (leaf - foot).length(), 1e-5f));
+        }
+
+        const WindBonePose all = windRigidPose(own, parent, 1.0f, foot);
+        assert((windBonePlace(all, leaf) - windBonePlace(own, leaf)).length() < 1e-5f);
+        const WindBonePose none = windRigidPose(own, parent, 0.0f, foot);
+        assert((windBonePlace(none, leaf) - windBonePlace(parent, leaf)).length() < 1e-5f);
+
+        const WindBonePose flipped{.turn = -own.turn, .shift = own.shift};
+        const WindBonePose half = windRigidPose(own, parent, 0.5f, foot);
+        const WindBonePose halfFlipped = windRigidPose(flipped, parent, 0.5f, foot);
+        assert((windBonePlace(half, leaf) - windBonePlace(halfFlipped, leaf)).length() < 1e-5f);
+        const Vec3 between = windBonePlace(half, leaf);
+        assert((between - windBonePlace(own, leaf)).length() < (windBonePlace(parent, leaf) - windBonePlace(own, leaf)).length());
+    }
+
     // The union of two spheres holds both: the larger one when it holds the other, else just reaching both.
     void testSphereUnion() {
         const Vec4 big{0.0f, 0.0f, 0.0f, 5.0f};
@@ -297,6 +329,7 @@ void testWindBones() {
     testBranchPhases();
     testTheTurnFollowsTheWind();
     testBlending();
+    testRigidPose();
     testSphereUnion();
     testClusterBoundsHold();
     testMotionIsValidated();

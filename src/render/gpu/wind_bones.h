@@ -91,6 +91,13 @@ Vec3 windBlendedPlace(const WindBonePose& own, const WindBonePose& parent, float
 // A normal or tangent bound likewise: the two turns of it blended, unit length again.
 Vec3 windBlendedDirection(const WindBonePose& own, const WindBonePose& parent, float weight, const Vec3& direction);
 
+/*
+* A rigid thing bound at its foot (a twig: weight its own bone's share, the rest its parent's) carried whole: its turn
+* the two turns blended (nlerp, the short way: a sway's turns are small, so nearly slerp), its foot where a vertex bound
+* there blends to, so it stays on the bark it grows from.
+*/
+WindBonePose windRigidPose(const WindBonePose& own, const WindBonePose& parent, float weight, const Vec3& foot);
+
 // A sphere (xyz its centre, w its radius) carried by a pose: moved, its radius kept.
 Vec4 windPosedSphere(const WindBonePose& pose, const Vec4& sphere);
 

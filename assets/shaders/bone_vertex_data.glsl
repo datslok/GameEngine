@@ -35,21 +35,15 @@ struct BoneDrawn {
 };
 
 /*
-* A vertex's bones: plant its placed plant (BONE_NO_TREE for any other draw), poolVertex its place in the vertex pool.
-* Posed only when it is bound and its plant's tree was claimed and given room this frame (the wind record's stamp, 0 on
-* a frame the bones pass did not run); else still. The binding is read first: most vertices are not bound.
+* What a bound thing of a plant (BONE_NO_TREE for any other draw) is posed by: its binding (SWAY_UNBOUND none), its tree
+* only when claimed and given room this frame (the wind record's stamp, 0 on a frame the bones pass did not run); else
+* it stands still.
 */
-BoneDrawn boneDrawn(uint plant, uint poolVertex) {
-    BoneDrawn drawn = BoneDrawn(BONE_NO_POSE, SWAY_UNBOUND, vec4(0.0));
+BoneDrawn boneDrawnBy(uint plant, uint binding) {
+    BoneDrawn drawn = BoneDrawn(BONE_NO_POSE, binding, vec4(0.0));
     uint stamp = uint(windField.flags.y);
 
-    if (plant == BONE_NO_TREE || stamp == 0u || poolVertex >= uint(sceneSwayBindings.length())) {
-        return drawn;
-    }
-
-    drawn.binding = sceneSwayBindings[poolVertex];
-
-    if (drawn.binding == SWAY_UNBOUND) {
+    if (plant == BONE_NO_TREE || stamp == 0u || binding == SWAY_UNBOUND) {
         return drawn;
     }
 
@@ -61,6 +55,12 @@ BoneDrawn boneDrawn(uint plant, uint poolVertex) {
     }
 
     return drawn;
+}
+
+// A vertex's bones (boneDrawnBy) by its place in the vertex pool; most vertices are not bound, so a plant's are read only then.
+BoneDrawn boneDrawn(uint plant, uint poolVertex) {
+    uint binding = poolVertex < uint(sceneSwayBindings.length()) ? sceneSwayBindings[poolVertex] : SWAY_UNBOUND;
+    return boneDrawnBy(binding == SWAY_UNBOUND ? BONE_NO_TREE : plant, binding);
 }
 
 bool bonePosed(BoneDrawn drawn) {
