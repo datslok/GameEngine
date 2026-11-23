@@ -45,6 +45,9 @@ layout(buffer_reference, std430) readonly buffer MeshVertexFloats {
     float values[];
 };
 
+// A twig's pose, made by the workgroup's first thread for all its vertices (one twig a pair).
+shared TwigPose workgroupTwig;
+
 void main() {
     // The workgroup's pair within its style's run of its list, the same for the whole workgroup; none past the run.
     MeshClusterWords totals = MeshClusterWords(meshClusterBuffers[0].zw);
@@ -67,6 +70,13 @@ void main() {
     MeshClusterWords triangleWords = MeshClusterWords(meshClusterBuffers[2].xy);
     MeshVertexFloats vertices = MeshVertexFloats(meshClusterBuffers[2].zw);
 
+    if (gl_LocalInvocationIndex == 0u) {
+        workgroupTwig = twigPoseOf(item.entry);
+    }
+
+    barrier();
+    TwigPose twigPose = workgroupTwig;
+
     // Each vertex placed as the vertex shaders place it; a pooled mesh never deforms, so last frame's shape is its own.
     // The pair's place stands for the draw's first instance too, so a placed plant's (from PLACED_INSTANCE_BASE) is
     // built from its plant and part (drawnObject), as an indexed draw of it would be.
@@ -77,7 +87,7 @@ void main() {
         vec3 normal = vec3(vertices.values[at + 3u], vertices.values[at + 4u], vertices.values[at + 5u]);
         vec2 uv = vec2(vertices.values[at + 6u], vertices.values[at + 7u]);
         vec4 tangent = vec4(vertices.values[at + 8u], vertices.values[at + 9u], vertices.values[at + 10u], vertices.values[at + 11u]);
-        shadeVertex(slot, position, normal, uv, tangent, position, item.entry, item.entry, int(number - cluster.meshFirstVertex), number);
+        shadeVertex(slot, position, normal, uv, tangent, position, item.entry, item.entry, int(number - cluster.meshFirstVertex), number, twigPose);
     }
 
     // Each triangle's three corner bytes, four to a word.

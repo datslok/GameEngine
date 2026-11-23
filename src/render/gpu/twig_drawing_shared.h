@@ -33,8 +33,10 @@
 #define TWIG_PASS_BINDINGS 16
 #define TWIG_SOURCES_GROUP_SIZE 64
 
-// The scene set's twig entries and twigs (render/vulkan/scene_layout.h), for the mesh shaders' twig instances.
+// The scene set's twig entries, twigs and their bindings to their trees' bones (render/vulkan/scene_layout.h), for the
+// mesh shaders' twig instances.
 #define SCENE_TWIG_ENTRIES_BINDING 46
 #define SCENE_TWIGS_BINDING 47
+#define SCENE_TWIG_BINDINGS_BINDING 49
 
 #endif

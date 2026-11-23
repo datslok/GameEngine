@@ -2,7 +2,7 @@
 
 Covers: `src/render/gpu/wind_bones`, `src/render/gpu/wind_bones_shared.h`, `assets/shaders/wind_bones.glsl`, `assets/shaders/quat.glsl`, `src/render/gpu/bone_records`, `src/render/gpu/bone_records_shared.h`, `src/render/gpu/bone_poses`, `src/render/gpu/bone_poses_shared.h`, `assets/shaders/bone_poses.glsl`, `assets/shaders/bone_pass.glsl`, `assets/shaders/bones_claim.comp`, `assets/shaders/bones_pose.comp`, `src/render/vulkan/vulkan_bone_posing`, `src/scene/sway_bones`, `assets/shaders/bone_vertex_data.glsl`
 
-Trees move by bones instead of the per-vertex sway ([wind.md](wind.md), `windSwayOffset`): each frame a pass poses every swaying tree's skeleton on the GPU from the trees' spring at its foot, and the draws move each bound vertex by its two bones' poses. Research and plan: `docs/research/LEAFGEOMETRY.md`, Wind with valid bounds (phase 21 stage 3c). Built: the bones and bindings (3c-i), their motion's maths (3c-ii), every tree mesh bound and the records on the GPU (3c-iii-a), the bones pass (3c-iii-b), bound vertices drawn by the poses (3c-iii-c-i); twigs and lianas' anchors still move by the sway (3c-iii-c-ii, iii).
+Trees move by bones instead of the per-vertex sway ([wind.md](wind.md), `windSwayOffset`): each frame a pass poses every swaying tree's skeleton on the GPU from the trees' spring at its foot, and the draws move each bound vertex by its two bones' poses. Research and plan: `docs/research/LEAFGEOMETRY.md`, Wind with valid bounds (phase 21 stage 3c). Built: the bones and bindings (3c-i), their motion's maths (3c-ii), every tree mesh bound and the records on the GPU (3c-iii-a), the bones pass (3c-iii-b), bound vertices and twigs drawn by the poses (3c-iii-c-i, ii); lianas' anchors still move by the sway (3c-iii-c-iii).
 
 ## Bones and bindings
 
@@ -49,17 +49,18 @@ Trees move by bones instead of the per-vertex sway ([wind.md](wind.md), `windSwa
 - **F4** `BONES TREES n  STILL s  BONES asked/pool`. **`bones-compare`:** the frame's placed lists, trees and pool read back; `boneWantedPlants` against the claims (missing, extra, twice), each pose against `boneTreePoses` (the pass's order, equal to `windTreePoses`) from the leans the GPU wrote.
 - **Cost grows with:** the claim with the swaying views' bound entries; the pose with the posed trees' bones, twice; memory the pool and 8 B a held plant.
 
-## Drawn by the poses (3c-iii-c-i)
+## Drawn by the poses (3c-iii-c-i, ii)
 
 `bone_vertex_data.glsl` (scene set 1: trees 50, each plant's tree 51, the pool 52, the vertices' bindings 48), read by `triangle_vertex.glsl` (the camera's vertex and mesh shaders) and `shadow.vert`, `shadow_cut_out.vert` (tiles that sway):
 
-- **Which vertex:** a placed plant's (`DrawnObject::plant`) pool vertex (`gl_VertexIndex`, a mesh shader's vertex number) bound to a bone; a twig's prototype vertex is not (stage ii).
+- **Which vertex:** a placed plant's (`DrawnObject::plant`) pool vertex (`gl_VertexIndex`, a mesh shader's vertex number) bound to a bone, or a twig's (bound by the twig's own binding, scene binding 49).
 - **Its tree** (`boneDrawn`): `boneClaimedTree` of the plant's word pair against the frame's stamp in the wind record (`GpuWindField::flags[1]`, `VulkanBonePosing::getNextStamp`, `boneNextStamp`; 0 on a frame the pass does not run, matching nothing), then the tree's first pose and leans.
 - **Its poses** (`boneVertexPoses`, mirrored in `render/gpu/bone_poses`): its bone's at `bonePoseSlot` (last frame's after it) and its parent's, named in the pose's fourth word (`GpuBonePose::parent`, -1 a root: the rest pose), so draws need no bone table.
 - **Moved** (`boneSwayOfVertex`): the blended place minus the rest, in the mesh's frame, then turned and scaled by the model (bones live in the plant's frame: a bound part sits at its plant's origin, `buildPlacedTable` refuses another); leaves flutter as the sway's (`windFlutterAmount` by the tree's lean); a climber's own anchors move as its bones, its swing as before (`windHangingSway`). Normals and tangents turned by `windBlendedDirection`. The main pass's last place from last frame's poses.
+- **Twigs** (ii): each moves whole, by `windRigidPose` at its foot (the twig matrix's place): its two bones' turns blended the short way (nlerp), its foot blended as the bark there is, so it stays on its branch. A mesh shader's workgroup draws one twig's cluster: its first thread makes the pose (`twigPoseOf`, last frame's too in the main pass) and shares it, every vertex then posed by it as by one bone (`drawnPoses`); leaves flutter as the cards' do. Swaying twigs skip the per-twig frustum test (`meshClusterRigid`), so they cannot pop at the screen's edge until 3c-iv's posed bounds.
 - **Still:** a bound vertex whose tree is not posed (past the reach, unclaimed, no room, a tile drawn still, a capture) keeps its rest shape; no fallback to the sway.
-- **Cost a bound vertex:** a binding word, the plant's pair, a tree record and two poses (four in the main pass); grows with drawn bound vertices.
+- **Cost a bound vertex:** a binding word, the plant's pair, a tree record and two poses (four in the main pass); grows with drawn bound vertices. A twig pays that once a cluster, then a pose a vertex.
 
 ## Tests
 
-`sway_bones_test` (and `forest_trees_test`'s and `forest_test`'s bones), `wind_bones_test`, `bone_records_test`, `bone_poses_test` (claims, poses, the draws' reads), `placed_drawing_test` (a bound part at its plant's origin), `wind_sway_test` (`windFlutterAmount`); GPU: `wind_bones_gpu_test`, `wind_gpu_test`.
+`sway_bones_test` (and `forest_trees_test`'s and `forest_test`'s bones), `wind_bones_test`, `bone_records_test`, `bone_poses_test` (claims, poses, the draws' reads), `wind_bones_test`'s rigid pose, `placed_drawing_test` (a bound part at its plant's origin), `wind_sway_test` (`windFlutterAmount`); GPU: `wind_bones_gpu_test`, `wind_gpu_test`.

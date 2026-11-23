@@ -131,6 +131,31 @@ namespace {
         }
 
         const std::vector<GpuVec4> posed = runner.run(shader, GPU_TEST_WIND_BONE_POSE, inputs, 6, 4);
+
+        // A twig's rigid pose (windRigidPose): turns from any pair (half of them across the double cover), feet up a
+        // tree, every weight. Inputs: parent's turn and shift, own's turn and shift, the foot and weight.
+        std::vector<GpuVec4> rigid;
+
+        for (int i = 0; i < 300; ++i) {
+            rigid.push_back(gpuVec4(asVec4(randomTurn(random))));
+            rigid.push_back(gpuVec4(random.direction() * random.between(0.0f, 10.0f)));
+            const Quat turn = randomTurn(random);
+            rigid.push_back(gpuVec4(asVec4(i % 2 == 0 ? turn : -turn)));
+            rigid.push_back(gpuVec4(random.direction() * random.between(0.0f, 10.0f)));
+            rigid.push_back(gpuVec4(random.direction() * random.between(0.0f, 20.0f), i % 10 == 0 ? 0.0f : (i % 10 == 1 ? 1.0f : random.between(0.0f, 1.0f))));
+        }
+
+        const std::vector<GpuVec4> carried = runner.run(shader, GPU_TEST_WIND_RIGID_POSE, rigid, 5, 2);
+
+        for (std::size_t i = 0; i < carried.size() / 2; ++i) {
+            const GpuVec4* in = &rigid[5 * i];
+            const WindBonePose parent{.turn = Quat{in[0][0], in[0][1], in[0][2], in[0][3]}, .shift = vec3From(in[1])};
+            const WindBonePose own{.turn = Quat{in[2][0], in[2][1], in[2][2], in[2][3]}, .shift = vec3From(in[3])};
+            const WindBonePose expected = windRigidPose(own, parent, in[4][3], vec3From(in[4]));
+            checkQuat(report, "windRigidPose turn", expected.turn, carried[2 * i]);
+            // The shift: a foot up to 20 m turned, as windBonePose's (a few ulps of 30 m).
+            report.check("windRigidPose shift", FloatTolerance{.absolute = 2e-5f, .relative = 1e-5f}, expected.shift, vec3From(carried[2 * i + 1]));
+        }
         const std::vector<GpuVec4> merged = runner.run(shader, GPU_TEST_WIND_SPHERES, spheres, 4, 2);
 
         // Rotations of places up to 30 m: rounding a few ulps of 30 m.

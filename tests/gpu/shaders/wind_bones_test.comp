@@ -34,6 +34,11 @@ void main() {
         testOutput(1, vec4(pose.shift, 0.0));
         testOutput(2, vec4(windBlendedPlace(pose, parent, place.w, place.xyz), 0.0));
         testOutput(3, vec4(windBlendedDirection(pose, parent, place.w, testInput(5).xyz), 0.0));
+    } else if (function == GPU_TEST_WIND_RIGID_POSE) {
+        vec4 foot = testInput(4);
+        WindBonePose rigid = windRigidPose(WindBonePose(testInput(2), testInput(3).xyz), WindBonePose(a, b.xyz), foot.w, foot.xyz);
+        testOutput(0, rigid.turn);
+        testOutput(1, vec4(rigid.shift, 0.0));
     } else if (function == GPU_TEST_WIND_BONE_OWN_TURN) {
         vec4 c = testInput(2);
         vec4 d = testInput(3);
