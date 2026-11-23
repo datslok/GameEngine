@@ -991,7 +991,8 @@ namespace {
             /*
             * Moved by bones (ROADMAP phase 21 stage 3c-iii): every part but the still impostor card (and the twig part's
             * stand-in) carries the look's one skeleton, and each mesh it or its levels draw is bound one a vertex to
-            * bones it has; every twig rides on one of them.
+            * bones it has; every twig rides on one of them. The bones are a tree's one way to move (3c-iii-c-iv): a part
+            * or vertex left unbound would quietly sway by the old per-vertex sway instead.
             */
             const SwaySkeleton* skeleton = leaves.parts.front().skeleton.get();
             assert(skeleton != nullptr && !skeleton->bones.empty() && skeleton->height > 1.0f && twigModel.parts.front().skeleton.get() == skeleton);

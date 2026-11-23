@@ -1112,7 +1112,7 @@ void ForestGame::updateNearLianas(World& world, int most) {
                                   .heights = *groundHeights,
                                   .lianas = lianaSettings,
                                   .lianaSeed = lianaSeed};
-    const NearLianaTrees trees{.emergents = emergentVariants, .canopy = canopyVariants, .bend = swaySettings.trees.bend};
+    const NearLianaTrees trees{.emergents = emergentVariants, .canopy = canopyVariants};
     const Vec3 place = controls.getCamera().getPosition();
     nearLianas.update(world, air, Vec2{place.x, place.z}, nearTreeSettings, most, sources, trees, lianaLook, forestTreeBarkLayer.tileMetres, getJobs());
 }
@@ -1235,7 +1235,7 @@ std::vector<NearTreeVariant> ForestGame::plantTrees(AssetManager& assets, Forest
         const MeshLevelOptions sharedBox{.hiddenBelowError = 0.0f, .chooseBounds = treeBox};
         treeHeights[index] = std::max(treeBox.maximum.y, 1e-3f);
         treeSkeletons[index] = std::make_shared<const SwaySkeleton>(SwaySkeleton{.bones = variant.bones, .height = treeHeights[index]});
-        lianaVariants[index] = NearTreeVariant{.height = treeHeights[index], .bones = variant.bones, .lines = variant.swayLines, .blendShare = settings.boneBlendShare};
+        lianaVariants[index] = NearTreeVariant{.bones = variant.bones, .lines = variant.swayLines, .blendShare = settings.boneBlendShare};
 
         barkMeshes.push_back(withClusterLevels(assets, assets.addDrawnMesh(std::move(variant.bark))));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
@@ -1532,9 +1532,9 @@ void ForestGame::applySway(World& world) {
 
     world.get<PlantingSource>(air).looks = plantedLooks();
 
-    // The lianas sway as hanging things, their ends bending as their trees do (their records' bend).
+    // The lianas sway as hanging things; their ends move as their trees' bones do.
     lianaLook.sway = forestSway(swaySettings, ForestSwayer{Entity{}, ForestSwayPart::Hanging, 1.0f, false});
-    nearLianas.resway(world, air, lianaLook.sway, swaySettings.trees.bend);
+    nearLianas.resway(world, lianaLook.sway);
 
     appliedSwaySettings = swaySettings;
 }

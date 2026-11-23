@@ -245,23 +245,6 @@ namespace {
     }
 
     /*
-    * An anchor on a tree (its foot, height, scale and bend, and the point) moves exactly as the tree's own vertex at
-    * its point does, so what hangs from it stays on: the same offset windSwayOffset gives that vertex of a tree sway of
-    * the same height, scale and bend, no flutter.
-    */
-    void testAnchorsMoveWithTheirTree() {
-        const Vec3 foot{10.0f, -2.0f, 5.0f};
-        const Vec3 point{14.0f, 22.0f, 6.0f};
-        const GpuWindAnchor anchor{{foot.x, foot.y, foot.z, 20.0f}, {point.x, point.y, point.z, 1.5f}, {0.3f, 0.0f, 0.0f, 0.0f}};
-        const Vec2 spring{0.06f, -0.03f};
-        const Vec3 moved = windAnchorOffset(anchor, spring, 0.8f, 7.0f);
-        const Vec3 fromFoot = point - foot;
-        const Vec4 sway = packSway(WindSway{.kind = SwayKind::Tree, .height = 20.0f, .bend = 0.3f, .flutter = 0.0f});
-        const Vec3 vertex = windSwayOffset(fromFoot, fromFoot.y / 1.5f, point, sway, 1.5f, spring, 0.8f, leafRate, 7.0f);
-        assert(moved.length() > 0.0f && (moved - vertex).length() < 1e-6f);
-    }
-
-    /*
     * The swing: nothing without wind or arm; out along the spring's lean times the arm (softened), rising so the vertex
     * stays its arm from where it hangs, as a pendulum; further for a longer arm; and flutter on top within its share.
     */
@@ -323,9 +306,9 @@ namespace {
 
     /*
     * The forest: its lianas and the islands' roots, vines and moss hang (Hanging); the islands' and moss's every vertex
-    * with an entry, hanging from fixed rock; each liana's record hangs it from its trees (on the air entity, their bend
-    * the trees'), a rope's far end fixed on the ground; some climbers' roots hang from their tree in mid air. The swing,
-    * flutter and bend apply live.
+    * with an entry, hanging from fixed rock; each liana's record hangs it from its first tree's bones (on the air
+    * entity), a rope's far end on no tree, fixed on the ground; some climbers' roots hang from their tree in mid air.
+    * The swing applies live.
     */
     void testTheForestHangs() {
         TestForest forest{testValley(ForestStart::Trees)};
@@ -340,8 +323,8 @@ namespace {
             assert(renderer.sway.kind == SwayKind::Hanging && renderer.sway.swing == defaults.hangingSwing && renderer.lianaShape > 0u);
             const std::size_t record = lianaRecordOf(renderer.lianaShape);
             const LianaShape& shape = (*shapes.slots[record / shapes.perSlot])[record % shapes.perSlot];
-            assert(shape.trees[2] == defaults.trees.bend && shape.firstTree[3] > 1.0f && shape.from[1] > shape.firstTree[1]);
-            fixedEnd = fixedEnd || shape.trees[1] == 0.0f;
+            assert(shape.anchors[2] != LIANA_NO_TREE && shape.from[1] > shape.firstTree[1]);
+            fixedEnd = fixedEnd || shape.anchors[3] == LIANA_NO_TREE;
         }
 
         assert(fixedEnd);
@@ -373,15 +356,8 @@ namespace {
 
         Input input;
         forest.game.getSwaySettings().hangingSwing = 0.7f;
-        forest.game.getSwaySettings().trees.bend = 0.2f;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(forest.world.get<ModelRenderer>(forest.game.getLianas().front()).sway.swing == 0.7f);
-
-        for (const auto& block : forest.world.get<LianaShapes>(forest.game.getAir()).slots) {
-            for (const LianaShape& shape : block ? *block : std::vector<LianaShape>{}) {
-                assert(shape.trees[2] == 0.2f);
-            }
-        }
     }
 }
 
@@ -394,7 +370,6 @@ void testWindHanging() {
     testTheBandShares();
     testTheHangingSprings();
     testTubesAndLeavesHang();
-    testAnchorsMoveWithTheirTree();
     testTheSwing();
     testTheBlend();
     testTheRecordsReachTheGpu();

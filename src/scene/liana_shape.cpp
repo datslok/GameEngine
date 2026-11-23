@@ -76,7 +76,7 @@ CatenaryFit fitCatenary(double d, double h, double total) {
 * lianaCentre. Its deepest sag is sampled from the curve as the shaders place it.
 */
 LianaShape makeLianaShape(const Vec3& from, const Vec3& to, float length, float radius, float barkTileMetres, const LianaTree& first,
-                          const LianaTree* second, float bend) {
+                          const LianaTree* second) {
     LianaShape shape;
     const Vec3 offset = to - from;
     const double d = Vec3{offset.x, 0.0f, offset.z}.length();
@@ -92,11 +92,8 @@ LianaShape makeLianaShape(const Vec3& from, const Vec3& to, float length, float 
     }
 
     shape.curve[3] = barkTileMetres;
-    setFour(shape.firstTree, first.foot, first.height);
-    setFour(shape.secondTree, second != nullptr ? second->foot : to, second != nullptr ? second->height : 1.0f);
-    shape.trees[0] = first.scale;
-    shape.trees[1] = second != nullptr ? second->scale : 0.0f;
-    shape.trees[2] = bend;
+    setFour(shape.firstTree, first.foot, 0.0f);
+    setFour(shape.secondTree, second != nullptr ? second->foot : to, 0.0f);
     const auto anchorOf = [](const LianaTree* tree) {
         return tree != nullptr && tree->layer != LIANA_NO_TREE ? packSwayBinding(tree->binding) : swayUnbound;
     };

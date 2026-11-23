@@ -151,8 +151,8 @@ namespace {
         const LianaCrown second{.centre = Vec3{24.0f, 27.0f, 4.0f}, .radius = 10.0f, .halfHeight = 4.0f};
         const Vec3 from = lianaCrownHold(first, 0.1f, 0.5f, 0.5f);
         const Vec3 to = lianaCrownHold(second, 0.6f, 0.5f, 0.5f);
-        const LianaTree tree{Vec3{0.0f, 0.0f, 0.0f}, 30.0f, 1.0f};
-        const LianaShape loop = makeLianaShape(from, to, (to - from).length() * 1.2f, 0.03f, 2.0f, tree, &tree, 0.2f);
+        const LianaTree tree{.foot = Vec3{0.0f, 0.0f, 0.0f}};
+        const LianaShape loop = makeLianaShape(from, to, (to - from).length() * 1.2f, 0.03f, 2.0f, tree, &tree);
         ForestLianaSettings settings;
         const LianaLeaves leaves = lianaIvy(loop, first, &second, settings, 0xabcdu);
         assert(near(leaves.firstCrownMetres, walkedRunInCrown(loop, first, false), 0.01f) && leaves.firstCrownMetres > 1.0f);
@@ -160,11 +160,11 @@ namespace {
         assert(leaves.spacing == settings.leafSpacing && leaves.sparseSpacing == settings.sparseLeafSpacing && leaves.size == settings.leafSize);
         assert(leaves.thinFrom == settings.ivyThinDistance && leaves.goneBy == settings.ivyDistance && leaves.seed == 0xabcdu);
 
-        const LianaShape rope = makeLianaShape(from, Vec3{from.x + 2.0f, 0.0f, from.z}, from.y * 1.03f, 0.03f, 2.0f, tree, nullptr, 0.2f);
+        const LianaShape rope = makeLianaShape(from, Vec3{from.x + 2.0f, 0.0f, from.z}, from.y * 1.03f, 0.03f, 2.0f, tree, nullptr);
         const LianaLeaves ropeLeaves = lianaIvy(rope, first, nullptr, settings, 1u);
         assert(ropeLeaves.lastCrownMetres == 0.0f && near(ropeLeaves.firstCrownMetres, walkedRunInCrown(rope, first, false), 0.01f));
 
-        const LianaShape inside = makeLianaShape(from, from + Vec3{1.0f, 0.0f, 0.0f}, 1.2f, 0.03f, 2.0f, tree, &tree, 0.2f);
+        const LianaShape inside = makeLianaShape(from, from + Vec3{1.0f, 0.0f, 0.0f}, 1.2f, 0.03f, 2.0f, tree, &tree);
         assert(near(lianaIvy(inside, first, &first, settings, 1u).firstCrownMetres, 1.2f, 1e-5f));
     }
 

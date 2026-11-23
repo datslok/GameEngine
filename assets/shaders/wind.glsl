@@ -159,22 +159,6 @@ vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, flo
     return offset + windFlutterOffset(place, windFlutterAmount(sway.w, lean, modelHeight, sway.y), flutterRate, seconds);
 }
 
-// An anchor as the shaders read it. Must match GpuWindAnchor.
-struct WindAnchorRecord {
-    vec4 foot;  // xyz the tree's foot, w its height in its mesh's units
-    vec4 point; // xyz the point things hang from, w the tree's scale
-    vec4 bend;  // x the tree's bend
-};
-
-// How an anchor moves, as its tree's own vertex there would (windAnchorOffset).
-vec3 windAnchorOffset(WindAnchorRecord anchor, vec2 spring, float fade, float seconds) {
-    float scale = anchor.point.w;
-    vec4 sway = vec4(float(WIND_CATEGORY_TREES), anchor.foot.w, anchor.bend.x, 0.0);
-    // No flutter (the sway's w is 0), so any rate does.
-    return windSwayOffset(anchor.point.xyz - anchor.foot.xyz, (anchor.point.y - anchor.foot.y) / max(scale, 1e-4), anchor.point.xyz, sway, scale, spring, fade,
-                          vec2(1.0), seconds);
-}
-
 // A hanging vertex's own swing and flutter (windSwingOffset).
 vec3 windSwingOffset(float arm, vec3 place, float swing, float flutter, vec2 spring, float fade, vec2 flutterRate, float seconds) {
     vec2 lean = windFadedLean(spring, swing, fade);

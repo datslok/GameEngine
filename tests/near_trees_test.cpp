@@ -139,7 +139,6 @@ namespace {
     // A tree variant for the lianas: 30 m tall, a trunk and two branches out either way, cut into bones 2 m long.
     NearTreeVariant branchedVariant() {
         NearTreeVariant variant;
-        variant.height = 30.0f;
         variant.blendShare = 0.5f;
         const std::vector<std::vector<Vec3>> lines{{Vec3{}, Vec3{0.0f, 30.0f, 0.0f}},
                                                    {Vec3{0.0f, 20.0f, 0.0f}, Vec3{8.0f, 26.0f, 0.0f}},
@@ -163,7 +162,7 @@ namespace {
         const NearTreeSources sources = patchSources(lianaSettings);
         const std::vector<NearTreeVariant> emergents(static_cast<std::size_t>(sources.species.emergent.variants), branchedVariant());
         const std::vector<NearTreeVariant> canopy(static_cast<std::size_t>(sources.species.canopy.variants), branchedVariant());
-        const NearLianaTrees trees{.emergents = emergents, .canopy = canopy, .bend = 0.25f};
+        const NearLianaTrees trees{.emergents = emergents, .canopy = canopy};
         const NearTreeVariant variant = branchedVariant();
         std::set<std::uint32_t> bindings;
         std::size_t ropes = 0;
@@ -212,7 +211,7 @@ namespace {
         ForestLianaSettings lianaSettings;
         NearTreeSources sources = patchSources(lianaSettings);
         std::vector<NearTreeVariant> variants{branchedVariant(), branchedVariant()};
-        NearLianaTrees trees{.emergents = variants, .canopy = variants, .bend = 0.25f};
+        NearLianaTrees trees{.emergents = variants, .canopy = variants};
         NearLianaLook look{.tube = assets.addDrawnMesh(lianaTemplateMesh(4, 3)), .bark = Material{}, .sway = WindSway{}, .shadowCascades = 2,
                            .ivy = ivyTemplates(assets), .leaf = cutOutLeaf()};
         ForestNearTreeSettings settings;
@@ -298,25 +297,18 @@ namespace {
         assert(fresh.lianas.getCellCount() == 1);
     }
 
-    // The bend given anew reaches every record, each block replaced (so the renderer copies it again).
+    // A new sway reaches every liana's entities; the records stay as they are (their ends move by their trees' bones).
     void testNearLianasResway() {
         LianaWorld held;
         held.update(Vec2{0.0f, -125.0f}, std::numeric_limits<int>::max());
         const LianaShapes before = held.world.get<LianaShapes>(held.holder);
-        held.lianas.resway(held.world, held.holder, WindSway{.kind = SwayKind::Hanging, .swing = 0.6f}, 0.4f);
+        held.lianas.resway(held.world, WindSway{.kind = SwayKind::Hanging, .swing = 0.6f});
         const LianaShapes& after = held.world.get<LianaShapes>(held.holder);
+        assert(after.slots == before.slots);
 
-        for (std::size_t slot = 0; slot < after.slots.size(); ++slot) {
-            if (after.slots[slot]) {
-                assert(after.slots[slot] != before.slots[slot]);
-
-                for (const LianaShape& shape : *after.slots[slot]) {
-                    assert(shape.trees[2] == 0.4f);
-                }
-            }
+        for (const Entity entity : held.lianas.getEntities()) {
+            assert(held.world.get<ModelRenderer>(entity).sway.swing == 0.6f);
         }
-
-        assert(held.world.get<ModelRenderer>(held.lianas.getEntities().front()).sway.swing == 0.6f);
     }
 }
 

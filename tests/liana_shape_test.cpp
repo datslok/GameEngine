@@ -36,8 +36,8 @@ namespace {
     }
 
     LianaShape shapeOf(const Hung& hung) {
-        const LianaTree tree{Vec3{0.0f, 0.0f, 0.0f}, 30.0f, 1.0f};
-        return makeLianaShape(hung.from, hung.to, hung.length, 0.03f, 2.0f, tree, &tree, 0.2f);
+        const LianaTree tree{.foot = Vec3{0.0f, 0.0f, 0.0f}};
+        return makeLianaShape(hung.from, hung.to, hung.length, 0.03f, 2.0f, tree, &tree);
     }
 
     Vec3 fromOf(const LianaShape& shape) {
@@ -136,25 +136,24 @@ namespace {
         }
     }
 
-    // The record keeps the trees it hangs from: the far end fixed (scale 0) without a second.
+    // The record keeps the trees it hangs from: their feet, each hold's binding and its tree's layer; the far end fixed without a second.
     void testTheRecordKeepsItsTrees() {
-        const LianaTree first{.foot = Vec3{1.0f, 2.0f, 3.0f}, .height = 28.0f, .scale = 1.2f, .layer = 0, .binding = SwayBinding{.bone = 12, .weight = 0.5f}};
-        const LianaTree second{.foot = Vec3{4.0f, 5.0f, 6.0f}, .height = 31.0f, .scale = 0.9f, .layer = 1, .binding = SwayBinding{.bone = 3, .weight = 1.0f}};
-        const LianaShape both = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{14.0f, 22.0f, 6.0f}, 16.0f, 0.02f, 2.0f, first, &second, 0.3f);
-        assert(both.firstTree[0] == 1.0f && both.firstTree[3] == 28.0f && both.trees[0] == 1.2f);
-        assert(both.secondTree[2] == 6.0f && both.secondTree[3] == 31.0f && both.trees[1] == 0.9f && both.trees[2] == 0.3f);
+        const LianaTree first{.foot = Vec3{1.0f, 2.0f, 3.0f}, .layer = 0, .binding = SwayBinding{.bone = 12, .weight = 0.5f}};
+        const LianaTree second{.foot = Vec3{4.0f, 5.0f, 6.0f}, .layer = 1, .binding = SwayBinding{.bone = 3, .weight = 1.0f}};
+        const LianaShape both = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{14.0f, 22.0f, 6.0f}, 16.0f, 0.02f, 2.0f, first, &second);
+        assert(both.firstTree[0] == 1.0f && both.firstTree[2] == 3.0f && both.secondTree[0] == 4.0f && both.secondTree[2] == 6.0f);
         // Each anchor's binding to its tree's bones and the tree's layer, for the bones to move it by.
         assert(both.anchors[0] == packSwayBinding(first.binding) && both.anchors[1] == packSwayBinding(second.binding));
         assert(both.anchors[2] == 0u && both.anchors[3] == 1u);
-        const LianaShape rope = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{3.0f, 0.0f, 3.0f}, 21.0f, 0.02f, 2.0f, first, nullptr, 0.3f);
-        assert(rope.trees[1] == 0.0f && rope.curve[0] > 0.0f);
+        const LianaShape rope = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{3.0f, 0.0f, 3.0f}, 21.0f, 0.02f, 2.0f, first, nullptr);
+        assert(rope.curve[0] > 0.0f && rope.secondTree[0] == 3.0f && rope.secondTree[1] == 0.0f);
         assert(rope.anchors[1] == swayUnbound && rope.anchors[3] == static_cast<std::uint32_t>(LIANA_NO_TREE));
         // A tree of no layer (not planted by the cells) leaves its anchor unbound.
-        const LianaTree unplanted{.foot = Vec3{1.0f, 2.0f, 3.0f}, .height = 28.0f, .scale = 1.2f};
-        const LianaShape loose = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{3.0f, 0.0f, 3.0f}, 21.0f, 0.02f, 2.0f, unplanted, nullptr, 0.3f);
+        const LianaTree unplanted{.foot = Vec3{1.0f, 2.0f, 3.0f}};
+        const LianaShape loose = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{3.0f, 0.0f, 3.0f}, 21.0f, 0.02f, 2.0f, unplanted, nullptr);
         assert(loose.anchors[0] == swayUnbound && loose.anchors[2] == static_cast<std::uint32_t>(LIANA_NO_TREE));
         // Holds one above the other hang straight.
-        const LianaShape plumb = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{1.0f, 0.0f, 3.0f}, 21.0f, 0.02f, 2.0f, first, nullptr, 0.3f);
+        const LianaShape plumb = makeLianaShape(Vec3{1.0f, 20.0f, 3.0f}, Vec3{1.0f, 0.0f, 3.0f}, 21.0f, 0.02f, 2.0f, first, nullptr);
         assert(plumb.curve[0] == 0.0f && plumb.to[3] == 20.0f);
     }
 

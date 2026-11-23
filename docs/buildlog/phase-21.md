@@ -173,3 +173,8 @@
   - **9 planted bugs caught** (turn undone the wrong way, the far end's layer, the hold not in the tree's frame, no cell edge fix, a negative modulo, the slot ignored, the counts' layer, the comparison flipped, the move turned back wrongly).
   - **A stale build file:** moving `bone_records_shared.h` left dependency files naming it, which stopped `make` for the GPU tests until deleted.
   - **Checked by the user:** looks great. GPU tests written, not run.
+- `tree-bones-3c-iii-c-iv` (Nov 23 2026): what was left of the trees' per-vertex sway retired; bones are a tree's only motion.
+  - **Smaller than planned:** the branch bob is not the trees' own but `windSwayOffset`'s, which still moves the palms and understorey (no bones), so it stays; the plan's line said otherwise and is corrected.
+  - **Retired:** `windAnchorOffset`, `GpuWindAnchor`, `WindAnchorRecord` (unused since iii) and their tests; the liana record's tree height, scale and bend, written but never read, so `LianaShape` is 128 B again and `NearLianas::resway` no longer replaces every block for a bend.
+  - **The one path guarded (the user's pick A, a test):** `forest_test` already failed for a tree-swayed part without a skeleton or a vertex unbound (both planted: the epiphytes' moss unbound, the shadow bark without its skeleton); its comment now says what it guards. Other games keep the per-vertex sway for things without bones.
+  - **3 planted bugs caught** (moss unbound, a part without its skeleton, the lianas' sway not given).

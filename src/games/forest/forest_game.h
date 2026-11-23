@@ -331,8 +331,7 @@ private:
 
     // One species' variants grown into the looks its placed trees are drawn with, with its leaf material; with
     // climbers, each variant's grown too (none for the mid layer), and likewise with epiphytes.
-    // Returns each variant as its lianas need it: its height (its box's top, in its mesh's units), which its sway bends
-    // against, and its bones' lines, which the lianas' holds are bound to.
+    // Returns each variant as its lianas need it: its bones' lines, which the lianas' holds are bound to.
     std::vector<NearTreeVariant> plantTrees(AssetManager& assets, ForestLayer layer, const ForestTreeSettings& settings,
                                   const std::vector<TreePlacement>& placements, std::uint32_t variantSeed, const Material& leaf, const TreeClimbers* climbers, const TreeEpiphytes& epiphytes);
 

@@ -101,15 +101,12 @@ std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLian
         const std::vector<NearTreeVariant>& variants = tree.layer == ForestLayer::Emergent ? trees.emergents : trees.canopy;
         const std::size_t variant = static_cast<std::size_t>(tree.placement.variant);
         const TreePlacement& placed = tree.placement;
-        LianaTree made{.foot = placed.foot, .height = 1.0f, .scale = placed.scale, .turnRadians = placed.turnRadians};
+        LianaTree made{.foot = placed.foot};
 
         if (variant < variants.size() && !variants[variant].lines.empty()) {
             const NearTreeVariant& grown = variants[variant];
-            made.height = grown.height;
             made.layer = static_cast<std::uint32_t>(tree.layer);
             made.binding = swayNearestBinding(grown.lines, grown.bones, swayPlantPoint(hold, placed.foot, placed.scale, placed.turnRadians), grown.blendShare);
-        } else if (variant < variants.size()) {
-            made.height = variants[variant].height;
         }
 
         return made;
@@ -123,8 +120,8 @@ std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLian
 
         const LianaTree first = treeOf(liana.crown, liana.from);
         const LianaTree second = liana.otherCrown >= 0 ? treeOf(liana.otherCrown, liana.to) : LianaTree{};
-        LianaShape shape = makeLianaShape(liana.from, liana.to, liana.length, liana.radius, barkTileMetres, first, liana.otherCrown >= 0 ? &second : nullptr,
-                                          trees.bend);
+        LianaShape shape = makeLianaShape(liana.from, liana.to, liana.length, liana.radius, barkTileMetres, first,
+                                          liana.otherCrown >= 0 ? &second : nullptr);
         const LianaCrown* otherCrown = liana.otherCrown >= 0 ? &cell.crowns[static_cast<std::size_t>(liana.otherCrown)] : nullptr;
         setLianaLeaves(shape, lianaIvy(shape, cell.crowns[static_cast<std::size_t>(liana.crown)], otherCrown, settings, liana.seed));
         shapes.push_back(shape);
@@ -212,26 +209,10 @@ bool NearLianas::update(World& world, Entity holder, const Vec2& place, const Fo
     return changed;
 }
 
-void NearLianas::resway(World& world, Entity holder, const WindSway& sway, float bend) {
+void NearLianas::resway(World& world, const WindSway& sway) {
     for (const Entity entity : entities) {
         world.get<ModelRenderer>(entity).sway = sway;
         markRenderChanged(world, entity);
-    }
-
-    for (std::shared_ptr<const std::vector<LianaShape>>& block : shapes.slots) {
-        if (block) {
-            auto bent = std::make_shared<std::vector<LianaShape>>(*block);
-
-            for (LianaShape& shape : *bent) {
-                shape.trees[2] = bend;
-            }
-
-            block = std::move(bent);
-        }
-    }
-
-    if (world.has<LianaShapes>(holder)) {
-        world.get<LianaShapes>(holder) = shapes;
     }
 }
 

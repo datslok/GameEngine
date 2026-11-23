@@ -229,45 +229,6 @@ namespace {
 }
 
 namespace {
-    /*
-    * Anchors on trees of every size, in any wind, faded or not. Inputs: the record's foot, point and bend; the spring,
-    * fade and time. Its sines' large phases are the GPU's own, as windSwayOffset's.
-    */
-    void checkAnchor(GpuFunctionRunner& runner, GpuCheckReport& report) {
-        CaseRandom random{97};
-        std::vector<GpuVec4> inputs;
-
-        for (int i = 0; i < 500; ++i) {
-            const float height = random.between(5.0f, 50.0f);
-            const float scale = random.between(0.5f, 2.0f);
-            const Vec3 foot{random.between(-2000.0f, 2000.0f), random.between(-50.0f, 100.0f), random.between(-2000.0f, 2000.0f)};
-            inputs.push_back(gpuVec4(foot.x, foot.y, foot.z, height));
-            inputs.push_back(gpuVec4(foot.x + random.between(-10.0f, 10.0f), foot.y + random.between(0.2f, 1.0f) * height * scale,
-                                     foot.z + random.between(-10.0f, 10.0f), scale));
-            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f)));
-            inputs.push_back(gpuVec4(random.between(-0.3f, 0.3f), random.between(-0.3f, 0.3f), random.between(0.0f, 1.0f), random.between(0.0f, 600.0f)));
-        }
-
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_WIND_ANCHOR, inputs, 4, 1);
-        const FloatTolerance tolerance{.absolute = 3e-3f, .relative = 1e-3f};
-
-        for (std::size_t i = 0; i < outputs.size(); ++i) {
-            GpuWindAnchor anchor{};
-
-            for (std::size_t component = 0; component < 4; ++component) {
-                anchor.foot[component] = inputs[4 * i][component];
-                anchor.point[component] = inputs[4 * i + 1][component];
-                anchor.bend[component] = inputs[4 * i + 2][component];
-            }
-
-            const GpuVec4& spring = inputs[4 * i + 3];
-            const Vec3 expected = windAnchorOffset(anchor, Vec2{spring[0], spring[1]}, spring[2], spring[3]);
-            report.check("windAnchorOffset", tolerance, expected.x, outputs[i][0]);
-            report.check("windAnchorOffset", tolerance, expected.y, outputs[i][1]);
-            report.check("windAnchorOffset", tolerance, expected.z, outputs[i][2]);
-        }
-    }
-
     // Arms from none to a long root's, swings and flutters of every size. Inputs: the place and arm; the swing and
     // flutter; the spring, fade and time; the flutter's rate.
     void checkSwing(GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -391,7 +352,6 @@ void gpuTestWind(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkSoftLean(runner, report);
     checkWindowShare(runner, report);
     checkSway(runner, report);
-    checkAnchor(runner, report);
     checkSwing(runner, report);
     checkFlutter(runner, report);
     checkChain(runner, report);

@@ -36,10 +36,6 @@ void main() {
         vec4 sway = testInput(2);
         vec4 spring = testInput(3);
         testOutput(0, vec4(windSwayOffset(a.xyz, a.w, place.xyz, sway, place.w, spring.xy, spring.z, testInput(4).xy, spring.w), 0.0));
-    } else if (function == GPU_TEST_WIND_ANCHOR) {
-        WindAnchorRecord anchor = WindAnchorRecord(a, testInput(1), testInput(2));
-        vec4 spring = testInput(3);
-        testOutput(0, vec4(windAnchorOffset(anchor, spring.xy, spring.z, spring.w), 0.0));
     } else if (function == GPU_TEST_WIND_SWING) {
         vec4 swing = testInput(1);
         vec4 spring = testInput(2);

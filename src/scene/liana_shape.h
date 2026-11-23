@@ -21,36 +21,29 @@
 */
 
 /*
-* One liana as the shaders read it (liana.glsl's LianaShape, std430, 144 bytes). The catenary in the upright plane
-* through its holds, by its a and u0, the slope (sinh) at the first hold; a = 0 a straight line. The trees it hangs from,
-* each moving as that tree's crown does there (WIND_CATEGORY_TREES); a second scale of 0 leaves the far end fixed (a
-* rope's foot in the ground). Its ivy (ROADMAP d2c): dense where it runs through either crown, sparse between. Its
-* anchors on its trees' bones (ROADMAP phase 21 stage 3c-iii-c-iii): each hold's binding and its tree's planting layer,
-* by which the GPU finds the tree among its planted plants (by its foot) and moves the hold as the bark there.
+* One liana as the shaders read it (liana.glsl's LianaShape, std430, 128 bytes). The catenary in the upright plane
+* through its holds, by its a and u0, the slope (sinh) at the first hold; a = 0 a straight line. Its ivy (ROADMAP d2c):
+* dense where it runs through either crown, sparse between. The trees it hangs from (ROADMAP phase 21 stage
+* 3c-iii-c-iii): each one's foot, and each hold's binding to its tree's bones and the tree's planting layer, by which the
+* GPU finds the tree among its planted plants and moves the hold as the bark there; a rope's foot is on none, fixed.
 */
 struct LianaShape {
     float from[4]{};       // xyz the first hold, w the radius
     float to[4]{};         // xyz the far end, w the length along it
     float curve[4]{};      // x a (0 straight), y u0, z its deepest sag below its chord (its swing's length), w the bark's tile in metres
-    float firstTree[4]{};  // xyz the first tree's foot, w its height in its mesh's units
-    float secondTree[4]{}; // xyz the second tree's foot, w its height
-    float trees[4]{};      // x the first tree's scale, y the second's (0: fixed), z the trees' bend
+    float firstTree[4]{};  // xyz the first tree's foot, w unused
+    float secondTree[4]{}; // xyz the second tree's foot (the far end without one), w unused
     float leaves[4]{};     // x the metres from the first hold inside its crown, y from the far end inside the second's, z the ivy's spacing there, w along the rest
     float leafLook[4]{};   // x a leaf's length (0: no ivy), y the distance its cards start thinning, z the distance they are gone by, w its seed (below 2^24, exact)
     std::uint32_t anchors[4]{}; // x the first hold's binding (packSwayBinding), y the far end's (SWAY_UNBOUND none), z w their trees' layers (LIANA_NO_TREE none)
 };
 
-static_assert(sizeof(LianaShape) == 144, "LianaShape must match liana.glsl's LianaShape");
+static_assert(sizeof(LianaShape) == 128, "LianaShape must match liana.glsl's LianaShape");
 
-/*
-* A tree a liana hangs from: its foot, its mesh's height, scale and turn (as its WindSway and placement), its planting
-* layer (LIANA_NO_TREE: none, the hold not moved by bones) and the binding of the hold to its bones.
-*/
+// A tree a liana hangs from: its foot, its planting layer (LIANA_NO_TREE: none, the hold not moved by bones) and the
+// binding of the hold to its bones.
 struct LianaTree {
     Vec3 foot;
-    float height = 1.0f;
-    float scale = 1.0f;
-    float turnRadians = 0.0f;
     std::uint32_t layer = LIANA_NO_TREE;
     SwayBinding binding{};
 };
@@ -72,10 +65,10 @@ CatenaryFit fitCatenary(double d, double h, double total);
 /*
 * A liana's record: the catenary of length metres from from to to, solved as catenaryStrand solves it (in doubles); a
 * length no longer than the straight line, or holds one above the other, a straight line. Its first tree, and its
-* second (none: its far end fixed), bending by bend; its bark tiled every barkTileMetres along it.
+* second (none: its far end fixed); its bark tiled every barkTileMetres along it.
 */
 LianaShape makeLianaShape(const Vec3& from, const Vec3& to, float length, float radius, float barkTileMetres, const LianaTree& first,
-                          const LianaTree* second, float bend);
+                          const LianaTree* second);
 
 // A point of a liana's centre line: its offset from the first hold, its unit direction along, the metres along to it.
 struct LianaPoint {
