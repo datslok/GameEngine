@@ -709,6 +709,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 - [ ] Slang trial: one shader source for SPIR-V and C++, replacing the hand-written mirrors
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
 - [x] Commands from the command line (`command-line-control`)
+- [x] Claude Code hooks: the hard rules a script can check, enforced (`claude-hooks`)
 - [ ] Level editor or scene file format, every edit a command (undo on the same list)
 - [ ] API reference with Doxygen (`make docs`, comments as `/** */`)
 - [ ] Scripting for gameplay code

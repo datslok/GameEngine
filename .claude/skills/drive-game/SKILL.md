@@ -27,5 +27,6 @@ Get-Process game -ErrorAction SilentlyContinue
 
 - **IMPORTANT:** the same step ends with `quit` and a `Get-Process game` check; `Stop-Process` any of yours left. A leftover copy locks `game.exe` and breaks the user's build. Never end a turn, ask a question or hand over with one running.
 - Yours always carry `--hidden --port 47620`; never touch any other. To tell copies apart: `Get-CimInstance Win32_Process -Filter "name = 'game.exe'"` shows each command line.
+- A copy answers only once it listens ("Listening" on stderr): the forest takes about 20 s in debug, 55 s in release on the home PC. Until then `--send` fails; send `wait` again rather than starting a second copy.
 - Then read the PNG.
 - Launch options: `--game <name>`, `--set key=value`, `--run <script>`, `--typical-gpu`.
