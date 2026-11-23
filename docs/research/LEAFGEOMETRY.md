@@ -105,6 +105,29 @@ The culling algorithm itself is unpublished (no talk slides found).
   - [I] No facing test on posed clusters (found building iv-b): a blend shears triangles near a joint, so a normal turns by more than its bones do and no widened cone is safe; the flutter moves leaves too. Twigs move rigidly, but flutter as well.
 - **Far:** the crown impostor card stays until volumes (`FARFOLIAGE.md`).
 
+## Far levels above the twigs (3e, researched Nov 23 2026)
+
+- **Measured (home PC, release, four spots, GPU ms; `probe-size-128`):** twigs cost 3-8 ms over the cards (ring 27.0 against 19.0 with Passes "Twigs" off, trees 26.2 / 18.6, wall 19.1 / 14.9, rim 15.5 / 12.3); a 4 px cluster error cut twig triangles 79M to 14M at the ring and the frame to 21.4. The cost is triangles, mostly near: at the ring levels 0-1 hold 61.6M of 79M twig triangles (153K and 516K twigs), levels 2-4 17.5M (786K, 392K, 25K twigs at 18, 9, 8 triangles each).
+- **The user's pick: twigs stay at 1 px** (no coarser twig error); the near triangles wait for stage 5.
+- **Others** [V unless marked]:
+  - Nanite Assemblies ([docs](https://dev.epicgames.com/documentation/unreal-engine/nanite-assemblies?lang=en-US)): parts' root clusters merged at build into the assembly's coarsest levels, "its own internal HLOD", down to one cluster; parts' own clusters not duplicated; near parts are instances, transforms made while culling descends. Example parts are big (41M triangles in 2,160 parts, about 19K each), so a part fills clusters over most of its range before its root.
+  - SpeedTree ([LOD](https://docs.unity3d.com/speedtree-modeler/manual/level-of-detail.html)): leaves removed at set distances, survivors grown to keep the leaf cloud's volume ("Grow scale", "Jumble"), then a dithered billboard.
+  - Leaf collapse (Remolar et al. 2002, [EG](https://diglib.eg.org/items/879d3160-d9ee-4463-9b0b-b36fda9bba37/full); Gasch et al. 2018, [Entropy](https://pmc.ncbi.nlm.nih.gov/articles/PMC7512728)) [S abstracts]: two leaves merged into one of their area; the alternative to pruning.
+  - Witcher 4 demo ([Unreal Fest 2025 talk](https://www.classcentral.com/course/youtube-large-scale-animated-foliage-in-the-witcher-4-unreal-engine-5-tech-demo-unreal-fest-stockholm-2025-505458)) [S summaries]: assemblies near, voxels far; no slides.
+- [I] **Where to merge, by Nanite's rule (a part merged once it is one cluster):** a twig is 189 triangles at level 0, 64 at 1 (one cluster, half empty), 18 at 2: from level 2 a twig's workgroup carries 18 of 124 triangles and every halving saves triangles but no instance, cull test or workgroup. At 1 px twigs rarely reach level 4 before the crown card (rim 38K of 1.34M, ring 25K of 1.87M), so merging there would do almost nothing.
+- [I] **Leaf records, not vertices:** from level 2 every leaf is one row of one shape, so a merged leaf is a record (foot, frame, size, number, binding: about 20-24 B) expanded by the mesh shader, as a twig is from its prototype: about 3-5 MB for 11 variants against about 150-200 MB as vertices (1.2 KB a twig); the GPU's work the same, its memory reads fewer.
+- **The user's picks (Nov 23 2026):**
+  - Brick levels in each variant's leaves (A, Nanite's way) over a far mesh a tree swapped whole (B: one error step, a pop) or far twigs packed into shared workgroups (C: per-twig culling stays, cost with twigs).
+  - Prune by the leaves' ranks and grow the survivors (A, as within a twig: levels nest, a leaf keeps its tone) over leaf collapse (B: new leaves each level, tones change, no nesting).
+  - Bricks take over at twig level 2, its leaves stored as records.
+- **The design:**
+  - A brick's level 0 is exactly its twigs' level-2 leaves (4 a twig), so the switch moves no leaf, only the work: 64 twig instances become about 10 full clusters.
+  - Each level above keeps half a brick's leaves by rank, the survivors grown by sqrt(full area over kept area) about their feet, the error as a twig's (a grown leaf's stray past its size, never under the finer level's) and above the twig levels'; bricks then merge in pairs (by the bricks' median split, so neighbours pair) up to the tree, then the crown card as today.
+  - A brick is drawn as twigs where its level 0's error does not fit, as its levels where it does: one choice a brick, the cluster cut's rule (a group drawn when its error fits and its parent's does not), so twigs and bricks never overlap or leave a gap.
+  - Leaves keep their twig's bone binding and flutter, posed rigidly as their twig; bounds from the bones (3c-iv), no facing test.
+  - The same records give 3f's shadows an opaque leaf set without cut-out cards.
+  - Cost grows with bricks and brick clusters drawn, not with twigs in the valley; memory with variants (records), not trees.
+
 ## The plan (phase 21 stage 3)
 
 | Stage | What | Tests and checks |
@@ -114,7 +137,9 @@ The culling algorithm itself is unpublished (no talk slides found).
 | 3c-ii | Bone motion in `wind_bones.glsl` and its C++ mirror: each bone's turn from the tree's spring, stiffness and phase, about the axis across its direction and the wind; parents composed first; the blended vertex; a cluster's bound from its bones | still air still, the foot fixed, joints continuous, bounds holding over random poses; a GPU test (not run) |
 | 3c-iii | The bones pass, its pool and buffers; bark and twigs moved by their bones in every view (twig flutter as its bone's turn); the trees' per-vertex sway retired | the user checks and tunes the sway |
 | 3c-iv | Clusters culled by their bones' bounds (up to 8 a cluster, else the tree's move; no facing test while posed); nothing kept whole for sway on trees; animation stopped below 0.1 of the screen | F4 counts, `cluster-compare`, timings at the four spots |
-| 3e | Far levels above the twigs: whole twigs pruned by rank and merged into each variant's coarse levels, the cut crossing from twigs to tree without cracks or pops | |
+| 3e-i | Each variant's brick levels on the CPU: level 0 its twigs' level-2 leaves as records, levels pruned by rank and grown, bricks merged in pairs up to the tree, errors rising past the twigs' | area kept a level, levels nest, errors rise, records match the twigs' level 2; size measured |
+| 3e-ii | The records on the GPU; the mesh shader expanding a leaf record into its row, mirrored in C++ | a record's leaf equals the twig's level-2 leaf (positions, normals, number, binding); a GPU test (not run) |
+| 3e-iii | The twig pass hands a brick to its levels where level 0's error fits, culled by posed bounds | one choice a brick (no overlap, no gap) on the CPU twin; F4 counts; the four spots measured; the user checks by eye |
 | 3f | The leaf cards and shadow stand-ins retired, leaves casting opaque shadows in the cascades until stage 4; the crown's impostor card kept far until volumes | measured at the four spots |
 
 - Plants, grass and hanging things keep today's sway. Grass and floor cover stay as they are: stage 1 culls their patches by cluster, stage 4 decides their shadows (contact shadows instead, measured), stage 5 helps them most.

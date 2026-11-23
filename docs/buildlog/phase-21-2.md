@@ -95,3 +95,7 @@
   - **The probe, not the trees, held the frame:** CUBE was 40-55% of it at three spots; at the ring 64 / 128 / 256 texels 1.9 / 5.9 / 17.5 ms with the same triangles, so pixel-bound (no prepass, stacked leaf cards, every light a layer). Research and plan: `docs/research/PROBECAPTURE.md`, phase 22, after the forest demo (the user's pick).
   - **High and Ultra share the probe now;** High's own 128 removed as a copy of the default.
   - **Caught by the preset tests** against the old default (256 left on Ultra).
+- 3e planned (`leaf-bricks-3e-plan`, Nov 23 2026; research and design in `LEAFGEOMETRY.md`, Far levels above the twigs): brick levels in each variant's leaves from twig level 2, leaves as records.
+  - **Measured first:** twigs cost 3-8 ms over the cards, almost all triangles, mostly near (levels 0-1 61.6M of the ring's 79M); a 4 px error would save 5.6 ms at the ring, but the user keeps twigs at 1 px.
+  - **Level 2, not 4 (the user asked why, since Nanite merges at the root):** Nanite merges a part once it is one cluster; its parts are about 19K triangles, ours 189, one cluster from level 1, 18 triangles a workgroup from level 2. At 1 px twigs rarely reach level 4 before the crown card.
+  - **Records over vertices (the user asked what scales best):** about 3-5 MB for 11 variants against 150-200 MB; a second expansion path in the mesh shader.
