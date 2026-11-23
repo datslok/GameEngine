@@ -60,13 +60,15 @@ int twigLevelRows(int leafRows, int level);
 
 /*
 * One level of a twig: its leaves (one mesh, the leaf material's), its stem (the finest level only; empty beyond), which
-* of the twig's leaves it keeps (their numbers in clusterLeaves' order), how much the kept leaves grew (their scale), and
-* its error in metres (0 for the finest; never less than the finer level's).
+* of the twig's leaves it keeps (their numbers in clusterLeaves' order) and where each was placed (in kept's order: what
+* a brick's far leaves carry, scene/twig_set.h), how much the kept leaves grew (their scale), and its error in metres (0
+* for the finest; never less than the finer level's).
 */
 struct TwigLevel {
     IndexedMesh leaves;
     IndexedMesh stem;
     std::vector<std::uint32_t> kept;
+    std::vector<TwigLeafPlace> places;
     float growth = 1.0f;
     float error = 0.0f;
 };
@@ -90,6 +92,9 @@ TwigLeafMesh twigLeafMesh(const TwigPrototype& twig);
 
 // One twig: leaves laid out as clusterLeaves(cells, leafShare, seed) lays out a card's, in a twig twigSize metres tall.
 TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& settings, float twigSize, float leafShare, std::uint32_t seed);
+
+// A twig's leaves at twigBrickLevel (its coarsest if it has fewer levels), as the bricks above it take them over.
+TwigFarLeaves twigFarLeaves(const TwigPrototype& twig);
 
 // The prototype a placed twig's pick (0..1) chooses among count.
 std::uint32_t twigPrototypeOf(float pick, std::size_t count);

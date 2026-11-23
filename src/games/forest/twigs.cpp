@@ -167,7 +167,22 @@ TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& se
             // The leaf's number in the texture coordinate's whole part (scene/foliage_shading.h): the shaders tone it by it.
             place.uvMin = Vec2{numberedLeafU(cell.uvMin.x, leaf), cell.uvMin.y};
             place.uvMax = Vec2{numberedLeafU(cell.uvMax.x, leaf), cell.uvMax.y};
+            const std::size_t firstVertex = made.leaves.vertices.size();
             appendModelledLeaf(made.leaves, shapeOf(leaf, level), place);
+            float reach = 0.0f;
+
+            for (std::size_t vertex = firstVertex; vertex < made.leaves.vertices.size(); ++vertex) {
+                reach = std::max(reach, (made.leaves.vertices[vertex].position - place.foot).length() / place.side);
+            }
+
+            made.places.push_back(TwigLeafPlace{.foot = place.foot,
+                                                .towardsTip = place.towardsTip,
+                                                .facing = place.facing,
+                                                .side = place.side,
+                                                .area = leafShapeArea(shapeOf(leaf, level)),
+                                                .reach = reach,
+                                                .cell = static_cast<std::uint32_t>(placed.sourceCell),
+                                                .number = leaf});
             made.error = std::max(made.error, placed.length * twigSize * (made.growth - 1.0f));
         }
 
@@ -177,6 +192,15 @@ TwigPrototype buildTwig(const TracedLeaves& leaves, const ForestTwigSettings& se
     }
 
     return twig;
+}
+
+TwigFarLeaves twigFarLeaves(const TwigPrototype& twig) {
+    if (twig.levels.empty()) {
+        return {};
+    }
+
+    const TwigLevel& level = twig.levels[std::min(static_cast<std::size_t>(twigBrickLevel), twig.levels.size() - 1)];
+    return TwigFarLeaves{.leaves = level.places, .growth = level.growth, .error = level.error};
 }
 
 std::uint32_t twigPrototypeOf(float pick, std::size_t count) {

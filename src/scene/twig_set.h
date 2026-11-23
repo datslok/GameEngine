@@ -4,6 +4,7 @@
 #include "scene/asset_handles.h"
 #include "scene/indexed_mesh.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -42,11 +43,107 @@ struct TwigBrick {
     std::uint32_t twigCount = 0;
 };
 
+/*
+* Far levels above the twigs (ROADMAP phase 21 stage 3e, docs/research/LEAFGEOMETRY.md, Far levels above the twigs;
+* Nanite's assemblies, a part merged once it is one cluster). From twigBrickLevel on a twig carries a few one-row leaves
+* in a workgroup with room for far more, so a brick takes over its twigs there: its leaves packed as records in full
+* clusters, coarser levels keeping half of them each, survivors grown, bricks merged in pairs once one cluster is left.
+*/
+
+// The twig level whose leaves a brick's finest level holds, exactly (scene/leaf_pruning.h's level; the coarsest a
+// prototype has when it has fewer).
+inline constexpr int twigBrickLevel = 2;
+
+/*
+* One leaf of a prototype's twigBrickLevel, in its frame (games/forest/twigs.h): its foot, the way to its tip and its
+* facing (unit, square to each other), its cell's side in metres as drawn at that level, its shape's area (its cell's
+* units squared, the rows it is drawn with there), the farthest any point of it lies from its foot (a share of its
+* side), its atlas cell and its number in the twig (its tone's).
+*/
+struct TwigLeafPlace {
+    Vec3 foot;
+    Vec3 towardsTip;
+    Vec3 facing;
+    float side = 1.0f;
+    float area = 0.0f;
+    float reach = 0.0f;
+    std::uint32_t cell = 0;
+    std::uint32_t number = 0;
+};
+
+// A prototype's leaves at twigBrickLevel, how much that level grew them over the finest (their sides there), and its
+// error (metres, prototype's frame).
+struct TwigFarLeaves {
+    std::vector<TwigLeafPlace> leaves;
+    float growth = 1.0f;
+    float error = 0.0f;
+};
+
+/*
+* A far leaf's record, in the plant's frame: a TwigLeafPlace carried by its twig (foot, frame, side times the twig's
+* scale and the level's growth), its cell and number, and its twig's number in the set (whose binding, lean and tone
+* it shares).
+*/
+struct FarLeaf {
+    Vec3 foot;
+    Vec3 towardsTip;
+    Vec3 facing;
+    float side = 0.0f;
+    std::uint32_t cell = 0;
+    std::uint32_t number = 0;
+    std::uint32_t twig = 0;
+};
+
+/*
+* One level of a far node: its leaves' run in the records (each level its own run, so its clusters are runs of
+* farLeavesPerCluster), its density (it keeps one leaf in 2^density of the set's, by the set's rank), the growth of
+* its leaves over the twig level's, and its error (metres, plant's frame): how far a grown leaf strays past its finest
+* size, never less than the level before's, nor its children's, nor its twigs'.
+*/
+struct TwigFarLevel {
+    std::uint32_t firstLeaf = 0;
+    std::uint32_t leafCount = 0;
+    std::uint32_t density = 0;
+    float growth = 1.0f;
+    float error = 0.0f;
+};
+
+inline constexpr std::uint32_t twigFarNoNode = 0xffffffffu;
+
+/*
+* A node of the far tree: a brick (nodes 0 to bricks - 1, a brick each) or two nodes merged (its children). Its sphere
+* holds every leaf of each of its levels and its children's spheres; its bricks' run, and its levels' run.
+*/
+struct TwigFarNode {
+    Vec3 centre;
+    float radius = 0.0f;
+    std::uint32_t firstBrick = 0;
+    std::uint32_t brickCount = 0;
+    std::uint32_t firstLevel = 0;
+    std::uint32_t levelCount = 0;
+    std::uint32_t children[2] = {twigFarNoNode, twigFarNoNode};
+    std::uint32_t parent = twigFarNoNode;
+};
+
+// The far levels of a set: the bricks' nodes first, the merged ones after their children, the root last.
+struct TwigFarLevels {
+    std::vector<FarLeaf> leaves;
+    std::vector<TwigFarLevel> levels;
+    std::vector<TwigFarNode> nodes;
+};
+
 struct TwigSet {
     std::vector<MeshHandle> prototypes;
     std::vector<TwigInstance> twigs; // brick by brick
     std::vector<TwigBrick> bricks;
+    TwigFarLevels far; // empty until made (scene/twig_far_levels.h)
 };
+
+/*
+* How many of a run of bricks the median split puts in its first half (makeTwigSet): half, rounded up. The far tree
+* merges them by the same split, so neighbours pair.
+*/
+std::size_t twigBricksFirstHalf(std::size_t bricks);
 
 // How far a mesh reaches from its origin: its farthest vertex's distance (0 for none).
 float meshReach(const IndexedMesh& mesh);

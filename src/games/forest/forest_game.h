@@ -406,6 +406,7 @@ private:
     ForestTwigSettings twigSettings;
     std::vector<TwigPrototype> twigPrototypes;
     std::vector<float> twigReaches; // each prototype's farthest point from its foot (meshReach of twigLeafMesh)
+    std::vector<TwigFarLeaves> twigFarLeavesOf; // each prototype's leaves the bricks take over (twigFarLeaves)
     LeafAtlas twigAtlas;            // the prototypes' leaves, until buildTwigs makes their material
     std::vector<Entity> twigStand;
     std::vector<std::vector<PlacedTwig>> treeTwigs; // each tree look's, as treeLooks

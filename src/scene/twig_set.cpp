@@ -35,7 +35,7 @@ namespace {
         const Vec3 size = high - low;
         const int axis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
         const std::size_t bricks = (count + twigBrickSize - 1) / twigBrickSize;
-        const std::size_t middle = first + (bricks + 1) / 2 * twigBrickSize;
+        const std::size_t middle = first + twigBricksFirstHalf(bricks) * twigBrickSize;
         std::nth_element(order.begin() + static_cast<std::ptrdiff_t>(first), order.begin() + static_cast<std::ptrdiff_t>(middle),
                          order.begin() + static_cast<std::ptrdiff_t>(end), [&](std::size_t a, std::size_t b) {
                              const float atA = axisOf(twigs[a].foot, axis);
@@ -45,6 +45,10 @@ namespace {
         splitIntoBricks(order, first, middle, twigs);
         splitIntoBricks(order, middle, end, twigs);
     }
+}
+
+std::size_t twigBricksFirstHalf(std::size_t bricks) {
+    return (bricks + 1) / 2;
 }
 
 float meshReach(const IndexedMesh& mesh) {

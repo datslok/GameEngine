@@ -1,5 +1,6 @@
 #include "games/forest/forest_game.h"
 
+#include "scene/twig_far_levels.h"
 #include "scene/interpolation.h"
 
 #include "core/srgb.h"
@@ -1803,9 +1804,11 @@ void ForestGame::makeTwigPrototypes() {
     const TracedLeaves leaves = traceAtlasLeaves(twigAtlas, twigSettings.leafRows, twigSettings.insetTexels);
     twigPrototypes = buildTwigPrototypes(leaves, twigSettings, treeSettings.clusterSize, treeSettings.leafLength / treeSettings.clusterSize, twigSeed);
     twigReaches.clear();
+    twigFarLeavesOf.clear();
 
     for (const TwigPrototype& twig : twigPrototypes) {
         twigReaches.push_back(meshReach(twigLeafMesh(twig).mesh));
+        twigFarLeavesOf.push_back(twigFarLeaves(twig));
     }
 }
 
@@ -1830,7 +1833,7 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
     }
 
     // The prototypes as the trees will draw them: every level in one mesh with its levels given (twigLeafMesh), and each
-    // tree look's twigs over them, in bricks.
+    // tree look's twigs over them, in bricks, with the bricks' far levels above them (ROADMAP phase 21 stage 3e).
     std::vector<MeshHandle> prototypeMeshes;
 
     for (const TwigPrototype& twig : twigPrototypes) {
@@ -1843,7 +1846,9 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
     treeTwigSets.clear();
 
     for (const std::vector<PlacedTwig>& twigs : treeTwigs) {
-        treeTwigSets.push_back(std::make_shared<const TwigSet>(treeTwigSet(twigs, prototypeMeshes, twigReaches)));
+        TwigSet set = treeTwigSet(twigs, prototypeMeshes, twigReaches);
+        set.far = makeTwigFarLevels(set, twigFarLeavesOf);
+        treeTwigSets.push_back(std::make_shared<const TwigSet>(std::move(set)));
     }
 
     /*

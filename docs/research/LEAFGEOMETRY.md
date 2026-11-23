@@ -126,6 +126,12 @@ The culling algorithm itself is unpublished (no talk slides found).
   - A brick is drawn as twigs where its level 0's error does not fit, as its levels where it does: one choice a brick, the cluster cut's rule (a group drawn when its error fits and its parent's does not), so twigs and bricks never overlap or leave a gap.
   - Leaves keep their twig's bone binding and flutter, posed rigidly as their twig; bounds from the bones (3c-iv), no facing test.
   - The same records give 3f's shadows an opaque leaf set without cut-out cards.
+- **Measured in 3e-i (default forest, 11 variants, release, home PC):**
+  - 71.7K twigs, 4.4 leaves a twig at level 2: 313K records at the bricks' finest levels, 625K with every level its own run; about 14 MB at 24 B, 17 MB at 28 B (the estimate's 3-5 MB counted fewer twigs). Sharing records between a brick's levels would halve it.
+  - [I] A one-row leaf is 5 vertices: 12 a cluster under the 64-vertex limit, not the 31 the triangles allow. So a brick's 64 twigs become about 22 clusters, not 10: 26.7K finest clusters against 71.7K twig workgroups, 2.7 times fewer. A mesh shader declaring more vertices for records (3e-ii) could fit 31.
+  - Each full brick has 6 levels (256 leaves down to 8); merged nodes about one cluster each; a tree's root keeps 6-9 leaves grown 20-92 times, its error 9-41 m, far past the crown card.
+  - The bricks' level 0 errors 0.24-0.36 m (twig level 2's, times its scale).
+  - Built in 48 ms for all 11 at start-up.
   - Cost grows with bricks and brick clusters drawn, not with twigs in the valley; memory with variants (records), not trees.
 
 ## The plan (phase 21 stage 3)

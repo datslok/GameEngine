@@ -2,6 +2,8 @@
 #include "games/forest/island_hangings.h"
 #include "games/forest/leaf_clusters.h"
 #include "games/forest/twigs.h"
+#include "math/angles.h"
+#include "scene/foliage_shading.h"
 #include "scene/leaf_pruning.h"
 
 #include "forest_helpers.h"
@@ -225,6 +227,59 @@ namespace {
         }
     }
 
+    /*
+    * A twig hands its level twigBrickLevel to the bricks: its kept leaves' places, which rebuild that level's mesh
+    * exactly (one row each, its fold and curl, its numbered cell), each its shape's area and a reach holding every point
+    * of it; the level's growth and error. A twig with fewer levels hands over its coarsest.
+    */
+    void testTwigsHandOverTheirLeaves() {
+        const TracedLeaves leaves = traceAtlasLeaves(testAtlas(), 3, 1.0f);
+        const ForestTwigSettings settings;
+        const TwigPrototype twig = buildTwig(leaves, settings, 1.0f, 0.22f, 7);
+        const TwigLevel& level = twig.levels[static_cast<std::size_t>(twigBrickLevel)];
+        const TwigFarLeaves far = twigFarLeaves(twig);
+        assert(twigLevelRows(settings.leafRows, twigBrickLevel) == 1);
+        assert(far.leaves.size() == level.kept.size() && far.growth == level.growth && far.error == level.error);
+        IndexedMesh rebuilt;
+
+        for (std::size_t index = 0; index < far.leaves.size(); ++index) {
+            const TwigLeafPlace& leaf = far.leaves[index];
+            const LeafShape& shape = leaves.byRows[0][leaf.cell];
+            const AtlasCell cell = atlasCell(static_cast<int>(leaf.cell), leaves.columns, leaves.rows);
+            assert(leaf.number == level.kept[index] && leaf.area == leafShapeArea(shape));
+            const std::size_t first = rebuilt.vertices.size();
+            appendModelledLeaf(rebuilt, shape,
+                               ModelledLeafPlace{.foot = leaf.foot,
+                                                 .towardsTip = leaf.towardsTip,
+                                                 .facing = leaf.facing,
+                                                 .side = leaf.side,
+                                                 .foldRadians = settings.foldDegrees * fullTurnRadians / 360.0f,
+                                                 .curl = settings.curl,
+                                                 .uvMin = Vec2{numberedLeafU(cell.uvMin.x, leaf.number), cell.uvMin.y},
+                                                 .uvMax = Vec2{numberedLeafU(cell.uvMax.x, leaf.number), cell.uvMax.y}});
+            float farthest = 0.0f;
+
+            for (std::size_t vertex = first; vertex < rebuilt.vertices.size(); ++vertex) {
+                farthest = std::max(farthest, (rebuilt.vertices[vertex].position - leaf.foot).length());
+            }
+
+            assert(farthest <= leaf.side * leaf.reach * 1.0001f && farthest >= leaf.side * leaf.reach * 0.9999f);
+        }
+
+        assert(rebuilt.vertices.size() == level.leaves.vertices.size() && rebuilt.indices == level.leaves.indices);
+
+        for (std::size_t vertex = 0; vertex < rebuilt.vertices.size(); ++vertex) {
+            const MeshVertex& a = rebuilt.vertices[vertex];
+            const MeshVertex& b = level.leaves.vertices[vertex];
+            assert((a.position - b.position).lengthSquared() == 0.0f && (a.normal - b.normal).lengthSquared() == 0.0f);
+            assert(a.uv.x == b.uv.x && a.uv.y == b.uv.y);
+        }
+
+        TwigPrototype shortTwig = twig;
+        shortTwig.levels.resize(2);
+        assert(twigFarLeaves(shortTwig).error == twig.levels[1].error && twigFarLeaves(TwigPrototype{}).leaves.empty());
+    }
+
     // The same seed grows the same twig; the prototypes differ from each other; the settings name seven fields, read at start-up.
     void testTwigsAreRepeatableAndVaried() {
         const TracedLeaves leaves = traceAtlasLeaves(testAtlas(), 3, 1.0f);
@@ -281,5 +336,6 @@ void testTwigs() {
     testTracingFollowsTheLeaf();
     testAModelledLeaf();
     testTwigLevels();
+    testTwigsHandOverTheirLeaves();
     testTwigsAreRepeatableAndVaried();
 }

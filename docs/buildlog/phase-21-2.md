@@ -99,3 +99,11 @@
   - **Measured first:** twigs cost 3-8 ms over the cards, almost all triangles, mostly near (levels 0-1 61.6M of the ring's 79M); a 4 px error would save 5.6 ms at the ring, but the user keeps twigs at 1 px.
   - **Level 2, not 4 (the user asked why, since Nanite merges at the root):** Nanite merges a part once it is one cluster; its parts are about 19K triangles, ours 189, one cluster from level 1, 18 triangles a workgroup from level 2. At 1 px twigs rarely reach level 4 before the crown card.
   - **Records over vertices (the user asked what scales best):** about 3-5 MB for 11 variants against 150-200 MB; a second expansion path in the mesh shader.
+- `leaf-bricks-3e-i` (Nov 24 2026): each variant's far levels on the CPU (`makeTwigFarLevels`, `TwigSet::far`); nothing drawn by them yet.
+  - **One rank for the whole set** (`prunedOrder` over every brick's leaves in order): a level of density k keeps one leaf in 2^k everywhere, so levels nest within a brick and across merges for free; no per-node ranks to reconcile.
+  - **The merge tree is the bricks' own split** (`twigBricksFirstHalf`, now shared with `makeTwigSet`): its shape depends only on the brick count, so neighbours pair without storing the split.
+  - **Each level its own run of grown records:** twice the finest's records (14 MB), simplest for 3e-ii and iii; sharing runs with a growth a level would save about 7 MB.
+  - **12 leaves a cluster, not 31** (5 vertices a one-row leaf against the 64-vertex limit): about 22 clusters a brick, 2.7 times fewer workgroups than its twigs, where the plan expected 6; 3e-ii may raise the records' shader's vertex limit.
+  - **Measured:** 625K records for 11 variants, about 14 MB at 24 B (the plan's 3-5 MB counted fewer twigs); built in 48 ms at start-up (`LEAFGEOMETRY.md`).
+  - **Twigs keep their leaves' places** (`TwigLevel::places`), tested to rebuild level 2's mesh exactly.
+  - **9 planted bugs caught** (growth without its square root, no error floor, no twig scale, the split halved down, children's spheres left out, ranks shifted a level, the hand-over a level early, reach not over the side, numbers lost).
