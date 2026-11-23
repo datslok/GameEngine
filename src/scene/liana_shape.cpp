@@ -97,6 +97,13 @@ LianaShape makeLianaShape(const Vec3& from, const Vec3& to, float length, float 
     shape.trees[0] = first.scale;
     shape.trees[1] = second != nullptr ? second->scale : 0.0f;
     shape.trees[2] = bend;
+    const auto anchorOf = [](const LianaTree* tree) {
+        return tree != nullptr && tree->layer != LIANA_NO_TREE ? packSwayBinding(tree->binding) : swayUnbound;
+    };
+    shape.anchors[0] = anchorOf(&first);
+    shape.anchors[1] = anchorOf(second);
+    shape.anchors[2] = first.layer;
+    shape.anchors[3] = second != nullptr ? second->layer : LIANA_NO_TREE;
 
     float deepest = 0.0f;
 

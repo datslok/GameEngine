@@ -1,7 +1,10 @@
 #pragma once
 
 #include "math/vec3.h"
+#include "scene/sway_bones_shared.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 /*
@@ -28,6 +31,19 @@ struct SwayBinding {
     int bone = 0;
     float weight = 1.0f;
 };
+
+inline constexpr std::uint32_t swayUnbound = SWAY_UNBOUND;
+inline constexpr std::size_t swayMostBones = SWAY_MOST_BONES;
+
+// A binding in one word, as the GPU reads it: its bone in the low 16 bits, its weight as a 16-bit unsigned normalized
+// number above them. Throws std::invalid_argument for a bone outside 0..SWAY_MOST_BONES - 1.
+std::uint32_t packSwayBinding(const SwayBinding& binding);
+
+// A packed binding back (its weight rounded to 1 / 65535).
+SwayBinding unpackSwayBinding(std::uint32_t packed);
+
+// A world point in a plant's mesh frame (where its bones live): its placement (foot, turn about up, scale) undone.
+Vec3 swayPlantPoint(const Vec3& world, const Vec3& foot, float scale, float turnRadians);
 
 // A line's bones: boneCount from firstBone on, each length / boneCount long along it.
 struct SwayChain {

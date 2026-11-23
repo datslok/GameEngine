@@ -1,9 +1,27 @@
 #include "scene/sway_bones.h"
+#include "math/quat.h"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
+
+std::uint32_t packSwayBinding(const SwayBinding& binding) {
+    if (binding.bone < 0 || static_cast<std::size_t>(binding.bone) >= swayMostBones) {
+        throw std::invalid_argument("A bound vertex's bone must be within a skeleton's 65535 bones");
+    }
+
+    const auto weight = static_cast<std::uint32_t>(std::lround(std::clamp(binding.weight, 0.0f, 1.0f) * 65535.0f));
+    return static_cast<std::uint32_t>(binding.bone) | (weight << 16u);
+}
+
+SwayBinding unpackSwayBinding(std::uint32_t packed) {
+    return SwayBinding{.bone = static_cast<int>(packed & 0xFFFFu), .weight = static_cast<float>(packed >> 16u) / 65535.0f};
+}
+
+Vec3 swayPlantPoint(const Vec3& world, const Vec3& foot, float scale, float turnRadians) {
+    return Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, -turnRadians).rotate(world - foot) * (1.0f / scale);
+}
 
 namespace {
     // Each point's distance along the line from its first.

@@ -87,16 +87,26 @@ struct NearLianaLook {
     Material leaf;
 };
 
-// What a liana's records take from the trees: each tree layer's variants' heights (their meshes' units), and the bend.
+// A tree variant as its lianas need it: its mesh's height (its units), its bones and their lines, and how a point bound
+// to them blends towards a bone's parent (ForestTreeSettings::boneBlendShare), so a hold moves as the bark there.
+struct NearTreeVariant {
+    float height = 1.0f;
+    std::vector<SwayBone> bones;
+    std::vector<SwayLine> lines;
+    float blendShare = 0.5f;
+};
+
+// What a liana's records take from the trees: each tree layer's variants, and the bend.
 struct NearLianaTrees {
-    const std::vector<float>& emergentHeights;
-    const std::vector<float>& canopyHeights;
+    const std::vector<NearTreeVariant>& emergents;
+    const std::vector<NearTreeVariant>& canopy;
     float bend = 1.0f;
 };
 
 /*
-* A cell's lianas as records (makeLianaShape): from each liana's trees, its far end fixed for a rope, with its ivy
-* (lianaIvy) as the settings give it; at most most.
+* A cell's lianas as records (makeLianaShape): from each liana's trees, its far end fixed for a rope, each hold bound to
+* its tree's variant's nearest bone line (in the tree's mesh frame), with its ivy (lianaIvy) as the settings give it; at
+* most most.
 */
 std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLianaTrees& trees, const ForestLianaSettings& settings, float barkTileMetres,
                                         std::size_t most);

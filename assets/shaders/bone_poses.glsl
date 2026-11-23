@@ -5,7 +5,7 @@
 #define BONE_POSES_GLSL
 
 #include "render/gpu/bone_poses_shared.h"
-#include "render/gpu/bone_records_shared.h"
+#include "scene/sway_bones_shared.h"
 
 // A bone of a skeleton (GpuSwayBone): pivot and parent within its skeleton (-1 a root), tip and radius, its chain's
 // first bone, length and radius at its start, its level.

@@ -95,11 +95,24 @@ NearTreeCell makeNearTreeCell(const PlantingCell& cell, float cellMetres, const 
 
 std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLianaTrees& trees, const ForestLianaSettings& settings, float barkTileMetres,
                                         std::size_t most) {
-    const auto treeOf = [&](int crown) {
+    // A variant the layer lacks (no meshes grown) leaves the hold unbound, standing still.
+    const auto treeOf = [&](int crown, const Vec3& hold) {
         const NearTree& tree = cell.trees[static_cast<std::size_t>(crown)];
-        const std::vector<float>& heights = tree.layer == ForestLayer::Emergent ? trees.emergentHeights : trees.canopyHeights;
+        const std::vector<NearTreeVariant>& variants = tree.layer == ForestLayer::Emergent ? trees.emergents : trees.canopy;
         const std::size_t variant = static_cast<std::size_t>(tree.placement.variant);
-        return LianaTree{tree.placement.foot, variant < heights.size() ? heights[variant] : 1.0f, tree.placement.scale};
+        const TreePlacement& placed = tree.placement;
+        LianaTree made{.foot = placed.foot, .height = 1.0f, .scale = placed.scale, .turnRadians = placed.turnRadians};
+
+        if (variant < variants.size() && !variants[variant].lines.empty()) {
+            const NearTreeVariant& grown = variants[variant];
+            made.height = grown.height;
+            made.layer = static_cast<std::uint32_t>(tree.layer);
+            made.binding = swayNearestBinding(grown.lines, grown.bones, swayPlantPoint(hold, placed.foot, placed.scale, placed.turnRadians), grown.blendShare);
+        } else if (variant < variants.size()) {
+            made.height = variants[variant].height;
+        }
+
+        return made;
     };
     std::vector<LianaShape> shapes;
 
@@ -108,8 +121,8 @@ std::vector<LianaShape> nearLianaShapes(const NearTreeCell& cell, const NearLian
             break;
         }
 
-        const LianaTree first = treeOf(liana.crown);
-        const LianaTree second = liana.otherCrown >= 0 ? treeOf(liana.otherCrown) : LianaTree{};
+        const LianaTree first = treeOf(liana.crown, liana.from);
+        const LianaTree second = liana.otherCrown >= 0 ? treeOf(liana.otherCrown, liana.to) : LianaTree{};
         LianaShape shape = makeLianaShape(liana.from, liana.to, liana.length, liana.radius, barkTileMetres, first, liana.otherCrown >= 0 ? &second : nullptr,
                                           trees.bend);
         const LianaCrown* otherCrown = liana.otherCrown >= 0 ? &cell.crowns[static_cast<std::size_t>(liana.otherCrown)] : nullptr;

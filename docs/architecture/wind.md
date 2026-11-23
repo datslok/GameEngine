@@ -97,7 +97,7 @@ A mesh without entries of kind `Hanging` sways as its own object on the short ba
 **On the GPU:**
 
 - `packHangingVertex`: three words (anchors as two 16-bit halves; along and arm as half floats; swing length as a half float), binding 40, read by `gl_VertexIndex`. `uploadMesh` returns the mesh's entry (`VertexEntries`), `attachVertexEntries` gives each draw `DrawItem::hangingEntry` → `GpuInstance::hanging[0]`. Copied whole when new ones arrive (`updateVertexRecords`).
-- Lianas' records: binding 41 (`LianaShape`, 128 bytes with the ivy's, `writeLianaShapes`: a slot's block copied when it is replaced). A draw's `hanging.w` is its record + 1, with `LIANA_IVY_BIT` (`scene/liana_shared.h`) for its ivy.
+- Lianas' records: binding 41 (`LianaShape`, 144 bytes with the ivy's and its anchors' bindings and trees' layers, `writeLianaShapes`: a slot's block copied when it is replaced). A draw's `hanging.w` is its record + 1, with `LIANA_IVY_BIT` (`scene/liana_shared.h`) for its ivy.
 
 ## Bones
 

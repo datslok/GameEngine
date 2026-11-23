@@ -18,6 +18,7 @@ struct LianaShape {
     vec4 trees;      // x the first tree's scale, y the second's (0: fixed), z the trees' bend
     vec4 leaves;     // x the metres from the first hold inside its crown, y from the far end inside the second's, z the ivy's spacing there, w along the rest
     vec4 leafLook;   // x a leaf's length (0: no ivy), y the distance its cards start thinning, z the distance they are gone by, w its seed
+    uvec4 anchors;   // x the first hold's binding, y the far end's (SWAY_UNBOUND none), z w their trees' layers (LIANA_NO_TREE none)
 };
 
 // The level direction across the upright plane from the first hold (x when the holds are one above the other) (lianaRun).
