@@ -172,8 +172,8 @@ void VulkanBonePosing::record(VkCommandBuffer commands, FrameDescriptors& descri
     vkCmdUpdateBuffer(commands, header.get(), 0, headerBytes, words);
     bufferBarrier(commands, header.get(), transferWrite, computeReadWrite);
 
-    // A frame's stamp is never 0, the plant table's cleared value.
-    stamp = stamp == 0xFFFFFFFFu ? 1u : stamp + 1u;
+    // A frame's stamp is never 0, the plant table's cleared value; the draws were given it (getNextStamp).
+    stamp = boneNextStamp(stamp);
     BonePush push{.stamp = stamp, .poolBones = poolBones, .fadeEnd = inputs.fadeEnd, .eye = {inputs.eye.x, inputs.eye.y, inputs.eye.z, 0.0f}};
 
     std::vector<ComputeBinding> bindings{
@@ -256,6 +256,10 @@ std::optional<VulkanBonePosing::Collected> VulkanBonePosing::collect(std::uint32
 
 const SwaySkeletonTables& VulkanBonePosing::getTables() const {
     return tables;
+}
+
+std::uint32_t VulkanBonePosing::getNextStamp() const {
+    return boneNextStamp(stamp);
 }
 
 VkBuffer VulkanBonePosing::getTrees() const {

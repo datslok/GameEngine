@@ -144,6 +144,23 @@ namespace {
             report.check("windFadedLean", arithmeticTolerance, expected.x, fadedOut[i][0]);
             report.check("windFadedLean", arithmeticTolerance, expected.y, fadedOut[i][1]);
         }
+
+        // How far leaves flutter (windFlutterAmount), below the foot, up a crown and past its top. Inputs: flutter, lean,
+        // height in the mesh; the mesh's height.
+        std::vector<GpuVec4> amounts;
+
+        for (int i = 0; i < 300; ++i) {
+            amounts.push_back(gpuVec4(random.between(0.0f, 0.5f), random.between(-1.0f, 1.0f), random.between(-1.0f, 1.0f), random.between(-5.0f, 60.0f)));
+            amounts.push_back(gpuVec4(i % 50 == 0 ? 0.0f : random.between(1.0f, 50.0f)));
+        }
+
+        const std::vector<GpuVec4> amountOut = runner.run(shader, GPU_TEST_WIND_FLUTTER_AMOUNT, amounts, 2, 1);
+
+        for (std::size_t i = 0; i < amountOut.size(); ++i) {
+            const GpuVec4& in = amounts[2 * i];
+            const float expected = windFlutterAmount(in[0], Vec2{in[1], in[2]}, in[3], amounts[2 * i + 1][0]);
+            report.check("windFlutterAmount", arithmeticTolerance, expected, amountOut[i][0]);
+        }
     }
 
     // Places in, near the edges of and outside windows anywhere. Inputs: the place and the window's first cell; the cell.

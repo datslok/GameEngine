@@ -9,6 +9,7 @@
 #include "planar_reflection.glsl"
 #include "terrain_data.glsl"
 #include "wind_data.glsl"
+#include "bone_vertex_data.glsl"
 #include "liana_data.glsl"
 
 // The shadow pass for cut-outs: where each vertex is, as shadow.vert places it, and its texture coordinates and
@@ -31,7 +32,8 @@ out float gl_ClipDistance[1];
 
 void main() {
     // A frame's draw, or a placed plant's part (drawn_objects.glsl).
-    InstanceData instance = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB)).instance;
+    DrawnObject drawn = drawnObject(uint(gl_InstanceIndex), uint(gl_BaseInstanceARB));
+    InstanceData instance = drawn.instance;
 
     // A liana's tube or ivy: its template placed on its curve (liana_data.glsl), swayed in the tiles that sway, as the
     // camera draws it (the ivy's cards grown for the camera's distance, so its shadow matches what is seen).
@@ -54,9 +56,19 @@ void main() {
     vec4 world = instance.model * vec4(position, 1.0);
     world.y += groundLift(instance.material.w, world.xyz, instance.model[3].y);
 
-    // In the sun's nearest cascades, the wind's sway as the camera's views draw it; the rest keep still shadows.
+    // In the sun's nearest cascades, the wind's sway as the camera's views draw it, a vertex bound to its tree's bones
+    // moved by them (still when its tree is not posed); the rest keep still shadows.
     if (tileOptions.x != 0.0) {
-        world.xyz += windSwayOfVertex(instance.model, instance.sway, instance.handedness.y, instance.hanging, gl_VertexIndex - gl_BaseVertexARB, position, world.xyz, cameraOrigin.xyz, false);
+        int meshVertex = gl_VertexIndex - gl_BaseVertexARB;
+        BoneDrawn bones = boneDrawn(drawn.plant, uint(gl_VertexIndex));
+
+        if (bonePosed(bones)) {
+            world.xyz += boneSwayOfVertex(bones, boneVertexPoses(bones, false), instance.model, instance.sway, instance.hanging, meshVertex, position, world.xyz,
+                                          cameraOrigin.xyz, false);
+        } else if (bones.binding == SWAY_UNBOUND) {
+            world.xyz += windSwayOfVertex(instance.model, instance.sway, instance.handedness.y, instance.hanging, meshVertex, position, world.xyz, cameraOrigin.xyz,
+                                          false);
+        }
     }
 
     gl_Position = tileMatrix * world;

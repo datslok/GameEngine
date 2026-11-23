@@ -70,6 +70,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the twigs
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // every pool vertex's binding to its bones (render/gpu/bone_records.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each twig's binding
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the posed trees (render/gpu/bone_poses.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each plant's tree this frame
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the bones' poses
     }};
 }
 
@@ -266,6 +269,9 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.twigs,
         views.swayBindings,
         views.twigBindings,
+        views.boneTrees,
+        views.bonePlantTrees,
+        views.bonePoses,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

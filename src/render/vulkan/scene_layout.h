@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/bone_poses_shared.h"
 #include "render/gpu/placed_drawing_shared.h"
 #include "render/gpu/twig_drawing_shared.h"
 #include "render/vulkan/frame_descriptors.h"
@@ -81,8 +82,15 @@ enum SceneBinding : std::uint32_t {
     TwigsBinding = 47,
     SwayBindingsBinding = 48,
     TwigBindingsBinding = 49,
-    SceneBindingCount = 50
+    BoneTreesBinding = 50,
+    BonePlantTreesBinding = 51,
+    BonePosesBinding = 52,
+    SceneBindingCount = 53
 };
+
+static_assert(BoneTreesBinding == SCENE_BONE_TREES_BINDING && BonePlantTreesBinding == SCENE_BONE_PLANT_TREES_BINDING &&
+                  BonePosesBinding == SCENE_BONE_POSES_BINDING && SwayBindingsBinding == SCENE_SWAY_BINDINGS_BINDING,
+              "The bones' bindings must match bone_vertex_data.glsl's");
 
 static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsBinding == SCENE_PLACED_PARTS_BINDING &&
                   PlacedEntriesBinding == SCENE_PLACED_ENTRIES_BINDING,
@@ -234,6 +242,9 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo twigs{};
     VkDescriptorBufferInfo swayBindings{};    // every pool vertex's binding to its bones (a stand-in without; render/gpu/bone_records.h)
     VkDescriptorBufferInfo twigBindings{};    // each twig's binding, beside the twigs (a stand-in without)
+    VkDescriptorBufferInfo boneTrees{};       // the bones pass's trees, each plant's tree and the pool (stand-ins without)
+    VkDescriptorBufferInfo bonePlantTrees{};
+    VkDescriptorBufferInfo bonePoses{};
     VkDescriptorBufferInfo lianaShapes{};     // the lianas' records, slot by slot (scene/liana_shape.h; one unused without)
 };
 

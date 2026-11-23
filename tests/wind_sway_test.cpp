@@ -192,6 +192,18 @@ namespace {
     }
 
     /*
+    * How far leaves flutter (windFlutterAmount, shared by the sway and the bones' cards): flutter times the lean, growing
+    * with the height share from nothing at the foot (or below it) to all of it at the top and above.
+    */
+    void testTheFlutterAmount() {
+        const Vec2 lean{0.3f, 0.4f};
+        assert(windFlutterAmount(0.2f, lean, 0.0f, 10.0f) == 0.0f && windFlutterAmount(0.2f, lean, -3.0f, 10.0f) == 0.0f);
+        assert(near(windFlutterAmount(0.2f, lean, 5.0f, 10.0f), 0.05f, 1e-6f));
+        assert(near(windFlutterAmount(0.2f, lean, 20.0f, 10.0f), 0.1f, 1e-6f));
+        assert(windFlutterAmount(0.0f, lean, 20.0f, 10.0f) == 0.0f && windFlutterAmount(0.2f, Vec2{}, 20.0f, 10.0f) == 0.0f);
+    }
+
+    /*
     * The flutter on its own: nothing for no amount, each direction within it; twice as fast at twice the hertz (the same
     * shiver at half the time) and the same shiver twice as far along at twice the metres. The sway's flutter is it, at
     * the top's full amount, with the rate given.
@@ -444,6 +456,7 @@ void testWindSway() {
     testTheBend();
     testTheBranches();
     testTheFlutter();
+    testTheFlutterAmount();
     testTheFlutterRate();
     testTheLeavesFlutterInStep();
     testWhichDrawsSway();

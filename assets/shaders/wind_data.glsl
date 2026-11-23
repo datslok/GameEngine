@@ -87,6 +87,35 @@ vec2 windChainSpringAt(vec2 place, float swingLength, bool previous) {
     return spring;
 }
 
+// A hanging vertex's anchors' word (its mesh's first hanging vertex in hanging.x, plus 1): first low, second high.
+uint windHangingAnchors(uvec4 hanging, int vertex) {
+    return hangingWords[3u * (hanging.x - 1u + uint(vertex))];
+}
+
+// Whether either anchor moves as the object's own sway does at the vertex.
+bool windAnchorsNeedOwn(uint anchors) {
+    return (anchors & 0xffffu) == uint(WIND_ANCHOR_OWN) || (anchors >> 16u) == uint(WIND_ANCHOR_OWN);
+}
+
+/*
+* A hanging vertex's motion given own, how its object moves at it (its sway, or its bones'): its anchors' motions
+* blended by its share along, and its swing on the hanging spring where it is (no flutter when an anchor is its own:
+* the own motion fluttered already).
+*/
+vec3 windHangingSway(uvec4 hanging, int vertex, uint anchors, vec4 sway, vec3 own, vec3 world, vec3 eye, float seconds, bool previous) {
+    uint word = 3u * (hanging.x - 1u + uint(vertex));
+    vec2 alongAndArm = unpackHalf2x16(hangingWords[word + 1u]);
+    float swingLength = unpackHalf2x16(hangingWords[word + 2u]).x;
+    bool needsOwn = windAnchorsNeedOwn(anchors);
+    vec3 firstMotion = windAnchorMotion(anchors & 0xffffu, own);
+    vec3 secondMotion = windAnchorMotion(anchors >> 16u, own);
+    vec2 spring = windChainSpringAt(world.xz, swingLength, previous);
+    float fade = windSwayFade(distance(world, eye), windField.sway.y, windField.sway.z);
+    vec3 swing = windSwingOffset(alongAndArm.y, world, uintBitsToFloat(hanging.y), needsOwn ? 0.0 : sway.w, spring, fade,
+                                 windField.flutters[WIND_CATEGORY_HANGING].xy, seconds);
+    return windHangingOffset(firstMotion, secondMotion, alongAndArm.x, swing);
+}
+
 /*
 * Where the wind moves a vertex of an instance, this frame or last frame (previous: its springs and time, for the
 * velocity pass). model: the instance's world matrix, sway and scale its record's (GpuInstance::sway, uniformScale),
@@ -107,21 +136,9 @@ vec3 windSwayOfVertex(mat4 model, vec4 sway, float scale, uvec4 hanging, int ver
         return windOwnSway(model, sway, scale, position, world, eye, seconds, previous);
     }
 
-    uint word = 3u * (hanging.x - 1u + uint(vertex));
-    uint anchors = hangingWords[word];
-    uint first = anchors & 0xffffu;
-    uint second = anchors >> 16u;
-    vec2 alongAndArm = unpackHalf2x16(hangingWords[word + 1u]);
-    float swingLength = unpackHalf2x16(hangingWords[word + 2u]).x;
-    bool needsOwn = first == uint(WIND_ANCHOR_OWN) || second == uint(WIND_ANCHOR_OWN);
-    vec3 own = needsOwn ? windOwnSway(model, sway, scale, position, world, eye, seconds, previous) : vec3(0.0);
-    vec3 firstMotion = windAnchorMotion(first, own);
-    vec3 secondMotion = windAnchorMotion(second, own);
-    vec2 spring = windChainSpringAt(world.xz, swingLength, previous);
-    float fade = windSwayFade(distance(world, eye), windField.sway.y, windField.sway.z);
-    vec3 swing = windSwingOffset(alongAndArm.y, world, uintBitsToFloat(hanging.y), needsOwn ? 0.0 : sway.w, spring, fade,
-                                 windField.flutters[WIND_CATEGORY_HANGING].xy, seconds);
-    return windHangingOffset(firstMotion, secondMotion, alongAndArm.x, swing);
+    uint anchors = windHangingAnchors(hanging, vertex);
+    vec3 own = windAnchorsNeedOwn(anchors) ? windOwnSway(model, sway, scale, position, world, eye, seconds, previous) : vec3(0.0);
+    return windHangingSway(hanging, vertex, anchors, sway, own, world, eye, seconds, previous);
 }
 
 #endif

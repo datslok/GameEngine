@@ -125,6 +125,11 @@ vec3 windFlutterOffset(vec3 place, float amount, vec2 rate, float seconds) {
     return vec3(sin(turn + phase), sin(1.3 * turn + 0.7 * phase + 2.0), sin(0.9 * turn + 1.3 * phase + 4.0)) * amount;
 }
 
+// How far a vertex's leaves flutter: flutter times the lean, growing with its height share to the top (windFlutterAmount).
+float windFlutterAmount(float flutter, vec2 lean, float modelHeight, float height) {
+    return flutter * length(lean) * min(max(modelHeight, 0.0) / max(height, 1e-4), 1.0);
+}
+
 /*
 * Where the wind moves a vertex (windSwayOffset): fromFoot the vertex from its foot in the world, modelHeight its
 * height in the mesh's frame, place where it is, sway the instance's (category, height, bend, flutter), scale the
@@ -151,7 +156,7 @@ vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, flo
     float branchTurn = 6.28318530718 * float(WIND_BRANCH_HERTZ) * seconds + windPhase(place, float(WIND_BRANCH_METRES));
     offset.y += float(WIND_BRANCH_SHARE) * amount * trunkDistance * grow * sin(branchTurn);
 
-    return offset + windFlutterOffset(place, sway.w * amount * grow, flutterRate, seconds);
+    return offset + windFlutterOffset(place, windFlutterAmount(sway.w, lean, modelHeight, sway.y), flutterRate, seconds);
 }
 
 // An anchor as the shaders read it. Must match GpuWindAnchor.

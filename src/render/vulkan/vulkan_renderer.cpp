@@ -2040,6 +2040,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // is written with its record.
     frameWind = wind->prepare(description.wind ? &*description.wind : nullptr, settings.wind, cameraOrigin, description.frameSeconds);
 
+    // The draws pose bound vertices only on a frame the bones pass runs (below), by the stamp it will claim with.
+    frameWind.flags[1] = frameBones && wind->runs() ? static_cast<std::int32_t>(bonePosing->getNextStamp()) : 0;
+
     // The camera's culling view, and the placed plants' views (render/vulkan/vulkan_placed_drawing.h) before the scene set
     // points at their entries: the camera, the probe faces captured this frame and the shadow tiles drawing their casters.
     // The mirror draws only flat-faced draws, which plants are not. The camera builds no velocity list: the main pass
@@ -2907,6 +2910,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.twigs = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getTwigs() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.twigBindings = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getTwigBindings() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.swayBindings = VkDescriptorBufferInfo{swayBindingRecords.empty() ? noPlacedRecords.get() : swayBindings.get(), 0, VK_WHOLE_SIZE};
+    const auto boneView = [&](VkBuffer buffer) { return VkDescriptorBufferInfo{buffer != VK_NULL_HANDLE ? buffer : noPlacedRecords.get(), 0, VK_WHOLE_SIZE}; };
+    views.boneTrees = boneView(bonePosing->getTrees());
+    views.bonePlantTrees = boneView(bonePosing->getPlantTrees());
+    views.bonePoses = boneView(bonePosing->getPoses());
     views.lianaShapes = lianaShapeRecords->describe();
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }

@@ -47,16 +47,19 @@ struct GpuBoneTree {
 
 static_assert(sizeof(GpuBoneTree) == 32, "GpuBoneTree must match bone_poses.glsl's BoneTree");
 
-// A bone's pose in the pool: its turn (x y z w) and shift, in its mesh's units. Must match bone_poses.glsl's BonePose.
+/*
+* A bone's pose in the pool: its turn (x y z w) and shift, in its mesh's units, and its parent within its skeleton (-1 a
+* root), so a vertex finds both poses it blends without the bone table. Must match bone_poses.glsl's BonePose.
+*/
 struct GpuBonePose {
     float turn[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     float shift[3] = {0.0f, 0.0f, 0.0f};
-    float unused = 0.0f;
+    std::int32_t parent = -1;
 };
 
 static_assert(sizeof(GpuBonePose) == 32, "GpuBonePose must match bone_poses.glsl's BonePose");
 
-GpuBonePose packBonePose(const WindBonePose& pose);
+GpuBonePose packBonePose(const WindBonePose& pose, std::int32_t parent);
 WindBonePose unpackBonePose(const GpuBonePose& pose);
 
 /*
@@ -89,6 +92,29 @@ std::uint32_t boneGrownPool(std::uint32_t pool, std::uint32_t bonesAsked, std::u
 
 // A tree's seed for its branches' phases: its plant's pick's bits (fixed for the plant wherever its slot is).
 std::uint32_t boneTreeSeed(const GpuPlacedPlant& plant);
+
+// The stamp after a frame's: the next, never 0 (the plant table's cleared value and the draws' "nothing posed").
+std::uint32_t boneNextStamp(std::uint32_t stamp);
+
+/*
+* The tree a plant's word pair (claimStamp, claimTree) holds for a draw this frame: claimTree when the frame that claimed
+* it is this one, else BONE_NO_TREE. frameStamp 0 (the passes did not run) matches nothing, though the table starts
+* cleared to 0.
+*/
+std::uint32_t boneClaimedTree(std::uint32_t claimStamp, std::uint32_t claimTree, std::uint32_t frameStamp);
+
+// A bone's place in the pool: its tree's first pose + 2 bone, last frame's (previous) after it.
+std::uint32_t bonePoseSlot(std::uint32_t firstPose, std::uint32_t bone, bool previous);
+
+// What a bound vertex blends: its bone's pose, its parent's (the rest pose for a root), its own weight.
+struct BoneVertexPoses {
+    WindBonePose own;
+    WindBonePose parent;
+    float weight = 1.0f;
+};
+
+// A vertex's poses (binding: packSwayBinding's, not SWAY_UNBOUND) from its tree's (firstPose) in the pool, this frame's or last's.
+BoneVertexPoses boneVertexPoses(std::span<const GpuBonePose> pool, std::uint32_t firstPose, std::uint32_t binding, bool previous);
 
 // ---- The passes' steps on the CPU ----
 
@@ -146,6 +172,7 @@ struct BoneComparison {
     std::size_t extra = 0;
     std::size_t twice = 0;
     std::size_t posesChecked = 0;
+    std::size_t wrongParents = 0;
     float worstTurn = 0.0f;
     float worstShift = 0.0f;
 };
@@ -154,5 +181,5 @@ BoneComparison compareBonePoses(std::span<const BoneWanted> wanted, std::span<co
                                 const SwaySkeletonTables& tables, std::span<const GpuPlacedPlant> plants, const WindBoneMotion& motion, float seconds,
                                 float previousSeconds);
 
-// The comparison in a line: agrees (turns within 1e-4, shifts within 1e-3 units) or DIFFERS, with the counts.
+// The comparison in a line: agrees (turns within 1e-4, shifts within 1e-3 units, every parent right) or DIFFERS, with the counts.
 std::string describeBoneComparison(const BoneComparison& comparison);

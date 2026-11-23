@@ -225,6 +225,29 @@ namespace {
             picked.pick = c[1][3];
             report.check("boneTreeSeed", arithmeticTolerance, static_cast<float>(boneTreeSeed(picked) == std::bit_cast<std::uint32_t>(claimed[i][2])), 1.0f);
         }
+
+        // What a draw reads (boneClaimedTree, bonePoseSlot): stamps matching or not, 0 (no pass), wrapped; integers as
+        // their bits. Inputs: the claim's stamp and tree, the frame's stamp, the first pose; the bone.
+        std::vector<GpuVec4> reads;
+
+        for (std::uint32_t i = 0; i < 200; ++i) {
+            const std::uint32_t frameStamp = i % 5 == 0 ? 0u : i % 5 == 1 ? 0xFFFFFFFFu : i * 7919u;
+            const std::uint32_t claimStamp = i % 3 == 0 ? frameStamp : frameStamp + 1u;
+            const std::uint32_t tree = i % 7 == 0 ? boneNoTree : i * 31u;
+            reads.push_back(gpuVec4(std::bit_cast<float>(claimStamp), std::bit_cast<float>(tree), std::bit_cast<float>(frameStamp),
+                                    std::bit_cast<float>(i * 1024u)));
+            reads.push_back(gpuVec4(std::bit_cast<float>(i * 3u % 400u)));
+        }
+
+        const std::vector<GpuVec4> read = runner.run(shader, GPU_TEST_BONE_CLAIMED_TREE, reads, 2, 1);
+
+        for (std::size_t i = 0; i < read.size(); ++i) {
+            const auto word = [&](std::size_t input, int lane) { return std::bit_cast<std::uint32_t>(reads[2 * i + input][lane]); };
+            const auto same = [](std::uint32_t expected, float actual) { return static_cast<float>(expected == std::bit_cast<std::uint32_t>(actual)); };
+            report.check("boneClaimedTree", arithmeticTolerance, same(boneClaimedTree(word(0, 0), word(0, 1), word(0, 2)), read[i][0]), 1.0f);
+            report.check("bonePoseSlot", arithmeticTolerance, same(bonePoseSlot(word(0, 3), word(1, 0), false), read[i][1]), 1.0f);
+            report.check("bonePoseSlot", arithmeticTolerance, same(bonePoseSlot(word(0, 3), word(1, 0), true), read[i][2]), 1.0f);
+        }
     }
 }
 

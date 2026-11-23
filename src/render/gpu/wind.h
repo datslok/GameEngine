@@ -155,7 +155,8 @@ bool windCellInWindow(const WindCell& cell, const WindWindow& window);
 * The field's record, std430 as wind_data.glsl reads it (scene set 1, binding 37): wind the direction (x, z), speed and
 * time; gusts the gusts' strength and size and the turbulence's; step the frame's step and whether the field is on (1)
 * and its spring images are filled; each category's spring (frequency, damping, response); each cascade's window and
-* last frame's; each cascade's cell (metres, and 1 / its window's width); flags whether last frame's windows hold; sway
+* last frame's; each cascade's cell (metres, and 1 / its window's width); flags whether last frame's windows hold (x)
+* and the bones pass's stamp this frame (y, 0 when it does not run: render/gpu/bone_poses.h; set by the renderer); sway
 * whether things sway (1, with the field on), where the sway's fade starts and ends (metres) and last frame's time;
 * each category's flutter (hertz, metres); the bones' motion (WindBoneMotion: exponent, most stiffness,
 * wood speed, slowest hertz; fastest hertz, swing along, swing across).
@@ -212,6 +213,13 @@ float windPhase(const Vec3& place, float metres);
 * turning once every rate's metres (y), each direction within amount.
 */
 Vec3 windFlutterOffset(const Vec3& place, float amount, const Vec2& rate, float seconds);
+
+/*
+* How far a vertex's leaves flutter: flutter (metres a radian of lean) times the lean, growing with its height share
+* (modelHeight over height, both in the mesh's units) from nothing at the foot to all of it at the top. Shared by the
+* sway and the cards the bones move.
+*/
+float windFlutterAmount(float flutter, const Vec2& lean, float modelHeight, float height);
 
 /*
 * Where the wind moves a vertex (an offset in the world, metres). fromFoot: the vertex from its foot, in the world (the

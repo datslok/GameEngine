@@ -41,7 +41,8 @@ struct BoneTree {
     vec4 leans;
 };
 
-// A bone's pose in the pool (GpuBonePose): its turn and shift.
+// A bone's pose in the pool (GpuBonePose): its turn, its shift (xyz) and its parent within its skeleton (w's bits as
+// an int, -1 a root).
 struct BonePose {
     vec4 turn;
     vec4 shift;
@@ -67,6 +68,16 @@ uint boneTreeFirstPose(uint askedBefore, uint boneCount, uint poolBones) {
 // A tree's seed for its branches' phases: its plant's pick's bits (boneTreeSeed).
 uint boneTreeSeed(float pick) {
     return floatBitsToUint(pick);
+}
+
+// The tree a plant's word pair holds this frame, BONE_NO_TREE unless claimed by this frame's stamp (never 0) (boneClaimedTree).
+uint boneClaimedTree(uint claimStamp, uint claimTree, uint frameStamp) {
+    return frameStamp != 0u && claimStamp == frameStamp ? claimTree : BONE_NO_TREE;
+}
+
+// A bone's place in the pool, last frame's after this frame's (bonePoseSlot).
+uint bonePoseSlot(uint firstPose, uint bone, bool previous) {
+    return firstPose + 2u * bone + (previous ? 1u : 0u);
 }
 
 #endif
