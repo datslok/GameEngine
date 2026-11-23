@@ -58,7 +58,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 1 | Cloth [CLOTH] | GPU cloths ticked | `cloth-gpu.md` |
 | 2 | Debug UI [UI] | F5 open: the UI into its own overlay image | `settings-and-commands.md` |
 | 3 | Culling [CULL] | always: the camera's, probe faces', mirror's and drawn shadow tiles' lists and commands | `gpu-driven.md` |
-| 3b | Planting [PLANTING], placed [PLACED], wind [WIND], bones [BONES] | cells made, or read back (`placement-compare`); every view's placed plants' lists while a field's looks draw some; the wind field runs; trees sway | `planting.md`, `wind.md`, `wind-bones.md` |
+| 3b | Planting [PLANTING], placed [PLACED], wind [WIND], bones [BONES] | cells made, or read back (`placement-compare`); every view's placed plants' lists while a field's looks draw some; the wind field runs; trees sway | `planting.md`, `wind-bones.md` |
 | 3c | Mesh clusters [MESHCULL] | Passes "Mesh clusters" on: the camera's clusters, its list's and placed plants' | `mesh-clusters.md` |
 | 4 | Ray scene [TLAS] | anything traces rays (probes, ray debug, probe capture, reflections, mirrored lights, glass shadows) | `ray-tracing.md` |
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
