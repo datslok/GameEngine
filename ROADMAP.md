@@ -499,7 +499,6 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
       - [x] 3c-iv-a. Each cluster's bones (up to 8), each tree's move a frame from its poses (`tree-bones-3c-iv-a`)
       - [x] 3c-iv-b. Trees' clusters and twigs culled by their posed bounds: frustum, occlusion (`tree-bones-3c-iv-b`)
       - [x] 3c-iv-c. Animation stopped below a share of the screen, faded (`tree-bones-3c-iv-c`)
-    - [ ] 3c-v. Optional: per-bone springs for a budget of near trees, pushed by forces (Unreal's promoted tier)
     - [ ] 3c-vi. Optional, if BONES shows in timings: far trees share a pose a variant and wind cell
   - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels
   - [ ] 3f. The leaf cards and shadow stand-ins retired; leaves cast opaque shadows
@@ -735,6 +734,7 @@ A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it,
 - [ ] Breaking: damage, union-find for the pieces cut off (`bond-breaking`)
 - [ ] On the GPU: thousands of chunks and the stress solve (`gpu-destruction`)
 - [ ] Debris and dust: debris as particles, dust in the fog's grid
+- [ ] Trees pushed: per-bone springs for near trees, pushed by forces (Unreal's promoted tier; `LEAFGEOMETRY.md`)
 - [ ] Flight: hover, cruise, boost, quick stop, and the feel of speed (`flight-controller`)
 - [ ] A destruction lab: a concrete frame, a brick house, a steel tower (`games/destructionlab/`)
 - [ ] A city, once the lab's buildings work
