@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -202,6 +203,23 @@ namespace {
         // A tree past its slot's count is not there.
         counts[slot * 3u + 1u] = 2u;
         assert(lianaTreePlant(lianaFrom(feet[2]), 0, tables, plants, counts, eye, 300.0f) == BONE_NO_TREE);
+
+        /*
+        * bones-compare: the GPU's found plants against the CPU's, held records only (slot 1 of 3, two records a slot),
+        * ropes' ends not counted; one anchor the GPU got wrong differs.
+        */
+        LianaShapes shapes{.slots = {nullptr, std::make_shared<const std::vector<LianaShape>>(std::vector<LianaShape>{lianaFrom(feet[0]), lianaFrom(feet[1])}),
+                                     nullptr},
+                           .perSlot = 2};
+        std::vector<std::uint32_t> found(12, 7u);
+        found[4] = slot * 140u + 40u;
+        found[6] = slot * 140u + 41u;
+        LianaTreeComparison same = compareLianaTrees(shapes, found, tables, plants, counts, eye, 300.0f);
+        assert(same.anchors == 2 && same.wanted == 2 && same.found == 2 && same.matching == 2 && same.differing == 0);
+        found[6] = BONE_NO_TREE;
+        LianaTreeComparison wrong = compareLianaTrees(shapes, found, tables, plants, counts, eye, 300.0f);
+        assert(wrong.found == 1 && wrong.matching == 1 && wrong.differing == 1);
+        assert(describeLianaTreeComparison(wrong).find("1 differing") != std::string::npos);
     }
 }
 

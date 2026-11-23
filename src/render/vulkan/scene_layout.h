@@ -2,6 +2,7 @@
 
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/bone_poses_shared.h"
+#include "render/gpu/liana_trees_shared.h"
 #include "render/gpu/placed_drawing_shared.h"
 #include "render/gpu/twig_drawing_shared.h"
 #include "render/vulkan/frame_descriptors.h"
@@ -85,12 +86,14 @@ enum SceneBinding : std::uint32_t {
     BoneTreesBinding = 50,
     BonePlantTreesBinding = 51,
     BonePosesBinding = 52,
-    SceneBindingCount = 53
+    LianaTreePlantsBinding = 53,
+    SceneBindingCount = 54
 };
 
 static_assert(BoneTreesBinding == SCENE_BONE_TREES_BINDING && BonePlantTreesBinding == SCENE_BONE_PLANT_TREES_BINDING &&
                   BonePosesBinding == SCENE_BONE_POSES_BINDING && SwayBindingsBinding == SCENE_SWAY_BINDINGS_BINDING,
               "The bones' bindings must match bone_vertex_data.glsl's");
+static_assert(LianaTreePlantsBinding == SCENE_LIANA_TREE_PLANTS_BINDING, "The lianas' trees' binding must match liana_data.glsl's");
 
 static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsBinding == SCENE_PLACED_PARTS_BINDING &&
                   PlacedEntriesBinding == SCENE_PLACED_ENTRIES_BINDING,
@@ -247,6 +250,7 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo bonePlantTrees{};
     VkDescriptorBufferInfo bonePoses{};
     VkDescriptorBufferInfo lianaShapes{};     // the lianas' records, slot by slot (scene/liana_shape.h; one unused without)
+    VkDescriptorBufferInfo lianaTreePlants{}; // each liana anchor's tree's plant (render/gpu/liana_trees.h; a stand-in without)
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

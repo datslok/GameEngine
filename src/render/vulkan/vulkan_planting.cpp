@@ -350,6 +350,10 @@ VkBuffer VulkanPlanting::getPlants() const {
     return plants.get();
 }
 
+VkBuffer VulkanPlanting::getCounts() const {
+    return counts.get();
+}
+
 VkDeviceSize VulkanPlanting::getPlantsBytes() const {
     return plants.getSize();
 }

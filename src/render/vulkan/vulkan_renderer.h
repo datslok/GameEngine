@@ -62,6 +62,7 @@
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_placed_drawing.h"
 #include "render/vulkan/vulkan_bone_posing.h"
+#include "render/vulkan/vulkan_liana_trees.h"
 #include "render/vulkan/vulkan_twig_drawing.h"
 #include "render/vulkan/vulkan_planting.h"
 #include "render/vulkan/vulkan_wind.h"
@@ -411,6 +412,7 @@ private:
     // The swaying trees' bones (phase 21 stage 3c-iii-b): the frame posing them, its swaying placed views, bones-compare's
     // request and report, and the last counts for F4.
     std::unique_ptr<VulkanBonePosing> bonePosing;
+    std::unique_ptr<VulkanLianaTrees> lianaTrees;
     std::optional<std::uint32_t> frameBones;
     std::vector<std::uint32_t> swayingPlacedViews;
     bool bonesCompareAsked = false;
@@ -426,6 +428,7 @@ private:
         float seconds = 0.0f;
         float previousSeconds = 0.0f;
         WindBoneMotion motion;
+        LianaShapes lianas; // the frame's, whose anchors' plants are compared too
     };
 
     std::optional<BonesCompare> bonesCompare;

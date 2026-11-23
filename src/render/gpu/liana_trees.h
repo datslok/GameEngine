@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 /*
@@ -86,3 +87,24 @@ bool lianaSameTree(const Vec3& planted, const Vec3& foot);
 */
 std::uint32_t lianaTreePlant(const LianaShape& shape, int end, const LianaTreeTables& tables, std::span<const GpuPlacedPlant> plants,
                              std::span<const std::uint32_t> counts, const Vec3& eye, float fadeEnd);
+
+// ---- bones-compare ----
+
+/*
+* A frame's found plants read back against the CPU's (lianaTreePlant on the plants and counts read back with them):
+* the held lianas' anchors on a planted layer's tree, those the CPU finds a plant for, those the GPU did, those the two
+* agree on and those they do not.
+*/
+struct LianaTreeComparison {
+    std::size_t anchors = 0;
+    std::size_t wanted = 0;
+    std::size_t found = 0;
+    std::size_t matching = 0;
+    std::size_t differing = 0;
+};
+
+// found: two a record, slot by slot (perSlot records a slot) as the pass wrote them; only the held records are compared.
+LianaTreeComparison compareLianaTrees(const LianaShapes& shapes, std::span<const std::uint32_t> found, const LianaTreeTables& tables,
+                                      std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts, const Vec3& eye, float fadeEnd);
+
+std::string describeLianaTreeComparison(const LianaTreeComparison& comparison);

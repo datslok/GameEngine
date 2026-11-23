@@ -2,8 +2,10 @@
 
 #include "render/gpu/bone_poses.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace {
     // The column (or row) whose span, from float(index) * size to that plus size, holds a place: plantingCellBox's edges.
@@ -128,4 +130,41 @@ std::uint32_t lianaTreePlant(const LianaShape& shape, int end, const LianaTreeTa
     }
 
     return BONE_NO_TREE;
+}
+
+LianaTreeComparison compareLianaTrees(const LianaShapes& shapes, std::span<const std::uint32_t> found, const LianaTreeTables& tables,
+                                      std::span<const GpuPlacedPlant> plants, std::span<const std::uint32_t> counts, const Vec3& eye, float fadeEnd) {
+    LianaTreeComparison comparison;
+
+    for (std::size_t slot = 0; slot < shapes.slots.size(); ++slot) {
+        if (!shapes.slots[slot]) {
+            continue;
+        }
+
+        const std::vector<LianaShape>& block = *shapes.slots[slot];
+
+        for (std::size_t index = 0; index < std::min<std::size_t>(block.size(), shapes.perSlot); ++index) {
+            for (int end = 0; end < 2; ++end) {
+                if (block[index].anchors[2 + end] == LIANA_NO_TREE) {
+                    continue;
+                }
+
+                const std::size_t anchor = 2 * (slot * shapes.perSlot + index) + static_cast<std::size_t>(end);
+                const std::uint32_t expected = lianaTreePlant(block[index], end, tables, plants, counts, eye, fadeEnd);
+                const std::uint32_t actual = anchor < found.size() ? found[anchor] : BONE_NO_TREE;
+                ++comparison.anchors;
+                comparison.wanted += expected != BONE_NO_TREE ? 1 : 0;
+                comparison.found += actual != BONE_NO_TREE ? 1 : 0;
+                ++(expected == actual ? comparison.matching : comparison.differing);
+            }
+        }
+    }
+
+    return comparison;
+}
+
+std::string describeLianaTreeComparison(const LianaTreeComparison& comparison) {
+    return "Lianas: " + std::to_string(comparison.anchors) + " anchors on trees, " + std::to_string(comparison.wanted) + " found on the CPU, " +
+           std::to_string(comparison.found) + " on the GPU; " + std::to_string(comparison.matching) + " matching, " + std::to_string(comparison.differing) +
+           " differing.";
 }

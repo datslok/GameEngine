@@ -59,9 +59,11 @@ public:
     // What the placed drawing reads (render/vulkan/vulkan_placed_drawing.h): the passes' eight bindings this frame (the
     // slots' plants and counts among them; the first set planting's layers and jobs), the slots' plants alone, each set
     // planting's slots (a view, while this frame's cells stand), the field (none while nothing is planted), the ground
-    // the cells were planted on, and the cells a set made this frame (by its place among getSlots').
+    // the cells were planted on, and the cells a set made this frame (by its place among getSlots'). The slots' counts
+    // alone, for the lianas' trees (render/vulkan/vulkan_liana_trees.h).
     std::array<ComputeBinding, PLANTING_BINDINGS> getBindings(VkBuffer heights, std::uint32_t frameIndex) const;
     VkBuffer getPlants() const;
+    VkBuffer getCounts() const;
     VkDeviceSize getPlantsBytes() const;
     VkDeviceSize getCountsBytes() const;
     std::vector<PlantingSetSlots> getSlots() const;
