@@ -1,6 +1,6 @@
 # Build
 
-Covers: `makefile`, `tools/package_demo.py`
+Covers: `makefile`, `tools/package_demo.py`, `tools/hooks/`
 
 ## Makefile
 
@@ -52,3 +52,19 @@ Covers: `makefile`, `tools/package_demo.py`
 - `assets/` without shader sources, and a README whose controls come from `README.md`'s `## Controls` (`readme_controls`).
 - `--anonymous`: `build/Demo.zip`, controls cut to their first phrase (`brief_action`), entries dated 1980-01-01, the PE timestamp zeroed (`clear_build_time`).
 - Needs a real Python (`winget install Python.Python.3.13`); the `WindowsApps` one is a Store placeholder.
+
+## Claude Code hooks
+
+`tools/hooks/claude_hooks.py` holds the checks Claude Code runs around Claude's tool calls, registered in `.claude/settings.json`. Each enforces a hard rule from `CLAUDE.md` that a script can check, so the rule holds even when Claude forgets it.
+
+| Check | When | Does |
+|---|---|---|
+| `commands` | Before every Bash or PowerShell command | Blocks a build with `-DNDEBUG` or `-ffast-math`; blocks committing code (any non-Markdown change) straight onto `main` outside a merge, and merges into `main` without `--no-ff`; asks the user before golden, GPU, slow, parked and yardstick runs |
+| `makefile` | Before an Edit or Write of the Makefile | Blocks the two flags outside comments |
+| `line-endings` | After an Edit or Write | Turns bare LF into CRLF in `src/`, `tests/`, `assets/shaders/` and `tools/` (root files such as `README.md` keep theirs) |
+| `games` | When Claude ends a turn | Keeps the turn going while a game copy with `--port 47620` (Claude's, never the user's) runs |
+
+- **Blocking:** exit code 2, the reason on stderr for Claude; a question is the PreToolUse `ask` permission decision.
+- **Cost:** about 80 ms a shell command (150 ms a `git commit`); the games check lists processes with `tasklist` and asks PowerShell for command lines only when a `game.exe` runs.
+- **Tests:** `python -I tools/hooks/test_claude_hooks.py`, each check's cases plus whole runs fed hook JSON.
+- The commit attribution check lives in the user's own Claude settings folder, outside the repo, since it covers every project.
