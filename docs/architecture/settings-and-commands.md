@@ -77,7 +77,7 @@ Dear ImGui is vendored unmodified (`external/imgui`, version in its `VERSION.txt
 `render/gpu/quality_preset`: `QualityPreset` Low, Medium, High, Ultra (`qualityPresetNames`). One private table (`QualityValues`) feeds `applyQualityPreset` and `matchingQualityPreset`, so they cannot disagree. Taste (tone mapping, exposure, bloom strength, HDR, camera finish, upscaling) is never touched, nor `RenderSettings::rayTracing` (its own choice).
 
 - **Ultra** = `RenderSettings{}`, the default: read from the defaults, so retuning a default retunes Ultra.
-- **High** = Ultra without ray-traced reflections and mirrored lights, probe sharing 0.1, reflection probe 128, ambient occlusion 2 slices and 4 steps.
+- **High** = Ultra without ray-traced reflections and mirrored lights, probe sharing 0.1, ambient occlusion 2 slices and 4 steps.
 
 | Value | Low | Medium | High | Ultra |
 |---|---|---|---|---|
@@ -89,7 +89,7 @@ Dear ImGui is vendored unmodified (`external/imgui`, version in its `VERSION.txt
 | Probe rays / fast rays, sharing | 32 / 32, 0.5 | 64 / 64, 0.3 | 256 / 256, 0.1 | 256 / 256, 0 |
 | Probe cascades, densest spacing | 4, 1 m | 5, 0.5 m | 6, 0.5 m | 6, 0.5 m |
 | Densest / other cascades (across x up) | 19 x 11 / 15 x 9 | 25 x 15 / 17 x 11 | 31 x 17 / 21 x 13 | 31 x 17 / 21 x 13 |
-| Reflections: steps, probe size | off | 32, 64 | 64, 128 | 64, 256 |
+| Reflections: steps, probe size | off | 32, 64 | 64, 128 | 64, 128 |
 | Ambient occlusion: slices, steps | off | 2, 3 | 2, 4 | 3, 6 |
 | Contact shadows, sky visibility | off | on | on | on |
 | Volumetric fog grid | off | 128 x 72 x 48 | 160 x 90 x 64 | 160 x 90 x 64 |

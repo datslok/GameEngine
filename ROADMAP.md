@@ -20,7 +20,7 @@ Each step is one short line: what it builds, its branch names (for `git log`) an
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising; costly graphics (ray tracing, GI quality) are settings that scale down to typical GPUs.
 
-**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase; its shadow and level popping wait for 21), 21 (virtual geometry and shadows), 20 (clouds and weather) and 17 (rendering), then 7 onwards, as the phases sit in this file.
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase; its shadow and level popping wait for 21), 21 (virtual geometry and shadows), 22 (a cheaper reflection probe), 20 (clouds and weather) and 17 (rendering), then 7 onwards, as the phases sit in this file.
 
 ---
 
@@ -482,7 +482,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [x] 3b-ii. Each variant's twigs laid out as its cards are (`twig-layout-3b-ii`)
     - [x] 3b-iii. The twigs culled and drawn from their prototypes' clusters (`twig-records-3b-iii-a` … `twigs-on`)
     - [x] 3b-iii-c. Leaf normals bent as the cards', each leaf toned from a hash (`twig-look-3b-iii-c`)
-    - [ ] 3b's timings at the four spots, on an idle PC
+    - [x] 3b's timings at the four spots, on an idle PC (`probe-size-128`)
   - [ ] 3c. Trees moved by bones
     - [x] 3c-i. Bones from each variant's skeleton, each bark vertex's and twig's binding (`tree-bones-3c-i`)
     - [x] 3c-ii. The bones' motion in `wind_bones.glsl` and its C++ mirror (`tree-bones-3c-ii`)
@@ -499,7 +499,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
       - [x] 3c-iv-a. Each cluster's bones (up to 8), each tree's move a frame from its poses (`tree-bones-3c-iv-a`)
       - [x] 3c-iv-b. Trees' clusters and twigs culled by their posed bounds: frustum, occlusion (`tree-bones-3c-iv-b`)
       - [x] 3c-iv-c. Animation stopped below a share of the screen, faded (`tree-bones-3c-iv-c`)
-    - [ ] 3c-vi. Optional, if BONES shows in timings: far trees share a pose a variant and wind cell
+    - [x] 3c-vi. Far trees sharing a pose a variant and wind cell: not needed, BONES about 0.1 ms (`probe-size-128`)
   - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels
   - [ ] 3f. The leaf cards and shadow stand-ins retired; leaves cast opaque shadows
 - [ ] 4. Virtual shadow maps for the sun, the cascades retired; then the lamps
@@ -511,6 +511,18 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
 - [ ] 6. Cluster pages streamed, when scenes outgrow memory
 
 **Milestone:** the forest walked and flown with no shadow or level popping, the sun's shadows costing what the screen needs, the frame measured on the laptop against today's.
+
+---
+
+## Phase 22: A cheaper reflection probe
+
+Added Nov 23 2026, after the forest demo: at 256 the probe's faces took 16-22 ms of the forest's frame, nearly all shading stacked leaf cards. Measurements, shipped engines' ways and options: `docs/research/PROBECAPTURE.md`.
+
+- [x] The probe's default size 256 to 128 until then (`probe-size-128`)
+- [ ] A cut-down capture world: no leaf cards, understorey or grass in the faces; measured at the four spots
+- [ ] Only if still costly: faces captured as albedo, normal and depth when the camera moves, relit every frame
+
+**Milestone:** the probe costs at most a few percent of the forest's frame at the four spots, its reflections still showing the valley.
 
 ---
 

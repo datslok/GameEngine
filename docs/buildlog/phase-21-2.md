@@ -88,3 +88,10 @@
   - **Lianas keep the distance** (`boneTreeWanted` of a foot renamed `boneFootInReach`): their anchors look for their trees within 400 m; a tree posed past that (a narrow zoom) leaves its lianas' anchors still, centimetres off at that distance.
   - **8 planted bugs caught** (no reach in the sphere, the turn the wrong way, the diameter for the radius, the fade's band doubled, wanted at the still share, the screen ignored, the packed radius off, equal shares allowed).
   - GPU test written for the new maths, not run.
+- `probe-size-128` (Nov 23 2026): 3b's timings at the four spots; 3c-vi not needed; the reflection probe's default 256 to 128, its real fix phase 22.
+  - **Measured (home PC, release, hidden copy, idle, three samples, GPU ms, frame / BONES / TWIGS / MAIN / CUBE):** rim 18.9 / 0.10 / 0.39 / 6.6 / 3.8, ring 39.4 / 0.09 / 0.51 / 11.1 / 17.7, wall 33.3 / 0.08 / 0.11 / 6.2 / 21.5, trees 37.2 / 0.10 / 0.46 / 11.2 / 16.1. Not comparable with the laptop's earlier numbers.
+  - **Twig triangles 28-79M a frame** (ring 28.8M at the finest level alone, wall 26.4M of 27.9M), against 15-29M for all other clusters: the case for 3e.
+  - **3c-vi dropped:** BONES 0.08-0.12 ms everywhere; the pool asked at most 226K bones of its 4M cap.
+  - **The probe, not the trees, held the frame:** CUBE was 40-55% of it at three spots; at the ring 64 / 128 / 256 texels 1.9 / 5.9 / 17.5 ms with the same triangles, so pixel-bound (no prepass, stacked leaf cards, every light a layer). Research and plan: `docs/research/PROBECAPTURE.md`, phase 22, after the forest demo (the user's pick).
+  - **High and Ultra share the probe now;** High's own 128 removed as a copy of the default.
+  - **Caught by the preset tests** against the old default (256 left on Ultra).

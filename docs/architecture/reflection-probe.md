@@ -89,7 +89,7 @@ In `ReflectionSettings` (`reflections.md` for the rest):
 | Setting | Default | Note |
 |---|---|---|
 | `probe` | on | off: screen-space reflections alone |
-| `probeSize` | 256 | power of two, 16-1024; High 128, Medium and Low 64; each doubling four times the capture |
+| `probeSize` | 128 | power of two, 16-1024; Medium and Low 64; each doubling four times the capture (forest ring, home PC: 64 1.9 ms, 128 5.9 ms, 256 17.5 ms, shading stacked leaf cards) |
 | `probeFar` | 300 m | beyond: the sky |
 | `probeFacesPerFrame` | 1 | 6: every face every frame |
 
