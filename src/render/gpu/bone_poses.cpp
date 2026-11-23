@@ -26,8 +26,8 @@ namespace {
     }
 }
 
-GpuBonePose packBonePose(const WindBonePose& pose) {
-    return GpuBonePose{.turn = {pose.turn.x, pose.turn.y, pose.turn.z, pose.turn.w}, .shift = {pose.shift.x, pose.shift.y, pose.shift.z}};
+GpuBonePose packBonePose(const WindBonePose& pose, std::int32_t parent) {
+    return GpuBonePose{.turn = {pose.turn.x, pose.turn.y, pose.turn.z, pose.turn.w}, .shift = {pose.shift.x, pose.shift.y, pose.shift.z}, .parent = parent};
 }
 
 WindBonePose unpackBonePose(const GpuBonePose& pose) {
@@ -93,6 +93,26 @@ std::uint32_t boneGrownPool(std::uint32_t pool, std::uint32_t bonesAsked, std::u
 
 std::uint32_t boneTreeSeed(const GpuPlacedPlant& plant) {
     return std::bit_cast<std::uint32_t>(plant.pick);
+}
+
+std::uint32_t boneNextStamp(std::uint32_t stamp) {
+    return stamp == 0xFFFFFFFFu ? 1u : stamp + 1u;
+}
+
+std::uint32_t boneClaimedTree(std::uint32_t claimStamp, std::uint32_t claimTree, std::uint32_t frameStamp) {
+    return frameStamp != 0 && claimStamp == frameStamp ? claimTree : boneNoTree;
+}
+
+std::uint32_t bonePoseSlot(std::uint32_t firstPose, std::uint32_t bone, bool previous) {
+    return firstPose + 2u * bone + (previous ? 1u : 0u);
+}
+
+BoneVertexPoses boneVertexPoses(std::span<const GpuBonePose> pool, std::uint32_t firstPose, std::uint32_t binding, bool previous) {
+    const SwayBinding bound = unpackSwayBinding(binding);
+    const GpuBonePose& own = pool[bonePoseSlot(firstPose, static_cast<std::uint32_t>(bound.bone), previous)];
+    const WindBonePose parent =
+        own.parent < 0 ? WindBonePose{} : unpackBonePose(pool[bonePoseSlot(firstPose, static_cast<std::uint32_t>(own.parent), previous)]);
+    return BoneVertexPoses{.own = unpackBonePose(own), .parent = parent, .weight = bound.weight};
 }
 
 std::vector<BoneWanted> boneWantedPlants(const PlacedTable& table, std::span<const GpuDrawCommand> commands, std::span<const GpuPlacedEntry> entries,
@@ -224,9 +244,10 @@ BoneComparison compareBonePoses(std::span<const BoneWanted> wanted, std::span<co
                     continue;
                 }
 
-                const GpuBonePose packed = packBonePose(*expected);
+                const GpuBonePose packed = packBonePose(*expected, tables.bones[tables.skeletons[tree.skeleton].firstBone + bone].parent);
                 comparison.worstTurn = std::max(comparison.worstTurn, largestDifference(packed.turn, poses[at].turn, 4));
                 comparison.worstShift = std::max(comparison.worstShift, largestDifference(packed.shift, poses[at].shift, 3));
+                comparison.wrongParents += packed.parent == poses[at].parent ? 0u : 1u;
                 ++comparison.posesChecked;
             }
         }
@@ -236,13 +257,14 @@ BoneComparison compareBonePoses(std::span<const BoneWanted> wanted, std::span<co
 }
 
 std::string describeBoneComparison(const BoneComparison& comparison) {
-    const bool agrees = comparison.missing == 0 && comparison.extra == 0 && comparison.twice == 0 && comparison.worstTurn <= 1e-4f &&
-                        comparison.worstShift <= 1e-3f;
+    const bool agrees = comparison.missing == 0 && comparison.extra == 0 && comparison.twice == 0 && comparison.wrongParents == 0 &&
+                        comparison.worstTurn <= 1e-4f && comparison.worstShift <= 1e-3f;
     char line[320];
     std::snprintf(line, sizeof(line),
                   "Bones %s: %zu trees wanted, %zu claimed (%zu still for want of room), %zu missing, %zu extra, %zu twice; %zu poses checked, worst turn %.2g, "
-                  "shift %.2g.",
+                  "shift %.2g, %zu wrong parents.",
                   agrees ? "agree" : "DIFFER", comparison.wanted, comparison.claimed, comparison.still, comparison.missing, comparison.extra,
-                  comparison.twice, comparison.posesChecked, static_cast<double>(comparison.worstTurn), static_cast<double>(comparison.worstShift));
+                  comparison.twice, comparison.posesChecked, static_cast<double>(comparison.worstTurn), static_cast<double>(comparison.worstShift),
+                  comparison.wrongParents);
     return line;
 }

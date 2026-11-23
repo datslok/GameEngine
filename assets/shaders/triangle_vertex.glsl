@@ -23,6 +23,7 @@
 #include "terrain_data.glsl"
 #include "impostor.glsl"
 #include "wind_data.glsl"
+#include "bone_vertex_data.glsl"
 #include "liana_data.glsl"
 #include "card_thinning_data.glsl"
 #include "level_fade.glsl"
@@ -111,11 +112,12 @@ invariant gl_Position;
 /*
 * One vertex placed and its outputs written (at vertexSlot in a mesh shader's arrays): its mesh's vertex (position,
 * normal, uv, tangent, and last frame's position), the draw list entry it is drawn as (instanceIndex, and the draw's
-* first: baseInstance, placed plants' from PLACED_INSTANCE_BASE) and its number in its own mesh (meshVertex: the per-vertex
-* records of hanging things and thinned cards count from the mesh's first vertex).
+* first: baseInstance, placed plants' from PLACED_INSTANCE_BASE), its number in its own mesh (meshVertex: the per-vertex
+* records of hanging things and thinned cards count from the mesh's first vertex) and in the vertex pool (poolVertex:
+* its binding to its tree's bones).
 */
 void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tangent, vec3 previousPosition, uint instanceIndex, uint baseInstance,
-                 int meshVertex) {
+                 int meshVertex, uint poolVertex) {
     // A frame's draw, or a placed plant's part (drawn_objects.glsl).
     // The vertex measured from the camera, kept here and written once at the end (a mesh shader may not read its outputs).
     vec3 relative = vec3(0.0);
@@ -248,8 +250,37 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
                                 captureView ? captureEye.w : levelOptions.x);
     relative = (model * vec4(shaped, 1.0)).xyz;
     relative.y += groundLift(instance.material.w, relative + cameraOrigin.xyz, instance.model[3].y);
-    // The wind (render/gpu/wind.h): the same sway in every view, so the prepass and the main pass agree to the bit.
-    vec3 swayOffset = windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, meshVertex, shaped, relative + cameraOrigin.xyz, cameraOrigin.xyz, false);
+
+    /*
+    * The wind (render/gpu/wind.h): the same sway in every view, so the prepass and the main pass agree to the bit. A
+    * vertex bound to its tree's bones (bone_vertex_data.glsl) moves by them instead, its normal and tangent turned with
+    * them; one whose tree is not posed this frame, and every vertex in a capture, stands still. A twig's (its prototype's
+    * vertex) is not bound: it keeps the sway until stage 3c-iii-c-ii.
+    */
+    BoneDrawn bones = BoneDrawn(BONE_NO_POSE, SWAY_UNBOUND, vec4(0.0));
+
+    if (!drawn.twig) {
+        bones = boneDrawn(drawn.plant, poolVertex);
+    }
+
+    if (captureView) {
+        bones.firstPose = BONE_NO_POSE;
+    }
+
+    vec3 swayOffset;
+
+    if (bonePosed(bones)) {
+        BoneVertexPoses poses = boneVertexPoses(bones, false);
+        swayOffset = boneSwayOfVertex(bones, poses, instance.model, instance.sway, instance.hanging, meshVertex, shaped, relative + cameraOrigin.xyz,
+                                      cameraOrigin.xyz, false);
+        normal = windBlendedDirection(poses.own, poses.parent, poses.weight, normal);
+        tangent.xyz = windBlendedDirection(poses.own, poses.parent, poses.weight, tangent.xyz);
+    } else if (bones.binding != SWAY_UNBOUND) {
+        swayOffset = vec3(0.0);
+    } else {
+        swayOffset = windSwayOfVertex(instance.model, instance.sway, handedness.y, instance.hanging, meshVertex, shaped, relative + cameraOrigin.xyz, cameraOrigin.xyz, false);
+    }
+
     relative += swayOffset;
     VERTEX_POSITION = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relative, 1.0);
     VERTEX_CLIP = captureView ? planarClipDistance(captureClipPlane, relative) : 1.0;
@@ -274,8 +305,13 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
         beforeRelative[3].xyz -= cameraOrigin.xyz;
         vec3 previousRelative = (beforeRelative * vec4(previousShaped, 1.0)).xyz;
         previousRelative.y += groundLift(instance.material.w, previousRelative + cameraOrigin.xyz, before[3].y);
-        previousRelative += windSwayOfVertex(before, instance.sway, handedness.y, instance.hanging, meshVertex, previousShaped,
-                                             previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
+        previousRelative += bonePosed(bones)
+                                ? boneSwayOfVertex(bones, boneVertexPoses(bones, true), before, instance.sway, instance.hanging, meshVertex, previousShaped,
+                                                   previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true)
+                                : bones.binding != SWAY_UNBOUND
+                                      ? vec3(0.0)
+                                      : windSwayOfVertex(before, instance.sway, handedness.y, instance.hanging, meshVertex, previousShaped,
+                                                         previousRelative + cameraOrigin.xyz, cameraOrigin.xyz, true);
         VERTEX_OUT(previousClip) = motionPrevious * vec4(previousRelative, 1.0);
         VERTEX_OUT(movement) = 1.0;
     }
@@ -314,6 +350,7 @@ void main() {
 #else
     vec3 previous = position;
 #endif
-    shadeVertex(0u, position, normal, uv, tangent, previous, uint(gl_InstanceIndex), uint(gl_BaseInstanceARB), gl_VertexIndex - gl_BaseVertexARB);
+    shadeVertex(0u, position, normal, uv, tangent, previous, uint(gl_InstanceIndex), uint(gl_BaseInstanceARB), gl_VertexIndex - gl_BaseVertexARB,
+                uint(gl_VertexIndex));
 }
 #endif

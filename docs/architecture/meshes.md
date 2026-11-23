@@ -32,7 +32,7 @@ Vertex numbering and error cases: the header.
 - `resolveCorners(mesh)`: three corners a triangle, unshared, each with its file normal or the face normal, its UV or (0, 0), its tangent. Throws for empty meshes, non-finite positions, w ≠ 1, missing vertices.
 - `buildIndexedMesh(mesh)`: `resolveCorners`, then corners identical in every component share a vertex (the key adds +0.0, so -0.0 and +0.0 match).
 - Built once, when a mesh first reaches the GPU; `VulkanMesh` only validates (`checkMeshUpload`) and uploads.
-- Optional per-vertex records riding along: `hanging` (`HangingVertex`, see `docs/research/WIND.md`), `thinning` and `thinningCards` (`scene/card_thinning.h`), `swayBindings` (`SwayBinding`, kept by `meshPrefix` and `simplifyMesh`; [wind.md](wind.md), Bones). Each list is one entry a vertex or empty.
+- Optional per-vertex records riding along: `hanging` (`HangingVertex`, see `docs/research/WIND.md`), `thinning` and `thinningCards` (`scene/card_thinning.h`), `swayBindings` (`SwayBinding`, kept by `meshPrefix` and `simplifyMesh`; [wind-bones.md](wind-bones.md)). Each list is one entry a vertex or empty.
 - `meshPrefix`, `thinnedLevel`: a mesh's first vertices and indices as a level of its own (levels sharing vertices; `docs/research/LOD.md`). `simplifyMesh`, `simplifiedLevels` (`scene/simplify_mesh`, meshoptimizer) make coarser levels.
 - `indexedMeshBounds`: the box, as `meshBounds` gives a `Mesh`'s.
 - Cut into clusters culled one by one: [mesh-clusters.md](mesh-clusters.md).

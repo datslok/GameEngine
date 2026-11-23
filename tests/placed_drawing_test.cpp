@@ -451,6 +451,20 @@ namespace {
         }
 
         assert(unbound && buildPlacedTable(testKinds().parts, testKinds().kinds, 3, testPlacement).skeletons.empty());
+
+        // Bones live in the plant's frame, so a part moved by them must sit at its plant's origin (3c-iii-c).
+        TestKinds moved = testKinds();
+        moved.parts[0].skeleton = &first;
+        moved.parts[0].model = Mat4::translation(0.0f, 1.0f, 0.0f);
+        bool refused = false;
+
+        try {
+            buildPlacedTable(moved.parts, moved.kinds, 3, testPlacement);
+        } catch (const std::invalid_argument&) {
+            refused = true;
+        }
+
+        assert(refused);
     }
 
     void testTheTable() {

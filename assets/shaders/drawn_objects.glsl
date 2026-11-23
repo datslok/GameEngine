@@ -7,6 +7,7 @@
 #include "instances.glsl"
 #include "placed_drawing.glsl"
 #include "twig_record.glsl"
+#include "render/gpu/bone_poses_shared.h"
 
 // The planting cells' slots' plants (render/gpu/planting_records.h; one unused without).
 layout(std430, set = 1, binding = SCENE_PLACED_PLANTS_BINDING) readonly buffer ScenePlacedPlants {
@@ -41,6 +42,7 @@ layout(std430, set = 1, binding = SCENE_TWIGS_BINDING) readonly buffer SceneTwig
 struct DrawnObject {
     InstanceData instance;
     uint entry;
+    uint plant; // a placed plant's (its slot's) or a twig's, BONE_NO_TREE for a frame's draw (bone_vertex_data.glsl)
     bool twig;
     mat4 twigMatrix;
     uint twigNumber; // its number in the twig table, and its plant's pick's bits (its leaves' tones)
@@ -59,12 +61,14 @@ DrawnObject drawnObject(uint instanceIndex, uint baseInstance) {
     drawn.twigNumber = 0u;
     drawn.twigPlant = 0u;
     drawn.twigLean = vec3(0.0);
+    drawn.plant = BONE_NO_TREE;
 
     // A twig (the mesh shaders only: its entry is the instance and the base alike): its part as its placed entry's.
     if (baseInstance >= TWIG_INSTANCE_BASE) {
         uvec4 twig = sceneTwigEntries[instanceIndex - TWIG_INSTANCE_BASE];
         uvec2 placed = scenePlacedEntries[twig.x];
-        PlacedPlant plant = scenePlacedPlants[drawnInstance(placed.x)];
+        drawn.plant = drawnInstance(placed.x);
+        PlacedPlant plant = scenePlacedPlants[drawn.plant];
         drawn.instance = placedInstance(scenePlacedParts[placed.y], plant);
         drawn.entry = placed.x;
         drawn.twig = true;
@@ -78,7 +82,8 @@ DrawnObject drawnObject(uint instanceIndex, uint baseInstance) {
 
     if (baseInstance >= PLACED_INSTANCE_BASE) {
         uvec2 placed = scenePlacedEntries[instanceIndex - PLACED_INSTANCE_BASE];
-        drawn.instance = placedInstance(scenePlacedParts[placed.y], scenePlacedPlants[drawnInstance(placed.x)]);
+        drawn.plant = drawnInstance(placed.x);
+        drawn.instance = placedInstance(scenePlacedParts[placed.y], scenePlacedPlants[drawn.plant]);
         drawn.entry = placed.x;
         return drawn;
     }

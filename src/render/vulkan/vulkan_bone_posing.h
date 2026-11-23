@@ -80,7 +80,10 @@ public:
     // The tables the frame's passes read (after prepare), for bones-compare.
     const SwaySkeletonTables& getTables() const;
 
-    // For the shaders that will read the poses (3c-iii-c): the trees, each plant's tree, the pool.
+    // The stamp the next record claims with, for the draws (GpuWindField::flags[1]) written before it.
+    std::uint32_t getNextStamp() const;
+
+    // For the draws reading the poses (3c-iii-c): the trees, each plant's tree, the pool (VK_NULL_HANDLE before any).
     VkBuffer getTrees() const;
     VkBuffer getPlantTrees() const;
     VkBuffer getPoses() const;

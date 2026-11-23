@@ -77,7 +77,7 @@ void main() {
         vec3 normal = vec3(vertices.values[at + 3u], vertices.values[at + 4u], vertices.values[at + 5u]);
         vec2 uv = vec2(vertices.values[at + 6u], vertices.values[at + 7u]);
         vec4 tangent = vec4(vertices.values[at + 8u], vertices.values[at + 9u], vertices.values[at + 10u], vertices.values[at + 11u]);
-        shadeVertex(slot, position, normal, uv, tangent, position, item.entry, item.entry, int(number - cluster.meshFirstVertex));
+        shadeVertex(slot, position, normal, uv, tangent, position, item.entry, item.entry, int(number - cluster.meshFirstVertex), number);
     }
 
     // Each triangle's three corner bytes, four to a word.

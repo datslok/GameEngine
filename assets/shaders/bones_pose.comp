@@ -73,8 +73,10 @@ void main() {
                                                 previousSeconds, windField.bones[0], windField.bones[1]);
                 parentNow = windBonePose(parentNow, turnNow, b.pivot);
                 parentLast = windBonePose(parentLast, turnLast, b.pivot);
-                bonePoses[tree.firstPose + 2u * bone] = BonePose(parentNow.turn, vec4(parentNow.shift, 0.0));
-                bonePoses[tree.firstPose + 2u * bone + 1u] = BonePose(parentLast.turn, vec4(parentLast.shift, 0.0));
+                // The parent rides in the pose, so a vertex blending the two needs no bone table.
+                float parentBits = intBitsToFloat(b.parent);
+                bonePoses[tree.firstPose + 2u * bone] = BonePose(parentNow.turn, vec4(parentNow.shift, parentBits));
+                bonePoses[tree.firstPose + 2u * bone + 1u] = BonePose(parentLast.turn, vec4(parentLast.shift, parentBits));
             }
         }
 

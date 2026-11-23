@@ -44,4 +44,12 @@
 #define BONE_PART_INSTANCES_BINDING 13
 #define BONE_PASS_BINDINGS 14
 
+// The scene set's bindings the draws read the poses through (set 1, render/vulkan/scene_layout.h): the trees, each
+// plant's tree, the pool; and every pool vertex's binding to its bones (render/gpu/bone_records.h). The frame's stamp
+// rides in the wind's record (GpuWindField::flags[1], 0 when the passes do not run).
+#define SCENE_BONE_TREES_BINDING 50
+#define SCENE_BONE_PLANT_TREES_BINDING 51
+#define SCENE_BONE_POSES_BINDING 52
+#define SCENE_SWAY_BINDINGS_BINDING 48
+
 #endif

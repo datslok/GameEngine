@@ -256,8 +256,8 @@ namespace {
             const std::vector<WindBonePose> last = boneTreePoses(tables, 0, shape, Vec2{posed.previousLean[0], posed.previousLean[1]}, 4.98f, motion);
 
             for (std::size_t bone = 0; bone < now.size(); ++bone) {
-                poses[posed.firstPose + 2 * bone] = packBonePose(now[bone]);
-                poses[posed.firstPose + 2 * bone + 1] = packBonePose(last[bone]);
+                poses[posed.firstPose + 2 * bone] = packBonePose(now[bone], tree.bones[bone].parent);
+                poses[posed.firstPose + 2 * bone + 1] = packBonePose(last[bone], tree.bones[bone].parent);
             }
         }
 
@@ -272,6 +272,11 @@ namespace {
         std::vector<GpuBonePose> shifted = poses;
         shifted[5].shift[2] += 0.01f;
         assert(compareBonePoses(wanted, claims.trees, shifted, tables, plants, motion, 5.0f, 4.98f).worstShift > 0.009f);
+        assert(same.wrongParents == 0);
+        std::vector<GpuBonePose> orphaned = poses;
+        orphaned[2 * 4 + 1].parent = 0;
+        const BoneComparison wrongParent = compareBonePoses(wanted, claims.trees, orphaned, tables, plants, motion, 5.0f, 4.98f);
+        assert(wrongParent.wrongParents == 1 && describeBoneComparison(wrongParent).find("DIFFER") != std::string::npos);
 
         const std::vector<GpuBoneTree> one{claims.trees[0]};
         assert(compareBonePoses(wanted, one, poses, tables, plants, motion, 5.0f, 4.98f).missing == 1);
@@ -298,6 +303,64 @@ namespace {
         last = "Bones agree";
         const CommandReply second = registry.execute("bones-compare");
         assert(second.ok && asked == 2 && second.text.find("agree") != std::string::npos);
+    }
+
+    /*
+    * What a vertex reads (3c-iii-c): a plant's tree only when claimed with this frame's stamp (none on a frame the pass
+    * did not run, stamp 0, though the table starts cleared to 0; stamps wrap past 0); a bone's pose at its tree's first
+    * pose + 2 b, last frame's after it.
+    */
+    void testClaimedTreeAndSlots() {
+        assert(boneClaimedTree(5, 7, 5) == 7);
+        assert(boneClaimedTree(4, 7, 5) == boneNoTree);
+        assert(boneClaimedTree(0, 0, 0) == boneNoTree);
+        assert(boneClaimedTree(5, boneNoTree, 5) == boneNoTree);
+        assert(bonePoseSlot(10, 3, false) == 16 && bonePoseSlot(10, 3, true) == 17 && bonePoseSlot(0, 0, false) == 0);
+        assert(boneNextStamp(0) == 1 && boneNextStamp(41) == 42 && boneNextStamp(0xFFFFFFFFu) == 1);
+    }
+
+    /*
+    * A bound vertex's two poses from the pool: its bone's and its parent's (named in the pose's fourth word), last
+    * frame's when asked; a root's parent the rest pose. A vertex at a child's pivot, its weight 0, sits where its parent
+    * bone carries it: the joints stay closed.
+    */
+    void testVertexPoses() {
+        const SwaySkeleton tree = threeLevelTree();
+        const SwaySkeletonTables tables = packSwaySkeletons({&tree});
+        const WindBoneMotion motion;
+        const WindTreeShape shape{.height = tree.height, .footRadius = tree.bones[0].radius, .metresPerUnit = 1.0f, .seed = 9u};
+        const std::vector<WindBonePose> now = boneTreePoses(tables, 0, shape, Vec2{0.2f, 0.1f}, 2.0f, motion);
+        const std::vector<WindBonePose> last = boneTreePoses(tables, 0, shape, Vec2{-0.1f, 0.05f}, 1.98f, motion);
+        const std::uint32_t firstPose = 6;
+        // The slots before the tree's hold another tree's poses (not the rest pose), so a root reading past its tree shows.
+        std::vector<GpuBonePose> pool(firstPose + 2 * now.size(), packBonePose(now.back(), 0));
+
+        for (std::size_t bone = 0; bone < now.size(); ++bone) {
+            pool[bonePoseSlot(firstPose, static_cast<std::uint32_t>(bone), false)] = packBonePose(now[bone], tree.bones[bone].parent);
+            pool[bonePoseSlot(firstPose, static_cast<std::uint32_t>(bone), true)] = packBonePose(last[bone], tree.bones[bone].parent);
+        }
+
+        const auto same = [](const WindBonePose& a, const WindBonePose& b) {
+            return near(a.turn.x, b.turn.x, 1e-6f) && near(a.turn.y, b.turn.y, 1e-6f) && near(a.turn.z, b.turn.z, 1e-6f) &&
+                   near(a.turn.w, b.turn.w, 1e-6f) && near(a.shift.x, b.shift.x, 1e-6f) && near(a.shift.y, b.shift.y, 1e-6f) &&
+                   near(a.shift.z, b.shift.z, 1e-6f);
+        };
+
+        const int child = 4;
+        const auto parent = static_cast<std::size_t>(tree.bones[static_cast<std::size_t>(child)].parent);
+        assert(tree.bones[static_cast<std::size_t>(child)].parent >= 0);
+        const BoneVertexPoses bound = boneVertexPoses(pool, firstPose, packSwayBinding(SwayBinding{.bone = child, .weight = 0.25f}), false);
+        assert(same(bound.own, now[static_cast<std::size_t>(child)]) && same(bound.parent, now[parent]) && near(bound.weight, 0.25f, 1e-4f));
+        const BoneVertexPoses before = boneVertexPoses(pool, firstPose, packSwayBinding(SwayBinding{.bone = child, .weight = 0.25f}), true);
+        assert(same(before.own, last[static_cast<std::size_t>(child)]) && same(before.parent, last[parent]));
+
+        const BoneVertexPoses root = boneVertexPoses(pool, firstPose, packSwayBinding(SwayBinding{.bone = 0, .weight = 1.0f}), false);
+        assert(same(root.own, now[0]) && same(root.parent, WindBonePose{}));
+
+        const Vec3 pivot = tree.bones[static_cast<std::size_t>(child)].pivot;
+        const BoneVertexPoses atJoint = boneVertexPoses(pool, firstPose, packSwayBinding(SwayBinding{.bone = child, .weight = 0.0f}), false);
+        const Vec3 joint = windBlendedPlace(atJoint.own, atJoint.parent, atJoint.weight, pivot);
+        assert((joint - windBonePlace(now[parent], pivot)).length() < 1e-5f && (joint - pivot).length() > 1e-3f);
     }
 
     // F4's BONES line while trees are posed: trees, the still ones, bones asked against the pool; none while none are.
@@ -328,6 +391,8 @@ void testBonePoses() {
     testPoolGrows();
     testLeanParts();
     testComparison();
+    testClaimedTreeAndSlots();
+    testVertexPoses();
     testCompareCommand();
     testStatsLine();
 }

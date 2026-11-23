@@ -225,6 +225,11 @@ PlacedTable buildPlacedTable(std::span<const DrawItem> parts, std::span<const Pl
         }
 
         if (draw.skeleton != nullptr) {
+            // Bones live in the plant's frame: a vertex is posed in its mesh's frame, which must be the plant's.
+            if (draw.model != Mat4::identity()) {
+                throw std::invalid_argument("A placed part moved by bones must sit at its plant's origin");
+            }
+
             const auto known = std::find(table.skeletons.begin(), table.skeletons.end(), draw.skeleton);
             placed.unused[1] = static_cast<std::uint32_t>(known - table.skeletons.begin()) + 1;
 

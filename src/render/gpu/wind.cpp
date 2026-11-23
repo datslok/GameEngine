@@ -271,6 +271,10 @@ Vec3 windFlutterOffset(const Vec3& place, float amount, const Vec2& rate, float 
     return Vec3{std::sin(turn + phase), std::sin(1.3f * turn + 0.7f * phase + 2.0f), std::sin(0.9f * turn + 1.3f * phase + 4.0f)} * amount;
 }
 
+float windFlutterAmount(float flutter, const Vec2& lean, float modelHeight, float height) {
+    return flutter * lean.length() * std::min(std::max(modelHeight, 0.0f) / std::max(height, 1e-4f), 1.0f);
+}
+
 /*
 * The main bend first: the lean's offset at the vertex's height share u, h^2 / height (the cantilever's u^2 times the
 * height in metres), then the vertex pulled back to its distance from the foot, so a tree bends rather than stretches.
@@ -297,7 +301,7 @@ Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, 
     const float branchTurn = fullTurnRadians * static_cast<float>(WIND_BRANCH_HERTZ) * seconds + windPhase(place, static_cast<float>(WIND_BRANCH_METRES));
     offset.y += static_cast<float>(WIND_BRANCH_SHARE) * amount * trunkDistance * grow * std::sin(branchTurn);
 
-    return offset + windFlutterOffset(place, sway.w * amount * grow, flutterRate, seconds);
+    return offset + windFlutterOffset(place, windFlutterAmount(sway.w, lean, modelHeight, sway.y), flutterRate, seconds);
 }
 
 bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadius, const Vec3& camera, const WindSettings& settings) {

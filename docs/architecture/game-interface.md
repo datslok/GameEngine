@@ -172,7 +172,7 @@ Then, independently, `drawWindField` while `WindSettings::showField` is on (wind
 | Line | Contents |
 |---|---|
 | `DRAWN  CULLED  CALLS` | Camera draws, culled, draw calls (prepass included) |
-| `LEVELS a b c d  TRIS  CUT  PROBE  CLUSTERS`, then `TWIGS`, `BONES` | `drawnByLevel` (mesh first); K triangles: drawn, cut-out, probe; `mesh-clusters.md`, `twig-drawing.md`, `wind.md` |
+| `LEVELS a b c d  TRIS  CUT  PROBE  CLUSTERS`, then `TWIGS`, `BONES` | `drawnByLevel` (mesh first); K triangles drawn, cut-out, probe; `mesh-clusters.md`, `twig-drawing.md`, `wind-bones.md` |
 | `SHADOW DRAWN  CULLED  CALLS` | Over drawn shadow views |
 | `LIGHTS  IN VIEW  LIT  SHADOWED  IN MIRRORS` | Point lights; image lights only when any |
 | `TILES DRAWN  CACHED  SKIPPED  SUN TO` | Shadow tiles; `sunShadowDistance` when a sun is shadowed |

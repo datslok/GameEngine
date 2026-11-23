@@ -44,6 +44,11 @@ void main() {
     } else if (function == GPU_TEST_BONE_CLAIM) {
         uint firstPose = boneTreeFirstPose(floatBitsToUint(b.x), floatBitsToUint(b.y), floatBitsToUint(b.z));
         testOutput(0, vec4(boneTreeWanted(a.xyz, testInput(2).xyz, a.w) ? 1.0 : 0.0, uintBitsToFloat(firstPose), uintBitsToFloat(boneTreeSeed(b.w)), 0.0));
+    } else if (function == GPU_TEST_BONE_CLAIMED_TREE) {
+        uvec4 words = floatBitsToUint(a);
+        uint tree = boneClaimedTree(words.x, words.y, words.z);
+        uint bone = floatBitsToUint(b.x);
+        testOutput(0, vec4(uintBitsToFloat(tree), uintBitsToFloat(bonePoseSlot(words.w, bone, false)), uintBitsToFloat(bonePoseSlot(words.w, bone, true)), 0.0));
     } else if (function == GPU_TEST_WIND_SPHERES) {
         WindBonePose pose = WindBonePose(a, b.xyz);
         vec4 first = testInput(2);
