@@ -3,8 +3,10 @@
 #include "render/gpu/cascades.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/mesh_cluster_culling.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -330,7 +332,7 @@ VirtualShadowCounts virtualShadowCountsFrom(const std::array<std::uint32_t, VIRT
 GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap, const Vec3& camera,
                                              const std::array<std::uint32_t, maxVirtualShadowLevels>& generations,
                                              const Mat4& inverseViewProjection, float width, float height, bool showPages,
-                                             std::uint32_t frame) {
+                                             std::uint32_t frame, std::uint32_t pairRoom) {
     const VirtualShadowSettings& settings = clipmap.settings;
     const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
     GpuVirtualShadowFrame packed{};
@@ -346,6 +348,11 @@ GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap
     packed.counts[1] = pagesPerSide;
     packed.counts[2] = settings.poolPages;
     packed.counts[3] = static_cast<std::int32_t>(frame);
+    const int columns = virtualShadowPoolColumns(settings.poolPages);
+    packed.pool[0] = columns;
+    packed.pool[1] = static_cast<std::int32_t>(pairRoom);
+    packed.pool[2] = columns * virtualShadowPageTexels;
+    packed.pool[3] = virtualShadowPoolRows(settings.poolPages) * virtualShadowPageTexels;
 
     for (int level = 0; level < settings.levelCount; ++level) {
         const VirtualShadowPlacement placement = virtualShadowPlacement(clipmap, level, camera);
@@ -364,4 +371,125 @@ GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap
     }
 
     return packed;
+}
+
+bool virtualShadowEntryDrawn(std::uint32_t entry) {
+    const std::uint32_t drawn = virtualShadowEntryAllocated | virtualShadowEntryRequested;
+    return (entry & drawn) == drawn;
+}
+
+/*
+* The sphere's square of texels, its first and last pages, kept only where they meet the level. Its depth reaches its
+* centre's plus the radius sunwards (reversed depth grows towards the sun); below 0 all of it is past the far end.
+*/
+std::optional<VirtualShadowPageSpan> virtualShadowSpherePages(const Vec3& levelPoint, float radiusTexels, float radiusDepth, int pagesPerSide) {
+    const VirtualShadowPage low = virtualShadowPageOf(levelPoint.x - radiusTexels, levelPoint.y - radiusTexels);
+    const VirtualShadowPage high = virtualShadowPageOf(levelPoint.x + radiusTexels, levelPoint.y + radiusTexels);
+
+    if (levelPoint.z + radiusDepth < 0.0f || high.x < 0 || high.y < 0 || low.x >= pagesPerSide || low.y >= pagesPerSide) {
+        return std::nullopt;
+    }
+
+    const auto clamped = [pagesPerSide](int page) { return std::clamp(page, 0, pagesPerSide - 1); };
+    return VirtualShadowPageSpan{VirtualShadowPage{clamped(low.x), clamped(low.y)}, VirtualShadowPage{clamped(high.x), clamped(high.y)}};
+}
+
+std::array<std::uint32_t, 2> packVirtualShadowPagePair(const VirtualShadowPagePair& pair) {
+    const std::uint32_t where = (static_cast<std::uint32_t>(pair.level) & VIRTUAL_SHADOW_PAIR_LEVEL_MASK) << VIRTUAL_SHADOW_PAIR_LEVEL_SHIFT |
+                                (static_cast<std::uint32_t>(pair.page.y) & VIRTUAL_SHADOW_PAIR_PAGE_MASK) << VIRTUAL_SHADOW_PAIR_PAGE_Y_SHIFT |
+                                (static_cast<std::uint32_t>(pair.page.x) & VIRTUAL_SHADOW_PAIR_PAGE_MASK) << VIRTUAL_SHADOW_PAIR_PAGE_X_SHIFT |
+                                (pair.physical & VIRTUAL_SHADOW_ENTRY_PHYSICAL);
+    return {pair.place, where};
+}
+
+VirtualShadowPagePair unpackVirtualShadowPagePair(const std::array<std::uint32_t, 2>& words) {
+    const std::uint32_t where = words[1];
+    return VirtualShadowPagePair{words[0], static_cast<int>((where >> VIRTUAL_SHADOW_PAIR_LEVEL_SHIFT) & VIRTUAL_SHADOW_PAIR_LEVEL_MASK),
+                                 VirtualShadowPage{static_cast<int>((where >> VIRTUAL_SHADOW_PAIR_PAGE_X_SHIFT) & VIRTUAL_SHADOW_PAIR_PAGE_MASK),
+                                                   static_cast<int>((where >> VIRTUAL_SHADOW_PAIR_PAGE_Y_SHIFT) & VIRTUAL_SHADOW_PAIR_PAGE_MASK)},
+                                 where & VIRTUAL_SHADOW_ENTRY_PHYSICAL};
+}
+
+// The smallest square holding the pages: at most 128 a side (16384 texels, every desktop GPU's image) for the most pages.
+int virtualShadowPoolColumns(int poolPages) {
+    int columns = 1;
+
+    while (columns * columns < poolPages) {
+        ++columns;
+    }
+
+    return columns;
+}
+
+int virtualShadowPoolRows(int poolPages) {
+    const int columns = virtualShadowPoolColumns(poolPages);
+    return (poolPages + columns - 1) / columns;
+}
+
+Vec2 virtualShadowPoolTexel(float texelX, float texelY, const VirtualShadowPage& page, std::uint32_t physical, int poolColumns) {
+    const float side = static_cast<float>(virtualShadowPageTexels);
+    const std::uint32_t columns = static_cast<std::uint32_t>(poolColumns);
+    const float placeX = static_cast<float>(physical % columns) - static_cast<float>(page.x);
+    const float placeY = static_cast<float>(physical / columns) - static_cast<float>(page.y);
+    return Vec2{texelX + placeX * side, texelY + placeY * side};
+}
+
+Vec4 virtualShadowPageClip(float texelX, float texelY, const VirtualShadowPage& page) {
+    const float side = static_cast<float>(virtualShadowPageTexels);
+    const float left = static_cast<float>(page.x) * side;
+    const float top = static_cast<float>(page.y) * side;
+    return Vec4{texelX - left, left + side - texelX, texelY - top, top + side - texelY};
+}
+
+Vec4 virtualShadowPoolClip(float poolX, float poolY, float depth, int poolWidth, int poolHeight) {
+    return Vec4{2.0f * poolX / static_cast<float>(poolWidth) - 1.0f, 1.0f - 2.0f * poolY / static_cast<float>(poolHeight), depth, 1.0f};
+}
+
+VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room) {
+    VirtualShadowDrawn drawn;
+    drawn.pairs[VIRTUAL_SHADOW_PAIRS_PLAIN] = header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_PLAIN];
+    drawn.pairs[VIRTUAL_SHADOW_PAIRS_CUT_OUT] = header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_CUT_OUT];
+    drawn.room = room;
+    drawn.triangles = header[VIRTUAL_SHADOW_HEADER_TRIANGLES];
+    return drawn;
+}
+
+// A list is drawn by one mesh shader draw, so its room stays within every GPU's workgroups (the clusters' own limit).
+std::uint32_t virtualShadowPairRoomFor(std::uint32_t room, std::uint32_t mostFound) {
+    if (mostFound <= room) {
+        return room;
+    }
+
+    return std::bit_ceil(std::min(mostFound, largestMeshClusterRoom));
+}
+
+/*
+* As the expanding pass's thread for the level: the sphere placed in the level, its pages' span, each page's slot and
+* entry, a pair for each drawn one.
+*/
+void appendVirtualShadowPagePairs(std::uint32_t place, const Vec3& lightCentre, float radius, int level, const GpuVirtualShadowFrame& frame,
+                                  const std::vector<std::uint32_t>& entries, std::vector<VirtualShadowPagePair>& pairs) {
+    const GpuVirtualShadowLevel& data = frame.levels[level];
+    const int pagesPerSide = frame.counts[1];
+    const VirtualShadowPlacement placement{data.placement[0], data.placement[1], data.placement[2], data.placement[3], data.depth[0],
+                                           VirtualShadowPage{data.pages[0], data.pages[1]}};
+    const Vec3 at = virtualShadowLevelPoint(lightCentre, placement);
+    const std::optional<VirtualShadowPageSpan> span =
+        virtualShadowSpherePages(at, radius * placement.inverseTexel, radius * std::abs(placement.depthScale), pagesPerSide);
+
+    if (!span) {
+        return;
+    }
+
+    for (int y = span->first.y; y <= span->last.y; ++y) {
+        for (int x = span->first.x; x <= span->last.x; ++x) {
+            const VirtualShadowPage page{x, y};
+            const VirtualShadowPage slot = virtualShadowSlot(page, placement.originSlot, pagesPerSide);
+            const std::uint32_t entry = entries[static_cast<std::size_t>(virtualShadowTableIndex(level, slot, pagesPerSide))];
+
+            if (virtualShadowEntryDrawn(entry)) {
+                pairs.push_back(VirtualShadowPagePair{place, level, page, virtualShadowPhysicalPage(entry)});
+            }
+        }
+    }
 }

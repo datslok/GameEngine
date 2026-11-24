@@ -2,7 +2,16 @@
 // triangle_motion.mesh): one workgroup a surviving (draw list entry, cluster) pair of the style pushed
 // (render/gpu/mesh_cluster_culling.h), its vertices placed by the vertex shaders' own body (triangle_vertex.glsl,
 // shadeVertex) and its triangles from the cluster's corner bytes. Included after the extensions it needs.
+//
+// A shader drawing its own pairs (virtual_shadow_draw.mesh) defines, before including this: MESH_CLUSTER_OWN_MAIN (it has
+// its own main, calling drawPooledCluster), MESH_CLUSTER_CLIP_DISTANCES (the clip distances a vertex has, 1 otherwise)
+// and MESH_CLUSTER_VERTEX_PLACED(slot, relative), called with each vertex once placed (measured from the camera) to place
+// it again in its own view.
 #define MESH_CLUSTER_SHADER
+
+#ifndef MESH_CLUSTER_CLIP_DISTANCES
+#define MESH_CLUSTER_CLIP_DISTANCES 1
+#endif
 
 #include "render/gpu/mesh_cluster_culling_shared.h"
 #include "scene/mesh_clusters_shared.h"
@@ -14,7 +23,7 @@ layout(triangles, max_vertices = MESH_CLUSTER_MAX_VERTICES, max_primitives = MES
 // depth EQUALS the prepass's: invariant makes both compute the position alike, bit for bit (as the vertex shaders do).
 out gl_MeshPerVertexEXT {
     invariant vec4 gl_Position;
-    float gl_ClipDistance[1];
+    float gl_ClipDistance[MESH_CLUSTER_CLIP_DISTANCES];
 } gl_MeshVerticesEXT[];
 
 #include "triangle_vertex.glsl"
@@ -161,25 +170,11 @@ void drawFarCluster(MeshClusterItem item) {
     }
 }
 
-void main() {
-    // The workgroup's pair within its style's run of its list, the same for the whole workgroup; none past the run.
-    MeshClusterWords totals = MeshClusterWords(meshClusterBuffers[0].zw);
-    uint listTotals = drawnList * uint(MESH_CLUSTER_TOTAL_WORDS);
-    uint inRun = meshClusterTaskIndex(gl_WorkGroupID);
-
-    if (inRun >= totals.words[listTotals + MESH_CLUSTER_TOTAL_RUN_COUNT + drawnStyle]) {
-        SetMeshOutputsEXT(0u, 0u);
-        return;
-    }
-
-    uint place = totals.words[listTotals + MESH_CLUSTER_TOTAL_LIST_FIRST] + totals.words[listTotals + MESH_CLUSTER_TOTAL_RUN_FIRST + drawnStyle] + inRun;
-    MeshClusterItem item = MeshClusterItems(meshClusterBuffers[0].xy).items[place];
-
-    // The same for the whole workgroup, so its barriers are met by every thread.
-    if ((item.cluster & TWIG_FAR_CLUSTER_BIT) != 0u) {
-        drawFarCluster(item);
-        return;
-    }
+/*
+* A pooled cluster's pair drawn by the workgroup: its vertices placed by the vertex shaders' body, its triangles from its
+* corner bytes. Every thread calls it (its barriers).
+*/
+void drawPooledCluster(MeshClusterItem item) {
     MeshCluster cluster = MeshClusterRecords(meshClusterBuffers[1].xy).records[item.cluster];
     uint vertexCount = cluster.counts & 0xffu;
     uint triangleCount = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
@@ -206,7 +201,10 @@ void main() {
         vec3 normal = vec3(vertices.values[at + 3u], vertices.values[at + 4u], vertices.values[at + 5u]);
         vec2 uv = vec2(vertices.values[at + 6u], vertices.values[at + 7u]);
         vec4 tangent = vec4(vertices.values[at + 8u], vertices.values[at + 9u], vertices.values[at + 10u], vertices.values[at + 11u]);
-        shadeVertex(slot, position, normal, uv, tangent, position, item.entry, item.entry, int(number - cluster.meshFirstVertex), number, twigPose);
+        vec3 relative = shadeVertex(slot, position, normal, uv, tangent, position, item.entry, item.entry, int(number - cluster.meshFirstVertex), number, twigPose);
+#ifdef MESH_CLUSTER_VERTEX_PLACED
+        MESH_CLUSTER_VERTEX_PLACED(slot, relative);
+#endif
     }
 
     // Each triangle's three corner bytes, four to a word.
@@ -222,3 +220,28 @@ void main() {
         gl_MeshPrimitivesEXT[triangle].gl_CullPrimitiveEXT = false;
     }
 }
+
+#ifndef MESH_CLUSTER_OWN_MAIN
+void main() {
+    // The workgroup's pair within its style's run of its list, the same for the whole workgroup; none past the run.
+    MeshClusterWords totals = MeshClusterWords(meshClusterBuffers[0].zw);
+    uint listTotals = drawnList * uint(MESH_CLUSTER_TOTAL_WORDS);
+    uint inRun = meshClusterTaskIndex(gl_WorkGroupID);
+
+    if (inRun >= totals.words[listTotals + MESH_CLUSTER_TOTAL_RUN_COUNT + drawnStyle]) {
+        SetMeshOutputsEXT(0u, 0u);
+        return;
+    }
+
+    uint place = totals.words[listTotals + MESH_CLUSTER_TOTAL_LIST_FIRST] + totals.words[listTotals + MESH_CLUSTER_TOTAL_RUN_FIRST + drawnStyle] + inRun;
+    MeshClusterItem item = MeshClusterItems(meshClusterBuffers[0].xy).items[place];
+
+    // The same for the whole workgroup, so its barriers are met by every thread.
+    if ((item.cluster & TWIG_FAR_CLUSTER_BIT) != 0u) {
+        drawFarCluster(item);
+        return;
+    }
+
+    drawPooledCluster(item);
+}
+#endif

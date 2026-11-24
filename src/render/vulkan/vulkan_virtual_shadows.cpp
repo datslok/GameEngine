@@ -1,6 +1,7 @@
 #include "render/vulkan/vulkan_virtual_shadows.h"
 
 #include "render/gpu/compute_dispatch.h"
+#include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/image_state.h"
 #include "render/vulkan/vulkan_device.h"
@@ -20,6 +21,11 @@ namespace {
         memoryBarrier(commands, {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},
                       {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
     }
+
+    constexpr VkDeviceSize headerBytes = VIRTUAL_SHADOW_HEADER_WORDS * sizeof(std::uint32_t);
+
+    // The expanding pass pushes the cluster passes' list and bones stamp, then the style (MESH_CLUSTER_PASS_STYLE).
+    constexpr std::uint32_t expandPushBytes = 3 * sizeof(std::uint32_t);
 
     std::unique_ptr<ComputePipeline> pagesPipeline(const VulkanDevice& device, const char* shader, std::uint32_t sampledImages) {
         ComputePipelineDescription description;
@@ -49,6 +55,17 @@ VulkanVirtualShadows::VulkanVirtualShadows(const VulkanDevice& device, VkSampler
     markPipeline = pagesPipeline(device, "assets/shaders/virtual_shadow_mark.comp.spv", 1);
     resolvePipeline = pagesPipeline(device, "assets/shaders/virtual_shadow_resolve.comp.spv", 0);
     allocatePipeline = pagesPipeline(device, "assets/shaders/virtual_shadow_allocate.comp.spv", 0);
+
+    // Expanding: the cluster passes' buffers, the list and totals, then the record, the table and the pairs.
+    ComputePipelineDescription expand;
+    expand.shader = "assets/shaders/virtual_shadow_expand.comp.spv";
+    expand.storageBuffers = MESH_CLUSTER_PASS_BINDINGS + 5;
+    expand.pushConstantBytes = expandPushBytes;
+    expandPipeline = std::make_unique<ComputePipeline>(device, expand);
+    ComputePipelineDescription tasks;
+    tasks.shader = "assets/shaders/virtual_shadow_tasks.comp.spv";
+    tasks.storageBuffers = 2;
+    tasksPipeline = std::make_unique<ComputePipeline>(device, tasks);
     setFramesInFlight(framesInFlight);
 }
 
@@ -60,9 +77,11 @@ void VulkanVirtualShadows::setFramesInFlight(std::uint32_t count) {
         frameRecords.emplace_back(device.getAllocator(), sizeof(GpuVirtualShadowFrame), storage, BufferMemory::Upload);
         std::memset(frameRecords.back().getMapped(), 0, sizeof(GpuVirtualShadowFrame));
         frameRecords.back().flush();
-        readbacks.push_back(Readback{
-            VulkanBuffer{device.getAllocator(), VIRTUAL_SHADOW_COUNTERS * sizeof(std::uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback},
-            false});
+        Readback readback;
+        readback.counters =
+            VulkanBuffer{device.getAllocator(), VIRTUAL_SHADOW_COUNTERS * sizeof(std::uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
+        readback.header = VulkanBuffer{device.getAllocator(), headerBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
+        readbacks.push_back(std::move(readback));
     }
 }
 
@@ -83,6 +102,31 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
             clipmap.reset();
         }
 
+        // The pool for these pages: a new one only between frames, the GPU idle (a change of settings, rare).
+        const std::uint32_t poolWidth = static_cast<std::uint32_t>(virtualShadowPoolColumns(settings.poolPages) * virtualShadowPageTexels);
+        const std::uint32_t poolHeight = static_cast<std::uint32_t>(virtualShadowPoolRows(settings.poolPages) * virtualShadowPageTexels);
+
+        if (!pool || pool->getDescription().width != poolWidth || pool->getDescription().height != poolHeight) {
+            device.waitIdle();
+            ImageDescription description;
+            description.format = VK_FORMAT_D32_SFLOAT;
+            description.width = poolWidth;
+            description.height = poolHeight;
+            description.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            description.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+            description.name = "Virtual shadow pool";
+            pool = std::make_unique<VulkanImage>(device, description);
+        }
+
+        // This frame's pairs, with the room the frames before asked for.
+        Readback& readback = readbacks.at(frameIndex);
+        const VkDeviceSize pairBytes = headerBytes + VkDeviceSize{VIRTUAL_SHADOW_PAIR_LISTS} * pairRoom * 2u * sizeof(std::uint32_t);
+        ensureBuffer(device.getAllocator(), readback.pairs, pairBytes,
+                     storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                     BufferMemory::Gpu);
+        readback.pairRoom = pairRoom;
+
         builtFor = settings;
         const VirtualShadowClipmapUpdate update = updateVirtualShadowClipmap(clipmap, camera, sunDirection, settings, casterReach);
         clipmap = update.clipmap;
@@ -94,7 +138,8 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
         }
 
         ++frameNumber;
-        packed = packVirtualShadowFrame(*clipmap, camera, generations, inverseViewProjection, width, height, settings.showPages, frameNumber);
+        packed = packVirtualShadowFrame(*clipmap, camera, generations, inverseViewProjection, width, height, settings.showPages, frameNumber,
+                                        readback.pairRoom);
         packed.options[2] = startAgain ? 1.0f : 0.0f;
     }
 
@@ -187,4 +232,83 @@ VkDescriptorBufferInfo VulkanVirtualShadows::frameRecord(std::uint32_t frameInde
 
 VkDescriptorBufferInfo VulkanVirtualShadows::pageTable() const {
     return VkDescriptorBufferInfo{table.get(), 0, VK_WHOLE_SIZE};
+}
+
+VkDeviceAddress VulkanVirtualShadows::pairAddress(std::uint32_t frameIndex) const {
+    return readbacks.at(frameIndex).pairs.getDeviceAddress();
+}
+
+/*
+* The barriers: the casters' list and totals, written by compute while culling and left for the mesh shaders, and the
+* table, left by mark, read by the expanding pass; the header cleared first (this frame in flight's last use of the
+* pairs, its draw, finished before its fence). Each expanding dispatch only adds to the header, so they run back to back.
+*/
+void VulkanVirtualShadows::expand(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex,
+                                  const std::vector<ComputeBinding>& clusterBindings, VkBuffer clusterTasks, std::uint32_t boneStamp) {
+    Readback& readback = readbacks.at(frameIndex);
+    const VkBuffer pairs = readback.pairs.get();
+    memoryBarrier(commands, {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},
+                  {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT});
+    vkCmdFillBuffer(commands, pairs, 0, headerBytes, 0);
+    bufferBarrier(commands, pairs, {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT},
+                  {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+
+    std::vector<ComputeBinding> bindings = clusterBindings;
+    bindings.push_back(storageBufferBinding(frameRecords.at(frameIndex).get()));
+    bindings.push_back(storageBufferBinding(table.get()));
+    bindings.push_back(storageBufferBinding(pairs));
+    bindComputeSet(commands, device.getDevice(), descriptors, *expandPipeline, bindings);
+
+    for (std::uint32_t style = 0; style < MESH_CLUSTER_STYLES; ++style) {
+        const std::uint32_t words[3] = {MESH_CLUSTER_EARLY, boneStamp, style};
+        vkCmdPushConstants(commands, expandPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, expandPushBytes, words);
+        vkCmdDispatchIndirect(commands, clusterTasks, (MESH_CLUSTER_EARLY * MESH_CLUSTER_STYLES + style) * 3 * sizeof(std::uint32_t));
+    }
+
+    bufferBarrier(commands, pairs, {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},
+                  {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+    const std::array<ComputeBinding, 2> taskBindings{storageBufferBinding(frameRecords.at(frameIndex).get()), storageBufferBinding(pairs)};
+    bindComputeSet(commands, device.getDevice(), descriptors, *tasksPipeline, taskBindings);
+    vkCmdDispatch(commands, 1, 1, 1);
+    bufferBarrier(commands, pairs, {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},
+                  {VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                   VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT});
+
+    VkBufferCopy copy{};
+    copy.size = headerBytes;
+    vkCmdCopyBuffer(commands, pairs, readback.header.get(), 1, &copy);
+    bufferBarrier(commands, readback.header.get(), {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT},
+                  {VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT});
+    readback.headerPending = true;
+}
+
+void VulkanVirtualShadows::markPoolDrawn(std::uint32_t frameIndex) {
+    VulkanBuffer& record = frameRecords.at(frameIndex);
+    GpuVirtualShadowFrame* packed = static_cast<GpuVirtualShadowFrame*>(record.getMapped());
+    packed->options[3] = 1.0f;
+    record.flush();
+}
+
+VulkanImage* VulkanVirtualShadows::getPool() {
+    return pool.get();
+}
+
+VkBuffer VulkanVirtualShadows::getPairs(std::uint32_t frameIndex) const {
+    return readbacks.at(frameIndex).pairs.get();
+}
+
+std::optional<VirtualShadowDrawn> VulkanVirtualShadows::collectDrawn(std::uint32_t frameIndex) {
+    Readback& readback = readbacks.at(frameIndex);
+
+    if (!readback.headerPending) {
+        return std::nullopt;
+    }
+
+    readback.headerPending = false;
+    readback.header.invalidate();
+    std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS> header{};
+    std::memcpy(header.data(), readback.header.getMapped(), sizeof(header));
+    const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, readback.pairRoom);
+    pairRoom = virtualShadowPairRoomFor(pairRoom, *std::max_element(drawn.pairs.begin(), drawn.pairs.end()));
+    return drawn;
 }

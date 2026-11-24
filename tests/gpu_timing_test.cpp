@@ -106,14 +106,16 @@ void testGpuTiming() {
     }
 
     // The fog's grid is lit right after the shadows, whose atlas it reads, before the depth prepass; the depth prepass is
-    // recorded after it, then ambient occlusion (in four parts, below), contact shadows, the virtual shadow maps' pages and the mirrored lights, which read its depth, right before the main pass,
+    // recorded after it, then ambient occlusion (in four parts, below), contact shadows, the virtual shadow maps' pages (then their casters drawn into them) and the mirrored lights, which read its depth, right before the main pass,
     // whose depth it fills and which shades their light.
     {
         assert(static_cast<int>(GpuPass::Shadows) + 1 == static_cast<int>(GpuPass::Fog));
         assert(static_cast<int>(GpuPass::Fog) + 1 == static_cast<int>(GpuPass::DepthPrepass));
         assert(std::string(gpuPassName(GpuPass::Fog)) == "FOG");
         assert(static_cast<int>(GpuPass::ContactShadows) + 1 == static_cast<int>(GpuPass::VirtualShadowPages));
-        assert(static_cast<int>(GpuPass::VirtualShadowPages) + 1 == static_cast<int>(GpuPass::MirroredLights));
+        assert(static_cast<int>(GpuPass::VirtualShadowPages) + 1 == static_cast<int>(GpuPass::VirtualShadowDraw));
+        assert(static_cast<int>(GpuPass::VirtualShadowDraw) + 1 == static_cast<int>(GpuPass::MirroredLights));
+        assert(std::string(gpuPassName(GpuPass::VirtualShadowDraw)) == "VSMDRAW");
         assert(std::string(gpuPassName(GpuPass::VirtualShadowPages)) == "VSMPAGES");
         assert(std::string(gpuPassName(GpuPass::ContactShadows)) == "CONTACT");
         assert(std::string(gpuPassName(GpuPass::AmbientOcclusion)) == "AO");
@@ -167,7 +169,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 5, 8, 0, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 0, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 5, 8, 0, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 0, 5, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -183,7 +185,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1407 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1412 * nanosecondsPerTick * 1e-9));
         // Ambient occlusion's parts, each between its own stamps, add up to what its one line used to read.
         assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid), 4 * nanosecondsPerTick * 1e-9));
         assert(nearlyEqual(timings.seconds(GpuPass::AmbientOcclusion), 16 * nanosecondsPerTick * 1e-9));

@@ -4,6 +4,8 @@
 #include "render/gpu/virtual_shadows.h"
 
 #include <algorithm>
+#include <array>
+#include <optional>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -236,6 +238,108 @@ namespace {
     }
 }
 
+namespace {
+    // Spheres in and out of a level, by and past its far end: (level point, radius in texels), (radius in depth, pages).
+    void checkSpherePages(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{47};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 400; ++i) {
+            const float side = (i % 2 == 0 ? 32.0f : 64.0f) * 128.0f;
+            inputs.push_back(gpuVec4(random.between(-0.2f * side, 1.2f * side), random.between(-0.2f * side, 1.2f * side), random.between(-0.2f, 1.2f),
+                                     random.between(0.0f, 300.0f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 0.1f), i % 2 == 0 ? 32.0f : 64.0f));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_SPHERE_PAGES, inputs, 2, 2);
+
+        for (std::size_t i = 0; i < inputs.size() / 2; ++i) {
+            const GpuVec4& a = inputs[2 * i];
+            const GpuVec4& b = inputs[2 * i + 1];
+            const std::optional<VirtualShadowPageSpan> span = virtualShadowSpherePages(Vec3{a[0], a[1], a[2]}, a[3], b[0], static_cast<int>(b[1]));
+            report.check("virtualShadowSpherePages", exactTolerance, span ? 1.0f : 0.0f, outputs[2 * i][0]);
+
+            if (span) {
+                const GpuVec4& got = outputs[2 * i + 1];
+                report.check("virtualShadowSpherePages", exactTolerance, Vec3{static_cast<float>(span->first.x), static_cast<float>(span->first.y),
+                                                                              static_cast<float>(span->last.x)},
+                             Vec3{got[0], got[1], got[2]});
+                report.check("virtualShadowSpherePages", exactTolerance, static_cast<float>(span->last.y), got[3]);
+            }
+        }
+    }
+
+    // Pairs at every level and page, places up to 2^24 (exact in a float), and entries drawn or not:
+    // (place, level, page x, y), (physical, entry's high and low halves).
+    void checkPairs(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{48};
+        std::vector<GpuVec4> inputs;
+        const float flags[4] = {0.0f, 0x8000, 0xC000, 0xD000};
+
+        for (int i = 0; i < 300; ++i) {
+            inputs.push_back(gpuVec4(std::floor(random.between(0.0f, 16777215.0f)), static_cast<float>(i % 16), static_cast<float>((i * 7) % 64),
+                                     static_cast<float>((i * 13) % 64)));
+            inputs.push_back(gpuVec4(std::floor(random.between(0.0f, 65535.0f)), flags[i % 4], std::floor(random.between(0.0f, 65535.0f))));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_PAIR, inputs, 2, 2);
+
+        for (std::size_t i = 0; i < inputs.size() / 2; ++i) {
+            const GpuVec4& a = inputs[2 * i];
+            const GpuVec4& b = inputs[2 * i + 1];
+            const VirtualShadowPagePair pair{static_cast<std::uint32_t>(a[0]), static_cast<int>(a[1]), VirtualShadowPage{static_cast<int>(a[2]), static_cast<int>(a[3])},
+                                             static_cast<std::uint32_t>(b[0])};
+            const std::array<std::uint32_t, 2> words = packVirtualShadowPagePair(pair);
+            const VirtualShadowPagePair back = unpackVirtualShadowPagePair(words);
+            const GpuVec4& unpacked = outputs[2 * i];
+            const GpuVec4& packed = outputs[2 * i + 1];
+            report.check("virtualShadowPairLevel", exactTolerance, static_cast<float>(back.level), unpacked[0]);
+            report.check("virtualShadowPairPage", exactTolerance, Vec3{static_cast<float>(back.page.x), static_cast<float>(back.page.y), static_cast<float>(back.physical)},
+                         Vec3{unpacked[1], unpacked[2], unpacked[3]});
+            report.check("virtualShadowPackPair", exactTolerance, Vec3{static_cast<float>(words[1] >> 16), static_cast<float>(words[1] & 0xFFFFu), static_cast<float>(words[0])},
+                         Vec3{packed[0], packed[1], packed[2]});
+            const std::uint32_t entry = (static_cast<std::uint32_t>(b[1]) << 16) | static_cast<std::uint32_t>(b[2]);
+            report.check("virtualShadowEntryDrawn", exactTolerance, virtualShadowEntryDrawn(entry) ? 1.0f : 0.0f, packed[3]);
+        }
+    }
+
+    // Texels on and off their page, physical pages across pools of every shape: (texel, page), (physical, pages a row,
+    // width, height), (depth). The GPU may fuse a product and a sum the CPU rounds apart: arithmetic tolerance.
+    void checkPool(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{49};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 300; ++i) {
+            const int pages = 64 + (i * 97) % 16320;
+            const int columns = virtualShadowPoolColumns(pages);
+            const float pageX = static_cast<float>(i % 32);
+            const float pageY = static_cast<float>((i * 5) % 32);
+            inputs.push_back(gpuVec4((pageX + random.between(-0.2f, 1.2f)) * 128.0f, (pageY + random.between(-0.2f, 1.2f)) * 128.0f, pageX, pageY));
+            inputs.push_back(gpuVec4(std::floor(random.between(0.0f, static_cast<float>(pages) - 1.0f)), static_cast<float>(columns),
+                                     static_cast<float>(columns * 128), static_cast<float>(virtualShadowPoolRows(pages) * 128)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_POOL, inputs, 3, 3);
+
+        for (std::size_t i = 0; i < inputs.size() / 3; ++i) {
+            const GpuVec4& a = inputs[3 * i];
+            const GpuVec4& b = inputs[3 * i + 1];
+            const VirtualShadowPage page{static_cast<int>(a[2]), static_cast<int>(a[3])};
+            const Vec2 pool = virtualShadowPoolTexel(a[0], a[1], page, static_cast<std::uint32_t>(b[0]), static_cast<int>(b[1]));
+            const Vec4 clip = virtualShadowPoolClip(pool.x, pool.y, inputs[3 * i + 2][0], static_cast<int>(b[2]), static_cast<int>(b[3]));
+            const Vec4 edges = virtualShadowPageClip(a[0], a[1], page);
+            const GpuVec4& placed = outputs[3 * i];
+            const GpuVec4& edgesOut = outputs[3 * i + 1];
+            report.check("virtualShadowPoolTexel", arithmeticTolerance, Vec3{pool.x, pool.y, 0.0f}, Vec3{placed[0], placed[1], 0.0f});
+            report.check("virtualShadowPoolClip", arithmeticTolerance, Vec3{clip.x, clip.y, clip.z}, Vec3{placed[2], placed[3], outputs[3 * i + 2][0]});
+            report.check("virtualShadowPoolClip", exactTolerance, clip.w, outputs[3 * i + 2][1]);
+            report.check("virtualShadowPageClip", arithmeticTolerance, Vec3{edges.x, edges.y, edges.z}, Vec3{edgesOut[0], edgesOut[1], edgesOut[2]});
+            report.check("virtualShadowPageClip", arithmeticTolerance, edges.w, edgesOut[3]);
+        }
+    }
+}
+
 void gpuTestVirtualShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkLevelChoice(runner, report);
     checkPagesAndSlots(runner, report);
@@ -244,5 +348,8 @@ void gpuTestVirtualShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkEntries(runner, report);
     checkAllocationSource(runner, report);
     checkPageView(runner, report);
+    checkSpherePages(runner, report);
+    checkPairs(runner, report);
+    checkPool(runner, report);
 }
 

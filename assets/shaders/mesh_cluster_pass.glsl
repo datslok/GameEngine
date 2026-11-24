@@ -125,10 +125,14 @@ layout(std430, set = 0, binding = MESH_CLUSTER_FAR_BINDING) readonly buffer Twig
 };
 
 // The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands; and the
-// frame's bones stamp (GpuWindField::flags[1]: 0 when the bones pass did not run).
+// frame's bones stamp (GpuWindField::flags[1]: 0 when the bones pass did not run). A pass over one style's run of a
+// made list (virtual_shadow_expand.comp) defines MESH_CLUSTER_PASS_STYLE and takes the style too.
 layout(push_constant) uniform MeshClusterList {
     uint list;
     uint boneStamp;
+#ifdef MESH_CLUSTER_PASS_STYLE
+    uint style;
+#endif
 } pass;
 
 // A group's command: a draw group's, past them a placed group's, from TWIG_GROUP_BASE a twig region's: its entries

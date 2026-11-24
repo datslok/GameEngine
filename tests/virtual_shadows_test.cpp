@@ -746,7 +746,263 @@ namespace {
     }
 }
 
+namespace {
+    // Drawn: a place in the pool and asked for this frame; failed or only cached is not.
+    void testDrawnEntries() {
+        assert(virtualShadowEntryDrawn(virtualShadowEntryWith(7, virtualShadowEntryAllocated | virtualShadowEntryRequested)));
+        assert(virtualShadowEntryDrawn(virtualShadowEntryWith(7, virtualShadowEntryAllocated | virtualShadowEntryRequested | virtualShadowEntryDirty)));
+        assert(!virtualShadowEntryDrawn(virtualShadowEntryWith(7, virtualShadowEntryAllocated)));
+        assert(!virtualShadowEntryDrawn(virtualShadowEntryWith(0, virtualShadowEntryRequested | virtualShadowEntryFailed)));
+        assert(!virtualShadowEntryDrawn(0));
+    }
+
+    /*
+    * A sphere's pages are exactly those whose square meets its square of texels (tested page by page), none when that
+    * misses the level or the sphere lies wholly past the depth range's far end; sunward of the range it is still drawn.
+    */
+    void testSpherePages() {
+        std::mt19937 random{21};
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const float page = static_cast<float>(virtualShadowPageTexels);
+
+        for (int trial = 0; trial < 4000; ++trial) {
+            const int pagesPerSide = trial % 2 == 0 ? 32 : 64;
+            const float side = page * static_cast<float>(pagesPerSide);
+            const Vec3 centre{(unit(random) * 1.4f - 0.2f) * side, (unit(random) * 1.4f - 0.2f) * side, unit(random) * 1.4f - 0.2f};
+            const float radius = trial % 5 == 0 ? unit(random) * side : unit(random) * 2.0f * page;
+            const float radiusDepth = unit(random) * 0.1f;
+            const std::optional<VirtualShadowPageSpan> span = virtualShadowSpherePages(centre, radius, radiusDepth, pagesPerSide);
+            const bool pastFarEnd = centre.z + radiusDepth < 0.0f;
+
+            for (int y = 0; y < pagesPerSide; ++y) {
+                for (int x = 0; x < pagesPerSide; ++x) {
+                    const bool meets = static_cast<float>(x) * page <= centre.x + radius && static_cast<float>(x + 1) * page > centre.x - radius &&
+                                       static_cast<float>(y) * page <= centre.y + radius && static_cast<float>(y + 1) * page > centre.y - radius;
+                    const bool listed = span && x >= span->first.x && x <= span->last.x && y >= span->first.y && y <= span->last.y;
+                    assert(listed == (meets && !pastFarEnd));
+                }
+            }
+
+            if (span) {
+                assert(span->first.x <= span->last.x && span->first.y <= span->last.y);
+            }
+        }
+
+        // Sunward of the range (depth past 1) still draws; a sliver past the far end does not.
+        assert(virtualShadowSpherePages(Vec3{100.0f, 100.0f, 3.0f}, 1.0f, 0.01f, 32).has_value());
+        assert(!virtualShadowSpherePages(Vec3{100.0f, 100.0f, -0.02f}, 1.0f, 0.01f, 32).has_value());
+        assert(virtualShadowSpherePages(Vec3{100.0f, 100.0f, -0.01f}, 1.0f, 0.01f, 32).has_value());
+    }
+
+    // A pair's words keep every field at its extremes.
+    void testPagePairs() {
+        for (const VirtualShadowPagePair pair : {VirtualShadowPagePair{0, 0, {0, 0}, 0}, VirtualShadowPagePair{0xFFFFFFFFu, 15, {63, 63}, 0xFFFFu},
+                                                 VirtualShadowPagePair{123456, 7, {5, 60}, 4095}, VirtualShadowPagePair{9, 15, {0, 63}, 1}}) {
+            assert(unpackVirtualShadowPagePair(packVirtualShadowPagePair(pair)) == pair);
+        }
+
+        assert(packVirtualShadowPagePair(VirtualShadowPagePair{1, 2, {3, 4}, 5})[0] == 1u);
+    }
+
+    // The pool's pages each their own square of the image; a level's texel lands at the same spot of its page's place.
+    void testPoolPlacement() {
+        assert(virtualShadowPoolColumns(4096) == 64 && virtualShadowPoolRows(4096) == 64);
+        assert(virtualShadowPoolColumns(16384) == 128 && virtualShadowPoolRows(16384) == 128);
+        assert(virtualShadowPoolColumns(1) == 1 && virtualShadowPoolRows(1) == 1);
+
+        for (int pages : {1, 2, 64, 100, 512, 4095, 4097, 16383}) {
+            const int columns = virtualShadowPoolColumns(pages);
+            const int rows = virtualShadowPoolRows(pages);
+            assert(columns * rows >= pages && columns * (rows - 1) < pages && rows <= columns);
+            assert(columns <= 128 && rows <= 128);
+        }
+
+        std::mt19937 random{5};
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const float page = static_cast<float>(virtualShadowPageTexels);
+        const int columns = virtualShadowPoolColumns(4097);
+        std::vector<bool> taken(static_cast<std::size_t>(columns * virtualShadowPoolRows(4097)) * 16384u, false);
+
+        for (std::uint32_t physical = 0; physical < 4097; ++physical) {
+            const VirtualShadowPage onLevel{static_cast<int>(physical % 32), static_cast<int>((physical / 32) % 32)};
+            const float withinX = unit(random) * (page - 1.0f);
+            const float withinY = unit(random) * (page - 1.0f);
+            const Vec2 corner = virtualShadowPoolTexel(static_cast<float>(onLevel.x) * page, static_cast<float>(onLevel.y) * page, onLevel, physical, columns);
+            const Vec2 inside = virtualShadowPoolTexel(static_cast<float>(onLevel.x) * page + withinX, static_cast<float>(onLevel.y) * page + withinY,
+                                                       onLevel, physical, columns);
+            assert(corner.x == static_cast<float>(physical % static_cast<std::uint32_t>(columns)) * page);
+            assert(corner.y == static_cast<float>(physical / static_cast<std::uint32_t>(columns)) * page);
+            assert(std::abs(inside.x - corner.x - withinX) < 1e-3f && std::abs(inside.y - corner.y - withinY) < 1e-3f);
+
+            const std::size_t first = static_cast<std::size_t>(corner.y) * static_cast<std::size_t>(columns) * 128u + static_cast<std::size_t>(corner.x);
+            assert(!taken[first]);
+            taken[first] = true;
+        }
+    }
+
+    // The clip distances: each a texel's distance in from one edge, all at least 0 exactly on the page.
+    void testPageClip() {
+        std::mt19937 random{8};
+        std::uniform_real_distribution<float> unit(-0.5f, 1.5f);
+        const float page = static_cast<float>(virtualShadowPageTexels);
+        const VirtualShadowPage onLevel{3, 17};
+
+        for (int trial = 0; trial < 2000; ++trial) {
+            const float x = (3.0f + unit(random)) * page;
+            const float y = (17.0f + unit(random)) * page;
+            const Vec4 clip = virtualShadowPageClip(x, y, onLevel);
+            assert(clip.x == x - 3.0f * page && clip.y == 4.0f * page - x && clip.z == y - 17.0f * page && clip.w == 18.0f * page - y);
+            const bool on = x >= 3.0f * page && x <= 4.0f * page && y >= 17.0f * page && y <= 18.0f * page;
+            assert(on == (clip.x >= 0.0f && clip.y >= 0.0f && clip.z >= 0.0f && clip.w >= 0.0f));
+        }
+    }
+
+    // Through the viewport setViewport sets (its y flipped: from y + height, -height tall), a pool texel lands on itself.
+    void testPoolClip() {
+        const int width = 8192;
+        const int height = 4096;
+
+        for (const Vec3 point : {Vec3{0.0f, 0.0f, 0.0f}, Vec3{8192.0f, 4096.0f, 1.0f}, Vec3{1000.5f, 77.25f, 0.3f}, Vec3{128.0f, 4000.0f, 0.75f}}) {
+            const Vec4 clip = virtualShadowPoolClip(point.x, point.y, point.z, width, height);
+            assert(clip.w == 1.0f && clip.z == point.z);
+            const float viewportY = static_cast<float>(height);
+            const float viewportHeight = -static_cast<float>(height);
+            const float framebufferX = static_cast<float>(width) * 0.5f + static_cast<float>(width) * 0.5f * clip.x;
+            const float framebufferY = viewportY + viewportHeight * 0.5f + viewportHeight * 0.5f * clip.y;
+            assert(std::abs(framebufferX - point.x) < 1e-3f && std::abs(framebufferY - point.y) < 1e-3f);
+        }
+    }
+
+    /*
+    * The pairs of spheres round a camera: every point of a sphere landing on a drawn page of a level (inside it, not past
+    * its far end) has that page's pair, with its entry's physical page; no pair is for a page not drawn or out of the
+    * sphere's reach. Each level's table entries drawn or not at random.
+    */
+    void testPagePairsOfSpheres() {
+        std::mt19937 random{31};
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        VirtualShadowSettings settings;
+        settings.levelCount = 8;
+        const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
+        const float side = static_cast<float>(pagesPerSide * virtualShadowPageTexels);
+
+        for (int trial = 0; trial < 60; ++trial) {
+            const Vec3 camera{(unit(random) - 0.5f) * 3000.0f, unit(random) * 100.0f, (unit(random) - 0.5f) * 3000.0f};
+            const Vec3 sun = randomDirection(random);
+            std::optional<VirtualShadowClipmap> clipmap;
+
+            for (int step = 0; step < 3; ++step) {
+                clipmap = updateVirtualShadowClipmap(clipmap, camera + randomDirection(random) * (unit(random) * 30.0f), sun, settings, casterReach).clipmap;
+            }
+
+            const GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, {}, Mat4::identity(), 1920.0f, 1080.0f, false, 1);
+            std::vector<std::uint32_t> entries(static_cast<std::size_t>(settings.levelCount * pagesPerSide * pagesPerSide));
+
+            for (std::size_t index = 0; index < entries.size(); ++index) {
+                const float pick = unit(random);
+                const std::uint32_t flags = pick < 0.5f ? virtualShadowEntryAllocated | virtualShadowEntryRequested
+                                            : pick < 0.7f ? virtualShadowEntryAllocated
+                                            : pick < 0.8f ? virtualShadowEntryRequested | virtualShadowEntryFailed
+                                                          : 0u;
+                entries[index] = virtualShadowEntryWith(static_cast<std::uint32_t>(index % 4096), flags);
+            }
+
+            for (int sphere = 0; sphere < 20; ++sphere) {
+                const float radius = 0.05f + unit(random) * unit(random) * 20.0f;
+                const Vec3 centre = camera + randomDirection(random) * (unit(random) * unit(random) * 400.0f);
+                const Vec3 lightCentre = lightPointOf(sun, centre - camera);
+                const std::uint32_t place = static_cast<std::uint32_t>(trial * 100 + sphere);
+
+                for (int level = 0; level < settings.levelCount; ++level) {
+                    std::vector<VirtualShadowPagePair> pairs;
+                    appendVirtualShadowPagePairs(place, lightCentre, radius, level, frame, entries, pairs);
+                    const VirtualShadowPlacement placement = virtualShadowPlacement(*clipmap, level, camera);
+                    const auto entryOf = [&](const VirtualShadowPage& onLevel) {
+                        const VirtualShadowPage slot = virtualShadowSlot(onLevel, placement.originSlot, pagesPerSide);
+                        return entries[static_cast<std::size_t>(virtualShadowTableIndex(level, slot, pagesPerSide))];
+                    };
+
+                    for (const VirtualShadowPagePair& pair : pairs) {
+                        assert(pair.place == place && pair.level == level);
+                        assert(virtualShadowEntryDrawn(entryOf(pair.page)) && pair.physical == virtualShadowPhysicalPage(entryOf(pair.page)));
+                        const Vec3 at = virtualShadowLevelPoint(lightCentre, placement);
+                        const float reach = radius * placement.inverseTexel + 1.0f;
+                        const float page = static_cast<float>(virtualShadowPageTexels);
+                        assert(static_cast<float>(pair.page.x) * page <= at.x + reach && static_cast<float>(pair.page.x + 1) * page >= at.x - reach);
+                        assert(static_cast<float>(pair.page.y) * page <= at.y + reach && static_cast<float>(pair.page.y + 1) * page >= at.y - reach);
+                    }
+
+                    for (int sample = 0; sample < 60; ++sample) {
+                        const Vec3 point = centre + randomDirection(random) * (radius * std::cbrt(unit(random)));
+                        const Vec3 at = inLevel(*clipmap, level, camera, point);
+
+                        if (at.x < 0.0f || at.y < 0.0f || at.x >= side || at.y >= side || at.z < 0.0f) {
+                            continue;
+                        }
+
+                        const VirtualShadowPage onLevel = virtualShadowPageOf(at.x, at.y);
+
+                        if (virtualShadowEntryDrawn(entryOf(onLevel))) {
+                            assert(std::any_of(pairs.begin(), pairs.end(), [&](const VirtualShadowPagePair& pair) { return pair.page == onLevel; }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The record carries the pool's layout and the pairs' room; the room grows to a power of two past what a frame found.
+    void testPoolInTheRecordAndRoom() {
+        VirtualShadowSettings settings;
+        settings.poolPages = 4097;
+        const VirtualShadowClipmap clipmap = freshClipmap(Vec3{}, Vec3{0.0f, -1.0f, 0.2f}.normalized(), settings);
+        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, Vec3{}, {}, Mat4::identity(), 100.0f, 100.0f, false, 1, 1u << 19);
+        assert(frame.pool[0] == 65 && frame.pool[1] == (1 << 19) && frame.pool[2] == 65 * 128 && frame.pool[3] == 64 * 128);
+
+        assert(virtualShadowPairRoomFor(262144, 0) == 262144 && virtualShadowPairRoomFor(262144, 262144) == 262144);
+        assert(virtualShadowPairRoomFor(262144, 262145) == 524288 && virtualShadowPairRoomFor(262144, 3000000) == 4194304);
+        assert(virtualShadowPairRoomFor(262144, 0xFFFFFFFFu) == 4194304);
+    }
+
+    // The header by name, and F4's line after the casters' while drawn.
+    void testDrawnLine() {
+        std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS> header{};
+        header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_PLAIN] = 12000;
+        header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_CUT_OUT] = 3000;
+        header[VIRTUAL_SHADOW_HEADER_TRIANGLES] = 900000;
+        const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, 262144);
+        assert(drawn.pairs[0] == 12000 && drawn.pairs[1] == 3000 && drawn.triangles == 900000 && drawn.room == 262144);
+
+        RenderStats stats;
+        stats.virtualShadowPages = VirtualShadowCounts{};
+        stats.virtualShadowCasters = VirtualShadowCasters{};
+        const auto drawnLine = [](const std::vector<std::string>& lines) {
+            return std::find_if(lines.begin(), lines.end(), [](const std::string& line) { return line.starts_with("VSM DRAWN"); });
+        };
+        std::vector<std::string> lines = renderStatsLines(stats);
+        assert(drawnLine(lines) == lines.end());
+        stats.virtualShadowDrawn = drawn;
+        lines = renderStatsLines(stats);
+        const auto line = drawnLine(lines);
+        assert(line != lines.end() && *line == "VSM DRAWN 15000 PAIRS (3000 CUT-OUT)  ROOM 262144  TRIS 900K");
+        assert((line - 1)->starts_with("VSM CASTERS"));
+
+        stats.virtualShadowDrawn->pairs[1] = 300000;
+        lines = renderStatsLines(stats);
+        assert(drawnLine(lines)->ends_with("  FULL"));
+    }
+}
+
 void testVirtualShadows() {
+    testDrawnEntries();
+    testSpherePages();
+    testPagePairs();
+    testPoolPlacement();
+    testPageClip();
+    testPoolClip();
+    testPagePairsOfSpheres();
+    testPoolInTheRecordAndRoom();
+    testDrawnLine();
     testCasterLevels();
     testCasterBoxHoldsItsLevels();
     testMarkedPages();

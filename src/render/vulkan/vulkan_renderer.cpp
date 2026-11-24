@@ -489,6 +489,23 @@ void VulkanRenderer::createPipelines() {
     shadowCutOut.vertices.attributes.push_back({2, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<std::uint32_t>(offsetof(MeshVertex, uv))});
     shadowCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, shadowCutOut);
 
+    // The sun's virtual shadow pages (ROADMAP phase 21 4c-ii): page pairs drawn by mesh shaders into the pool's depth as
+    // the shadow pass draws, both sides, GREATER, clamped as every pipeline; plain casters with no fragment shader,
+    // cut-outs through the prepass's own test (their holes, impostors' cards, fading levels).
+    if (device.supportsMeshShaders()) {
+        PipelineDescription pages = shadow;
+        pages.vertexShader = "assets/shaders/virtual_shadow_draw.mesh.spv";
+        pages.fragmentShader = nullptr;
+        pages.meshShader = true;
+        pages.vertices = VertexLayout{};
+        pages.dynamicCullMode = false;
+        pages.cullMode = VK_CULL_MODE_NONE;
+        virtualShadowPagePipeline = std::make_unique<VulkanPipeline>(device, layouts, pages);
+        PipelineDescription pagesCutOut = pages;
+        pagesCutOut.fragmentShader = "assets/shaders/virtual_shadow_cut_out.frag.spv";
+        virtualShadowCutOutPagePipeline = std::make_unique<VulkanPipeline>(device, layouts, pagesCutOut);
+    }
+
     PipelineDescription reset = shadow;
     reset.dynamicCullMode = false;
     reset.vertexShader = "assets/shaders/fullscreen_triangle.vert.spv";
@@ -1057,6 +1074,11 @@ FrameContext VulkanRenderer::beginFrame() {
         const std::array<std::uint32_t, MESH_CLUSTER_TOTAL_WORDS>& totals = casters->totals[MESH_CLUSTER_EARLY];
         lastVirtualShadowCasters = VirtualShadowCasters{lastCameraCull.virtualShadowDraws, totals[MESH_CLUSTER_TOTAL_TESTED],
                                                         totals[MESH_CLUSTER_TOTAL_KEPT], totals[MESH_CLUSTER_TOTAL_TRIANGLES]};
+    }
+
+    // What was drawn into the pages (stage 4c-ii).
+    if (const std::optional<VirtualShadowDrawn> drawn = virtualShadows->collectDrawn(frameIndex)) {
+        lastVirtualShadowDrawn = drawn;
     }
 
     clusterCompareBones.reset();
@@ -1789,6 +1811,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.bonePool = bones.pool;
     stats.virtualShadowPages = settings.virtualShadows.enabled ? lastVirtualShadowCounts : std::nullopt;
     stats.virtualShadowCasters = settings.virtualShadows.enabled ? lastVirtualShadowCasters : std::nullopt;
+    stats.virtualShadowDrawn = settings.virtualShadows.enabled ? lastVirtualShadowDrawn : std::nullopt;
     const TwigTally twigTally = lastTwigTally.value_or(TwigTally{});
     stats.twigsTested = twigTally.tested;
     stats.twigsKept = twigTally.kept;
@@ -2108,8 +2131,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Their casters (ROADMAP phase 21 4c-i): one more shadow view of the camera's culling, round every level the screen
     // may mark (to the farthest surface the cascades' fit measured, else the far plane), its list a region of the draw
     // list like a shadow tile's; its clusters culled after the camera's, by its own passes. With mesh shaders only, which
-    // are to draw them into the pages (4c-ii).
+    // draw them into the pages (4c-ii): their list and the page pairs by address in the frame's uniform block, so made
+    // ready here, before the scene set is written.
     std::optional<GpuCameraCull> virtualShadowView;
+    frameVirtualShadowBuffers = {};
 
     if (virtualShadows->runs() && drawsClusters && virtualShadows->getClipmap()) {
         const float farthest = std::min(camera.getFarPlane(), fittedSunDistance);
@@ -2117,6 +2142,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         virtualShadowView = packVirtualShadowCull(virtualShadowCasterBox(*virtualShadows->getClipmap(), casterLevels), cameraLevels);
         virtualShadowView->mainBase = drawList.reserve(listEntries);
         virtualShadowView->motionBase = virtualShadowView->mainBase;
+        frameVirtualShadowBuffers = {virtualShadows->pairAddress(frame.frameIndex), virtualShadowClusters->prepare(frame.frameIndex).items};
+        virtualShadows->markPoolDrawn(frame.frameIndex);
     }
 
     if (contact.runs() && !contactShadows->hasImages()) {
@@ -2429,7 +2456,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             placedClusters && placedViewNumbers.virtualShadow ? std::optional{placedDrawing->clusterInputs(frame.frameIndex, *placedViewNumbers.virtualShadow)}
                                                               : std::nullopt;
         const VulkanMeshClusterCulling::Inputs inputs = meshClusterInputs(clusterViewOf(*virtualShadowCullView), placed, -1);
-        virtualShadowClusters->prepare(frame.frameIndex);
         virtualShadowClusters->cull(frame.commands, frame.descriptors, frame.frameIndex, inputs, false);
         endGpuPass(frame, GpuPass::VirtualShadowCull);
     }
@@ -2610,6 +2636,35 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::VirtualShadowPages);
         virtualShadows->mark(frame.commands, frame.descriptors, frame.frameIndex, depth);
         endGpuPass(frame, GpuPass::VirtualShadowPages);
+    }
+
+    // Their casters drawn into the pages given room (ROADMAP phase 21 4c-ii): the casters' clusters expanded into page
+    // pairs, then each pair's cluster drawn into its page's place in the pool, cleared first (every page drawn each frame
+    // until 4e), plain casters then cut-outs; the pool left for the main pass's reads.
+    if (virtualShadowView) {
+        beginGpuPass(frame, GpuPass::VirtualShadowDraw);
+        virtualShadows->expand(frame.commands, frame.descriptors, frame.frameIndex, virtualShadowClusters->listPassBindings(frame.frameIndex),
+                               virtualShadowClusters->getTaskCommands(frame.frameIndex), cullBones.stamp);
+        VulkanImage& pool = *virtualShadows->getPool();
+        pool.transition(frame.commands, ImageState::DepthTarget, ImageContents::Discard);
+        const DepthAttachment poolTarget{pool.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+        beginRendering(frame.commands, {pool.getDescription().width, pool.getDescription().height}, nullptr, &poolTarget);
+        renderingOpen = true;
+        bindScene(frame.commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+
+        for (std::uint32_t list = 0; list < VIRTUAL_SHADOW_PAIR_LISTS; ++list) {
+            const VulkanPipeline& pipeline = list == VIRTUAL_SHADOW_PAIRS_CUT_OUT ? *virtualShadowCutOutPagePipeline : *virtualShadowPagePipeline;
+            vkCmdBindPipeline(frame.commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
+            const std::uint32_t drawn[3] = {0, list, MESH_CLUSTER_LEAF_TEST_NONE};
+            vkCmdPushConstants(frame.commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, sizeof(drawn), drawn);
+            vkCmdDrawMeshTasksIndirectEXT(frame.commands, virtualShadows->getPairs(frame.frameIndex),
+                                          (VIRTUAL_SHADOW_HEADER_TASKS + 3 * list) * sizeof(std::uint32_t), 1, 3 * sizeof(std::uint32_t));
+        }
+
+        vkCmdEndRendering(frame.commands);
+        renderingOpen = false;
+        pool.transition(frame.commands, ImageState::DepthFragmentRead);
+        endGpuPass(frame, GpuPass::VirtualShadowDraw);
     }
 
     if (mirrorLight) {
@@ -2965,6 +3020,11 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            settings.clusterHeatmap, settings.shadows);
     packMeshClusterBuffers(frameMeshClusterBuffers, frameData.meshClusterBuffers);
 
+    for (std::size_t buffer = 0; buffer < frameVirtualShadowBuffers.size(); ++buffer) {
+        frameData.virtualShadowBuffers[2 * buffer] = static_cast<std::uint32_t>(frameVirtualShadowBuffers[buffer] & 0xFFFFFFFFu);
+        frameData.virtualShadowBuffers[2 * buffer + 1] = static_cast<std::uint32_t>(frameVirtualShadowBuffers[buffer] >> 32);
+    }
+
     if (!probes.empty()) {
         const GlobalIlluminationSettings& illumination = settings.globalIllumination;
         packProbeSampling(frameData, ProbeSampling{countCascadeProbes(probes), static_cast<int>(probes.size()), illumination.selfShadowBias,
@@ -3079,6 +3139,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         wind->sampledPreviousSprings(),
         leafPyramidEarly.value_or(sampled(*noProbesTexture)),
         leafPyramidWhole.value_or(sampled(*noProbesTexture)),
+        frameVirtualShadowBuffers[0] != 0 ? SampledImage{virtualShadows->getPool()->getView(), nearestSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL}
+                                          : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -4795,6 +4857,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     lastVirtualShadowCounts.reset();
     virtualShadowClusters->setFramesInFlight(count);
     lastVirtualShadowCasters.reset();
+    lastVirtualShadowDrawn.reset();
     motionBlur->setFramesInFlight(count);
     depthOfField->setFramesInFlight(count);
 

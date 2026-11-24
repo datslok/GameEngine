@@ -166,8 +166,8 @@ layout(set = 1, binding = 32) uniform sampler2D lightContactShadows;
 
 #include "render/gpu/contact_shadows_shared.h"
 
-// The sun's virtual shadow maps' record and page table (render/vulkan/vulkan_virtual_shadows.h): only their debug view
-// reads them so far (ROADMAP phase 21 stage 4b).
+// The sun's virtual shadow maps' record, page table and pool (render/vulkan/vulkan_virtual_shadows.h): only their debug
+// view reads them so far (ROADMAP phase 21 stages 4b, 4c-ii).
 #include "virtual_shadow_data.glsl"
 #include "virtual_shadows.glsl"
 
@@ -178,6 +178,13 @@ layout(std430, set = 1, binding = SCENE_VIRTUAL_SHADOW_FRAME_BINDING) readonly b
 layout(std430, set = 1, binding = SCENE_VIRTUAL_SHADOW_TABLE_BINDING) readonly buffer SceneVirtualShadowTable {
     uint virtualShadowEntries[];
 };
+
+// The pool's depth, exact texels; a stand-in while nothing is drawn there (the record's options.w 0).
+layout(set = 1, binding = SCENE_VIRTUAL_SHADOW_POOL_BINDING) uniform sampler2D virtualShadowPool;
+
+// The debug view's own bias: a point is in a page's shadow where the pool holds a depth this many of its level's texels
+// sunward of it (a rough look at what was drawn, not the main pass's shadow, 4c-iii).
+const float VIRTUAL_SHADOW_VIEW_BIAS_TEXELS = 3.0;
 
 #include "ambient_occlusion.glsl"
 
@@ -905,6 +912,17 @@ vec4 virtualShadowPageView(vec3 relative) {
         colour = vec3(0.0);
     } else if ((entry & VIRTUAL_SHADOW_ENTRY_DIRTY) != 0u) {
         colour = vec3(1.0);
+    }
+
+    // Once drawn (4c-ii): a page's shadow dark, where its depth is sunward of the point (reversed: larger).
+    if (virtualShadowFrame.options.w > 0.5 && virtualShadowEntryDrawn(entry)) {
+        vec2 poolTexel = virtualShadowPoolTexel(placed.xy, virtualShadowPageOf(placed.xy), virtualShadowPhysicalPage(entry), virtualShadowFrame.pool.x);
+        float stored = texelFetch(virtualShadowPool, ivec2(poolTexel), 0).r;
+        float bias = VIRTUAL_SHADOW_VIEW_BIAS_TEXELS * abs(data.placement.w) / data.placement.z;
+
+        if (stored > placed.z + bias) {
+            colour *= 0.2;
+        }
     }
 
     if (virtualShadowNearPageEdge(placed.xy, 2.0)) {

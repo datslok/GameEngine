@@ -18,8 +18,10 @@ class VulkanDevice;
 /*
 * The sun's virtual shadow maps' pages on the GPU (render/gpu/virtual_shadows.h; ROADMAP phase 21 stage 4b). Each frame,
 * after the depth prepass, four compute passes: clear last frame's flags, mark the pages every pixel's shadow needs,
-* resolve each table entry's fate (kept, stale, needing a place, only cached), and allocate places in the pool. Nothing
-* is drawn into the pages yet (4c); the counts reach F4, and the main pass reads the table for its debug view.
+* resolve each table entry's fate (kept, stale, needing a place, only cached), and allocate places in the pool. Then
+* (4c-ii) the casters' surviving clusters are expanded into page pairs, a pair for each drawn page a cluster's sphere
+* touches, and the renderer draws each pair's cluster into the pool, a depth image cleared each frame (every page is
+* redrawn until 4e caches them). The counts reach F4; the main pass reads the table and the pool for its debug view.
 *
 * Everything lives on the GPU from frame to frame: the page table, each entry's key, the free list and its top. The CPU
 * keeps only the clipmap (where each level is) and each level's generation, bumped when the level drops its pages, so the
@@ -57,10 +59,41 @@ public:
     VkDescriptorBufferInfo frameRecord(std::uint32_t frameIndex) const;
     VkDescriptorBufferInfo pageTable() const;
 
+    // This frame's page pairs' buffer by address, for the frame's uniform block (made by prepare while running).
+    VkDeviceAddress pairAddress(std::uint32_t frameIndex) const;
+
+    // After prepare: this frame draws into the pool (its casters culled), so the main pass may read it (the record's options.w).
+    void markPoolDrawn(std::uint32_t frameIndex);
+
+    /*
+    * After mark, the casters' clusters culled (VulkanMeshClusterCulling::listPassBindings and its task commands): each
+    * style's survivors expanded into page pairs, a workgroup a survivor dispatched by the list's own draw of that style,
+    * then each pair list's mesh shader draw written into the pairs' header, which is copied back for F4. Leaves the pairs
+    * for the mesh shaders and their draws for indirect reads.
+    */
+    void expand(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, const std::vector<ComputeBinding>& clusterBindings,
+                VkBuffer clusterTasks, std::uint32_t boneStamp);
+
+    // The pool's depth image (VIRTUAL_SHADOW_PAGE_TEXELS a page, virtualShadowPoolColumns pages a row), made by prepare
+    // for its settings; none before.
+    VulkanImage* getPool();
+
+    // This frame's pairs: each list's mesh shader draw at VIRTUAL_SHADOW_HEADER_TASKS words in.
+    VkBuffer getPairs(std::uint32_t frameIndex) const;
+
+    // Once the frame's fence passed: what it drew, once; none when it drew nothing. A list past its room grows the room.
+    std::optional<VirtualShadowDrawn> collectDrawn(std::uint32_t frameIndex);
+
 private:
     struct Readback {
         VulkanBuffer counters;
         bool pending = false;
+
+        // The page pairs (4c-ii): GPU memory with the room it was made for, and its header copied back.
+        VulkanBuffer pairs;
+        std::uint32_t pairRoom = 0;
+        VulkanBuffer header;
+        bool headerPending = false;
     };
 
     const VulkanDevice& device;
@@ -69,6 +102,12 @@ private:
     std::unique_ptr<ComputePipeline> markPipeline;
     std::unique_ptr<ComputePipeline> resolvePipeline;
     std::unique_ptr<ComputePipeline> allocatePipeline;
+    std::unique_ptr<ComputePipeline> expandPipeline;
+    std::unique_ptr<ComputePipeline> tasksPipeline;
+
+    // The pool, made for the pages builtFor has; the pairs' room for frames from now.
+    std::unique_ptr<VulkanImage> pool;
+    std::uint32_t pairRoom = virtualShadowFirstPairRoom;
 
     // Sized for the most levels, pages and pool any settings ask for, so changing them never reallocates.
     VulkanBuffer table;

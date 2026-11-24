@@ -96,7 +96,8 @@ enum SceneBinding : std::uint32_t {
     LeafPyramidWholeBinding = 58,
     VirtualShadowFrameBinding = 59,
     VirtualShadowTableBinding = 60,
-    SceneBindingCount = 61
+    VirtualShadowPoolBinding = 61,
+    SceneBindingCount = 62
 };
 
 static_assert(FarClustersBinding == SCENE_FAR_CLUSTERS_BINDING && FarLeavesBinding == SCENE_FAR_LEAVES_BINDING && FarShapesBinding == SCENE_FAR_SHAPES_BINDING,
@@ -107,7 +108,8 @@ static_assert(LeafPyramidEarlyBinding == SCENE_LEAF_PYRAMID_EARLY_BINDING && Lea
 static_assert(BoneTreesBinding == SCENE_BONE_TREES_BINDING && BonePlantTreesBinding == SCENE_BONE_PLANT_TREES_BINDING &&
                   BonePosesBinding == SCENE_BONE_POSES_BINDING && SwayBindingsBinding == SCENE_SWAY_BINDINGS_BINDING,
               "The bones' bindings must match bone_vertex_data.glsl's");
-static_assert(VirtualShadowFrameBinding == SCENE_VIRTUAL_SHADOW_FRAME_BINDING && VirtualShadowTableBinding == SCENE_VIRTUAL_SHADOW_TABLE_BINDING,
+static_assert(VirtualShadowFrameBinding == SCENE_VIRTUAL_SHADOW_FRAME_BINDING && VirtualShadowTableBinding == SCENE_VIRTUAL_SHADOW_TABLE_BINDING &&
+                  VirtualShadowPoolBinding == SCENE_VIRTUAL_SHADOW_POOL_BINDING,
               "The virtual shadow maps' bindings must match scene_surface.glsl's");
 static_assert(LianaTreePlantsBinding == SCENE_LIANA_TREE_PLANTS_BINDING, "The lianas' trees' binding must match liana_data.glsl's");
 
@@ -242,6 +244,7 @@ struct SceneImages {
     SampledImage windPreviousSprings;
     SampledImage leafPyramidEarly;  // the occlusion pyramids the mesh shaders test far leaves against (stand-ins without)
     SampledImage leafPyramidWhole;
+    SampledImage virtualShadowPool; // the sun's virtual shadow pages' depth, once drawn this frame (a stand-in otherwise)
 };
 
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light

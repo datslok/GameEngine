@@ -143,6 +143,14 @@ public:
     // The room for pairs, each list's.
     std::uint32_t getRoom() const;
 
+    /*
+    * For a pass of another system's over the frame's early list once cull made it (the sun's virtual shadow casters'
+    * expanding, render/vulkan/vulkan_virtual_shadows.h): the bindings every pass shares (mesh_cluster_pass.glsl, from
+    * what cull was given), then the list's items and totals. The list and its task commands are left for the mesh
+    * shaders and indirect reads; such a pass makes them visible to compute itself.
+    */
+    std::vector<ComputeBinding> listPassBindings(std::uint32_t frameIndex) const;
+
     // The occlusion pyramids for the mesh shaders' far leaves (stage 3e-v-b), made now if not yet; none before the render
     // size is known. This frame's early list's, and the whole frame's (the next frame's history). Readable by mesh shaders
     // whenever they draw, but read only by a draw told to test against one, after cullLate or keepDepth built it.

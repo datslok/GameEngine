@@ -17,8 +17,9 @@ struct VirtualShadowLevelData {
     mat4 lightRotation;          /* camera-relative points to the light's axes */                                  \
     mat4 inverseViewProjection;  /* the camera's, camera-relative and jittered */                                  \
     vec4 screen;                 /* the render size in pixels, and its inverse */                                  \
-    vec4 options;                /* x the first level's usable half-width, y 1 the debug view, z 1 starts again */\
+    vec4 options;                /* x the first usable half-width, y 1 the debug view, z 1 starts again, w 1 drawn */\
     ivec4 counts;                /* x the levels, y the pages a level's side, z the pool's pages, w the frame */  \
+    ivec4 pool;                  /* x the pool's pages a row, y the pairs' room, z, w its width, height (texels) */\
     VirtualShadowLevelData levels[VIRTUAL_SHADOW_MAX_LEVELS];
 
 #endif

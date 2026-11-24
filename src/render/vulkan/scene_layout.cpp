@@ -79,8 +79,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves' cells' shapes
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the early list's occlusion pyramid (the mesh shaders' far leaves)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the whole frame's
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // the sun's virtual shadow maps' record (render/gpu/virtual_shadows.h)
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // their page table
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment},           // the sun's virtual shadow maps' record (render/gpu/virtual_shadows.h; the mesh shaders drawing into the pages read it)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment},           // their page table
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // their pool's depth (render/vulkan/vulkan_virtual_shadows.h)
     }};
 }
 
@@ -312,6 +313,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[WindPreviousSpringsBinding] = imageInfo(images.windPreviousSprings);
     imageInfos[LeafPyramidEarlyBinding] = imageInfo(images.leafPyramidEarly);
     imageInfos[LeafPyramidWholeBinding] = imageInfo(images.leafPyramidWhole);
+    imageInfos[VirtualShadowPoolBinding] = imageInfo(images.virtualShadowPool);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

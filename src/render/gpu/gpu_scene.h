@@ -126,9 +126,12 @@ struct GpuFrameData {
     // numbers, their triangle words, the vertex pool.
     std::uint32_t meshClusterBuffers[12];
     float leafOptions[4]; // x: the twigs' leaf normal blend (MaterialSettings::leafNormalBlend, scene/foliage_shading.h)
+    // The mesh shaders drawing into the sun's virtual shadow pages (render/vulkan/vulkan_virtual_shadows.h), by address as
+    // low and high words, zero while nothing is drawn there: the page pairs' buffer, the casters' clusters' list.
+    std::uint32_t virtualShadowBuffers[4];
 };
 
-static_assert(sizeof(GpuFrameData) == 576, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 592, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);

@@ -39,6 +39,7 @@ enum class GpuPass {
     AoUpsample,   // at half resolution, its result brought to the render's size
     ContactShadows, // the sun's contact shadows marched through the prepass's depth (render/gpu/contact_shadows.h)
     VirtualShadowPages, // the sun's virtual shadow maps' pages marked from the prepass's depth and given room (render/gpu/virtual_shadows.h)
+    VirtualShadowDraw,  // their casters' clusters expanded into page pairs and drawn into the pool
     MirroredLights, // light reflected off mirrors onto what the prepass drew (render/gpu/mirrored_light.h)
     Main,
     ProbeBalls,

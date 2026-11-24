@@ -99,6 +99,11 @@ VkBuffer VulkanMeshClusterCulling::getTaskCommands(std::uint32_t frameIndex) con
 * The lists sized by the room as it stands (the room grows only between frames, in collect), each list a room's run of
 * the items; the totals and the task commands; the lists and totals reached by address from the mesh shaders.
 */
+std::vector<ComputeBinding> VulkanMeshClusterCulling::listPassBindings(std::uint32_t frameIndex) const {
+    const PerFrame& frame = frames.at(frameIndex);
+    return passBindings(frame, {frame.items.get(), frame.totals.get()}, false);
+}
+
 VulkanMeshClusterCulling::ListAddresses VulkanMeshClusterCulling::prepare(std::uint32_t frameIndex) {
     PerFrame& frame = frames.at(frameIndex);
     const VmaAllocator allocator = device.getAllocator();

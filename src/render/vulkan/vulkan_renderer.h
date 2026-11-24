@@ -348,6 +348,10 @@ private:
     std::array<std::unique_ptr<VulkanPipeline>, 32> mainMeshPipelines;
     std::unique_ptr<VulkanPipeline> depthPrepassMeshPipeline;
     std::unique_ptr<VulkanPipeline> depthPrepassCutOutMeshPipeline;
+
+    // The sun's virtual shadow pages' casters drawn by mesh shaders (stage 4c-ii), plain and cut-out.
+    std::unique_ptr<VulkanPipeline> virtualShadowPagePipeline;
+    std::unique_ptr<VulkanPipeline> virtualShadowCutOutPagePipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
     std::unique_ptr<VulkanPipeline> shadowCutOutPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;
@@ -401,6 +405,11 @@ private:
     // culled after the camera's by passes of their own (no occlusion, no twigs); the last counts for F4.
     std::unique_ptr<VulkanMeshClusterCulling> virtualShadowClusters;
     std::optional<VirtualShadowCasters> lastVirtualShadowCasters;
+
+    // What was drawn into the pages (stage 4c-ii), for F4; and this frame's page pairs and casters' list by address for
+    // the frame's uniform block (zero while nothing is drawn there).
+    std::optional<VirtualShadowDrawn> lastVirtualShadowDrawn;
+    std::array<std::uint64_t, 2> frameVirtualShadowBuffers{};
     std::unique_ptr<VulkanMotionBlur> motionBlur;
     std::unique_ptr<VulkanDepthOfField> depthOfField;
     bool depthOfFieldFresh = true;

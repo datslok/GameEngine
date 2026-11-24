@@ -45,5 +45,27 @@ void main() {
         testOutput(0, vec4(vec2(source), 0.0, 0.0));
     } else if (function == GPU_TEST_VIRTUAL_SHADOW_PAGE_VIEW) {
         testOutput(0, vec4(virtualShadowLevelColour(int(a.x)), virtualShadowNearPageEdge(a.yz, a.w) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_SPHERE_PAGES) {
+        // a: the level point, the radius in texels; b: the radius in depth, the pages a side.
+        vec4 b = testInput(1);
+        ivec4 span;
+        bool found = virtualShadowSpherePages(a.xyz, a.w, b.x, int(b.y), span);
+        testOutput(0, vec4(found ? 1.0 : 0.0, 0.0, 0.0, 0.0));
+        testOutput(1, found ? vec4(span) : vec4(0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_PAIR) {
+        // a: place, level, page; b: physical, an entry's high and low halves.
+        vec4 b = testInput(1);
+        uvec2 pair = virtualShadowPackPair(uint(a.x), int(a.y), ivec2(a.zw), uint(b.x));
+        uint entry = (uint(b.y) << 16u) | uint(b.z);
+        testOutput(0, vec4(float(virtualShadowPairLevel(pair)), vec2(virtualShadowPairPage(pair)), float(virtualShadowPairPhysical(pair))));
+        testOutput(1, vec4(float(pair.y >> 16u), float(pair.y & 0xFFFFu), float(pair.x), virtualShadowEntryDrawn(entry) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_POOL) {
+        // a: a level's texel, its page; b: the physical page, the pool's pages a row, width, height; c: x the depth.
+        vec4 b = testInput(1);
+        vec2 pool = virtualShadowPoolTexel(a.xy, ivec2(a.zw), uint(b.x), int(b.y));
+        vec4 clip = virtualShadowPoolClip(pool, testInput(2).x, ivec2(b.zw));
+        testOutput(0, vec4(pool, clip.xy));
+        testOutput(1, virtualShadowPageClip(a.xy, ivec2(a.zw)));
+        testOutput(2, vec4(clip.zw, 0.0, 0.0));
     }
 }
