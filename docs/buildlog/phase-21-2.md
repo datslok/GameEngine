@@ -143,3 +143,9 @@
   - **Measured at 100, 75, 50:** far leaves a mean loss of 0.25, 1.04 and 1.06 ms; at 50 a third of nodes reach level 1, as a third of twigs reach level 3; still no merged node. Figures in `LEAFGEOMETRY.md`.
   - **The cause found:** occlusion hides half the clusters it did (1.08M against 2.07M at the ring): a far cluster's leaves spread over its brick. 3e-v groups them by place (the user's pick; 50 kept).
   - **8 planted bugs caught** (the floor at the worst, the floor reset each level, the percentile ignored, the rank's place off by one, no float tolerance, a twig counted once, the brick floor too low for the hand-over, the percentile's check removed: missed at first, as the rank refused it too; an empty set's refusal added).
+- `leaf-bricks-3e-v-a` (Nov 24 2026): each far level's leaves in their feet's median split order, so a cluster holds 12 neighbours; far leaves from a mean loss of 1.06 ms to break-even.
+  - **One split for bricks and clusters:** `medianSplitOrder` (`math/median_split.h`) is `makeTwigSet`'s brick split made general; bricks are unchanged.
+  - **Order within a level is free:** each level is its own run of records, so ordering changes no rank, error or sphere of a node, only how the packing's runs of 12 fall.
+  - **Spheres:** a level-0 far cluster 1.24 m (from 2.41), level 1 1.67 m (from 2.96), on the test crown; figures and the spots in `LEAFGEOMETRY.md`.
+  - **A missed planted bug:** splitting at half the points, not at whole groups, passed, as points on a line came out sorted anyway; a test that no two groups' boxes overlap now catches it.
+  - **7 planted bugs caught** (the far levels unordered, groups of 64, always the x axis, ties the wrong way, higher points first, the first half rounded down, the split off whole groups once the overlap test was added).
