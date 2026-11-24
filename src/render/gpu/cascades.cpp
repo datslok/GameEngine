@@ -138,17 +138,19 @@ Vec3 shadowViewUp(const Vec3& forward) {
     return std::abs(forward.normalized().y) > 0.99f ? Vec3{0.0f, 0.0f, -1.0f} : Vec3{0.0f, 1.0f, 0.0f};
 }
 
+Mat4 sunLightRotation(const Vec3& lightDirection) {
+    const Vec3 along = lightDirection.lengthSquared() > 1e-12f ? lightDirection.normalized() : Vec3{0.0f, -1.0f, 0.0f};
+    return Mat4::lookAt(Vec3{0.0f, 0.0f, 0.0f}, along, shadowViewUp(along));
+}
+
 /*
 * Parallel rays need no perspective: a box looking along the light, as wide as the sphere. The box's centre is snapped to
 * whole texels, measured across the light's direction: as the sphere moves with the camera, the box jumps a whole texel
 * at a time, so every shadow edge falls on the same texels instead of crawling and shimmering.
 */
 CascadeBox cascadeBox(const Vec3& lightDirection, const BoundingSphere& sphere, float casterReach, std::uint32_t tileSize) {
-    const Vec3 along = lightDirection.lengthSquared() > 1e-12f ? lightDirection.normalized() : Vec3{0.0f, -1.0f, 0.0f};
     const float radius = sphere.radius;
-
-    // The light's orientation only: a view at the origin looking along the light.
-    const Mat4 rotation = Mat4::lookAt(Vec3{0.0f, 0.0f, 0.0f}, along, shadowViewUp(along));
+    const Mat4 rotation = sunLightRotation(lightDirection);
     const Vec4 centreInLight = rotation * Vec4{sphere.centre.x, sphere.centre.y, sphere.centre.z, 1.0f};
 
     const float texel = 2.0f * radius / static_cast<float>(tileSize);

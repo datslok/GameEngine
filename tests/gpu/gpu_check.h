@@ -157,6 +157,7 @@ void gpuTestStars(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestBeaconSplat(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestClusters(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCascades(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestVirtualShadows(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDdgiSampling(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestProbeRelocation(GpuFunctionRunner& runner, GpuCheckReport& report);
 

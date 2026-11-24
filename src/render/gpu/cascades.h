@@ -103,6 +103,11 @@ float farShadowSmallestCaster(float texelSize);
 // Any up direction works for a shadow view, as long as it is not parallel to the way the view looks.
 Vec3 shadowViewUp(const Vec3& forward);
 
+// The light's orientation alone: a view at the origin looking along the light (straight down when it has no direction),
+// up from shadowViewUp. The cascades' boxes and the virtual shadow maps' levels (virtual_shadows.h) share it, so x and y
+// run across the light and -z along it in both.
+Mat4 sunLightRotation(const Vec3& lightDirection);
+
 // One cascade's shadow view: its view-projection (the GPU's depth range), how deep the box is from its near side
 // (towards the light) to its far side, and the world size of one texel.
 struct CascadeBox {

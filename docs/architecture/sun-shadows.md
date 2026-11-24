@@ -31,7 +31,7 @@ The sun's cascaded shadow maps (with the far map, staggering and a mirror's row)
 - `cascadeSphere(camera, near, far)`: the slice's smallest bounding sphere. Centre on the view axis at `(f + n)(1 + t²) / 2` (t² = the squared half-width plus half-height tangents), or at the far end's centre with radius `f t` when nearer.
 - The radius depends only on the lens, so turning never resizes the box (tested with `==`).
 - `cascadeBox(direction, sphere, casterReach, tileSize)` → `CascadeBox` {matrix, `depthRange` = 2r + reach, `texelSize` = 2r / tile}:
-  - looks along the light, up from `shadowViewUp` (shared with lamp views);
+  - looks along the light (`sunLightRotation`, shared with the virtual shadow maps), up from `shadowViewUp` (shared with lamp views);
   - centre snapped to whole texels across the light, so edges do not crawl;
   - extends `directionalCasterReach` (200 m) towards the sun so tall casters outside the view still cast.
 - Tile edge: `cascadeTilePixels(cascadeResolution)`, 1024, 2048 or 4096 (default 4096; the atlas grows to hold four, see the atlas doc).

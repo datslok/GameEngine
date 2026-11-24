@@ -95,6 +95,7 @@ Pure-function libraries in `assets/shaders/*.glsl`, included by the passes and b
 | `overlay.glsl` | `render/gpu/overlay_composite` | `overlay_gpu_test.cpp` |
 | `clusters.glsl` | `render/gpu/clusters` | `clusters_gpu_test.cpp` |
 | `cascades.glsl` | `render/gpu/cascades` | `cascades_gpu_test.cpp` |
+| `virtual_shadows.glsl` | `render/gpu/virtual_shadows` | `virtual_shadows_gpu_test.cpp` |
 | `depth_range.glsl` | `render/gpu/depth_range` | `depth_range_gpu_test.cpp` (the real pass only) |
 | `stars.glsl` | `render/gpu/stars` | `stars_gpu_test.cpp` |
 | `beacon_splat.glsl` | `render/gpu/beacon_splat` | `beacon_splat_gpu_test.cpp` |
