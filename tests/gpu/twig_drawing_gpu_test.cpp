@@ -10,6 +10,7 @@
 #include "render/gpu/mesh_cluster_culling.h"
 #include "render/gpu/twig_records.h"
 
+#include <bit>
 #include <cfloat>
 #include <cmath>
 #include <string>
@@ -265,9 +266,71 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A far leaf's vertices (farLeafVertex) against the mirror: random records (feet up to 25 m out, frames, sides, cells
+    * and numbers) and shapes, every vertex. Positions within a few ulps of the 25 m foot, normals and tangents within
+    * arithmetic rounding of unit vectors (the GPU's normalize may use an inverse square root), the texture coordinates
+    * within a few ulps of the leaf's number.
+    */
+    void checkFarLeafVertex(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{61};
+        std::vector<GpuFarLeaf> leaves;
+        std::vector<GpuFarLeafShape> shapes;
+        std::vector<std::uint32_t> vertices;
+        std::vector<GpuVec4> inputs;
+
+        for (int index = 0; index < 1000; ++index) {
+            const Quat turn = Quat::fromAxisAngle(random.direction(), random.between(0.0f, 6.28f));
+            const FarLeaf leaf{.foot = Vec3{random.between(-25.0f, 25.0f), random.between(0.0f, 25.0f), random.between(-25.0f, 25.0f)},
+                               .towardsTip = turn.rotate(Vec3{0.0f, 1.0f, 0.0f}),
+                               .facing = turn.rotate(Vec3{0.0f, 0.0f, 1.0f}),
+                               .side = random.between(0.02f, 3.0f),
+                               .cell = static_cast<std::uint32_t>(index % 24),
+                               .number = static_cast<std::uint32_t>(index % 128),
+                               .twig = static_cast<std::uint32_t>(index * 37)};
+            const float base = random.between(0.0f, 0.2f);
+            const FarLeafShape shape{.base = base,
+                                     .tip = random.between(0.7f, 1.0f),
+                                     .up = random.between(0.3f, 0.7f),
+                                     .left = random.between(0.0f, 0.4f),
+                                     .right = random.between(0.0f, 0.4f),
+                                     .uvMin = Vec2{random.between(0.0f, 0.8f), random.between(0.0f, 0.8f)},
+                                     .uvMax = Vec2{random.between(0.8f, 1.0f), random.between(0.8f, 1.0f)}};
+            leaves.push_back(packFarLeaf(leaf));
+            shapes.push_back(packFarLeafShape(shape, random.between(0.0f, 0.6f), random.between(0.0f, 0.3f)));
+            vertices.push_back(static_cast<std::uint32_t>(index % FAR_LEAF_VERTICES));
+            const GpuFarLeaf& packed = leaves.back();
+            const GpuFarLeafShape& made = shapes.back();
+            inputs.push_back(gpuVec4(packed.foot[0], packed.foot[1], packed.foot[2], std::bit_cast<float>(packed.turn[0])));
+            inputs.push_back(gpuVec4(std::bit_cast<float>(packed.turn[1]), std::bit_cast<float>(packed.sideCellNumber), std::bit_cast<float>(packed.twig),
+                                     static_cast<float>(vertices.back())));
+            inputs.push_back(gpuVec4(made.shape[0], made.shape[1], made.shape[2], made.shape[3]));
+            inputs.push_back(gpuVec4(made.right, made.raise, made.curl));
+            inputs.push_back(gpuVec4(made.uvRect[0], made.uvRect[1], made.uvRect[2], made.uvRect[3]));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FAR_LEAF_VERTEX, inputs, 5, 4);
+        const FloatTolerance places{.absolute = 2e-5f, .relative = 1e-5f};
+        const FloatTolerance numbered{.absolute = 2e-5f, .relative = 1e-6f};
+
+        for (std::size_t i = 0; i < leaves.size(); ++i) {
+            const FarLeafVertex want = farLeafVertex(leaves[i], shapes[i], vertices[i]);
+            report.check("farLeafVertex position", places, want.position, Vec3{outputs[4 * i][0], outputs[4 * i][1], outputs[4 * i][2]});
+            report.check("farLeafVertex normal", arithmeticTolerance, want.normal, Vec3{outputs[4 * i + 1][0], outputs[4 * i + 1][1], outputs[4 * i + 1][2]});
+            report.check("farLeafVertex uv", numbered, want.uv.x, outputs[4 * i + 2][0]);
+            report.check("farLeafVertex uv", numbered, want.uv.y, outputs[4 * i + 2][1]);
+            report.check("farLeafVertex tangent", arithmeticTolerance, Vec3{want.tangent.x, want.tangent.y, want.tangent.z},
+                         Vec3{outputs[4 * i + 3][0], outputs[4 * i + 3][1], outputs[4 * i + 3][2]});
+            report.check("farLeafVertex tangent", exactTolerance, want.tangent.w, outputs[4 * i + 3][3]);
+        }
+    }
+}
+
 void gpuTestTwigDrawing(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("twig_drawing.glsl");
     checkInstance(runner, report);
     checkLevelDrawn(runner, report);
     checkBrickKept(runner, report);
+    checkFarLeafVertex(runner, report);
 }

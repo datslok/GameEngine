@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace {
     // The set's handed-over leaves in brick and twig order (the records of the bricks' finest levels), each with what
@@ -206,14 +207,21 @@ FarLeaf farLeafOf(const TwigInstance& twig, std::uint32_t twigNumber, const Twig
                    .twig = twigNumber};
 }
 
-TwigFarLevels makeTwigFarLevels(const TwigSet& set, const std::vector<TwigFarLeaves>& prototypes) {
+TwigFarLevels makeTwigFarLevels(const TwigSet& set, const std::vector<TwigFarLeaves>& prototypes, FarLeafShapes shapes) {
     for (const TwigInstance& twig : set.twigs) {
         if (twig.prototype >= prototypes.size()) {
             throw std::invalid_argument("A twig's prototype hands over no far leaves");
         }
+
+        for (const TwigLeafPlace& leaf : prototypes[twig.prototype].leaves) {
+            if (leaf.cell >= shapes.cells.size()) {
+                throw std::invalid_argument("A far leaf's cell has no shape");
+            }
+        }
     }
 
     TwigFarLevels far;
+    far.shapes = std::move(shapes);
 
     if (set.bricks.empty()) {
         return far;

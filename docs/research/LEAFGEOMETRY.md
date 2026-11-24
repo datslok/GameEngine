@@ -132,6 +132,7 @@ The culling algorithm itself is unpublished (no talk slides found).
   - Each full brick has 6 levels (256 leaves down to 8); merged nodes about one cluster each; a tree's root keeps 6-9 leaves grown 20-92 times, its error 9-41 m, far past the crown card.
   - The bricks' level 0 errors 0.24-0.36 m (twig level 2's, times its scale).
   - Built in 48 ms for all 11 at start-up.
+- **The record (3e-ii):** 28 B: foot as three floats (exact, as twigs' are); frame as a quaternion in four snorm16 (8 B; two octahedral directions would cost the same, but a quaternion rebuilds both axes square to each other); side as a half float (5e-4 relative, under 0.1 mm on a 10 cm leaf); cell and number a byte each; the twig's number (its binding, lean and tone). Fold and curl are one pair for every leaf, kept with the 24 cells' shapes (48 B each), not in the records.
   - Cost grows with bricks and brick clusters drawn, not with twigs in the valley; memory with variants (records), not trees.
 
 ## The plan (phase 21 stage 3)

@@ -206,6 +206,28 @@ namespace {
         assert(nearlyEqual((target * current.conjugate()).toRotationVector(), zAxis * 0.75f));
         assert(sameRotation(Quat::fromRotationVector((otherTurn * someTurn.conjugate()).toRotationVector()) * someTurn, otherTurn));
     }
+
+    /*
+    * The turn taking x, y and z to a right-handed unit basis: rebuilt from what it turns the axes to, for turns of every
+    * size, each of Shepperd's four branches (w, x, y or z largest), half turns about each axis included.
+    */
+    void testFromBasis() {
+        const Quat turns[] = {Quat{},
+                              someTurn,
+                              otherTurn,
+                              Quat::fromAxisAngle(xAxis, pi),
+                              Quat::fromAxisAngle(yAxis, pi),
+                              Quat::fromAxisAngle(zAxis, pi),
+                              Quat::fromAxisAngle(Vec3{1.0f, 1.0f, 0.2f}.normalized(), 3.0f),
+                              Quat::fromAxisAngle(Vec3{0.1f, -1.0f, 1.0f}.normalized(), 2.8f),
+                              Quat::fromAxisAngle(Vec3{-0.3f, 0.2f, 1.0f}.normalized(), 0.4f)};
+
+        for (const Quat& turn : turns) {
+            const Quat rebuilt = Quat::fromBasis(turn.rotate(xAxis), turn.rotate(yAxis), turn.rotate(zAxis));
+            assert(std::abs(rebuilt.length() - 1.0f) < 1e-5f);
+            assert(sameRotation(rebuilt, turn));
+        }
+    }
 }
 
 void testQuat() {
@@ -217,4 +239,5 @@ void testQuat() {
     testNormalize();
     testSlerp();
     testRotationVector();
+    testFromBasis();
 }

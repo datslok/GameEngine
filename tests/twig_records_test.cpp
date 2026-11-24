@@ -10,6 +10,7 @@
 #include "render/gpu/wind.h"
 #include "render/gpu/wind_bones.h"
 #include "scene/mesh.h"
+#include "scene/twig_far_levels.h"
 
 #include <algorithm>
 #include <array>
@@ -22,6 +23,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "test_levels.h"
+#include "twig_helpers.h"
 
 namespace {
     // A twig's record takes its prototype's points where the twig puts them; its lean and prototype are kept.
@@ -568,7 +572,113 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A far leaf's record keeps its foot exactly, its frame to snorm16 (about 3e-5), its side to a half float, its cell,
+    * number and twig exactly; a cell or number past a byte is refused. A shape's record keeps its numbers and the fold's
+    * tangent.
+    */
+    void testAFarLeafsRecord() {
+        const Vec3 towardsTip = Vec3{0.3f, 0.9f, -0.2f}.normalized();
+        const Vec3 facing = towardsTip.cross(Vec3{1.0f, 0.0f, 0.0f}).normalized();
+        const FarLeaf leaf{.foot = Vec3{12.5f, -3.25f, 7.0f}, .towardsTip = towardsTip, .facing = facing, .side = 0.137f, .cell = 23, .number = 127, .twig = 70001};
+        const GpuFarLeaf packed = packFarLeaf(leaf);
+        assert(packed.foot[0] == 12.5f && packed.foot[1] == -3.25f && packed.foot[2] == 7.0f && packed.twig == 70001);
+        assert(((packed.sideCellNumber >> 16) & 0xffu) == 23 && (packed.sideCellNumber >> 24) == 127);
+
+        // A flat leaf's tip vertex lies a side up its midrib from its foot.
+        const FarLeafShape flat{.base = 0.0f, .tip = 1.0f, .up = 0.5f, .left = 0.25f, .right = 0.25f, .uvMin = Vec2{0.5f, 0.25f}, .uvMax = Vec2{0.75f, 0.5f}};
+        const GpuFarLeafShape shape = packFarLeafShape(flat, 0.0f, 0.0f);
+        const FarLeafVertex tip = farLeafVertex(packed, shape, 4);
+        assert((tip.position - (leaf.foot + towardsTip * 0.137f)).length() < 1e-4f);
+        const Vec3 tipAcross{tip.tangent.x, tip.tangent.y, tip.tangent.z};
+        assert(tip.normal.dot(facing) > 0.9999f && tipAcross.dot(towardsTip.cross(facing)) > 0.9999f);
+        assert(std::abs(tip.uv.x - (127.0f + 0.625f)) < 1e-4f && std::abs(tip.uv.y - 0.5f) < 1e-6f);
+
+        const GpuFarLeafShape folded = packFarLeafShape(flat, 0.3f, 0.1f);
+        assert(folded.shape[0] == 0.0f && folded.shape[1] == 1.0f && folded.shape[2] == 0.5f && folded.shape[3] == 0.25f && folded.right == 0.25f);
+        assert(std::abs(folded.raise - std::tan(0.3f)) < 1e-7f && folded.curl == 0.1f && folded.uvRect[2] == 0.75f && folded.uvRect[3] == 0.5f);
+
+        FarLeaf tooMany = leaf;
+        tooMany.cell = 256;
+        assert(throwsInvalid([&] { packFarLeaf(tooMany); }));
+        tooMany = leaf;
+        tooMany.number = 256;
+        assert(throwsInvalid([&] { packFarLeaf(tooMany); }));
+    }
+
+    /*
+    * A brick's finest far leaves, packed and expanded as the mesh shader will (farLeafVertex), are their twigs' level-2
+    * leaves: each vertex where the twig places its prototype's (within the half float's and snorm's rounding), its normal
+    * turned with it, its texture coordinate (and so its number) the same, its tangent across; its triangles wound as
+    * the prototype's. Twigs of every prototype, turned at random and scaled.
+    */
+    void testFarLeavesAreTheTwigsLevel() {
+        const LeafAtlas atlas = standInLeafAtlas(64, forestTreeLeafColumns, forestTreeLeafRows, forestLeafStandIn);
+        const ForestTwigSettings settings;
+        const TracedLeaves leaves = traceAtlasLeaves(atlas, 3, 1.0f);
+        const std::vector<TwigPrototype> prototypes = buildTwigPrototypes(leaves, settings, 1.0f, 0.22f, 3);
+        std::vector<TwigFarLeaves> handed;
+        std::vector<float> reaches;
+        std::vector<MeshHandle> meshes;
+
+        for (const TwigPrototype& twig : prototypes) {
+            handed.push_back(twigFarLeaves(twig));
+            reaches.push_back(meshReach(twigLeafMesh(twig).mesh));
+            meshes.push_back(MeshHandle{static_cast<std::uint32_t>(meshes.size())});
+        }
+
+        const TwigSet set = makeTwigSet(meshes, reaches, scatteredTwigs(300, static_cast<std::uint32_t>(prototypes.size())));
+        const TwigFarLevels far = makeTwigFarLevels(set, handed, twigFarLeafShapes(leaves, settings));
+        std::size_t checked = 0;
+
+        for (std::size_t brick = 0; brick < set.bricks.size(); ++brick) {
+            const TwigFarLevel& finest = far.levels[far.nodes[brick].firstLevel];
+
+            for (std::uint32_t index = finest.firstLeaf; index < finest.firstLeaf + finest.leafCount; ++index) {
+                const FarLeaf& leaf = far.leaves[index];
+                const TwigInstance& twig = set.twigs[leaf.twig];
+                const TwigLevel& level = prototypes[twig.prototype].levels[static_cast<std::size_t>(twigBrickLevel)];
+                const auto kept = static_cast<std::uint32_t>(std::find(level.kept.begin(), level.kept.end(), leaf.number) - level.kept.begin());
+                assert(kept < level.kept.size());
+                const GpuFarLeaf packed = packFarLeaf(leaf);
+                const GpuFarLeafShape shape = packFarLeafShape(far.shapes.cells[leaf.cell], far.shapes.foldRadians, far.shapes.curl);
+                const Vec3 across = twig.towardsTip.cross(twig.facing);
+                const auto turned = [&](const Vec3& local) {
+                    return twig.across * local.x + twig.towardsTip * local.y + twig.facing * local.z;
+                };
+
+                for (std::uint32_t vertex = 0; vertex < farLeafVertices; ++vertex) {
+                    const MeshVertex& want = level.leaves.vertices[kept * farLeafVertices + vertex];
+                    const FarLeafVertex got = farLeafVertex(packed, shape, vertex);
+                    assert((got.position - twigPoint(twig, want.position)).length() <= 2e-3f * leaf.side + 1e-6f);
+                    assert(got.normal.dot(turned(want.normal).normalized()) > 0.9999f);
+                    assert(std::abs(got.uv.x - want.uv.x) < 1e-5f && std::abs(got.uv.y - want.uv.y) < 1e-6f);
+                    const Vec3 gotAcross{got.tangent.x, got.tangent.y, got.tangent.z};
+                    const Vec3 wantAcross{want.tangent.x, want.tangent.y, want.tangent.z};
+                    assert(gotAcross.dot(turned(wantAcross)) > 0.9999f);
+                    assert(got.tangent.w == 1.0f && std::abs(across.length() - 1.0f) < 1e-4f);
+                }
+
+                for (std::uint32_t triangle = 0; triangle < farLeafTriangles; ++triangle) {
+                    const std::array<std::uint32_t, 3> corners = farLeafTriangle(triangle);
+
+                    for (std::uint32_t corner = 0; corner < 3; ++corner) {
+                        assert(level.leaves.indices[(kept * farLeafTriangles + triangle) * 3 + corner] == kept * farLeafVertices + corners[corner]);
+                    }
+                }
+
+                ++checked;
+            }
+        }
+
+        assert(checked > 1000);
+    }
+}
+
 void testTwigRecords() {
+    testAFarLeafsRecord();
+    testFarLeavesAreTheTwigsLevel();
     testTwigGroupsInTheClusterPasses();
     testATwigsRecord();
     testAPrototypesLevels();

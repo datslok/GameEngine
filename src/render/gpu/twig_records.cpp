@@ -4,12 +4,126 @@
 #include "render/gpu/bone_records.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/mesh_cluster_culling.h"
+#include "core/half_float.h"
+#include "math/quat.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 std::uint32_t packTwigBinding(const TwigInstance& twig) {
     return twig.binding.bone < 0 ? swayUnbound : packSwayBinding(twig.binding);
+}
+
+namespace {
+    // A value in -1..1 as a snorm16 (GLSL's packSnorm2x16: rounded, clamped) and back (unpackSnorm2x16).
+    std::uint32_t snorm16Of(float value) {
+        return static_cast<std::uint32_t>(static_cast<std::uint16_t>(static_cast<std::int16_t>(std::lround(std::clamp(value, -1.0f, 1.0f) * 32767.0f))));
+    }
+
+    float snorm16Value(std::uint32_t bits) {
+        return std::clamp(static_cast<float>(static_cast<std::int16_t>(static_cast<std::uint16_t>(bits & 0xffffu))) / 32767.0f, -1.0f, 1.0f);
+    }
+
+    // A one-row leaf's corners in its cell's units (across the midrib, up it), vertex by vertex.
+    Vec2 farLeafCorner(const GpuFarLeafShape& shape, std::uint32_t vertex) {
+        switch (vertex) {
+        case 0:
+            return Vec2{0.0f, shape.shape[0]};
+        case 1:
+            return Vec2{-shape.shape[3], shape.shape[2]};
+        case 2:
+            return Vec2{0.0f, shape.shape[2]};
+        case 3:
+            return Vec2{shape.right, shape.shape[2]};
+        default:
+            return Vec2{0.0f, shape.shape[1]};
+        }
+    }
+}
+
+GpuFarLeaf packFarLeaf(const FarLeaf& leaf) {
+    if (leaf.cell > 0xffu || leaf.number > 0xffu) {
+        throw std::invalid_argument("A far leaf's cell or number does not fit a byte");
+    }
+
+    const Vec3 across = leaf.towardsTip.cross(leaf.facing);
+    const Quat turn = Quat::fromBasis(across, leaf.towardsTip, leaf.facing);
+    GpuFarLeaf packed;
+    packed.foot[0] = leaf.foot.x;
+    packed.foot[1] = leaf.foot.y;
+    packed.foot[2] = leaf.foot.z;
+    packed.turn[0] = snorm16Of(turn.x) | (snorm16Of(turn.y) << 16);
+    packed.turn[1] = snorm16Of(turn.z) | (snorm16Of(turn.w) << 16);
+    packed.sideCellNumber = static_cast<std::uint32_t>(floatToHalf(leaf.side)) | (leaf.cell << 16) | (leaf.number << 24);
+    packed.twig = leaf.twig;
+    return packed;
+}
+
+GpuFarLeafShape packFarLeafShape(const FarLeafShape& shape, float foldRadians, float curl) {
+    GpuFarLeafShape packed;
+    packed.shape[0] = shape.base;
+    packed.shape[1] = shape.tip;
+    packed.shape[2] = shape.up;
+    packed.shape[3] = shape.left;
+    packed.right = shape.right;
+    packed.raise = std::tan(foldRadians);
+    packed.curl = curl;
+    packed.uvRect[0] = shape.uvMin.x;
+    packed.uvRect[1] = shape.uvMin.y;
+    packed.uvRect[2] = shape.uvMax.x;
+    packed.uvRect[3] = shape.uvMax.y;
+    return packed;
+}
+
+std::array<std::uint32_t, 3> farLeafTriangle(std::uint32_t triangle) {
+    constexpr std::uint32_t corners[FAR_LEAF_TRIANGLES][3] = {{0, 2, 1}, {0, 3, 2}, {1, 2, 4}, {2, 3, 4}};
+    const std::uint32_t* chosen = corners[std::min<std::uint32_t>(triangle, FAR_LEAF_TRIANGLES - 1)];
+    return {chosen[0], chosen[1], chosen[2]};
+}
+
+/*
+* Every corner's position is made (five, cheap) so a vertex's normal can sum the triangles it touches, as
+* appendModelledLeaf sums them; on the GPU each thread makes its own vertex the same way.
+*/
+FarLeafVertex farLeafVertex(const GpuFarLeaf& leaf, const GpuFarLeafShape& shape, std::uint32_t vertex) {
+    const Quat turn = Quat{snorm16Value(leaf.turn[0]), snorm16Value(leaf.turn[0] >> 16), snorm16Value(leaf.turn[1]), snorm16Value(leaf.turn[1] >> 16)}.normalized();
+    const Vec3 across = turn.rotate(Vec3{1.0f, 0.0f, 0.0f});
+    const Vec3 towardsTip = turn.rotate(Vec3{0.0f, 1.0f, 0.0f});
+    const Vec3 facing = turn.rotate(Vec3{0.0f, 0.0f, 1.0f});
+    const Vec3 foot{leaf.foot[0], leaf.foot[1], leaf.foot[2]};
+    const float side = halfToFloat(static_cast<std::uint16_t>(leaf.sideCellNumber & 0xffffu));
+    const float number = static_cast<float>(leaf.sideCellNumber >> 24);
+    const float length = std::max(shape.shape[1] - shape.shape[0], 1e-6f);
+    const std::uint32_t chosen = std::min<std::uint32_t>(vertex, FAR_LEAF_VERTICES - 1);
+    Vec3 points[FAR_LEAF_VERTICES];
+
+    for (std::uint32_t corner = 0; corner < FAR_LEAF_VERTICES; ++corner) {
+        const Vec2 at = farLeafCorner(shape, corner);
+        const float t = std::clamp((at.y - shape.shape[0]) / length, 0.0f, 1.0f);
+        const float z = std::abs(at.x) * shape.raise - shape.curl * t * t;
+        points[corner] = foot + (across * at.x + towardsTip * at.y + facing * z) * side;
+    }
+
+    Vec3 normal{};
+
+    for (std::uint32_t triangle = 0; triangle < FAR_LEAF_TRIANGLES; ++triangle) {
+        const std::array<std::uint32_t, 3> corners = farLeafTriangle(triangle);
+
+        if (corners[0] == chosen || corners[1] == chosen || corners[2] == chosen) {
+            normal = normal + (points[corners[1]] - points[corners[0]]).cross(points[corners[2]] - points[corners[0]]);
+        }
+    }
+
+    const Vec2 at = farLeafCorner(shape, chosen);
+    const float uMin = shape.uvRect[0] + number;
+    const float uMax = shape.uvRect[2] + number;
+    FarLeafVertex made;
+    made.position = points[chosen];
+    made.normal = normal.lengthSquared() > 1e-20f ? normal.normalized() : facing;
+    made.uv = Vec2{uMin + (uMax - uMin) * (0.5f + at.x), shape.uvRect[1] + (shape.uvRect[3] - shape.uvRect[1]) * at.y};
+    made.tangent = Vec4{across.x, across.y, across.z, 1.0f};
+    return made;
 }
 
 GpuTwig packTwig(const TwigInstance& twig) {

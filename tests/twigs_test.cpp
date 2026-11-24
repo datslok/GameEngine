@@ -67,6 +67,20 @@ namespace {
         return result;
     }
 
+    // A bite (a disc of radius, its centre up the cell) out of the right side of a cell's leaf, so its halves differ.
+    void biteRightSide(LeafAtlas& atlas, int cell, float centreUp = 0.5f, float radius = 0.15f) {
+        for (int y = 0; y < testCellTexels; ++y) {
+            for (int x = 0; x < testCellTexels; ++x) {
+                const float across = (static_cast<float>(x) + 0.5f) / testCellTexels - 0.75f;
+                const float up = (static_cast<float>(y) + 0.5f) / testCellTexels - centreUp;
+
+                if (across * across + up * up < radius * radius) {
+                    alphaAt(atlas, cell, x, y) = 0;
+                }
+            }
+        }
+    }
+
     LeafShape traced(LeafAtlas& atlas, int cell, int rows, float inset = 0.0f) {
         return traceLeafShape(atlas.colour, static_cast<std::uint32_t>(cell % atlas.columns), static_cast<std::uint32_t>(cell / atlas.columns),
                               testCellTexels, testCutoff, rows, inset);
@@ -91,18 +105,7 @@ namespace {
         // The stand-in leaf is an ellipse: its two halves alike.
         assert(std::abs(three.leftHalf - three.rightHalf) <= three.leftHalf / 10);
 
-        // A bite out of the right side of cell 1.
-        for (int y = 0; y < testCellTexels; ++y) {
-            for (int x = 0; x < testCellTexels; ++x) {
-                const float across = (static_cast<float>(x) + 0.5f) / testCellTexels - 0.75f;
-                const float up = (static_cast<float>(y) + 0.5f) / testCellTexels - 0.5f;
-
-                if (across * across + up * up < 0.15f * 0.15f) {
-                    alphaAt(atlas, 1, x, y) = 0;
-                }
-            }
-        }
-
+        biteRightSide(atlas, 1);
         const LeafShape bitten = traced(atlas, 1, 3);
         const Coverage bittenCoverage = coverage(atlas, 1, bitten);
         assert(bittenCoverage.inside >= 0.8f && bittenCoverage.outside < 0.05f);
@@ -274,6 +277,26 @@ namespace {
             assert((a.position - b.position).lengthSquared() == 0.0f && (a.normal - b.normal).lengthSquared() == 0.0f);
             assert(a.uv.x == b.uv.x && a.uv.y == b.uv.y);
         }
+
+        // Far leaves' shapes: each cell's one-row trace, its texture rectangle, the settings' fold and curl; a leaf
+        // with most of its right half bitten away keeps the narrower half.
+        LeafAtlas bitten = testAtlas();
+        biteRightSide(bitten, 1, 0.5f, 0.32f);
+        const TracedLeaves bittenLeaves = traceAtlasLeaves(bitten, 3, 1.0f);
+        const FarLeafShapes shapes = twigFarLeafShapes(bittenLeaves, settings);
+        assert(static_cast<int>(shapes.cells.size()) == bitten.columns * bitten.rows && shapes.curl == settings.curl);
+        assert(std::abs(shapes.foldRadians - settings.foldDegrees * fullTurnRadians / 360.0f) < 1e-7f);
+
+        for (std::size_t cell = 0; cell < shapes.cells.size(); ++cell) {
+            const LeafShape& one = bittenLeaves.byRows[0][cell];
+            const FarLeafShape& made = shapes.cells[cell];
+            const AtlasCell rectangle = atlasCell(static_cast<int>(cell), bitten.columns, bitten.rows);
+            assert(made.base == one.base && made.tip == one.tip && made.up == one.rows[0].up);
+            assert(made.left == one.rows[0].left && made.right == one.rows[0].right);
+            assert(made.uvMin.x == rectangle.uvMin.x && made.uvMin.y == rectangle.uvMin.y && made.uvMax.x == rectangle.uvMax.x && made.uvMax.y == rectangle.uvMax.y);
+        }
+
+        assert(shapes.cells[1].right < shapes.cells[1].left * 0.9f);
 
         TwigPrototype shortTwig = twig;
         shortTwig.levels.resize(2);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/vec2.h"
 #include "math/vec3.h"
 #include "scene/asset_handles.h"
 #include "scene/indexed_mesh.h"
@@ -125,11 +126,35 @@ struct TwigFarNode {
     std::uint32_t parent = twigFarNoNode;
 };
 
-// The far levels of a set: the bricks' nodes first, the merged ones after their children, the root last.
+/*
+* An atlas cell's leaf as far leaves draw it, one row (games/forest/leaf_clusters.h's LeafShape traced with one row, in
+* its cell's units): its base and tip on the midrib, its row's height and half widths left and right of it, and the
+* cell's texture rectangle (its leaf's number not yet added, scene/foliage_shading.h).
+*/
+struct FarLeafShape {
+    float base = 0.0f;
+    float tip = 1.0f;
+    float up = 0.5f;
+    float left = 0.0f;
+    float right = 0.0f;
+    Vec2 uvMin;
+    Vec2 uvMax;
+};
+
+// Every atlas cell's shape (by cell), and how far every leaf is folded about its midrib and curled (ModelledLeafPlace's).
+struct FarLeafShapes {
+    std::vector<FarLeafShape> cells;
+    float foldRadians = 0.0f;
+    float curl = 0.0f;
+};
+
+// The far levels of a set: the bricks' nodes first, the merged ones after their children, the root last; the shapes
+// their records' cells name.
 struct TwigFarLevels {
     std::vector<FarLeaf> leaves;
     std::vector<TwigFarLevel> levels;
     std::vector<TwigFarNode> nodes;
+    FarLeafShapes shapes;
 };
 
 struct TwigSet {
