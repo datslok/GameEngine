@@ -38,6 +38,9 @@ struct PassDraws {
     VkBuffer meshTasks = VK_NULL_HANDLE;
     std::uint32_t meshLists = 1u << MESH_CLUSTER_EARLY;
     bool meshOnly = false;
+
+    // The pyramid the mesh shaders test each far leaf against (MESH_CLUSTER_LEAF_TEST_*, stage 3e-v-b).
+    std::uint32_t farLeafTest = MESH_CLUSTER_LEAF_TEST_NONE;
 };
 
 /*

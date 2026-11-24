@@ -148,4 +148,12 @@
   - **Order within a level is free:** each level is its own run of records, so ordering changes no rank, error or sphere of a node, only how the packing's runs of 12 fall.
   - **Spheres:** a level-0 far cluster 1.24 m (from 2.41), level 1 1.67 m (from 2.96), on the test crown; figures and the spots in `LEAFGEOMETRY.md`.
   - **A missed planted bug:** splitting at half the points, not at whole groups, passed, as points on a line came out sorted anyway; a test that no two groups' boxes overlap now catches it.
+- `leaf-bricks-3e-v-b` (Nov 24 2026): the mesh shader tests each far leaf against the depth pyramid and culls a hidden one's triangles; it hides 93-99.8% of the far leaves it tests, yet the frame gains nothing past noise.
+  - **Which pyramid:** none in the early prepass (last frame's depth could hide a leaf seen now, and nothing would draw it again); the early list's in the late prepass; the whole frame's in the main pass, which holds the leaf's own depth, so its nearest depth is taken 1e-4 nearer and a leaf seen anywhere is never culled.
+  - **A mesh shader may not read its outputs:** `shadeVertex` now returns the vertex measured from the camera; the clip positions go through shared memory.
+  - **One box test for both:** the cluster passes' sphere test split into the box (`meshClusterBoxTake`) and the pyramid read (`mesh_cluster_pyramid.glsl`), which the far leaves share.
+  - **Why no gain:** a far crown is about 100 leaves a pixel deep; culling triangles before rasterising was never the cost: the early prepass draws every leaf untested, and every kept cluster's mesh shader still places its vertices. Far leaves off stays 1.6-2.2 ms faster at trees and ring, about 6% of the frame.
+  - **Researched, then dropped:** fewer far leaves by a leaves-a-pixel rule and Neubert et al.'s shell-first pruning order (`LEAFGEOMETRY.md`); worth at most about 2 ms at two spots, so the user's pick is to skip it: near twigs are the larger cost.
+  - **F4:** the `FAR` line counts the far leaves hidden of those tested, in the main pass and the late prepass.
+  - **4 planted bugs caught** (no depth margin, a vertex left out of the box, only the first pyramid cell read: missed until leaves up to 1.5 m spanned several cells, the late counts swapped on the F4 line).
   - **7 planted bugs caught** (the far levels unordered, groups of 64, always the x axis, ties the wrong way, higher points first, the first half rounded down, the split off whole groups once the overlap test was added).

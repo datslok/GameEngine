@@ -77,6 +77,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaf clusters (render/gpu/twig_records.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves' cells' shapes
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the early list's occlusion pyramid (the mesh shaders' far leaves)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the whole frame's
     }};
 }
 
@@ -280,6 +282,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.farClusters,
         views.farLeaves,
         views.farShapes,
+        VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -302,6 +306,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[GlassDepthsBinding] = imageInfo(images.glassDepths);
     imageInfos[WindSpringsBinding] = imageInfo(images.windSprings);
     imageInfos[WindPreviousSpringsBinding] = imageInfo(images.windPreviousSprings);
+    imageInfos[LeafPyramidEarlyBinding] = imageInfo(images.leafPyramidEarly);
+    imageInfos[LeafPyramidWholeBinding] = imageInfo(images.leafPyramidWhole);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

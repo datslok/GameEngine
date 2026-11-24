@@ -45,7 +45,7 @@ void VulkanDepthPyramid::ensureSize(RenderSize render) {
 * Level by level, each dispatch reading the level below as a storage image (level 0 reads the depth image), with a
 * barrier after each so the next level sees it written.
 */
-void VulkanDepthPyramid::build(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth) {
+void VulkanDepthPyramid::build(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth, ImageState readState) {
     depth.transition(commands, ImageState::DepthComputeRead);
     image.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
@@ -65,7 +65,7 @@ void VulkanDepthPyramid::build(VkCommandBuffer commands, FrameDescriptors& descr
         computeLevelWritten(commands, image, level);
     }
 
-    image.transition(commands, ImageState::ComputeRead);
+    image.transition(commands, readState);
 }
 
 VulkanImage& VulkanDepthPyramid::getImage() {

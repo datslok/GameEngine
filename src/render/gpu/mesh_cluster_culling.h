@@ -271,6 +271,21 @@ struct MeshClusterScreenBox {
 
 MeshClusterScreenBox meshClusterScreenBox(const std::array<float, 4>& sphere, const Mat4& viewProjection, Vec2 size);
 
+// A box holding nothing yet (least past most), for meshClusterBoxTake to grow.
+MeshClusterScreenBox meshClusterEmptyBox();
+
+// The box grown to hold a clip-space point's pixel and depth; false (the box untouched) when the point is within
+// MESH_CLUSTER_SMALLEST_W of the camera's plane or behind it, so nothing it is part of can be bounded on screen.
+bool meshClusterBoxTake(MeshClusterScreenBox& box, const Vec4& clip, Vec2 size);
+
+/*
+* A far leaf's screen box (ROADMAP phase 21 stage 3e-v-b), from its vertices as the mesh shader placed them: a leaf is
+* their hull, so their box bounds it and their nearest depth its nearest. That depth is taken nearer by
+* MESH_CLUSTER_LEAF_DEPTH_MARGIN, since the main pass tests a leaf against a pyramid holding its own depth, rasterised
+* from the same vertices but rounded apart. Not on screen when a vertex cannot be projected.
+*/
+MeshClusterScreenBox farLeafScreenBox(std::span<const Vec4> clips, Vec2 size);
+
 // The pixels the box covers, clamped to the screen (x y first, z w last); empty (first past last) when it is off screen.
 std::array<int, 4> meshClusterBoxPixels(const std::array<float, 4>& box, int width, int height);
 
@@ -280,6 +295,10 @@ std::uint32_t meshClusterPyramidLevel(const std::array<int, 4>& pixels, std::uin
 // Whether the pyramid (farthest depths) hides the sphere: every cell its box covers at its level farther than its
 // nearest point. Read by the passes in mesh_cluster_pass.glsl (meshClusterHidden).
 bool meshClusterHidden(const DepthPyramid& pyramid, const std::array<float, 4>& sphere, const Mat4& viewProjection);
+
+// Whether the pyramid hides a screen box (of the pyramid's size): every cell it covers at its level farther than its
+// nearest depth; never one off screen. Read by mesh_cluster_pyramid.glsl (meshClusterBoxHiddenIn).
+bool meshClusterBoxHidden(const DepthPyramid& pyramid, const MeshClusterScreenBox& box);
 
 // ---- Sizes ----
 

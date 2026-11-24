@@ -6,6 +6,7 @@
 #include "render/gpu/mesh_cluster_culling.h"
 #include "render/gpu/upscaling.h"
 #include "render/vulkan/frame_descriptors.h"
+#include "render/vulkan/render_pass.h"
 #include "render/vulkan/vulkan_bone_posing.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_depth_pyramid.h"
@@ -115,6 +116,9 @@ public:
     // With occlusion, after the late list's depth is drawn: the history for the next frame, from the depth image.
     void keepDepth(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth);
 
+    // With occlusion, after the main pass: the far leaf tally its mesh shaders added, copied back with the totals.
+    void readLeafTally(VkCommandBuffer commands, std::uint32_t frameIndex);
+
     // The frame's mesh shader draws for each list and style (VkDrawMeshTasksIndirectCommandEXT, MESH_CLUSTER_LISTS times
     // MESH_CLUSTER_STYLES of them, the early list's first), written by the scan passes and ready for the indirect draws.
     VkBuffer getTaskCommands(std::uint32_t frameIndex) const;
@@ -126,6 +130,10 @@ public:
         std::array<std::vector<GpuMeshClusterItem>, MESH_CLUSTER_LISTS> items;
         bool itemsRead = false;
         bool occlusion = false;
+
+        // With occlusion, the far leaves the main pass's mesh shaders tested and hid, then the late prepass's
+        // (MESH_CLUSTER_LEAF_TALLY_*; zero while far leaf occlusion is off).
+        std::array<std::uint32_t, MESH_CLUSTER_LEAF_TALLY_WORDS> leafTally{};
     };
 
     // Once the frame's commands have finished (its fence passed). Each is returned once; none when it culled nothing.
@@ -133,6 +141,12 @@ public:
 
     // The room for pairs, each list's.
     std::uint32_t getRoom() const;
+
+    // The occlusion pyramids for the mesh shaders' far leaves (stage 3e-v-b), made now if not yet; none before the render
+    // size is known. This frame's early list's, and the whole frame's (the next frame's history). Readable by mesh shaders
+    // whenever they draw, but read only by a draw told to test against one, after cullLate or keepDepth built it.
+    std::optional<SampledImage> sampledEarlyDepth();
+    std::optional<SampledImage> sampledWholeDepth();
 
 private:
     struct PerFrame {
@@ -177,6 +191,9 @@ private:
     // A pyramid image readable by the passes, built or not (an unbuilt one is never read: its flags say so).
     void makeReadable(VkCommandBuffer commands, VulkanDepthPyramid& pyramid, bool& built);
 
+    // The pyramids made at the render size, once it is known (false before).
+    bool makePyramids();
+
     const VulkanDevice& device;
     VkSampler nearest;
     std::unique_ptr<ComputePipeline> countPass;
@@ -193,6 +210,9 @@ private:
     bool pyramidsMade = false;
     bool historyBuilt = false;
     bool earlyDepthBuilt = false;
+
+    // The state the pyramids are read in: by the passes, and with mesh shaders by their far leaves too.
+    ImageState pyramidRead = ImageState::ComputeRead;
 
     // The history's view-projection and camera, and the cull it was kept for: it holds last frame's depth only when kept
     // by the cull before this one (a frame without occlusion, or a resize, leaves it stale).

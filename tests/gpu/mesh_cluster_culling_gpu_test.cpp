@@ -257,9 +257,61 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Far leaves' five clip positions, near and far, some with a vertex behind the camera's plane: the box within the
+    * divide's rounding (as the sphere's), the nearest depth with its margin, and whether it is on screen.
+    */
+    void checkFarLeafScreenBox(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{43};
+        std::vector<GpuVec4> inputs;
+        std::vector<std::array<Vec4, FAR_LEAF_VERTICES>> leaves;
+        const Vec2 size{191.0f, 107.0f};
+
+        for (int index = 0; index < 600; ++index) {
+            std::array<Vec4, FAR_LEAF_VERTICES> clips{};
+            const float w = random.between(0.5f, 200.0f);
+
+            for (Vec4& clip : clips) {
+                clip = Vec4{random.between(-1.2f, 1.2f) * w, random.between(-1.2f, 1.2f) * w, random.between(0.0f, 0.1f), w + random.between(-0.1f, 0.1f)};
+            }
+
+            if (index % 10 == 0) {
+                clips[static_cast<std::size_t>(index / 10) % clips.size()].w = -1.0f;
+            }
+
+            for (const Vec4& clip : clips) {
+                inputs.push_back(gpuVec4(clip.x, clip.y, clip.z, clip.w));
+            }
+
+            inputs.push_back(gpuVec4(size.x, size.y, 0.0f));
+            leaves.push_back(clips);
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FAR_LEAF_SCREEN_BOX, inputs, FAR_LEAF_VERTICES + 1, 2);
+        const FloatTolerance pixelTolerance{.absolute = 1e-3f, .relative = 1e-5f};
+
+        for (std::size_t i = 0; i < leaves.size(); ++i) {
+            const GpuVec4& box = outputs[2 * i];
+            const GpuVec4& depth = outputs[2 * i + 1];
+            const MeshClusterScreenBox expected = farLeafScreenBox(leaves[i], size);
+            report.check("farLeafScreenBox on screen", exactTolerance, expected.onScreen ? 1.0f : 0.0f, depth[1]);
+
+            if (!expected.onScreen) {
+                continue;
+            }
+
+            report.check("farLeafScreenBox least", pixelTolerance, Vec3{expected.box[0], expected.box[1], 0.0f}, Vec3{box[0], box[1], 0.0f});
+            report.check("farLeafScreenBox most", pixelTolerance, Vec3{expected.box[2], expected.box[3], 0.0f}, Vec3{box[2], box[3], 0.0f});
+            report.check("farLeafScreenBox nearest depth", arithmeticTolerance, expected.nearestDepth, depth[0]);
+        }
+    }
+}
+
 void gpuTestMeshClusterCulling(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("mesh_cluster_culling.glsl");
     checkKept(runner, report);
     checkTasks(runner, report);
     checkScreenBox(runner, report);
+    checkFarLeafScreenBox(runner, report);
 }

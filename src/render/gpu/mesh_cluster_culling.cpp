@@ -396,29 +396,55 @@ GpuMeshClusterOcclusion packMeshClusterOcclusion(const MeshClusterOcclusionView&
 * outline (Mara and McGuire 2013) but takes any view-projection, jittered or last frame's, with no view-space step.
 */
 MeshClusterScreenBox meshClusterScreenBox(const std::array<float, 4>& sphere, const Mat4& viewProjection, Vec2 size) {
-    MeshClusterScreenBox result;
-    result.box = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
-                  std::numeric_limits<float>::lowest()};
-    result.nearestDepth = std::numeric_limits<float>::lowest();
+    MeshClusterScreenBox result = meshClusterEmptyBox();
     const float radius = sphere[3];
 
     for (int corner = 0; corner < 8; ++corner) {
         const Vec4 point{sphere[0] + ((corner & 1) != 0 ? radius : -radius), sphere[1] + ((corner & 2) != 0 ? radius : -radius),
                          sphere[2] + ((corner & 4) != 0 ? radius : -radius), 1.0f};
-        const Vec4 clip = viewProjection * point;
 
-        if (!(clip.w > static_cast<float>(MESH_CLUSTER_SMALLEST_W))) {
+        if (!meshClusterBoxTake(result, viewProjection * point, size)) {
             return MeshClusterScreenBox{};
         }
-
-        const Vec2 pixel = ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, size);
-        result.box[0] = std::min(result.box[0], pixel.x);
-        result.box[1] = std::min(result.box[1], pixel.y);
-        result.box[2] = std::max(result.box[2], pixel.x);
-        result.box[3] = std::max(result.box[3], pixel.y);
-        result.nearestDepth = std::max(result.nearestDepth, clip.z / clip.w);
     }
 
+    result.onScreen = true;
+    return result;
+}
+
+MeshClusterScreenBox meshClusterEmptyBox() {
+    MeshClusterScreenBox result;
+    result.box = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
+                  std::numeric_limits<float>::lowest()};
+    result.nearestDepth = std::numeric_limits<float>::lowest();
+    return result;
+}
+
+bool meshClusterBoxTake(MeshClusterScreenBox& box, const Vec4& clip, Vec2 size) {
+    if (!(clip.w > static_cast<float>(MESH_CLUSTER_SMALLEST_W))) {
+        return false;
+    }
+
+    const Vec2 pixel = ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, size);
+    box.box[0] = std::min(box.box[0], pixel.x);
+    box.box[1] = std::min(box.box[1], pixel.y);
+    box.box[2] = std::max(box.box[2], pixel.x);
+    box.box[3] = std::max(box.box[3], pixel.y);
+    box.nearestDepth = std::max(box.nearestDepth, clip.z / clip.w);
+    return true;
+}
+
+// Reversed-Z depths are positive and nearer is larger, so a relative margin moves the leaf nearer at any distance.
+MeshClusterScreenBox farLeafScreenBox(std::span<const Vec4> clips, Vec2 size) {
+    MeshClusterScreenBox result = meshClusterEmptyBox();
+
+    for (const Vec4& clip : clips) {
+        if (!meshClusterBoxTake(result, clip, size)) {
+            return MeshClusterScreenBox{};
+        }
+    }
+
+    result.nearestDepth *= 1.0f + static_cast<float>(MESH_CLUSTER_LEAF_DEPTH_MARGIN);
     result.onScreen = true;
     return result;
 }
@@ -439,7 +465,11 @@ std::uint32_t meshClusterPyramidLevel(const std::array<int, 4>& pixels, std::uin
 
 bool meshClusterHidden(const DepthPyramid& pyramid, const std::array<float, 4>& sphere, const Mat4& viewProjection) {
     const RenderSize size = pyramid.sizes[0];
-    const MeshClusterScreenBox box = meshClusterScreenBox(sphere, viewProjection, Vec2{static_cast<float>(size.width), static_cast<float>(size.height)});
+    return meshClusterBoxHidden(pyramid, meshClusterScreenBox(sphere, viewProjection, Vec2{static_cast<float>(size.width), static_cast<float>(size.height)}));
+}
+
+bool meshClusterBoxHidden(const DepthPyramid& pyramid, const MeshClusterScreenBox& box) {
+    const RenderSize size = pyramid.sizes[0];
 
     if (!box.onScreen) {
         return false;

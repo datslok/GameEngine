@@ -1773,6 +1773,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.twigFarMerged = twigTally.farMerged;
     stats.twigFarClusters = twigTally.farClusters;
     stats.twigFarTriangles = twigTally.farTriangles;
+    const std::array<std::uint32_t, MESH_CLUSTER_LEAF_TALLY_WORDS> leafTally = clustersCulled ? lastMeshClusters->leafTally : std::array<std::uint32_t, MESH_CLUSTER_LEAF_TALLY_WORDS>{};
+    stats.twigFarLeavesTested = leafTally[0];
+    stats.twigFarLeavesHidden = leafTally[1];
+    stats.twigFarLeavesLateTested = leafTally[2];
+    stats.twigFarLeavesLateHidden = leafTally[3];
 
     for (std::size_t level = 0; level < twigTally.levelTwigs.size(); ++level) {
         stats.twigsByLevel[level] = twigTally.levelTwigs[level];
@@ -2365,6 +2370,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         latePrepass = mainPass;
         latePrepass.meshLists = 1u << MESH_CLUSTER_LATE;
         latePrepass.meshOnly = true;
+
+        // Far leaves hidden behind the pyramid of what is drawn before them: in the late prepass the early list's depth, in
+        // the main pass the whole frame's; never in the early prepass (last frame's depth could hide a leaf seen now).
+        if (occludesClusters && settings.farLeafOcclusion) {
+            latePrepass.farLeafTest = MESH_CLUSTER_LEAF_TEST_EARLY;
+            mainPass.farLeafTest = MESH_CLUSTER_LEAF_TEST_WHOLE;
+        }
     }
 
     for (std::size_t view = 0; view < captureViews.size(); ++view) {
@@ -2522,6 +2534,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                  description.lighting.background,
                  air ? &skyRays : nullptr, stars ? &*stars : nullptr);
     endGpuPass(frame, GpuPass::Main);
+
+    // The far leaves the main pass and the late prepass tested and hid, for F4 (with occlusion: the tally is cleared at cull).
+    if (occludesClusters) {
+        meshClusterCulling->readLeafTally(frame.commands, frame.frameIndex);
+    }
 
     if (showProbes) {
         beginGpuPass(frame, GpuPass::ProbeBalls);
@@ -2940,6 +2957,9 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     updateVertexRecords(thinningRecords.data(), thinningRecords.size() * sizeof(GpuThinningRecord), thinningChanged, thinningCards);
     updateVertexRecords(swayBindingRecords.data(), swayBindingRecords.size() * sizeof(std::uint32_t), swayBindingsChanged, swayBindings);
 
+    // The occlusion pyramids the mesh shaders' far leaves are tested against (stand-ins without mesh clusters drawn).
+    const std::optional<SampledImage> leafPyramidEarly = device.supportsMeshShaders() ? meshClusterCulling->sampledEarlyDepth() : std::nullopt;
+    const std::optional<SampledImage> leafPyramidWhole = device.supportsMeshShaders() ? meshClusterCulling->sampledWholeDepth() : std::nullopt;
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         SampledImage{shadowAtlas.getView(), shadowDepthSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -2961,6 +2981,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                : sampled(*noProbesTexture),
         wind->sampledSprings(),
         wind->sampledPreviousSprings(),
+        leafPyramidEarly.value_or(sampled(*noProbesTexture)),
+        leafPyramidWhole.value_or(sampled(*noProbesTexture)),
     };
 
     SceneBufferViews views;
@@ -3926,7 +3948,7 @@ std::size_t VulkanRenderer::drawPassDraws(VkCommandBuffer commands, const PassDr
                     continue;
                 }
 
-                const std::uint32_t drawn[2] = {static_cast<std::uint32_t>(run), list};
+                const std::uint32_t drawn[3] = {static_cast<std::uint32_t>(run), list, draws.farLeafTest};
                 vkCmdPushConstants(commands, pipelines.meshLayout, VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, sizeof(drawn), drawn);
                 vkCmdDrawMeshTasksIndirectEXT(commands, draws.meshTasks, (list * MESH_CLUSTER_STYLES + run) * 3 * sizeof(std::uint32_t), 1,
                                               3 * sizeof(std::uint32_t));
