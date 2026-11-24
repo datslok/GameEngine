@@ -191,8 +191,9 @@ std::array<float, 4> meshClusterCullSphere(const GpuMeshCluster& cluster, const 
 
 /*
 * What the view makes of the cluster (MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): hidden out of the cut (any draw); seen whole
-* (meshClusterSeenWhole); else hidden out of the frustum (meshClusterCullSphere) or, single-sided, not mirrored and not
-* posed (a posed cluster's triangles turn and bend: its cone does not hold), facing away; else seen with its sphere holding.
+* (meshClusterSeenWhole); else hidden out of the frustum (meshClusterCullSphere) or, single-sided, not mirrored, not
+* posed (a posed cluster's triangles turn and bend: its cone does not hold) and not in a shadow view (CAMERA_CULL_SHADOW:
+* the light sees the sides the eye does not), facing away; else seen with its sphere holding.
 */
 std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                                     const GpuCameraCull& view, const MeshClusterPose& pose = {});

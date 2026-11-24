@@ -177,3 +177,8 @@
   - **`memoryBarrier`** shared in `buffer_barrier` (cloth's own copy, the mesh pool's and ray tracing's built on it).
   - **Allocation tested on the CPU** by running the four passes' shared functions over frames (walking, a dropped level, a full pool).
   - **7 planted bugs caught** (the marked span's low edge shifted, a slot's page not wrapped, a stale entry not needing a place, the free list read one off, keys without the generation, every level packed with the first level's generation, F4's line above the tiles').
+- `vsm-4c-draw` (Nov 24 2026): 4c in four steps (`VIRTUALSHADOWMAPS.md`, after reading the culling code: the plan said what to draw, not how the sun finds it); 4c-i the sun's casters culled (`virtual-shadows.md`).
+  - **One more shadow view, not a new culling:** the camera's culling, placed plants and cluster passes take it as they take shadow tiles and the camera; the cluster passes' inputs shared (`meshClusterInputs`), the placed commands read from the view's first.
+  - **The camera's levels, not the light's:** a caster drawn at another level or cut than seen would part from its shadow; the box (every served level's pages and depth ranges, caster reach sunwards) is sized for pages cached later too.
+  - **Facing never culls a shadow view** (the light sees the sides the eye does not), in the shader and its C++ mirror.
+  - **5 planted bugs caught** (facing culled in shadow views, the reach left out of the box, only the last level's range, the screen's corner left out of the levels, the view not a shadow view; and F4's casters line above the pages').

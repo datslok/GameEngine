@@ -6,6 +6,7 @@
 #include "render/gpu/virtual_shadows_shared.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -165,6 +166,21 @@ VirtualShadowPlacement virtualShadowPlacement(const VirtualShadowClipmap& clipma
 Vec3 virtualShadowLevelPoint(const Vec3& lightPoint, const VirtualShadowPlacement& placement);
 
 /*
+* The sun's casters (stage 4c-i), culled once for every level the screen may mark, as one more shadow view of the
+* camera's culling. The levels: up to the finest holding the farthest surface seen (a point that far along the view at
+* the screen's corner, where it is farthest from the camera), every level when none holds it.
+*/
+int virtualShadowCasterLevels(const VirtualShadowSettings& settings, float farthestAlongView, float verticalFov, float aspectRatio);
+
+/*
+* The box those levels' casters lie in, as a shadow tile's world-space clip matrix (reversed depth; x, y across the
+* light): every level's pages across, and along the light every level's whole depth range, the caster reach sunwards
+* included, so a page drawn holds every caster its depths can (and, once pages are cached, still holds them while the
+* camera moves within the range).
+*/
+Mat4 virtualShadowCasterBox(const VirtualShadowClipmap& clipmap, int levels);
+
+/*
 * The pages (stage 4b). Each frame the marking pass flags the page under every pixel on screen, and the pages round it
 * a soft shadow's filter may read (VIRTUAL_SHADOW_FILTER_TEXELS); the resolving pass then decides each table entry's
 * fate, and the allocating pass gives the pages that need one a place in the pool: a free one, else one only cached.
@@ -245,6 +261,15 @@ struct VirtualShadowCounts {
 };
 
 VirtualShadowCounts virtualShadowCountsFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_COUNTERS>& counters);
+
+// The sun's casters (stage 4c-i), for F4's VSM CASTERS line: the draws its view took, the clusters tested and kept of
+// them, and the kept ones' triangles.
+struct VirtualShadowCasters {
+    std::size_t draws = 0;
+    std::size_t tested = 0;
+    std::size_t kept = 0;
+    std::size_t triangles = 0;
+};
 
 // One level for the shader (std430): virtualShadowPlacement's numbers, the level's first page (low 32 bits) and
 // generation for the keys.

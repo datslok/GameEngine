@@ -44,6 +44,9 @@ public:
     // Whether prepare found the pages on this frame (enabled, with a sun).
     bool runs() const;
 
+    // The clipmap prepare moved to the camera (none before the first frame that ran).
+    const std::optional<VirtualShadowClipmap>& getClipmap() const;
+
     // After the depth prepass (the depth left readable by compute): the four passes, the table left for fragment reads.
     void mark(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth);
 

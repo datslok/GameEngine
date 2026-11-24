@@ -31,6 +31,14 @@ std::vector<std::size_t> shadowTileCasters(const std::vector<DrawItem>& draws, c
 GpuCameraCull packShadowCull(const ShadowTile& tile, const LevelOfDetailSettings& settings);
 
 /*
+* The sun's virtual shadow maps' casters as a view (ROADMAP phase 21 4c-i; render/gpu/virtual_shadows.h,
+* virtualShadowCasterBox): a shadow view of the box, every caster of any size in it, no reach, no cascade; its levels
+* the camera's, so the old levels and the clusters' cut it draws are the ones the camera draws (a caster must be the same
+* in every level, and the same as it is seen, or a shadow parts from what casts it).
+*/
+GpuCameraCull packVirtualShadowCull(const Mat4& box, const LevelView& cameraLevels);
+
+/*
 * What the placed plants (render/gpu/placed_drawing.h) changed this frame: each cell made or dropped as a casting sphere
 * round its boxes (placedChangeRecord), or everything (all: a new table or region, or the placed plants starting or
 * stopping).

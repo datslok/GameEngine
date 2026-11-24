@@ -140,6 +140,15 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                         std::to_string(pages.allocated) + " (EVICTED " + std::to_string(pages.evicted) + ")  FAILED " +
                                         std::to_string(pages.failed) + "  STALE " + std::to_string(pages.stale) + "  FREE " +
                                         std::to_string(pages.free));
+
+        // Its casters (stage 4c-i), on the line after: the draws the sun's view took, clusters kept of those tested, their
+        // triangles in thousands.
+        if (stats.virtualShadowCasters) {
+            const VirtualShadowCasters& casters = *stats.virtualShadowCasters;
+            const auto pagesLine = std::find(lines.begin(), lines.end(), tiles) + 1;
+            lines.insert(pagesLine + 1, "VSM CASTERS " + std::to_string(casters.draws) + " DRAWS  CLUSTERS " + std::to_string(casters.kept) + "/" +
+                                            std::to_string(casters.tested) + "  TRIS " + std::to_string(casters.triangles / 1000) + "K");
+        }
     }
 
     // The bones pass's (ROADMAP phase 21 stage 3c-iii-b): trees posed, those still for want of room, bones asked of the pool.

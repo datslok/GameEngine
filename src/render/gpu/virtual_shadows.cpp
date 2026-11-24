@@ -2,9 +2,11 @@
 
 #include "render/gpu/cascades.h"
 #include "render/gpu/column_major.h"
+#include "render/gpu/gpu_depth_range.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -199,6 +201,54 @@ VirtualShadowPlacement virtualShadowPlacement(const VirtualShadowClipmap& clipma
 Vec3 virtualShadowLevelPoint(const Vec3& lightPoint, const VirtualShadowPlacement& placement) {
     return Vec3{lightPoint.x * placement.inverseTexel + placement.cameraTexelX, lightPoint.y * placement.inverseTexel + placement.cameraTexelY,
                 lightPoint.z * placement.depthScale + placement.depthOffset};
+}
+
+/*
+* A point at distance d along the view lies d * sqrt(1 + t^2) from the camera at the screen's corner, t the length of
+* (tan of half the width, tan of half the height), as cascadeSphere has it; the levels are chosen by that distance.
+*/
+int virtualShadowCasterLevels(const VirtualShadowSettings& settings, float farthestAlongView, float verticalFov, float aspectRatio) {
+    const float tanHalfHeight = std::tan(verticalFov * 0.5f);
+    const float tanHalfWidth = tanHalfHeight * aspectRatio;
+    const float farthest = farthestAlongView * std::sqrt(1.0f + tanHalfWidth * tanHalfWidth + tanHalfHeight * tanHalfHeight);
+    const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
+    const int level = virtualShadowLevelFor(farthest, virtualShadowUsableHalfWidth(settings.firstHalfWidth, pagesPerSide), settings.levelCount);
+    return level == virtualShadowNoLevel ? settings.levelCount : level + 1;
+}
+
+/*
+* Each level's pages across the light, from its first page to the page past its last, and its depth range along it, from
+* the sunward end (the centre less slack half-widths and the caster reach) to the far end; their union, in doubles, made
+* an orthographic box looking down the light as the cascades' boxes are (cascadeBox).
+*/
+Mat4 virtualShadowCasterBox(const VirtualShadowClipmap& clipmap, int levels) {
+    const VirtualShadowSettings& settings = clipmap.settings;
+    const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
+    double left = std::numeric_limits<double>::max();
+    double right = std::numeric_limits<double>::lowest();
+    double bottom = left;
+    double top = right;
+    double sunward = left;
+    double farEnd = right;
+
+    for (int level = 0; level < std::clamp(levels, 1, settings.levelCount); ++level) {
+        const float halfWidth = virtualShadowHalfWidth(settings.firstHalfWidth, level);
+        const double pageWidth = static_cast<double>(virtualShadowPageWidth(halfWidth, pagesPerSide));
+        const double slackDepth = static_cast<double>(halfWidth) * static_cast<double>(settings.depthSlack);
+        const VirtualShadowLevel& state = clipmap.levels[static_cast<std::size_t>(level)];
+
+        left = std::min(left, static_cast<double>(state.firstPageX) * pageWidth);
+        right = std::max(right, static_cast<double>(state.firstPageX + pagesPerSide) * pageWidth);
+        bottom = std::min(bottom, static_cast<double>(state.firstPageY) * pageWidth);
+        top = std::max(top, static_cast<double>(state.firstPageY + pagesPerSide) * pageWidth);
+        sunward = std::min(sunward, state.depthCentre - slackDepth - static_cast<double>(clipmap.casterReach));
+        farEnd = std::max(farEnd, state.depthCentre + slackDepth);
+    }
+
+    // The view looks down -z, so the near plane is the sunward end's distance along the light and the far plane the far end's.
+    const Mat4 box = Mat4::orthographic(static_cast<float>(left), static_cast<float>(right), static_cast<float>(bottom), static_cast<float>(top),
+                                        static_cast<float>(sunward), static_cast<float>(farEnd));
+    return toGpuDepthRange(box) * sunLightRotation(clipmap.lightDirection);
 }
 
 VirtualShadowPageSpan virtualShadowMarkedPages(float texelX, float texelY, float reach, int pagesPerSide) {

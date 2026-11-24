@@ -187,7 +187,8 @@ uint meshClusterTaskIndex(uvec3 group) {
 /*
 * What the view makes of a cluster (meshClusterVisibility: MESH_CLUSTER_HIDDEN, _SEEN, _SPHERE): hidden out of the cut
 * (any draw); seen whole (meshClusterSeenWhole); else hidden out of the frustum (meshClusterCullSphere) or, single-sided,
-* not mirrored and not posed, facing away; else seen, its sphere holding.
+* not mirrored, not posed and not in a shadow view (the light sees the sides the eye does not), facing away; else seen,
+* its sphere holding.
 */
 uint meshClusterVisibility(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
     if (!meshClusterInCut(cluster, instance.model, view.levels)) {
@@ -204,7 +205,7 @@ uint meshClusterVisibility(MeshCluster cluster, InstanceData instance, uint entr
 
     float determinant = meshClusterDeterminant(instance.model);
 
-    if (pose.posed || (record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0)) {
+    if (pose.posed || (record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0) || (view.flags & CAMERA_CULL_SHADOW) != 0u) {
         return MESH_CLUSTER_SPHERE;
     }
 

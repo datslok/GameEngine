@@ -106,6 +106,10 @@ bool VulkanVirtualShadows::runs() const {
     return running;
 }
 
+const std::optional<VirtualShadowClipmap>& VulkanVirtualShadows::getClipmap() const {
+    return clipmap;
+}
+
 /*
 * The barriers: the depth from the prepass to compute reads (the main pass makes it a depth target again, keeping it);
 * between the passes, every compute write to the next pass (memory barriers, since each touches most of the buffers);

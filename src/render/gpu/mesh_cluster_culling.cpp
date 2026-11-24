@@ -362,7 +362,7 @@ std::uint32_t meshClusterVisibility(const GpuMeshCluster& cluster, const GpuInst
 
     const float determinant = meshClusterDeterminant(instance);
 
-    if (pose.posed || (record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0f)) {
+    if (pose.posed || (record.flags & CULL_DOUBLE_SIDED) != 0u || !(determinant > 0.0f) || (view.flags & CAMERA_CULL_SHADOW) != 0u) {
         return MESH_CLUSTER_SPHERE;
     }
 

@@ -78,9 +78,10 @@ public:
     Draws draws(std::uint32_t frameIndex, std::uint32_t view) const;
 
     /*
-    * What the camera's mesh cluster passes read of its placed plants (after setViews; render/vulkan/
-    * vulkan_mesh_cluster_culling.h): the commands (the camera's first), groups, entries and parts, the drawing order,
-    * and the bound on its pairs (placedMeshClusterPairBound).
+    * What a view's mesh cluster passes read of its placed plants (after setViews; render/vulkan/
+    * vulkan_mesh_cluster_culling.h): the commands (every view's, the camera's first) and the view's first among them,
+    * groups, entries and parts, the drawing order, and the bound on its pairs (placedMeshClusterPairBound). The camera's
+    * by default; the sun's virtual shadow casters' too (ROADMAP phase 21 4c-i).
     */
     struct ClusterInputs {
         VkBuffer commands = VK_NULL_HANDLE;
@@ -89,9 +90,10 @@ public:
         VkBuffer parts = VK_NULL_HANDLE;
         const CullDrawOrder* order = nullptr;
         std::uint64_t pairBound = 0;
+        std::uint32_t commandFirst = 0;
     };
 
-    ClusterInputs clusterInputs(std::uint32_t frameIndex) const;
+    ClusterInputs clusterInputs(std::uint32_t frameIndex, std::uint32_t view = 0) const;
 
     // Asks for the next frame drawing placed plants to be read back and compared; returns the last comparison's report.
     std::string compare();

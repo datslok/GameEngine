@@ -162,6 +162,10 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     cullCompares.resize(framesInFlight);
     meshClusterCulling = std::make_unique<VulkanMeshClusterCulling>(device, nearestLevelsSampler.get(), framesInFlight);
     meshClusterCompares.resize(framesInFlight);
+
+    // The sun's casters' passes test no occlusion, so their pyramids (bound, never read) are one texel.
+    virtualShadowClusters = std::make_unique<VulkanMeshClusterCulling>(device, nearestLevelsSampler.get(), framesInFlight);
+    virtualShadowClusters->ensureSize(RenderSize{1, 1});
     wind = std::make_unique<VulkanWind>(device, uploads, surfaceSampler.get());
     planting = std::make_unique<VulkanPlanting>(device, uploads, framesInFlight);
     placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
@@ -1047,6 +1051,14 @@ FrameContext VulkanRenderer::beginFrame() {
         takeMeshClusterCull(*clusters, culled ? &*culled : nullptr, frameIndex);
     }
 
+    // The sun's casters (stage 4c-i): the draws its view took (counted with the camera's culling, just taken) and its
+    // clusters.
+    if (const std::optional<VulkanMeshClusterCulling::Collected> casters = virtualShadowClusters->collect(frameIndex)) {
+        const std::array<std::uint32_t, MESH_CLUSTER_TOTAL_WORDS>& totals = casters->totals[MESH_CLUSTER_EARLY];
+        lastVirtualShadowCasters = VirtualShadowCasters{lastCameraCull.virtualShadowDraws, totals[MESH_CLUSTER_TOTAL_TESTED],
+                                                        totals[MESH_CLUSTER_TOTAL_KEPT], totals[MESH_CLUSTER_TOTAL_TRIANGLES]};
+    }
+
     clusterCompareBones.reset();
     planting->collect(frameIndex, jobs);
     placedDrawing->collect(frameIndex);
@@ -1366,6 +1378,12 @@ void VulkanRenderer::takeCameraCull(const VulkanCameraCulling::Collected& culled
 
     for (std::size_t view = 0; view < culled.mainCommands.size(); ++view) {
         const CullViewKind kind = view > 0 && view - 1 < kinds.size() ? kinds[view - 1] : CullViewKind{};
+
+        // The sun's virtual shadow casters: the draws it took, whose clusters its own passes cull.
+        if (kind.virtualShadow) {
+            lastCameraCull.virtualShadowDraws = culled.counts[view].values[CAMERA_CULL_COUNT_DRAWN];
+            continue;
+        }
 
         // A shadow tile's casters: its still ones only where they were drawn, its moved ones always.
         if (kind.shadow) {
@@ -1770,6 +1788,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.bonesAsked = bones.bonesAsked;
     stats.bonePool = bones.pool;
     stats.virtualShadowPages = settings.virtualShadows.enabled ? lastVirtualShadowCounts : std::nullopt;
+    stats.virtualShadowCasters = settings.virtualShadows.enabled ? lastVirtualShadowCasters : std::nullopt;
     const TwigTally twigTally = lastTwigTally.value_or(TwigTally{});
     stats.twigsTested = twigTally.tested;
     stats.twigsKept = twigTally.kept;
@@ -2086,6 +2105,20 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                             settings.shadows.directionalCasterReach, inverseViewProjection.value_or(Mat4::identity()),
                             static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
 
+    // Their casters (ROADMAP phase 21 4c-i): one more shadow view of the camera's culling, round every level the screen
+    // may mark (to the farthest surface the cascades' fit measured, else the far plane), its list a region of the draw
+    // list like a shadow tile's; its clusters culled after the camera's, by its own passes. With mesh shaders only, which
+    // are to draw them into the pages (4c-ii).
+    std::optional<GpuCameraCull> virtualShadowView;
+
+    if (virtualShadows->runs() && drawsClusters && virtualShadows->getClipmap()) {
+        const float farthest = std::min(camera.getFarPlane(), fittedSunDistance);
+        const int casterLevels = virtualShadowCasterLevels(pageSettings, farthest, camera.getVerticalFov(), camera.getAspectRatio());
+        virtualShadowView = packVirtualShadowCull(virtualShadowCasterBox(*virtualShadows->getClipmap(), casterLevels), cameraLevels);
+        virtualShadowView->mainBase = drawList.reserve(listEntries);
+        virtualShadowView->motionBase = virtualShadowView->mainBase;
+    }
+
     if (contact.runs() && !contactShadows->hasImages()) {
         contactShadows->ensureSize(sceneSize);
     }
@@ -2122,10 +2155,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             }
         }
 
-        setPlacedViews(cameraCull, faces, faceNumbers, shadowDraws, frame.frameIndex);
+        setPlacedViews(cameraCull, faces, faceNumbers, shadowDraws, virtualShadowView, frame.frameIndex);
     }
 
-    // The placed views that sway, whose trees the bones pass poses: the camera (view 0), the tiles drawn swaying.
+    // The placed views that sway, whose trees the bones pass poses: the camera (view 0), the tiles drawn swaying, the sun's
+    // virtual shadow casters (a tree off screen sways in its shadow on screen).
     swayingPlacedViews.clear();
 
     if (frameBones) {
@@ -2135,6 +2169,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             if (drawing.sways && drawing.placedView) {
                 swayingPlacedViews.push_back(*drawing.placedView);
             }
+        }
+
+        if (placedViewNumbers.virtualShadow) {
+            swayingPlacedViews.push_back(*placedViewNumbers.virtualShadow);
         }
     }
 
@@ -2184,6 +2222,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     for (std::size_t tile = 0; tile < shadowDraws.views.size(); ++tile) {
         cullViews.push_back(shadowDraws.views[tile]);
         kinds.push_back(CullViewKind{-1, true, shadowDraws.tiles[tile].still});
+    }
+
+    std::optional<std::uint32_t> virtualShadowCullView;
+
+    if (virtualShadowView) {
+        virtualShadowCullView = static_cast<std::uint32_t>(cullViews.size());
+        cullViews.push_back(*virtualShadowView);
+        kinds.push_back(CullViewKind{-1, false, false, true});
     }
 
     const bool clusterComparing = clusterCompareAsked && settings.meshClusters;
@@ -2271,16 +2317,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         }
     }
 
-    // The camera's view as its mesh clusters and twigs are culled: given the wind's sway (the camera culls without it), so
-    // a draw swaying near the camera keeps every cluster (and twig), and the cut's pixel error.
-    GpuCameraCull clusterView{};
+    // A view as its mesh clusters (and the camera's twigs) are culled: as the camera's culling placed it, given the wind's
+    // sway (the culling runs without it), so a draw swaying near the camera keeps every cluster (and twig), and the cut's
+    // pixel error. The camera's, and the sun's virtual shadow casters' (whose levels are the camera's).
+    const auto clusterViewOf = [&](std::uint32_t view) {
+        GpuCameraCull placed = cameraCulling->placedView(frame.frameIndex, view);
+        placed.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
+        placed.swayFadeEnd = settings.wind.swayFadeEnd;
+        placed.levels.pixelError = settings.meshClusterErrorPixels;
+        return placed;
+    };
 
-    if (cullsClusters) {
-        clusterView = cameraCulling->placedView(frame.frameIndex, 0);
-        clusterView.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
-        clusterView.swayFadeEnd = settings.wind.swayFadeEnd;
-        clusterView.levels.pixelError = settings.meshClusterErrorPixels;
-    }
+    const GpuCameraCull clusterView = cullsClusters ? clusterViewOf(0) : GpuCameraCull{};
 
     // The bones the camera's twigs and clusters are culled by (ROADMAP phase 21 stage 3c-iv-b): this frame's trees and
     // poses, claimed with the frame's stamp (0, nothing posed, before the bones' buffers are made).
@@ -2307,18 +2355,17 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::Twigs);
     }
 
-    // The camera's mesh clusters culled from its list, its placed plants' and its twigs' (each style's draws, then its
-    // placed groups, then the twig regions in the twigs' style).
-    if (cullsClusters) {
-        beginGpuPass(frame, GpuPass::MeshCull);
+    /*
+    * A view's mesh cluster passes' inputs (the camera's, the sun's virtual shadow casters'): its view (clusterViewOf), its
+    * runs the drawing order's (each style's draws, then its placed groups, then the twig regions in twigStyle; -1 none),
+    * the frame's tables and draw list, its placed plants (none without), the bones; no twigs, no occlusion.
+    */
+    const auto meshClusterInputs = [&](const GpuCameraCull& view, const std::optional<VulkanPlacedDrawing::ClusterInputs>& placed, int twigStyle) {
         const VulkanCameraCulling::Outputs culled = cameraCulling->outputs(frame.frameIndex);
-        const VulkanPlacedDrawing::ClusterInputs placed =
-            placedClusters ? placedDrawing->clusterInputs(frame.frameIndex) : VulkanPlacedDrawing::ClusterInputs{};
-        const int twigStyle = twigClusters ? placedDrawing->getTable(frame.frameIndex).twigStyle : -1;
         const CullDrawOrder order = meshClusterDrawOrder(cullFrame.drawOrder, static_cast<std::uint32_t>(cullFrame.groups.size()),
-                                                         placedClusters ? *placed.order : CullDrawOrder{}, twigStyle);
+                                                         placed ? *placed->order : CullDrawOrder{}, twigStyle);
         VulkanMeshClusterCulling::Inputs inputs;
-        inputs.view = clusterView;
+        inputs.view = view;
 
         for (std::size_t style = 0; style < cullStyles; ++style) {
             inputs.view.runFirst[style] = order.runFirst[style];
@@ -2334,31 +2381,57 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         inputs.instances = lastingInstances->describe();
         inputs.clusters = meshPool->getClusters();
 
-        if (placedClusters) {
-            inputs.placed = VulkanMeshClusterCulling::PlacedInputs{placed.commands, placed.groups, placed.entries,
-                                                                   frames[frame.frameIndex].scene->placedParts.describe(), placed.parts, planting->getPlants()};
+        if (placed) {
+            inputs.placed = VulkanMeshClusterCulling::PlacedInputs{placed->commands, placed->groups, placed->entries,
+                                                                   frames[frame.frameIndex].scene->placedParts.describe(), placed->parts, planting->getPlants(),
+                                                                   placed->commandFirst};
         }
+
+        inputs.bones = cullBones;
+        inputs.pairBound = meshClusterPairBound(cullFrame) + (placed ? placed->pairBound : 0);
+        inputs.viewProjection = relativeViewProjection;
+        inputs.origin = cameraOrigin;
+        return inputs;
+    };
+
+    // The camera's mesh clusters culled from its list, its placed plants' and its twigs'.
+    if (cullsClusters) {
+        beginGpuPass(frame, GpuPass::MeshCull);
+        const std::optional<VulkanPlacedDrawing::ClusterInputs> placed =
+            placedClusters ? std::optional{placedDrawing->clusterInputs(frame.frameIndex)} : std::nullopt;
+        const int twigStyle = twigClusters ? placedDrawing->getTable(frame.frameIndex).twigStyle : -1;
+        VulkanMeshClusterCulling::Inputs inputs = meshClusterInputs(clusterView, placed, twigStyle);
 
         if (twigClusters) {
             inputs.twigs = VulkanMeshClusterCulling::TwigInputs{twigDrawing->getRegions(frame.frameIndex), twigDrawing->getEntries(frame.frameIndex),
                                                                 twigDrawing->getTwigs(), twigDrawing->getFarClusters()};
+            inputs.pairBound += twigMeshClusterPairBound(twigDrawing->getRoom(frame.frameIndex));
         }
 
-        inputs.bones = cullBones;
-        inputs.pairBound = meshClusterPairBound(cullFrame) + placed.pairBound + (twigClusters ? twigMeshClusterPairBound(twigDrawing->getRoom(frame.frameIndex)) : 0);
         inputs.occlusion = occludesClusters;
-        inputs.viewProjection = relativeViewProjection;
-        inputs.origin = cameraOrigin;
         meshClusterCulling->cull(frame.commands, frame.descriptors, frame.frameIndex, inputs, clusterComparing);
         endGpuPass(frame, GpuPass::MeshCull);
 
         if (clusterComparing) {
             const std::span<const std::uint32_t> twigBindings = twigClusters ? twigDrawing->getTwigBindingRecords() : std::span<const std::uint32_t>{};
-            meshClusterCompares[frame.frameIndex] = MeshClusterCompare{inputs.view, cullFrame.groups, order.order, cullFrame.join().records,
+            meshClusterCompares[frame.frameIndex] = MeshClusterCompare{inputs.view, cullFrame.groups, inputs.order, cullFrame.join().records,
                                                                       std::move(clusterCompareInstances), std::move(clusterComparePlacedParts),
                                                                       placedClusters, cullBones.stamp,
                                                                       std::vector<std::uint32_t>(twigBindings.begin(), twigBindings.end())};
         }
+    }
+
+    // The sun's virtual shadow casters' clusters (ROADMAP phase 21 4c-i), from its view's list and placed plants, cut as the
+    // camera's (its levels are the camera's), never culled by facing (a shadow view); no twigs (4f), no occlusion.
+    if (virtualShadowCullView && cullsClusters) {
+        beginGpuPass(frame, GpuPass::VirtualShadowCull);
+        const std::optional<VulkanPlacedDrawing::ClusterInputs> placed =
+            placedClusters && placedViewNumbers.virtualShadow ? std::optional{placedDrawing->clusterInputs(frame.frameIndex, *placedViewNumbers.virtualShadow)}
+                                                              : std::nullopt;
+        const VulkanMeshClusterCulling::Inputs inputs = meshClusterInputs(clusterViewOf(*virtualShadowCullView), placed, -1);
+        virtualShadowClusters->prepare(frame.frameIndex);
+        virtualShadowClusters->cull(frame.commands, frame.descriptors, frame.frameIndex, inputs, false);
+        endGpuPass(frame, GpuPass::VirtualShadowCull);
     }
     stats.stillCells = description.stillCells;
     stats.stillSlots = description.stillDraws;
@@ -4040,7 +4113,7 @@ std::size_t VulkanRenderer::drawPlacedDraws(VkCommandBuffer commands, const Batc
 }
 
 void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
-                                    ShadowDraws& shadowDraws, std::uint32_t frameIndex) {
+                                    ShadowDraws& shadowDraws, const std::optional<GpuCameraCull>& virtualShadowView, std::uint32_t frameIndex) {
     std::vector<GpuCameraCull> asked{camera};
     std::vector<std::string> names{"Camera"};
     const auto add = [&](const GpuCameraCull& view, std::string name) {
@@ -4060,6 +4133,10 @@ void VulkanRenderer::setPlacedViews(const GpuCameraCull& camera, const std::vect
         if (!drawing.tile->separateMovers || drawing.still) {
             drawing.placedView = add(shadowDraws.views[tile], "Shadow tile " + std::to_string(tile));
         }
+    }
+
+    if (virtualShadowView) {
+        placedViewNumbers.virtualShadow = add(*virtualShadowView, "Virtual shadow casters");
     }
 
     placedDrawing->setViews(asked, std::move(names), frameIndex);
@@ -4716,6 +4793,8 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     contactShadows->setFramesInFlight(count);
     virtualShadows->setFramesInFlight(count);
     lastVirtualShadowCounts.reset();
+    virtualShadowClusters->setFramesInFlight(count);
+    lastVirtualShadowCasters.reset();
     motionBlur->setFramesInFlight(count);
     depthOfField->setFramesInFlight(count);
 

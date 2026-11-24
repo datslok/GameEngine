@@ -224,7 +224,7 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     const VkDeviceSize itemBytes = MESH_CLUSTER_LISTS * VkDeviceSize{frame.room} * sizeof(GpuMeshClusterItem);
     ensureBuffer(allocator, frame.readback, totalBytes + (readItems ? itemBytes : 0), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
 
-    const std::uint32_t setup[4] = {places, blockRoom, frame.room, inputs.drawGroups};
+    const std::uint32_t setup[8] = {places, blockRoom, frame.room, inputs.drawGroups, inputs.placed.commandFirst, 0, 0, 0};
     MeshClusterOcclusionView view;
     view.previous = hasHistory ? previousRelativeViewProjection(historyViewProjection, historyOrigin, inputs.origin) : inputs.viewProjection;
     view.current = inputs.viewProjection;

@@ -46,6 +46,12 @@ GpuCameraCull packShadowCull(const ShadowTile& tile, const LevelOfDetailSettings
     return view;
 }
 
+GpuCameraCull packVirtualShadowCull(const Mat4& box, const LevelView& cameraLevels) {
+    GpuCameraCull view = packCameraCull(Frustum::fromClipMatrix(box, ClipDepth::OneToZero), cameraLevels, false, false, 0.0f);
+    view.flags = CAMERA_CULL_SHADOW;
+    return view;
+}
+
 /*
 * The movers it takes are found from their records (shadowTakes, the GPU's own test), the changed still draws likewise
 * where they were and where they are; the key is the movers' and glass's fingerprint with the tile's levels mixed in.

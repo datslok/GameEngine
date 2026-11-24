@@ -47,9 +47,9 @@ public:
     void ensureSize(RenderSize render);
 
     /*
-    * The camera's placed plants (render/vulkan/vulkan_placed_drawing.h), each buffer the passes' own record when there
-    * are none: the commands with the camera's first, the placed groups, every view's entries, the parts' instances and
-    * records, the slots' plants.
+    * The view's placed plants (render/vulkan/vulkan_placed_drawing.h), each buffer the passes' own record when there
+    * are none: every view's commands, the camera's first, and the view's first among them, the placed groups, every
+    * view's entries, the parts' instances and records, the slots' plants.
     */
     struct PlacedInputs {
         VkBuffer commands = VK_NULL_HANDLE;
@@ -58,6 +58,7 @@ public:
         VkDescriptorBufferInfo partInstances{};
         VkBuffer parts = VK_NULL_HANDLE;
         VkBuffer plants = VK_NULL_HANDLE;
+        std::uint32_t commandFirst = 0;
     };
 
     /*

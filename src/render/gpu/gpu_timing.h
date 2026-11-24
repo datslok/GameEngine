@@ -21,6 +21,7 @@ enum class GpuPass {
     Bones,        // the swaying trees' bones posed (render/vulkan/vulkan_bone_posing.h), after the wind's springs are stepped
     Twigs,        // the camera's twigs culled, each at its level (render/vulkan/vulkan_twig_drawing.h), while Passes "Twigs" draws them
     MeshCull,     // the camera's mesh clusters culled one by one (render/gpu/mesh_cluster_culling.h), while meshClusters is on
+    VirtualShadowCull, // the sun's virtual shadow maps' casters' clusters culled (render/gpu/virtual_shadows.h), while they are on
     RayScene,
     Atmosphere,
     Probes,

@@ -129,6 +129,18 @@ What each cost grows with (hard rule 11):
 | 4g | Mirror, probe, cards and fog moved over; cascades kept only for GPUs without mesh shaders | golden views; the user checks by eye |
 | 4h | Lamps' pages (spots, point faces), after their own research | later |
 
+### 4c in four steps (planned Nov 24 2026, after reading the culling code)
+
+| Step | What | Cost grows with |
+|---|---|---|
+| 4c-i | The sun's casters: one more shadow view in the camera's culling and the placed plants', its box the level holding the farthest surface seen (the depth fit's measure, else the far plane) plus the caster reach sunwards; its clusters through a second run of the cluster passes (no occlusion, no twigs), cut by the camera's eye and pixel error, never by facing (a shadow view); F4 counts them | draws in the box, their clusters |
+| 4c-ii | An expanding pass: each survivor's sphere (posed, or its draw's bounds when kept whole) into every level, each allocated page it touches listed (pair, page); a mesh shader a listed pair, its vertices placed by the vertex body (position only), then into the page's place in a D32 pool image, four clip distances at the page's edges; depth test GREATER, depth clamped (as every pipeline); cut-outs alpha-tested. The whole pool cleared each frame (every page redrawn: 4e caches) | survivors x levels touched; page pairs' triangles |
+| 4c-iii | The main pass: a point's level, page, entry, physical page and texel, compared with the bias along the light in the level's texels (the cascades' `sunShadowBias`); no page there: the cascades as today. `virtualShadows.mainPass` (off) | screen pixels |
+| 4c-iv | The fallback: an R32 storage image, `imageAtomicMax` of reversed depth in a fragment shader without a depth target; `virtualShadows.drawing` picks; both timed at the four spots against 3.8-5.4 ms | as 4c-ii |
+
+- Not drawn into pages before 4f: twigs and far leaves (leaves cast nothing there yet), and draws outside the pools (deforming meshes, cloth), which stay the cascades' until 4g.
+- Reused, not copied: `VulkanMeshClusterCulling` takes a view's command and placed-command offsets (today the camera's, view 0); `meshClusterVisibility` skips the facing test for shadow views (mirrored).
+
 ## Decided (the user, Nov 24 2026)
 
 1. Writing depth: clip distances with the hardware test tried first; fragment atomics as the fallback, both behind a switch in 4c and measured at the four spots. Not found elsewhere: Unreal writes atomics even for meshes without Nanite (its software rasteriser came first); EEVEE's per-tile views copied whole meshes, where a cluster mostly lands in one page; few shadow fragments stack on most scenes, our crowns about 100.

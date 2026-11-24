@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <numbers>
 #include <random>
 #include <vector>
@@ -324,6 +325,46 @@ namespace {
     }
 
     /*
+    * The sun's virtual shadow maps' casters as a view (ROADMAP phase 21 4c-i): a shadow view of its box, with the
+    * camera's levels to the byte (so its draws' level slots and clusters' cut are the camera's), taking a caster of any
+    * size anywhere in the box (no reach, smallest caster or cascade) and nothing wholly outside it, nor a caster that
+    * casts no shadow.
+    */
+    void testTheVirtualShadowView() {
+        const Vec3 eye{120.0f, 30.0f, -40.0f};
+        const LevelView levels = levelView(eye, 1440.0f, 1.2f, LevelOfDetailSettings{});
+        const Mat4 box = toGpuDepthRange(Mat4::orthographic(-100.0f, 100.0f, -50.0f, 50.0f, -300.0f, 400.0f)) *
+                         Mat4::lookAt(eye, eye + Vec3{0.3f, -1.0f, 0.2f}, Vec3{0.0f, 1.0f, 0.0f});
+        const GpuCameraCull view = packVirtualShadowCull(box, levels);
+        const GpuLevelView packed = packLevelView(levels);
+        assert(std::memcmp(&view.levels, &packed, sizeof(packed)) == 0);
+        assert(view.flags == CAMERA_CULL_SHADOW);
+
+        const Frustum frustum = Frustum::fromClipMatrix(box, ClipDepth::OneToZero);
+        std::mt19937 random{5};
+        std::uniform_real_distribution<float> unit{-1.0f, 1.0f};
+        int taken = 0;
+        int left = 0;
+
+        for (int trial = 0; trial < 2000; ++trial) {
+            DrawItem draw;
+            draw.mesh = MeshHandle{0};
+            draw.bounds = BoundingSphere{eye + Vec3{unit(random), unit(random), unit(random)} * 150.0f, 0.001f + (unit(random) + 1.0f) * 3.0f};
+            GpuCullRecord record = packCullRecord(draw);
+            record.shadowCascades = 1;
+            const bool inside = frustum.intersectsSphere(draw.bounds.centre, draw.bounds.radius);
+            assert(shadowTakes(record, view) == inside);
+            taken += inside ? 1 : 0;
+            left += inside ? 0 : 1;
+
+            record.flags &= ~CULL_CASTS_SHADOWS;
+            assert(!shadowTakes(record, view));
+        }
+
+        assert(taken > 100 && left > 100);
+    }
+
+    /*
     * Which tiles keep their movers apart (keepsMoversApart): the far map always; a sun cascade once a moving draw is in
     * it, and from then on while it has its still copy; never a swaying cascade (redrawn every frame anyway) or a lamp's
     * tile. Kept apart, a mover moving leaves the cascade's still casters cached, where the whole tile was redrawn.
@@ -472,6 +513,7 @@ void testShadowCulling() {
     testLimitedCastersThinOut();
     testShadowCacheCoversTheFingerprint();
     testShadowEdges();
+    testTheVirtualShadowView();
     testCascadesKeepTheirMoversApart();
     testPlantedChangesRedrawTheirTiles();
 }

@@ -60,9 +60,10 @@ layout(std430, set = 0, binding = 9) readonly buffer Clusters {
 };
 
 // x: places in the drawing order, y: room for block sums, z: room for pairs, w: the draw groups (a place's group past
-// them is a placed group's).
+// them is a placed group's); placedSetup x: the view's first placed command (the camera's 0).
 layout(std430, set = 0, binding = 10) readonly buffer Setup {
     uvec4 setup;
+    uvec4 placedSetup;
 };
 
 // What occlusion is tested with (GpuMeshClusterOcclusion): last frame's camera-relative view-projection taking this
@@ -75,8 +76,8 @@ layout(std430, set = 0, binding = 11) readonly buffer Occlusion {
     uvec4 pyramid;
 } occlusion;
 
-// The camera's placed plants (render/gpu/placed_drawing.h; one unused record each without): its commands by placed
-// group (the camera is the placed drawing's first view), the placed groups, every view's entries, each part's instance
+// The view's placed plants (render/gpu/placed_drawing.h; one unused record each without): every view's commands by
+// placed group (the view's from placedSetup.x; the camera is the placed drawing's first view), the placed groups, every view's entries, each part's instance
 // and record in its plant's frame, and the slots' plants.
 layout(std430, set = 0, binding = 12) readonly buffer PlacedCommands {
     DrawCommand placedCommands[];
@@ -144,7 +145,7 @@ DrawCommand groupCommand(uint group) {
         return command;
     }
 
-    return group < setup.w ? commands[views[0].slices.z + group] : placedCommands[group - setup.w];
+    return group < setup.w ? commands[views[0].slices.z + group] : placedCommands[placedSetup.x + group - setup.w];
 }
 
 // A group's clusters: first, count (a twig region's first is each entry's own: meshClusterPairKept; the far region's one).
