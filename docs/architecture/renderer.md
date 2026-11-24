@@ -23,7 +23,7 @@ It never reads files. Its camera copy takes the acquired frame's aspect ratio; `
 ## A frame (`render`)
 
 1. `updateDisplayOutput`: the window's HDR properties every frame; `swapchain.supportsHdr()` asked only when HDR comes on (`image-pipeline.md`).
-2. `prepareSwapchain`: rebuild after `waitIdle` when missing, out of date, HDR or present mode or frames in flight changed; HDR refused → SDR, marked unsupported; screen pipelines (tone mapping, lines, overlay) remade for a new format. False while minimised (10 ms sleep).
+2. `prepareSwapchain`: rebuild after `waitIdle` when missing, out of date, HDR or present mode or frames in flight changed; HDR refused → SDR, marked unsupported; screen pipelines (tone mapping, lines, overlay) remade for a new format. False minimised (10 ms sleep).
 3. `bakeSkyVisibility` on the CPU (`sky-visibility.md`), before the fence wait.
 4. `beginFrame`: wait for the frame's fence; read back its timestamps, cloth stamps, depth ranges, eye adaptation and cloth points; reset its descriptor pools, uniforms and command pool; reset its query pool.
 5. Acquire (`imageAcquired`). Out of date: submit the empty buffer, draw nothing.
@@ -102,7 +102,7 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 - Scene colour `ColourTarget`, discarded and cleared to the sky background colour; then the velocity image, cleared to no motion (`anti-aliasing.md`).
 - After the prepass: depth kept and loaded, `EQUAL`, not written (`mainPassDepthState(true)`), so each pixel is shaded once whatever the draw order. Without it: cleared, `GREATER`, written.
 - `EQUAL` needs bit-identical depths: the prepass's `triangle.vert` and the main pass's `triangle_motion.vert` (and their `.mesh` twins) are one body (`triangle_vertex.glsl`'s `shadeVertex`), `gl_Position` `invariant`.
-- `mainPipelines` indexed by `mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays)`: probes and cut-outs as fragment specialization constants (frames without them draw as plain); reflection surfaces add three targets after the velocity image (`triangle_surfaces.frag`); glass rays use `triangle_rays.frag` / `triangle_surfaces_rays.frag` in a layout with the ray tracing set. After the prepass a cut-out needs no discard (its holes have no depth to match), so no cut-out variant exists there.
+- `mainPipelines` indexed by `mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays)`: probes and cut-outs as fragment specialization constants (frames without them draw as plain); reflection surfaces add three targets after the velocity image (`triangle_surfaces.frag`); glass rays: `triangle_rays.frag` / `triangle_surfaces_rays.frag`, a layout with the ray tracing set. After the prepass a cut-out needs no discard (its holes have no depth to match): no cut-out variant there.
 - Shading itself is `scene_surface.glsl` (`triangle.frag` only includes it); a light is skipped before its shadow lookups when `facesLight` says the surface faces away (same test as the shading, so no change to the picture).
 - The sky and stars draw in a block of their own after (they write the scene image alone); depth stored only when read later.
 - Ends with the scene image in `SurfaceRead`.
@@ -112,7 +112,7 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 - `EngineSettings::framesInFlight`, 1 to `maxFramesInFlight` (2), clamped by `validFramesInFlight`.
 - Each frame owns: command pool and buffer, fence (created signalled), acquire semaphore, `FrameDescriptors`, `FrameUniforms`, `SceneBuffers`, timestamp query pool.
 - Shared by all frames: the frame images and the cluster masks (the fence order keeps them safe).
-- `setFramesInFlight`: waits for the GPU, `createFrames`, tells every per-frame helper (debug lines, depth ranges, reflections, eye adaptation, ray tracing, AO, contact shadows, blur, depth of field), drops cloth and probe read-backs a vanished frame would never collect; the swapchain is rebuilt because `swapchainFramesInFlight` differs.
+- `setFramesInFlight`: waits for the GPU, `createFrames`, tells every per-frame helper (debug lines, depth ranges, reflections, eye adaptation, ray tracing, AO, contact shadows, blur, depth of field), drops cloth and probe read-backs a vanished frame would never collect; the swapchain is rebuilt (`swapchainFramesInFlight` differs).
 - ImGui keeps `maxFramesInFlight` buffer sets throughout.
 - Swapchain images: at least one per frame in flight, the surface's minimum, three for Mailbox (`chooseSwapchainImageCount`; format, present mode and extent choices beside it, tested in `swapchain_choice_test`).
 
@@ -122,16 +122,16 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 
 ## Pipelines and the loading screen
 
-- **`PipelineCompiler`** (owned by `VulkanDevice`, stopped first in its teardown): one worker per core (`defaultWorkers`). `submit` → `PipelineFuture`; `take` waits and hands it over or rethrows; `progress`; `waitAll` rethrows the first unreported error. A future dropped untaken destroys its pipeline; a build whose future is gone before it starts is skipped. Holds nothing of the GPU, so `pipeline_compiler_test` uses stand-in handles.
+- **`PipelineCompiler`** (owned by `VulkanDevice`, stopped first in its teardown): one worker per core (`defaultWorkers`). `submit` → `PipelineFuture`; `take` waits and hands it over or rethrows; `progress`; `waitAll` rethrows the first unreported error. A future dropped untaken destroys its pipeline; a build whose future is gone before it starts is skipped. Holds nothing of the GPU, so `pipeline_compiler_test` uses stand-ins.
 - **`VulkanPipeline`, `ComputePipeline`:** make their layouts at once (`DescriptorLayouts` is not thread-safe), hand the SPIR-V load and `vkCreate*Pipelines` to the compiler as a static build over copies of what it needs; the first `get()` waits for its own build.
-- **Loading screen:** `drawLoadingScreen` about 30 times a second while the `Application` loads (closing quits): a block sliding along the bar for work that cannot count (`loadingSlideFrames`), a filling bar for meshes and shaders (stages: `engine-core.md`, Start; `LoadingProgress`, `layoutLoadingScreen`). Drawn by `vkCmdClearAttachments` alone in a 5 x 7 block font (`blockText`), since no pipeline may be ready.
+- **Loading screen:** `drawLoadingScreen` about 30 times a second while the `Application` loads (closing quits): a block sliding along the bar for work that cannot count (`loadingSlideFrames`), a filling bar for meshes, shaders (stages: `engine-core.md`, Start; `LoadingProgress`, `layoutLoadingScreen`). Drawn by `vkCmdClearAttachments` alone, a 5 x 7 block font (`blockText`): no pipeline may be ready.
 - Not compiled this way: ImGui's own pipeline, the GPU tests' (built on first use).
 
 ## Kept from SDL_GPU
 
 The port drew every golden image bit for bit the same, so these stay:
 
-- **Descriptor layout** for bloom, tone mapping, debug lines and the overlay (`ShaderResources`, sets shared through `DescriptorLayouts`): set 0 vertex textures (unused), set 1 vertex uniforms, set 2 fragment combined image samplers then storage buffers, set 3 fragment uniforms. Scene pipelines use the GPU scene's layout instead (`PipelineDescription::sharedLayout`).
+- **Descriptor layout** for bloom, tone mapping, debug lines and the overlay (`ShaderResources`, sets shared through `DescriptorLayouts`): set 0 vertex textures (unused), set 1 vertex uniforms, set 2 fragment combined image samplers then storage buffers, set 3 fragment uniforms. Scene pipelines use the GPU scene's (`PipelineDescription::sharedLayout`).
 - **Pipelines:** depth clamp on, counter-clockwise front faces, line width 1, dynamic viewport and scissor. `setViewport` flips y (origin at `y + height`, negative height); `beginRendering` sets the whole target.
 - **Formats:** swapchain `B8G8R8A8_SRGB` (else `R8G8B8A8_SRGB`), or `R16G16B16A16_SFLOAT` in `EXTENDED_SRGB_LINEAR` for HDR; bloom levels `B10G11R11_UFLOAT_PACK32` when drawable, blendable and filterable.
 - **Shared samplers:** surfaces (trilinear, repeat, anisotropy 16 or the GPU's limit, `VK_LOD_CLAMP_NONE`); tables (bilinear, clamped); nearest; linear clamped; shadow compare (`GREATER_OR_EQUAL`, linear); shadow raw depth (nearest).
@@ -151,13 +151,14 @@ An `ImageState` names a use; `imageStateUse` gives its stages, accesses and layo
 
 | State | Use |
 |---|---|
-| `Undefined`, `Acquired`, `Present` | Start; a swapchain image just acquired (stage = `acquireWaitStage`, so the first barrier chains after the semaphore); presented (no stage: the semaphore orders it) |
+| `Undefined`, `Acquired`, `Present` | Start; a swapchain image acquired (stage `acquireWaitStage`: the first barrier chains after the semaphore); presented (no stage: the semaphore orders it) |
 | `ColourTarget`, `DepthTarget` | Drawn into |
 | `FragmentRead` | Sampled by fragment shaders |
 | `SurfaceRead` | Sampled by fragment and compute (every uploaded texture, since probe rays read them) |
 | `VertexRead` | Sampled by vertex and compute (the wind's springs) |
 | `DepthFragmentRead`, `DepthComputeRead` | A depth image sampled |
 | `ComputeRead`, `ComputeStorage` | Sampled by compute; read and written in place (`GENERAL`) |
+| `MeshComputeRead` | Sampled by compute and mesh shaders (the occlusion pyramids) |
 | `TransferSource`, `TransferDestination` | Copies and blits |
 
 - `imageBarrier(image, aspect, from, to, ImageContents, levels)` waits for the old stages, flushes only the old writes, makes data visible to all new accesses, changes layout (from undefined on `Discard`). `needsBarrier` is false only for the same read-only state twice.
@@ -167,12 +168,12 @@ An `ImageState` names a use; `imageStateUse` gives its stages, accesses and layo
 
 ## Device and memory
 
-- **`VulkanDevice`:** `volkInitialize` once per process (vk-bootstrap caches the loader's first functions; SDL unloads its copy when video stops); without a window (GPU tests) vk-bootstrap's headless mode, no surface. Vulkan 1.3, discrete GPU preferred, one queue for everything, VMA.
+- **`VulkanDevice`:** `volkInitialize` once per process (vk-bootstrap caches the loader's first functions; SDL unloads its copy as video stops); without a window (GPU tests) vk-bootstrap's headless mode, no surface. Vulkan 1.3, discrete GPU preferred, one queue for everything, VMA.
 - **Required features:** `samplerAnisotropy`, `shaderInt64` (planting's 64-bit hash), `depthClamp`, `shaderClipDistance` (planar mirrors), `shaderStorageImageExtendedFormats`; 1.3's `dynamicRendering`, `synchronization2`, `shaderDemoteToHelperInvocation`, `subgroupSizeControl`, `computeFullSubgroups`, `privateData`; descriptor indexing for bindless textures and `bufferDeviceAddress`. `checkFormats` throws without fragment and compute subgroup arithmetic (clustered shading, the cascades' fit).
 - **Asked first, dropped only if no GPU has them:** FSR's and DLSS's (`shaderInt16`, `shaderFloat16`, storage images without format, `timelineSemaphore`, `descriptorIndexing`, plus `VK_KHR_get_memory_requirements2` and `VK_KHR_dedicated_allocation`, since FSR fetches the KHR-suffixed name).
 - **Optional:** DLSS's extensions (all or none), memory budget, dual-source blending, independent blending, ray queries (acceleration structures, ray query, deferred host operations).
 - **Debug utils:** on whenever the instance has it, release too. `beginLabel`/`endLabel` mark passes; `nameObject` names objects (`ImageDescription::name`, a string literal per image: Scene colour, Scene depth, Solid mask, Shadow atlas, Still shadow, Golden capture, ...).
-- **Memory:** `VulkanBuffer` in `BufferMemory::Gpu`, `Upload` (mapped, sequential writes) or `Readback` (mapped, cached); `VulkanImage` (2D, cube or volume, a view of all levels, its current `ImageState`). `ImmediateCommands::run` records, submits and waits (uploads, atlas clear, GPU tests). `OwnedHandle<T>` owns one device object; `vulkanCheck` turns a failed `VkResult` into an exception naming it.
+- **Memory:** `VulkanBuffer` in `BufferMemory::Gpu`, `Upload` (mapped, sequential writes) or `Readback` (mapped, cached); `VulkanImage` (2D, cube or volume, a view of all levels, its current `ImageState`). `ImmediateCommands::run` records, submits, waits (uploads, atlas clear, GPU tests). `OwnedHandle<T>` owns one device object; `vulkanCheck` makes a failed `VkResult` an exception naming it.
 
 ## Debug lines and overlay
 
