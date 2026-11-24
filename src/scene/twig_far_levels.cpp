@@ -1,5 +1,6 @@
 #include "scene/twig_far_levels.h"
 
+#include "math/percentile.h"
 #include "scene/leaf_pruning.h"
 
 #include <cmath>
@@ -56,8 +57,8 @@ namespace {
     */
     class FarTreeBuilder {
     public:
-        FarTreeBuilder(const TwigSet& set, const std::vector<TwigFarLeaves>& prototypes, const RankedLeaves& ranked, TwigFarLevels& far)
-            : set(set), prototypes(prototypes), ranked(ranked), far(far) {
+        FarTreeBuilder(const TwigSet& set, const std::vector<TwigFarLeaves>& prototypes, const RankedLeaves& ranked, float errorShare, TwigFarLevels& far)
+            : set(set), prototypes(prototypes), ranked(ranked), errorShare(errorShare), far(far) {
             far.nodes.resize(set.bricks.size());
         }
 
@@ -98,29 +99,32 @@ namespace {
         const TwigSet& set;
         const std::vector<TwigFarLeaves>& prototypes;
         const RankedLeaves& ranked;
+        float errorShare; // the error percentile as a share
         TwigFarLevels& far;
 
         const TwigFarLevel& lastLevel(const TwigFarNode& node) const {
             return far.levels[node.firstLevel + node.levelCount - 1];
         }
 
-        // A brick's finest level is its twigs': their level's error (prototype's frame) times their scale.
+        // A brick's finest level is its twigs': their level's error (prototype's frame) times their scale, once for each
+        // leaf they hand over, at the error percentile.
         float brickErrorFloor(std::uint32_t brick) const {
-            float floor = 0.0f;
+            std::vector<float> errors;
             const TwigBrick& twigs = set.bricks[brick];
 
             for (std::uint32_t number = twigs.firstTwig; number < twigs.firstTwig + twigs.twigCount; ++number) {
                 const TwigInstance& twig = set.twigs[number];
-                floor = std::max(floor, prototypes[twig.prototype].error * twig.scale);
+                const TwigFarLeaves& handed = prototypes[twig.prototype];
+                errors.insert(errors.end(), handed.leaves.size(), handed.error * twig.scale);
             }
 
-            return floor;
+            return nearestRank(std::move(errors), errorShare);
         }
 
         /*
         * A node's levels from density on: each keeps the leaves of its run whose rank the density keeps, grown by the
-        * square root of the run's area over theirs, its error the most any strays past its finest side (never under the
-        * level before's, from floor). Until one cluster is left. Then the sphere: centred on the run's feet's box,
+        * square root of the run's area over theirs, its error how far they stray past their finest sides at the error
+        * percentile (never under the level before's, from floor). Until one cluster is left. Then the sphere: centred on the run's feet's box,
         * holding every level's leaves and the children's spheres.
         */
         void makeLevels(std::uint32_t index, std::uint32_t density, float floor) {
@@ -147,6 +151,7 @@ namespace {
                 const std::uint32_t keptRanks = prunedKept(count, static_cast<int>(density));
                 float keptArea = 0.0f;
                 std::vector<std::uint32_t> kept;
+                std::vector<float> strays;
 
                 for (std::uint32_t leaf = firstLeaf; leaf < endLeaf; ++leaf) {
                     if (ranked.rank[leaf] < keptRanks) {
@@ -166,13 +171,14 @@ namespace {
                     grown.side *= level.growth;
                     // The finest level's strays are its twigs' level's, its floor already.
                     if (density > 0) {
-                        error = std::max(error, grown.side - ranked.finestSide[leaf]);
+                        strays.push_back(grown.side - ranked.finestSide[leaf]);
                     }
 
                     radius = std::max(radius, (grown.foot - centre).length() + grown.side * ranked.reach[leaf]);
                     far.leaves.push_back(grown);
                 }
 
+                error = std::max(error, nearestRank(std::move(strays), errorShare));
                 level.error = error;
                 ++far.nodes[index].levelCount;
 
@@ -207,7 +213,11 @@ FarLeaf farLeafOf(const TwigInstance& twig, std::uint32_t twigNumber, const Twig
                    .twig = twigNumber};
 }
 
-TwigFarLevels makeTwigFarLevels(const TwigSet& set, const std::vector<TwigFarLeaves>& prototypes, FarLeafShapes shapes) {
+TwigFarLevels makeTwigFarLevels(const TwigSet& set, const std::vector<TwigFarLeaves>& prototypes, FarLeafShapes shapes, float errorPercentile) {
+    if (!(errorPercentile > 0.0f && errorPercentile <= 100.0f)) {
+        throw std::invalid_argument("A far error percentile must be in (0, 100]");
+    }
+
     for (const TwigInstance& twig : set.twigs) {
         if (twig.prototype >= prototypes.size()) {
             throw std::invalid_argument("A twig's prototype hands over no far leaves");
@@ -228,6 +238,6 @@ TwigFarLevels makeTwigFarLevels(const TwigSet& set, const std::vector<TwigFarLea
     }
 
     const RankedLeaves ranked = rankLeaves(set, prototypes);
-    FarTreeBuilder(set, prototypes, ranked, far).build(0, static_cast<std::uint32_t>(set.bricks.size()));
+    FarTreeBuilder(set, prototypes, ranked, errorPercentile / 100.0f, far).build(0, static_cast<std::uint32_t>(set.bricks.size()));
     return far;
 }

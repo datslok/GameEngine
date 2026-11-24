@@ -92,7 +92,7 @@ Garments cut from flat pieces and sewn, cloth kept off itself, and the yardstick
 - `yardstickSheet(squares, settings)`: a 1 m sheet (`yardstickSheetSize`), upright in x-y, top edge on y = 0, pinned at its top corners. `yardstickRungs`: 25, 50, 100, 200 squares a side.
 - `measureSheet` -> `SheetMeasure`: `pathStretch` (the longest top-to-hem column against its rest length, minus 1), `worstEdgeStrain`, `sag` (hem middle below the pins; over 1 m is stretch).
 - `settleYardstick(cloth, seconds, tickSeconds, jobs, fields, prepare)`: steps against field bodies, each tick readied by `prepare` (`ClothTickPreparation`, given the cloth and tick number); returns the farthest any point moved over the last second.
-- `measureGarment(cloth, hem, floorHeight, fields)` -> `GarmentMeasure`, for cloth without columns: `meanStretch` (squashed edges count as none), `percentileStrain` (`garmentStrainPercentile`, 99%: the stretch carrying weight, without the odd edge pinched at a seam), `worstEdgeStrain`, `worstSeamGap`, `hemHeight`, `closestToBody` (infinity with no bodies).
+- `measureGarment(cloth, hem, floorHeight, fields)` -> `GarmentMeasure`, for cloth without columns: `meanStretch` (squashed edges count as none), `percentileStrain` (`garmentStrainPercentile`, 99%, its nearest rank, `math/percentile.h`: the stretch carrying weight, without the odd edge pinched at a seam), `worstEdgeStrain`, `worstSeamGap`, `hemHeight`, `closestToBody` (infinity with no bodies).
 
 **The runner** (`app/cloth_yardstick_run`; options parsed in `app/game_registry`; each takes no other option):
 

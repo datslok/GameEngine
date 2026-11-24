@@ -351,7 +351,7 @@ namespace {
         ForestTwigSettings counted;
         FieldCounter counter;
         visit(counted, counter);
-        assert(counter.fields == 7 && counter.live == 0);
+        assert(counter.fields == 8 && counter.live == 0);
     }
 }
 

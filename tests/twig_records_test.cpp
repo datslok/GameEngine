@@ -713,7 +713,7 @@ namespace {
         TwigTables tables;
     };
 
-    FarTwigs farTwigs(std::size_t count) {
+    FarTwigs farTwigs(std::size_t count, float errorPercentile = ForestTwigSettings{}.farErrorPercentile) {
         const LeafAtlas atlas = standInLeafAtlas(64, forestTreeLeafColumns, forestTreeLeafRows, forestLeafStandIn);
         const ForestTwigSettings settings;
         const TracedLeaves leaves = traceAtlasLeaves(atlas, 3, 1.0f);
@@ -730,7 +730,7 @@ namespace {
         }
 
         made.set = makeTwigSet(meshes, reaches, scatteredTwigs(count, static_cast<std::uint32_t>(made.prototypes.size())));
-        made.set.far = makeTwigFarLevels(made.set, handed, twigFarLeafShapes(leaves, settings));
+        made.set.far = makeTwigFarLevels(made.set, handed, twigFarLeafShapes(leaves, settings), errorPercentile);
         const TwigSet* sets[1] = {&made.set};
         made.tables = packTwigSets(sets, meshes).tables;
         std::uint32_t pool = 0;
@@ -763,10 +763,10 @@ namespace {
         const std::vector<TwigFarLeaves> handed = standInFarLeaves();
         const std::vector<float> reaches{1.2f, 1.0f, 0.8f};
         TwigSet first = makeTwigSet({MeshHandle{3}, MeshHandle{4}, MeshHandle{5}}, reaches, scatteredTwigs(700));
-        first.far = makeTwigFarLevels(first, handed, standInFarShapes());
+        first.far = makeTwigFarLevels(first, handed, standInFarShapes(), farErrorWorstPercentile);
         const TwigSet plain = makeTwigSet({MeshHandle{9}, MeshHandle{4}}, {1.0f, 1.0f}, scatteredTwigs(200, 2));
         TwigSet third = makeTwigSet({MeshHandle{5}, MeshHandle{3}, MeshHandle{4}}, reaches, scatteredTwigs(300));
-        third.far = makeTwigFarLevels(third, handed, standInFarShapes());
+        third.far = makeTwigFarLevels(third, handed, standInFarShapes(), farErrorWorstPercentile);
         TwigSet curled = third;
         curled.far.shapes.curl = 0.2f;
         const std::vector<MeshHandle> meshes{MeshHandle{3}, MeshHandle{4}, MeshHandle{5}, MeshHandle{9}};
@@ -906,12 +906,19 @@ namespace {
     * One choice a brick, from inside the crown to far past it (the cluster cut's rule on the far tree): no brick drawn
     * as twigs and as a far node, nor by two far nodes; each far node drawn fits and its parent does not, at its coarsest
     * level that fits, in the frustum; twigs never coarser than the bricks' level. Where a node fits, every node below
-    * it does (so every brick under it finds it), and every twig of a brick whose node fits would draw twigBrickLevel or
-    * coarser by itself (so the bricks take over from exactly the leaves the twigs showed: no leaf moves). Near views draw
-    * only twigs, far ones only the root, between them both.
+    * it does (so every brick under it finds it), and the twigs of a brick whose node fits holding at least the error
+    * percentile of its leaves would draw twigBrickLevel or coarser by themselves (at 100 every twig: the bricks take
+    * over from exactly the leaves the twigs showed, no leaf moves; below, its largest twigs' leaves may shrink to their
+    * level-2 forms). Near views draw only twigs, far ones only the root, between them both.
     */
-    void testABrickMakesOneChoice() {
-        const FarTwigs made = farTwigs(3000);
+    void testABrickMakesOneChoice(float errorPercentile) {
+        const FarTwigs made = farTwigs(3000, errorPercentile);
+        std::vector<std::size_t> handedLeaves;
+
+        for (const TwigPrototype& twig : made.prototypes) {
+            handedLeaves.push_back(twigFarLeaves(twig).leaves.size());
+        }
+
         const TwigTables& tables = made.tables;
         const TwigFarLevels& far = made.set.far;
         const auto root = static_cast<std::uint32_t>(far.nodes.size() - 1);
@@ -992,11 +999,18 @@ namespace {
                     continue;
                 }
 
+                std::size_t leaves = 0;
+                std::size_t handedOver = 0;
+
                 for (std::uint32_t twig = tables.bricks[brick].firstTwig; twig < tables.bricks[brick].firstTwig + tables.bricks[brick].twigCount; ++twig) {
                     const GpuTwigPrototype& prototype = tables.prototypes[tables.twigs[twig].prototype];
                     const GpuInstance placed = twigInstance(part, tables.twigs[twig]);
-                    assert(twigLevel(&tables.levels[prototype.firstLevel], prototype.levelCount, placed, view) >= TWIG_BRICK_LEVEL);
+                    const std::size_t count = handedLeaves[tables.twigs[twig].prototype];
+                    leaves += count;
+                    handedOver += twigLevel(&tables.levels[prototype.firstLevel], prototype.levelCount, placed, view) >= TWIG_BRICK_LEVEL ? count : 0;
                 }
+
+                assert(static_cast<float>(handedOver) >= errorPercentile / 100.0f * static_cast<float>(leaves) - 1e-3f);
             }
 
             onlyTwigs = onlyTwigs || (!draws.empty() && farDraws.empty());
@@ -1193,7 +1207,8 @@ void testTwigRecords() {
     testAFarLeafsRecord();
     testFarLeavesAreTheTwigsLevel();
     testPackedSetsMoveTheirRuns();
-    testABrickMakesOneChoice();
+    testABrickMakesOneChoice(farErrorWorstPercentile);
+    testABrickMakesOneChoice(ForestTwigSettings{}.farErrorPercentile);
     testFarNodesOutOfViewAreLeftOut();
     testFarNodesPosedByTheirTree();
     testAFarClustersStandIn();
