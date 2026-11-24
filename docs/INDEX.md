@@ -42,6 +42,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | `docs/research/LUMEN.md` | The software tracer or the Lumen-like layer (phase 14) |
 | `docs/research/SHADOWCACHE.md` | Shadow caching for still and moving casters |
 | `docs/research/VIRTUALGEOMETRY.md` | Nanite-style clusters, virtual shadow maps, leaves as geometry; why cascades popped (phase 21) |
+| `docs/research/VIRTUALSHADOWMAPS.md` | Virtual shadow maps for the sun: Unreal, Sakmary, EEVEE and others; the plan (phase 21 stage 4) |
 | `docs/research/LEAFGEOMETRY.md` | Modelled leaves, assemblies, crowns kept under simplification, rigid wind (phase 21 stage 3) |
 | `docs/research/VISBUFFER.md` | Visibility buffer, material pass, compute rasteriser for small triangles (phase 21 stage 5) |
 | `docs/research/PROBECAPTURE.md` | The reflection probe's capture cost: measured, how shipped engines keep it cheap (phase 22) |
