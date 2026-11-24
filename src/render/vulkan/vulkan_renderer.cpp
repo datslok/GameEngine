@@ -1768,6 +1768,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.twigsTested = twigTally.tested;
     stats.twigsKept = twigTally.kept;
     stats.twigsSwaying = twigTally.swaying;
+    stats.twigFarBricks = twigTally.farBricks;
+    stats.twigFarNodes = twigTally.farNodes;
+    stats.twigFarMerged = twigTally.farMerged;
+    stats.twigFarClusters = twigTally.farClusters;
+    stats.twigFarTriangles = twigTally.farTriangles;
 
     for (std::size_t level = 0; level < twigTally.levelTwigs.size(); ++level) {
         stats.twigsByLevel[level] = twigTally.levelTwigs[level];
@@ -2276,7 +2281,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         twigDrawing->record(frame.commands, frame.descriptors,
                             VulkanTwigDrawing::PlacedInputs{placed.commands, placed.entries, frames[frame.frameIndex].scene->placedParts.describe(),
                                                             placed.parts, planting->getPlants()},
-                            cullBones, clusterView, frame.frameIndex);
+                            cullBones, clusterView, settings.farLeaves, frame.frameIndex);
         endGpuPass(frame, GpuPass::Twigs);
     }
 

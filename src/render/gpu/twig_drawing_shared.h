@@ -34,14 +34,20 @@
 // No far node: a set without far levels (its record's first node), the root's parent.
 #define TWIG_FAR_NO_NODE 0xffffffffu
 
-// The cull pass's tally (F4's TWIGS line, ROADMAP phase 21 stage 5-0; TwigTally), its words after the regions' room:
-// twigs tested, kept, kept for sway, a spare, then each level's twigs kept and their triangles.
+// The cull pass's tally (F4's TWIGS and FAR lines, ROADMAP phase 21 stages 5-0 and 3e-iii-c; TwigTally), its words after
+// the regions' room: twigs tested, kept, kept for sway, bricks handing over to a far node, each level's twigs kept and
+// their triangles, then far nodes drawn, those merged from bricks, their levels' clusters and triangles.
 #define TWIG_TALLY_TESTED 0
 #define TWIG_TALLY_KEPT 1
 #define TWIG_TALLY_SWAYING 2
+#define TWIG_TALLY_FAR_BRICKS 3
 #define TWIG_TALLY_LEVEL_TWIGS 4
 #define TWIG_TALLY_LEVEL_TRIANGLES (TWIG_TALLY_LEVEL_TWIGS + TWIG_MOST_LEVELS)
-#define TWIG_TALLY_WORDS (TWIG_TALLY_LEVEL_TRIANGLES + TWIG_MOST_LEVELS)
+#define TWIG_TALLY_FAR_NODES (TWIG_TALLY_LEVEL_TRIANGLES + TWIG_MOST_LEVELS)
+#define TWIG_TALLY_FAR_MERGED (TWIG_TALLY_FAR_NODES + 1)
+#define TWIG_TALLY_FAR_CLUSTERS (TWIG_TALLY_FAR_NODES + 2)
+#define TWIG_TALLY_FAR_TRIANGLES (TWIG_TALLY_FAR_NODES + 3)
+#define TWIG_TALLY_WORDS (TWIG_TALLY_FAR_NODES + 4)
 
 // The twig passes' storage buffers (twig_pass.glsl; from TWIG_BONE_BINDING the bones' four, bone_cull_data.glsl; from
 // TWIG_FAR_BINDING the far nodes and levels), and the workgroup of the pass gathering their sources.

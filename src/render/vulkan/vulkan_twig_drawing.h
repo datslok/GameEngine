@@ -60,10 +60,11 @@ public:
     };
 
     // Record the passes (after the placed passes and the bones', before the cluster passes): view is the camera's as the
-    // cluster passes take it; bones the frame's (posed trees' bricks and twigs culled by their posed bounds). Then the
-    // regions and entries readable by the cluster passes and mesh shaders, the counts copied back.
+    // cluster passes take it; bones the frame's (posed trees' bricks and twigs culled by their posed bounds); farLeaves
+    // whether far bricks hand over to their far levels (RenderSettings::farLeaves). Then the regions and entries readable
+    // by the cluster passes and mesh shaders, the counts copied back.
     void record(VkCommandBuffer commands, FrameDescriptors& descriptors, const PlacedInputs& placed, const BoneCullBuffers& bones, const GpuCameraCull& view,
-                std::uint32_t frameIndex);
+                bool farLeaves, std::uint32_t frameIndex);
 
     // What the cluster passes and mesh shaders read (after record): the regions' counts and room, the entries, the twigs.
     VkBuffer getRegions(std::uint32_t frameIndex) const;

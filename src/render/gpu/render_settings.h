@@ -108,6 +108,10 @@ struct RenderSettings {
     // cards until phase 21's compute rasteriser; off for comparing.
     bool twigs = true;
 
+    // With twigs: far bricks drawn as their far levels' leaf records (ROADMAP phase 21 stage 3e-iii), twigs stopping at
+    // the bricks' level. Off for comparing (the twigs to every level, as before stage 3e).
+    bool farLeaves = true;
+
     // Each pixel loops only over the lights listed for its cluster (render/gpu/clusters.h) instead of every light in the
     // frame; both add the same lights in the same order, so the picture is identical. Off is for comparing the timings.
     bool clusteredShading = true;

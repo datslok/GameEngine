@@ -364,7 +364,9 @@ std::uint32_t twigFarLevel(const TwigTables& tables, const GpuTwigFarNode& node,
 /*
 * What the twig pass counted (F4's TWIGS line, ROADMAP phase 21 stage 5-0): its sources' twigs tested, those kept
 * (drawn), those of them that move (posed by their bones, or kept whole as their part sways unbound), and the kept ones'
-* twigs and triangles at each level. The pass writes it as TWIG_TALLY_WORDS words (readTwigTally).
+* twigs and triangles at each level; and its far levels' (the FAR line, stage 3e-iii-c): bricks handing over to a far
+* node, far nodes drawn, those of them merged from bricks, and their levels' leaf clusters and triangles. The pass
+* writes it as TWIG_TALLY_WORDS words (readTwigTally).
 */
 struct TwigTally {
     std::uint32_t tested = 0;
@@ -372,6 +374,11 @@ struct TwigTally {
     std::uint32_t swaying = 0;
     std::array<std::uint32_t, TWIG_MOST_LEVELS> levelTwigs{};
     std::array<std::uint32_t, TWIG_MOST_LEVELS> levelTriangles{};
+    std::uint32_t farBricks = 0;
+    std::uint32_t farNodes = 0;
+    std::uint32_t farMerged = 0;
+    std::uint32_t farClusters = 0;
+    std::uint32_t farTriangles = 0;
 
     bool operator==(const TwigTally&) const = default;
 };

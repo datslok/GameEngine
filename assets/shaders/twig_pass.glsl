@@ -100,12 +100,14 @@ layout(std430, set = 0, binding = TWIG_FAR_BINDING + 1) readonly buffer TwigFarL
     TwigFarLevel twigFarLevels[];
 };
 
-// The most bricks any twig set has (the dispatch's x), the most sources the room takes, and the frame's bones stamp
-// (GpuWindField::flags[1]: 0 when the bones pass did not run).
+// The most bricks any twig set has (the dispatch's x), the most sources the room takes, the frame's bones stamp
+// (GpuWindField::flags[1]: 0 when the bones pass did not run), and whether far bricks hand over to their far levels
+// (Passes "Far leaves").
 layout(push_constant) uniform TwigPush {
     uint mostBricks;
     uint mostSources;
     uint boneStamp;
+    uint farLeaves;
 } push;
 
 #endif
