@@ -29,9 +29,11 @@ inline constexpr std::uint32_t farLeavesPerCluster = std::min(MESH_CLUSTER_MAX_V
 * one leaf in 2^k keeps a subset of every finer one, across merges too. A brick's level 0 is its twigs' leaves exactly;
 * each level after keeps half by rank, its survivors grown about their feet by sqrt(full area over kept area), until
 * one cluster is left; then two nodes merge, as the bricks' median split paired them (twigBricksFirstHalf), starting a
-* density past both children's last, again until one cluster, up to the root. The shapes are kept with them. Throws
-* std::invalid_argument for a twig whose prototype has no far leaves given, a leaf whose cell has no shape, or an
-* error percentile outside (0, 100]. Deterministic; cost grows with the leaves times the tree's depth.
+* density past both children's last, again until one cluster, up to the root. Each level's leaves are in their feet's
+* median split order (math/median_split.h), so its runs of farLeavesPerCluster are clusters of neighbours. The shapes
+* are kept with them. Throws std::invalid_argument for a twig whose prototype has no far leaves given, a leaf whose
+* cell has no shape, or an error percentile outside (0, 100]. Deterministic; cost grows with the leaves times the
+* tree's depth.
 *
 * A level's error is its leaves' at errorPercentile (nearest rank, math/percentile.h; stage 3e-iv): a brick's finest
 * its leaves' twig errors (the twig level's times the twig's scale, once a leaf), each coarser level its grown leaves'

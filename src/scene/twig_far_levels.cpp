@@ -1,5 +1,6 @@
 #include "scene/twig_far_levels.h"
 
+#include "math/median_split.h"
 #include "math/percentile.h"
 #include "scene/leaf_pruning.h"
 
@@ -166,7 +167,17 @@ namespace {
                 level.density = density;
                 level.growth = density > 0 && keptArea > 0.0f ? std::sqrt(fullArea / keptArea) : 1.0f;
 
+                // In their feet's median split order, so each cluster of the level (its leaves in runs, twig_records) holds
+                // neighbours and its sphere stays small enough to be hidden (stage 3e-v-a).
+                std::vector<Vec3> feet;
+                feet.reserve(kept.size());
+
                 for (const std::uint32_t leaf : kept) {
+                    feet.push_back(ranked.leaves[leaf].foot);
+                }
+
+                for (const std::size_t place : medianSplitOrder(feet, farLeavesPerCluster)) {
+                    const std::uint32_t leaf = kept[place];
                     FarLeaf grown = ranked.leaves[leaf];
                     grown.side *= level.growth;
                     // The finest level's strays are its twigs' level's, its floor already.

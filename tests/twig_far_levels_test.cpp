@@ -1,5 +1,6 @@
 #include "scene/twig_far_levels.h"
 
+#include "math/median_split.h"
 #include "math/percentile.h"
 
 #include <algorithm>
@@ -60,7 +61,8 @@ namespace {
 
     /*
     * A record is its leaf carried by its twig: foot and frame placed, side times the twig's scale and the growth. A
-    * brick's finest level holds exactly its twigs' handed-over leaves, in twig order, grown by nothing more.
+    * brick's finest level holds exactly its twigs' handed-over leaves, grown by nothing more, in their feet's median
+    * split order (12 neighbours a cluster).
     */
     void testFarLeavesAreTheTwigsLeaves() {
         const TwigInstance twig{.foot = Vec3{1.0f, 2.0f, 3.0f},
@@ -86,18 +88,24 @@ namespace {
             assert(node.firstBrick == brick && node.brickCount == 1 && node.children[0] == twigFarNoNode && node.levelCount > 0);
             const TwigFarLevel& finest = far.levels[node.firstLevel];
             assert(finest.density == 0 && finest.growth == 1.0f);
-            std::uint32_t next = finest.firstLeaf;
+            std::vector<FarLeaf> carried;
+            std::vector<Vec3> feet;
 
             for (std::uint32_t number = set.bricks[brick].firstTwig; number < set.bricks[brick].firstTwig + set.bricks[brick].twigCount; ++number) {
                 const TwigInstance& placed = set.twigs[number];
 
                 for (const TwigLeafPlace& leaf : prototypes[placed.prototype].leaves) {
-                    assert(sameFarLeaf(far.leaves[next], farLeafOf(placed, number, leaf, 1.0f)));
-                    ++next;
+                    carried.push_back(farLeafOf(placed, number, leaf, 1.0f));
+                    feet.push_back(carried.back().foot);
                 }
             }
 
-            assert(next == finest.firstLeaf + finest.leafCount);
+            const std::vector<std::size_t> order = medianSplitOrder(feet, farLeavesPerCluster);
+            assert(finest.leafCount == carried.size());
+
+            for (std::size_t place = 0; place < order.size(); ++place) {
+                assert(sameFarLeaf(far.leaves[finest.firstLeaf + place], carried[order[place]]));
+            }
         }
     }
 
@@ -360,6 +368,80 @@ namespace {
         assert(throwsInvalid([&] { makeTwigFarLevels(set, prototypes, standInFarShapes(), 0.0f); }));
         assert(throwsInvalid([&] { makeTwigFarLevels(makeTwigSet({}, {}, {}), prototypes, standInFarShapes(), 101.0f); }));
     }
+    /*
+    * Every level's leaves, merged nodes' too, are its kept leaves (in the bricks' and twigs' order) in their feet's
+    * median split order, so each run of 12 is a cluster of neighbours: at the finest levels far tighter than the
+    * twigs' order made them.
+    */
+    void testFarLevelsKeepNeighboursTogether() {
+        const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
+        const TwigSet set = testSet(2000);
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes(), farErrorWorstPercentile);
+        float orderedReach = 0.0f;
+        float givenReach = 0.0f;
+
+        // A cluster's reach: its farthest foot from its feet's box centre.
+        const auto reachOf = [](const std::vector<Vec3>& feet) {
+            Vec3 low = feet.front();
+            Vec3 high = low;
+
+            for (const Vec3& foot : feet) {
+                low = Vec3{std::min(low.x, foot.x), std::min(low.y, foot.y), std::min(low.z, foot.z)};
+                high = Vec3{std::max(high.x, foot.x), std::max(high.y, foot.y), std::max(high.z, foot.z)};
+            }
+
+            float reach = 0.0f;
+
+            for (const Vec3& foot : feet) {
+                reach = std::max(reach, (foot - (low + high) * 0.5f).length());
+            }
+
+            return reach;
+        };
+
+        for (const TwigFarLevel& level : far.levels) {
+            // The level's leaves in the bricks' and twigs' order: by twig, then by place in the twig's handed-over leaves.
+            std::vector<FarLeaf> given(far.leaves.begin() + level.firstLeaf, far.leaves.begin() + level.firstLeaf + level.leafCount);
+            const auto placeInTwig = [&](const FarLeaf& leaf) {
+                const std::vector<TwigLeafPlace>& leaves = prototypes[set.twigs[leaf.twig].prototype].leaves;
+                return std::find_if(leaves.begin(), leaves.end(), [&](const TwigLeafPlace& place) { return place.number == leaf.number; }) - leaves.begin();
+            };
+            std::sort(given.begin(), given.end(), [&](const FarLeaf& a, const FarLeaf& b) {
+                return a.twig < b.twig || (a.twig == b.twig && placeInTwig(a) < placeInTwig(b));
+            });
+            std::vector<Vec3> feet;
+
+            for (const FarLeaf& leaf : given) {
+                feet.push_back(leaf.foot);
+            }
+
+            const std::vector<std::size_t> order = medianSplitOrder(feet, farLeavesPerCluster);
+
+            for (std::size_t place = 0; place < order.size(); ++place) {
+                assert(sameFarLeaf(far.leaves[level.firstLeaf + place], given[order[place]]));
+            }
+
+            if (level.density != 0) {
+                continue;
+            }
+
+            for (std::uint32_t first = 0; first < level.leafCount; first += farLeavesPerCluster) {
+                const std::uint32_t end = std::min(first + farLeavesPerCluster, level.leafCount);
+                std::vector<Vec3> ordered;
+                std::vector<Vec3> twigOrder;
+
+                for (std::uint32_t place = first; place < end; ++place) {
+                    ordered.push_back(far.leaves[level.firstLeaf + place].foot);
+                    twigOrder.push_back(given[place].foot);
+                }
+
+                orderedReach += reachOf(ordered);
+                givenReach += reachOf(twigOrder);
+            }
+        }
+
+        assert(orderedReach < 0.8f * givenReach);
+    }
 }
 
 void testTwigFarLevels() {
@@ -369,4 +451,5 @@ void testTwigFarLevels() {
     testFarTreeFollowsTheSplit();
     testNearestRank();
     testFarErrorsFromATypicalLeaf();
+    testFarLevelsKeepNeighboursTogether();
 }

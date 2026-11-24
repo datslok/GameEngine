@@ -100,6 +100,7 @@ void testLeafPruning();
 void testTwigs();
 void testTwigSet();
 void testTwigFarLevels();
+void testMedianSplit();
 void testTwigRecords();
 void testTerrain();
 void testGroundFollow();
@@ -455,6 +456,7 @@ const RoutineTest routineTests[] = {
     {"testTwigs", testTwigs},
     {"testTwigSet", testTwigSet},
     {"testTwigFarLevels", testTwigFarLevels},
+    {"testMedianSplit", testMedianSplit},
     {"testTwigRecords", testTwigRecords},
     {"testTerrain", testTerrain},
     {"testGroundFollow", testGroundFollow},
