@@ -54,6 +54,33 @@ The culling algorithm itself is unpublished (no talk slides found).
 ## Shadows
 
 - Virtual shadow maps [V]: deforming geometry invalidates its cached pages every frame; "Rigid" mode and a distance turning offsets off exist; Nanite Foliage "requires disabling animation in the distance". No numbers published.
+- Unreal, VSM page [V] ([virtual shadow maps](https://dev.epicgames.com/documentation/en-us/unreal-engine/virtual-shadow-maps-in-unreal-engine)): Nanite always renders into the VSM "regardless of distance"; non-Nanite casters are "much more expensive to render into VSMs". Per-primitive invalidation: Auto (offsets and moves), Rigid (offsets ignored), Static (moves ignored too). Deformation's tools: an offset disable distance, Rigid/Static, or bones or instance moves in place of offsets. Grass, "sometimes foliage": contact shadows alone may do.
+- Nanite Foliage [V] ([nanite foliage](https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-foliage)): wind by bones keeps tight cluster bounds; 100K bones about 0.1 ms; skinning stops below 0.1 of the screen (`r.Skinning.DefaultAnimationMinScreenSize`, ours since 3c-iv-c), stopped trees drawn "in bind pose" as static meshes. Nothing on voxels' or assemblies' shadows.
+- Horizon Zero Dawn, GDC 2018 (Sanders, "Between Tech and Art") [S], from an AI summary and a garbled transcript: vegetation drawn into cascades 0 and 1 only, the distant cascade a height field; shadow casters separate meshes, "as cheap as you can possibly" make them, not animated. Shadow levels by distance to the camera popped; fixed by choosing an object's shadow level by its cascade, at "somewhat" more cost. No reliable ms.
+- Ghost of Tsushima, GDC 2021 grass talk [S]: grass shadow casting too costly; impostors for its height plus screen-space shadows.
+- Alan Wake 2 (Remedy) [S]: mesh-shader pipeline culling meshlets; full bone rigs on all foliage, about 300K bones a frame. Its cascades are said to reuse the raster pipeline with occlusion culling (a third-party blog); the REAC 2024 slides (over 10 MB) not read.
+- Shadow views have no depth of their own to occlude by (NVIDIA on Justice's mesh shaders [S]); a cascade's occlusion would need last frame's tile.
+- Cut-out shadow cost [S]: each cascade pays its own alpha test, "the cost stacks fast across 4 cascades" (Cinevva blog, unsourced, no numbers). Ours measured [V]: cascades of 2048 instead of 4096 took the shadows from 17.2 to 6.8 ms (phase 18), so the cut-out pixels were the cost; 8-sided outlines brought it to 6.9 ms at 4096; stand-ins a sixth of the cards.
+
+### What it means for 3f [I]
+
+- **Cascades draw no clusters today:** shadow tiles draw indexed meshes through `shadow.vert` and `shadow_cut_out.vert` (old levels by `tileLevelView`, the tile's own texels); the twig pass and far leaves exist only for the camera. Opaque leaves in the cascades need clusters drawn into tiles, which stage 4 needs anyway (clusters culled and drawn a page).
+- **Levels by the tile's texels** (0.22, 0.65, 2.5 and 14 cm at 4096, unfitted) is Horizon's fix already: a leaf's shadow level depends on its cascade, not on its distance. The nearest cascades take twigs, the last mostly far nodes, so a cascade's leaves grow with its area over its texel's square, not with the trees planted (hard rule 11).
+- **Sway:** only cascade 0 sways (`swayShadowCascades` 1); the rest stand still and redraw only when their box moves (turning, staggered). Twigs keep that rule: posed by bones in cascade 0, at rest elsewhere.
+- **Self-shadowing:** the camera draws a leaf at its level, the cascade at a coarser one, so a leaf may be shadowed by a grown copy of itself; the normal offset (2.5 texels) covers a texel's error, as it does the stand-ins' different cards today.
+- **Kept:** probe captures, the mirror and GPUs without mesh shaders keep the stand-ins and cards; the crown's impostor card stays far; the far map keeps no leaves (none today).
+- **Options put to the user:** clusters drawn into the cascades (the base stage 4 needs), a baked opaque shadow mesh a tree through the old path (50-150 MB, cost by trees, thrown away at stage 4), or 3f inside stage 4.
+- **The user's pick (Nov 24 2026): 3f skipped,** done in stage 4: virtual pages draw clusters, so leaves cast from the camera's own twig and far records there, once.
+- **Today's shadows, measured** (home PC, release, the four spots; Wind "Swaying shadow cascades" 1, then 4, which redraws every cascade each frame as turning does):
+
+| Spot | SHADOW, 1 swaying | GPU | SHADOW, 4 swaying | GPU |
+|---|---|---|---|---|
+| trees | 0.70 ms (2 tiles drawn) | 29.4 | 4.87 ms (5) | 33.4 |
+| rim | 1.16 (3) | 18.2 | 3.76 (5) | 21.2 |
+| ring | 0.67 (2) | 33.3 | 5.40 (5) | 38.8 |
+| wall | 1.18 (2) | 21.4 | 5.12 (5) | 26.7 |
+
+- So standing still the cut-out stand-ins cost about 1 ms; every cascade redrawn costs 3.8-5.4 ms, the frame 3-5.5 ms more. Stage 4's target: leaves in the pages at no more than this.
 
 ## What it means here [I]
 

@@ -475,7 +475,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
   - [x] 2d. The group tree walked instead: not needed (`cluster-levels-2c`)
   - [x] 2e. The rock's and trunks' old levels and cards retired from the camera (`cluster-levels-2e`)
   - [x] 2f. The placed plants' parts culled and drawn by mesh clusters (`cluster-levels-2f`)
-- [ ] 3. Leaves as geometry (plan: `docs/research/LEAFGEOMETRY.md`)
+- [x] 3. Leaves as geometry (plan: `docs/research/LEAFGEOMETRY.md`)
   - [x] 3a. Twig prototypes of modelled leaves, with their own levels (`leaf-twigs-3a`)
   - [x] 3b. Trees draw twigs, expanded on the GPU while culling
     - [x] 3b-i. A prototype's twig levels given by the caller (`twig-levels-3b-i`)
@@ -483,7 +483,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [x] 3b-iii. The twigs culled and drawn from their prototypes' clusters (`twig-records-3b-iii-a` … `twigs-on`)
     - [x] 3b-iii-c. Leaf normals bent as the cards', each leaf toned from a hash (`twig-look-3b-iii-c`)
     - [x] 3b's timings at the four spots, on an idle PC (`probe-size-128`)
-  - [ ] 3c. Trees moved by bones
+  - [x] 3c. Trees moved by bones
     - [x] 3c-i. Bones from each variant's skeleton, each bark vertex's and twig's binding (`tree-bones-3c-i`)
     - [x] 3c-ii. The bones' motion in `wind_bones.glsl` and its C++ mirror (`tree-bones-3c-ii`)
     - [x] 3c-iii. The bones pass; bark and twigs moved by their bones, the trees' per-vertex sway retired
@@ -500,7 +500,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
       - [x] 3c-iv-b. Trees' clusters and twigs culled by their posed bounds: frustum, occlusion (`tree-bones-3c-iv-b`)
       - [x] 3c-iv-c. Animation stopped below a share of the screen, faded (`tree-bones-3c-iv-c`)
     - [x] 3c-vi. Far trees sharing a pose a variant and wind cell: not needed, BONES about 0.1 ms (`probe-size-128`)
-  - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels (`leaf-bricks-3e-plan`)
+  - [x] 3e. Far levels above the twigs, merged into each variant's coarse levels (`leaf-bricks-3e-plan`)
     - [x] 3e-i. Each variant's brick levels on the CPU, from its twigs' level-2 leaves as records (`leaf-bricks-3e-i`)
     - [x] 3e-ii. Leaf records packed for the GPU, a record's leaf made as the mesh shader will, mirrored in C++ (`leaf-bricks-3e-ii`)
     - [x] 3e-iii. Records uploaded; bricks drawn as their levels where level 0's error fits, culled by posed bounds
@@ -511,8 +511,8 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
   - [x] 3e-v. Far clusters of nearby leaves, so occlusion hides them as it hides twigs
     - [x] 3e-v-a. Each far level's leaves ordered by a median split, 12 nearest a cluster; measured (`leaf-bricks-3e-v-a`)
     - [x] 3e-v-b. The mesh shader culls far leaves hidden behind the depth pyramid; measured: no gain (`leaf-bricks-3e-v-b`)
-  - [ ] 3f. The leaf cards and shadow stand-ins retired; leaves cast opaque shadows
-- [ ] 4. Virtual shadow maps for the sun, the cascades retired; then the lamps
+  - [x] 3f. Leaves' opaque shadows moved into stage 4; today's shadows measured (`leaf-shadows-3f-plan`)
+- [ ] 4. Virtual shadow maps for the sun, the cascades retired, leaves casting as drawn; then the lamps
 - [ ] 5. A visibility buffer, a material pass, a compute rasteriser (plan: `docs/research/VISBUFFER.md`)
   - [x] 5-0. Twig triangle counts on F4 (`twig-counts-5-0`)
   - [ ] 5a. The visibility buffer in place of the mesh clusters' prepass

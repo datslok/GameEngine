@@ -157,3 +157,7 @@
   - **F4:** the `FAR` line counts the far leaves hidden of those tested, in the main pass and the late prepass.
   - **4 planted bugs caught** (no depth margin, a vertex left out of the box, only the first pyramid cell read: missed until leaves up to 1.5 m spanned several cells, the late counts swapped on the F4 line).
   - **7 planted bugs caught** (the far levels unordered, groups of 64, always the x axis, ties the wrong way, higher points first, the first half rounded down, the split off whole groups once the overlap test was added).
+- `leaf-shadows-3f-plan` (Nov 24 2026): 3f (leaves casting opaque shadows) researched, then skipped into stage 4; today's shadows measured.
+  - **Found:** the cascades draw no clusters (indexed meshes through `shadow.vert`), so leaves in them first need clusters drawn into tiles, which stage 4's pages need anyway; Horizon chose shadow levels by cascade (ours by the tile's texels already), Unreal stops sway when small (ours since 3c-iv-c). Sources in `LEAFGEOMETRY.md`, Shadows.
+  - **The user's pick:** skip 3f; leaves cast from their own records once, in stage 4, rather than through a cascade path stage 4 retires.
+  - **Measured** (four spots): the stand-ins' shadows 0.7-1.2 ms standing still; every cascade redrawn each frame (as turning) 3.8-5.4 ms, the frame 3-5.5 ms more: stage 4's bar.
