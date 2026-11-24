@@ -8,7 +8,7 @@
 * survivors' triangles and the late list's candidates added to the list's totals, once a workgroup.
 * Dispatched as the test pass is. Mirrored by cullMeshClustersOnCpu.
 */
-// After its 15 storage buffers.
+// After its storage buffers.
 #define MESH_CLUSTER_PYRAMID_BINDING (MESH_CLUSTER_PASS_BINDINGS + 3)
 #include "mesh_cluster_pass.glsl"
 
@@ -60,7 +60,7 @@ void main() {
 
         if (place < setup.z) {
             items[pass.list * setup.z + place] = item;
-            atomicAdd(triangles, clusters[item.cluster].counts >> MESH_CLUSTER_TRIANGLE_SHIFT);
+            atomicAdd(triangles, meshClusterOfPair(item.cluster).counts >> MESH_CLUSTER_TRIANGLE_SHIFT);
         }
     }
 

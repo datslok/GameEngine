@@ -123,3 +123,10 @@
   - **Sweeps:** a 3000-twig crown from 12 m to 480 m at 8 px, then the pixel error grown: 47 bricks, then 27, 8 and 3 merged nodes, then the root alone.
   - **9 planted bugs caught** (a leaf's twig, a node's parent and first brick not offset, shapes never shared, every brick drawing its node, twigs not stopped at level 2, never up the chain, always the finest far level, far nodes not culled).
   - GPU test written (`twig_drawing_gpu_test`'s far node), not run.
+- `leaf-bricks-3e-iii-b` (Nov 24 2026): far leaves drawn: the twig pass makes each brick's choice, far leaf clusters go through the cluster passes and a mesh shader branch.
+  - **Far clusters in the cluster passes, not a draw of their own:** frustum and both occlusion lists cull them as any cluster (a forest hides most far trees behind near ones), one mesh shader draw a style; a pair is far by a bit in its cluster's number, tested by a stand-in record (`twigFarMeshCluster`).
+  - **Clusters made at packing,** 12 leaves each in order, each sphere the box of its leaves' vertices out to the farthest; the cull pass writes a cluster an entry into a fifth region.
+  - **Each leaf rides its own twig** (its binding, tone and lean): the mesh shader makes up to 12 rigid poses a workgroup, one a leaf, not one a cluster.
+  - **Posed bounds came with it** (`twigSpherePose`, shared with the bricks): far nodes and far clusters culled by their sphere grown by the tree's move; 3e-iii-c keeps the F4 counts and the measuring.
+  - **11 planted bugs caught** (one missed at first, the far cluster's pose in the cluster passes; a test added): the far region's cluster count, order and pair bound, a far entry drawn as a twig, the stand-in's cut and counts, a cluster's sphere halved, its leaves not offset, the pose not grown, the node's pose ignored.
+  - GPU test written (`twig_drawing_gpu_test`'s far mesh cluster), not run.

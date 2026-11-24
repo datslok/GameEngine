@@ -87,8 +87,14 @@ enum SceneBinding : std::uint32_t {
     BonePlantTreesBinding = 51,
     BonePosesBinding = 52,
     LianaTreePlantsBinding = 53,
-    SceneBindingCount = 54
+    FarClustersBinding = 54,
+    FarLeavesBinding = 55,
+    FarShapesBinding = 56,
+    SceneBindingCount = 57
 };
+
+static_assert(FarClustersBinding == SCENE_FAR_CLUSTERS_BINDING && FarLeavesBinding == SCENE_FAR_LEAVES_BINDING && FarShapesBinding == SCENE_FAR_SHAPES_BINDING,
+              "The far leaves' bindings must match drawn_objects.glsl's");
 
 static_assert(BoneTreesBinding == SCENE_BONE_TREES_BINDING && BonePlantTreesBinding == SCENE_BONE_PLANT_TREES_BINDING &&
                   BonePosesBinding == SCENE_BONE_POSES_BINDING && SwayBindingsBinding == SCENE_SWAY_BINDINGS_BINDING,
@@ -251,6 +257,9 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo bonePoses{};
     VkDescriptorBufferInfo lianaShapes{};     // the lianas' records, slot by slot (scene/liana_shape.h; one unused without)
     VkDescriptorBufferInfo lianaTreePlants{}; // each liana anchor's tree's plant (render/gpu/liana_trees.h; a stand-in without)
+    VkDescriptorBufferInfo farClusters{};     // the far leaf clusters, leaves and cells' shapes (stand-ins without; render/gpu/twig_records.h)
+    VkDescriptorBufferInfo farLeaves{};
+    VkDescriptorBufferInfo farShapes{};
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

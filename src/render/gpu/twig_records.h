@@ -118,6 +118,10 @@ inline constexpr std::uint32_t twigMostLevels = TWIG_MOST_LEVELS;
 static_assert(TWIG_BRICK_SIZE == twigBrickSize, "The twig pass's workgroup is a brick");
 static_assert(TWIG_BRICK_LEVEL == twigBrickLevel, "Twigs of a set with far levels stop where its bricks take over");
 static_assert(TWIG_FAR_NO_NODE == twigFarNoNode, "The far tree's no node is the shaders'");
+inline constexpr std::uint32_t twigFarRegion = TWIG_FAR_REGION;
+inline constexpr std::uint32_t twigRegions = TWIG_REGIONS;
+inline constexpr std::uint32_t twigFarClusterBit = TWIG_FAR_CLUSTER_BIT;
+static_assert(TWIG_REGION_WORDS >= TWIG_REGIONS && TWIG_REGION_WORDS % 4 == 0, "The region counts fill whole uvec4s");
 
 /*
 * A far leaf's record as the GPU holds it (scene/twig_set.h's FarLeaf; ROADMAP phase 21 stage 3e-ii), 28 B: its foot
@@ -169,15 +173,30 @@ struct GpuTwigFarNode {
 
 static_assert(sizeof(GpuTwigFarNode) == 32, "GpuTwigFarNode must match twig_drawing.glsl's TwigFarNode");
 
-// A far node's level: its leaves' run in the far leaf table and its error (metres, plant's frame).
+// A far node's level: its clusters' run in the far cluster table, its error (metres, plant's frame) and its leaves.
 struct GpuTwigFarLevel {
-    std::uint32_t firstLeaf = 0;
-    std::uint32_t leafCount = 0;
+    std::uint32_t firstCluster = 0;
+    std::uint32_t clusterCount = 0;
     float error = 0.0f;
-    std::uint32_t unused = 0;
+    std::uint32_t leafCount = 0;
 };
 
 static_assert(sizeof(GpuTwigFarLevel) == 16, "GpuTwigFarLevel must match twig_drawing.glsl's TwigFarLevel");
+
+/*
+* A far leaf cluster (ROADMAP phase 21 stage 3e-iii-b): up to farLeavesPerCluster of a level's leaves in a row, the
+* sphere holding every vertex the mesh shader makes of them (plant's frame), their run in the far leaf table, and their
+* set's first cell shape.
+*/
+struct GpuTwigFarCluster {
+    float sphere[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::uint32_t firstLeaf = 0;
+    std::uint32_t leafCount = 0;
+    std::uint32_t firstShape = 0;
+    std::uint32_t unused = 0;
+};
+
+static_assert(sizeof(GpuTwigFarCluster) == 32, "GpuTwigFarCluster must match twig_drawing.glsl's TwigFarCluster");
 
 /*
 * A twig set as the twig pass reads it: its bricks' run in the brick table, its bricks' far nodes from firstNode (brick
@@ -256,6 +275,10 @@ bool twigKept(const GpuTwigLevel& coarsest, const GpuInstance& twig, std::uint32
 */
 MeshClusterPose twigBrickPose(const GpuTwigBrick& brick, const GpuInstance& part, bool partBound, const GpuBoneTree& tree);
 
+// The same for any sphere in the plant's frame (a brick's, a far node's, a far leaf cluster's: each holds leaves carried
+// by twigs, so none moves farther than the tree's move).
+MeshClusterPose twigSpherePose(const float sphere[4], const GpuInstance& part, bool partBound, const GpuBoneTree& tree);
+
 /*
 * How a twig stands: bound by its binding (not SWAY_UNBOUND); posed when its tree is, its coarsest group's sphere placed
 * by the twig carried by its rigid pose (windRigidPose of its two bones at its foot, twigPosed), padded by the flutter.
@@ -286,12 +309,12 @@ struct TwigDraw {
     bool operator==(const TwigDraw&) const = default;
 };
 
-// A far node a view draws: its number in the node table, its chosen level's in the level table, and that level's leaves.
+// A far node a view draws: its number in the node table, its chosen level's in the level table, and that level's clusters.
 struct TwigFarDraw {
     std::uint32_t node = 0;
     std::uint32_t level = 0;
-    std::uint32_t firstLeaf = 0;
-    std::uint32_t leafCount = 0;
+    std::uint32_t firstCluster = 0;
+    std::uint32_t clusterCount = 0;
 
     bool operator==(const TwigFarDraw&) const = default;
 };
@@ -305,6 +328,7 @@ struct TwigTables {
     std::vector<GpuTwigLevel> levels;
     std::vector<GpuTwigFarNode> farNodes;
     std::vector<GpuTwigFarLevel> farLevels;
+    std::vector<GpuTwigFarCluster> farClusters;
     std::vector<GpuFarLeaf> farLeaves;
     std::vector<GpuFarLeafShape> farShapes;
 };
@@ -318,11 +342,12 @@ struct PackedTwigSets {
 };
 
 /*
-* Sets packed one after another: each brick's twig run, each far node's levels, first brick and parent, each far level's
-* leaves and each far leaf's twig moved past the sets before (a leaf's twig names its binding, lean and tone, so it must
-* be the table's number, not the set's), each twig's prototype its mesh's place in prototypeMeshes. Sets sharing their
-* cells' shapes share one run of them. Throws std::invalid_argument for a prototype not in prototypeMeshes. Cost grows
-* with the sets' twigs and far records.
+* Sets packed one after another: each brick's twig run, each far node's levels, first brick and parent, and each far
+* leaf's twig moved past the sets before (a leaf's twig names its binding, lean and tone, so it must be the table's
+* number, not the set's), each twig's prototype its mesh's place in prototypeMeshes. Each far level's leaves cut into
+* clusters of farLeavesPerCluster in order, each with the sphere of its leaves' vertices (farLeafVertex: the box's
+* middle, out to the farthest). Sets sharing their cells' shapes share one run of them. Throws std::invalid_argument for
+* a prototype not in prototypeMeshes. Cost grows with the sets' twigs and far records.
 */
 PackedTwigSets packTwigSets(std::span<const TwigSet* const> sets, std::span<const MeshHandle> prototypeMeshes);
 

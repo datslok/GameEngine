@@ -2314,7 +2314,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
         if (twigClusters) {
             inputs.twigs = VulkanMeshClusterCulling::TwigInputs{twigDrawing->getRegions(frame.frameIndex), twigDrawing->getEntries(frame.frameIndex),
-                                                                twigDrawing->getTwigs()};
+                                                                twigDrawing->getTwigs(), twigDrawing->getFarClusters()};
         }
 
         inputs.bones = cullBones;
@@ -2973,6 +2973,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.twigEntries = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getEntries(frame.frameIndex) : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.twigs = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getTwigs() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
     views.twigBindings = VkDescriptorBufferInfo{frameTwigs ? twigDrawing->getTwigBindings() : noPlacedRecords.get(), 0, VK_WHOLE_SIZE};
+    const auto twigView = [&](VkBuffer buffer) { return VkDescriptorBufferInfo{frameTwigs && buffer != VK_NULL_HANDLE ? buffer : noPlacedRecords.get(), 0, VK_WHOLE_SIZE}; };
+    views.farClusters = twigView(twigDrawing->getFarClusters());
+    views.farLeaves = twigView(twigDrawing->getFarLeaves());
+    views.farShapes = twigView(twigDrawing->getFarShapes());
     views.swayBindings = VkDescriptorBufferInfo{swayBindingRecords.empty() ? noPlacedRecords.get() : swayBindings.get(), 0, VK_WHOLE_SIZE};
     const auto boneView = [&](VkBuffer buffer) { return VkDescriptorBufferInfo{buffer != VK_NULL_HANDLE ? buffer : noPlacedRecords.get(), 0, VK_WHOLE_SIZE}; };
     views.boneTrees = boneView(bonePosing->getTrees());

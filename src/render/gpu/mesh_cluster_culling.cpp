@@ -5,9 +5,11 @@
 #include "render/gpu/taa.h"
 #include "render/gpu/wind.h"
 #include "scene/planting.h"
+#include "scene/twig_far_levels.h"
 
 #include <algorithm>
 #include <bit>
+#include <cfloat>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -52,7 +54,7 @@ namespace {
             GpuDrawCommand command{};
             command.instanceCount = std::min(tables.twigs.counts[region], tables.twigs.room);
             command.firstInstance = twigInstanceBase + region * tables.twigs.room;
-            return OrderedGroup{command, 0, region + 1};
+            return OrderedGroup{command, 0, region == twigFarRegion ? 1 : region + 1};
         }
 
         if (group < drawGroups) {
@@ -83,7 +85,7 @@ namespace {
     PairChoice choosePair(const MeshClusterTables& tables, const MeshClusterPair& pair, const GpuCameraCull& view,
                           const MeshClusterOcclusionView* occlusion) {
         const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, pair.entry);
-        const GpuMeshCluster& cluster = tables.clusters[pair.cluster];
+        const GpuMeshCluster cluster = meshClusterOfPair(tables, pair.cluster);
         const MeshClusterPose pose = meshClusterPoseAt(tables, drawn, cluster);
         const std::uint32_t visibility = meshClusterVisibility(cluster, drawn.instance, drawn.entry, drawn.record, view, pose);
         const bool late = occlusion != nullptr && occlusion->list == MESH_CLUSTER_LATE;
@@ -543,7 +545,7 @@ std::uint64_t twigMeshClusterPairBound(std::uint32_t room) {
         bound += std::uint64_t{room} * clusters;
     }
 
-    return bound;
+    return bound + room; // the far region: one cluster an entry
 }
 
 // Each style's pooled draw groups, then its placed groups (all pooled: buildPlacedTable refuses the rest), then its twig regions.
@@ -562,7 +564,7 @@ CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t dra
         }
 
         if (static_cast<int>(style) == twigStyle) {
-            for (std::uint32_t region = 0; region < twigMostLevelClusters; ++region) {
+            for (std::uint32_t region = 0; region < twigRegions; ++region) {
                 both.order.push_back(twigGroupBase + region);
             }
         }
@@ -577,10 +579,19 @@ CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t dra
 MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32_t place) {
     MeshClusterDrawn drawn;
 
-    // A twig: its part placed by its plant as a placed entry's, then the twig after it (twigInstance).
+    // A twig: its part placed by its plant as a placed entry's, then the twig after it (twigInstance); a far leaf cluster
+    // its part alone (its leaves are in the plant's frame).
     if (place >= twigInstanceBase) {
         const GpuTwigEntry& twig = tables.twigs.entries[place - twigInstanceBase];
         drawn = meshClusterDrawnAt(tables, placedInstanceBase + twig.placedEntry);
+
+        if ((twig.firstCluster & twigFarClusterBit) != 0) {
+            drawn.farCluster = twig.firstCluster & ~twigFarClusterBit;
+            const GpuPlacedEntry& placed = tables.placed.entries[twig.placedEntry];
+            drawn.partBound = tables.placed.parts[placed.part].unused[1] != 0;
+            return drawn;
+        }
+
         drawn.instance = twigInstance(drawn.part, tables.twigs.twigs[twig.twig]);
         drawn.twig = twig.twig;
         return drawn;
@@ -609,6 +620,10 @@ MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32
 MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster) {
     const GpuBoneTree tree = drawn.plant == boneNoTree ? GpuBoneTree{} : boneCullTree(tables.bones, drawn.plant);
 
+    if (drawn.farCluster != meshClusterNoFar) {
+        return twigSpherePose(cluster.sphere, drawn.part, drawn.partBound, tree);
+    }
+
     if (drawn.twig != meshClusterNoTwig) {
         const std::uint32_t binding = drawn.twig < tables.bones.twigBindings.size() ? tables.bones.twigBindings[drawn.twig] : swayUnbound;
         GpuTwigLevel own;
@@ -627,6 +642,27 @@ MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClu
     const Vec4 posed = meshClusterBonesSphere(cluster, tables.bones.poses, tree);
     const float sphere[4] = {posed.x, posed.y, posed.z, posed.w};
     return meshClusterPosed(sphere, drawn.instance, drawn.instance.sway[3], Vec2{tree.lean[0], tree.lean[1]});
+}
+
+// Own and group spheres the far cluster's, so the cut's two tests take the same one; its counts as a mesh cluster's.
+GpuMeshCluster twigFarMeshCluster(const GpuTwigFarCluster& far) {
+    GpuMeshCluster cluster;
+    std::copy(std::begin(far.sphere), std::end(far.sphere), std::begin(cluster.sphere));
+    std::copy(std::begin(far.sphere), std::end(far.sphere), std::begin(cluster.ownSphere));
+    std::copy(std::begin(far.sphere), std::end(far.sphere), std::begin(cluster.parentSphere));
+    cluster.cone[3] = 1.0f;
+    cluster.counts = far.leafCount * farLeafVertices | (far.leafCount * farLeafTriangles) << MESH_CLUSTER_TRIANGLE_SHIFT;
+    cluster.ownError = 0.0f;
+    cluster.parentError = FLT_MAX;
+    return cluster;
+}
+
+GpuMeshCluster meshClusterOfPair(const MeshClusterTables& tables, std::uint32_t cluster) {
+    if ((cluster & twigFarClusterBit) != 0) {
+        return twigFarMeshCluster(tables.twigs.farClusters[cluster & ~twigFarClusterBit]);
+    }
+
+    return tables.clusters[cluster];
 }
 
 // A part's level slots are firstGroup to firstGroup + levels; a block's layer is its first kind's.
@@ -700,7 +736,7 @@ MeshClusterList cullMeshClustersOnCpu(const MeshClusterTables& tables, const Gpu
 
             if (place < room) {
                 list.items[place] = GpuMeshClusterItem{pairs[index].entry, pairs[index].cluster};
-                list.triangles += tables.clusters[pairs[index].cluster].counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
+                list.triangles += meshClusterOfPair(tables, pairs[index].cluster).counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
             }
         }
     }
@@ -767,7 +803,7 @@ bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& inst
 
 bool nearAMeshClusterEdge(const MeshClusterTables& tables, const GpuMeshClusterItem& item, const GpuCameraCull& view) {
     const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, item.entry);
-    const GpuMeshCluster& cluster = tables.clusters[item.cluster];
+    const GpuMeshCluster cluster = meshClusterOfPair(tables, item.cluster);
     return nearAMeshClusterEdge(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(tables, drawn, cluster));
 }
 

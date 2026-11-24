@@ -1,5 +1,5 @@
 // Twigs drawn as instances of prototypes, included with #include "twig_drawing.glsl": mirrors render/gpu/twig_records.h
-// (twigInstance, twigPosed, twigLevel, twigBrickKept, twigKept, twigBrickPose, twigFarLevelFits, twigFarNodeKept) and declares its records. Pure functions, the errors' sides precise,
+// (twigInstance, twigPosed, twigLevel, twigBrickKept, twigKept, twigBrickPose, twigSpherePose, twigFarLevelFits, twigFarNodeKept, twigFarMeshCluster) and declares its records. Pure functions, the errors' sides precise,
 // so the twig pass chooses what the cluster cut would.
 #ifndef TWIG_DRAWING_GLSL
 #define TWIG_DRAWING_GLSL
@@ -100,13 +100,44 @@ struct TwigFarNode {
     uint parent;
 };
 
-// A far node's level: its leaves' run and its error. Must match GpuTwigFarLevel.
+// A far node's level: its clusters' run, its error and its leaves. Must match GpuTwigFarLevel.
 struct TwigFarLevel {
+    uint firstCluster;
+    uint clusterCount;
+    float error;
+    uint leafCount;
+};
+
+// A far leaf cluster: the sphere of its leaves' vertices, their run, its set's first cell shape. Must match GpuTwigFarCluster.
+struct TwigFarCluster {
+    vec4 sphere;
     uint firstLeaf;
     uint leafCount;
-    float error;
+    uint firstShape;
     uint unused;
 };
+
+// A far leaf cluster as the cluster passes test it (twigFarMeshCluster): its sphere as its own and its group's, its
+// leaves' vertices and triangles, always in the cut, never culled by facing, bound to no bone.
+MeshCluster twigFarMeshCluster(TwigFarCluster far) {
+    MeshCluster cluster;
+    cluster.sphere = far.sphere;
+    cluster.cone = vec4(0.0, 0.0, 0.0, 1.0);
+    cluster.axis = vec3(0.0);
+    cluster.firstVertex = 0u;
+    cluster.firstTriangleWord = 0u;
+    cluster.counts = far.leafCount * uint(FAR_LEAF_VERTICES) | (far.leafCount * uint(FAR_LEAF_TRIANGLES)) << MESH_CLUSTER_TRIANGLE_SHIFT;
+    cluster.meshFirstVertex = 0u;
+    cluster.ownError = 0.0;
+    cluster.ownSphere = far.sphere;
+    cluster.parentSphere = far.sphere;
+    cluster.parentError = uintBitsToFloat(0x7f7fffffu); // the largest float: nothing coarser
+    cluster.level = 0u;
+    cluster.bones = uvec2(0xFFFFFFFFu);
+    cluster.moreBones = uvec2(0xFFFFFFFFu);
+    cluster.unused = uvec2(0u);
+    return cluster;
+}
 
 // Whether a far node's level fits the view (twigFarLevelFits): its error on the node's sphere placed by the part's model.
 bool twigFarLevelFits(TwigFarNode node, TwigFarLevel level, mat4 model, LevelView view) {
@@ -118,14 +149,20 @@ bool twigFarNodeKept(TwigFarNode node, InstanceData part, uint entry, CullRecord
     return twigSphereKept(node.sphere, part.model, part, entry, record, view, pose);
 }
 
-// How a brick stands (twigBrickPose): posed with its tree (tree.firstPose not BONE_NO_POSE) when its part is bound,
-// its sphere grown by the tree's move, placed by the part, padded by the flutter.
-MeshClusterPose twigBrickPose(TwigBrick brick, InstanceData part, bool partBound, BoneTree tree) {
+// How a sphere of leaves carried by twigs stands (twigSpherePose: a brick's, a far node's, a far leaf cluster's): posed
+// with its tree when its part is bound, grown by the tree's move, placed by the part, padded by the flutter.
+MeshClusterPose twigSpherePose(vec4 sphere, InstanceData part, bool partBound, BoneTree tree) {
     if (!partBound || tree.firstPose == BONE_NO_POSE) {
         return meshClusterUnposed(partBound);
     }
 
-    return meshClusterPosed(vec4(brick.sphere.xyz, brick.sphere.w + tree.move), part.model, part.sway.w, tree.leans.xy);
+    return meshClusterPosed(vec4(sphere.xyz, sphere.w + tree.move), part.model, part.sway.w, tree.leans.xy);
+}
+
+// How a brick stands (twigBrickPose): posed with its tree (tree.firstPose not BONE_NO_POSE) when its part is bound,
+// its sphere grown by the tree's move, placed by the part, padded by the flutter.
+MeshClusterPose twigBrickPose(TwigBrick brick, InstanceData part, bool partBound, BoneTree tree) {
+    return twigSpherePose(brick.sphere, part, partBound, tree);
 }
 
 #endif

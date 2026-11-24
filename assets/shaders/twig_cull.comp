@@ -8,6 +8,11 @@
 * cluster count. A tree posed by its bones this frame culls its bricks and twigs by their posed bounds (twigBrickPose,
 * twigPose). The regions' order is the atomics', so the cluster passes and cluster-compare take them as sets.
 *
+* A set with far levels (stage 3e-iii-b) first makes the brick's one choice: the first thread walks up its node's chain
+* while the parent fits (twigFarNodeDrawn); where its own node fits the brick draws no twig, and the node's first brick
+* puts the chosen level's leaf clusters (twigFarLevel) in the far region, where the node is kept by its posed sphere
+* (twigSpherePose). Twigs of such a set stop at TWIG_BRICK_LEVEL, where the bricks take over.
+*
 * The tally (F4's TWIGS line, TwigTally) is counted in shared memory and added once a workgroup, so a frame's million
 * twigs do not all meet at the same few words.
 */
@@ -16,6 +21,13 @@
 layout(local_size_x = TWIG_BRICK_SIZE) in;
 
 shared uint groupTally[TWIG_TALLY_WORDS];
+shared uint groupFarNode;
+
+// Whether a far node's finest level fits the view (twigFarLevelFits).
+bool farNodeFits(uint node, mat4 model) {
+    TwigFarNode record = twigFarNodes[node];
+    return twigFarLevelFits(record, twigFarLevels[record.firstLevel], model, view.levels);
+}
 
 void main() {
     uvec2 source = twigSources[gl_WorkGroupID.y];
@@ -40,9 +52,45 @@ void main() {
     InstanceData part = placedInstance(placedPartInstances[placed.y], plant);
     CullRecord record = placedCullRecord(placedParts[placed.y].record, plant);
     BoneTree tree = boneCullTree(placed.x & DRAW_LIST_INSTANCE_MASK, push.boneStamp);
-    MeshClusterPose brickPose = twigBrickPose(brick, part, placedParts[placed.y].unused1 != 0u, tree);
+    bool partBound = placedParts[placed.y].unused1 != 0u;
+    MeshClusterPose brickPose = twigBrickPose(brick, part, partBound, tree);
+    bool hasFar = set.z != TWIG_FAR_NO_NODE;
 
-    if (local < brick.twigCount && twigBrickKept(brick, part, placed.x, record, view, brickPose)) {
+    // The brick's one choice, the same for the whole workgroup (twigFarNodeDrawn).
+    if (local == 0u) {
+        uint node = set.z + gl_WorkGroupID.x;
+        groupFarNode = hasFar && farNodeFits(node, part.model) ? node : TWIG_FAR_NO_NODE;
+
+        while (groupFarNode != TWIG_FAR_NO_NODE && twigFarNodes[groupFarNode].parent != TWIG_FAR_NO_NODE &&
+               farNodeFits(twigFarNodes[groupFarNode].parent, part.model)) {
+            groupFarNode = twigFarNodes[groupFarNode].parent;
+        }
+    }
+
+    barrier();
+    uint farNode = groupFarNode;
+
+    if (farNode != TWIG_FAR_NO_NODE) {
+        TwigFarNode node = twigFarNodes[farNode];
+
+        if (node.firstBrick == set.x + gl_WorkGroupID.x && twigFarNodeKept(node, part, placed.x, record, view, twigSpherePose(node.sphere, part, partBound, tree))) {
+            uint level = node.firstLevel;
+
+            while (level + 1u < node.firstLevel + node.levelCount && twigFarLevelFits(node, twigFarLevels[level + 1u], part.model, view.levels)) {
+                ++level;
+            }
+
+            TwigFarLevel chosen = twigFarLevels[level];
+
+            for (uint cluster = local; cluster < chosen.clusterCount; cluster += uint(TWIG_BRICK_SIZE)) {
+                uint slot = atomicAdd(twigCounts[TWIG_FAR_REGION], 1u);
+
+                if (slot < twigRoom.x) {
+                    twigEntries[uint(TWIG_FAR_REGION) * twigRoom.x + slot] = uvec4(source.x, 0u, TWIG_FAR_CLUSTER_BIT | (chosen.firstCluster + cluster), 0u);
+                }
+            }
+        }
+    } else if (local < brick.twigCount && twigBrickKept(brick, part, placed.x, record, view, brickPose)) {
         uint number = brick.firstTwig + local;
         Twig twig = twigs[number];
         TwigPrototype prototype = twigPrototypes[twig.prototype];
@@ -52,9 +100,10 @@ void main() {
         MeshClusterPose pose = twigPose(coarsest.sphere, part, twig, binding, tree);
 
         if (twigKept(coarsest, placedTwig, placed.x, record, view, pose)) {
-            uint chosen = prototype.levelCount - 1u;
+            uint drawable = hasFar ? min(prototype.levelCount, uint(TWIG_BRICK_LEVEL) + 1u) : prototype.levelCount;
+            uint chosen = drawable - 1u;
 
-            for (uint level = 0u; level < prototype.levelCount; ++level) {
+            for (uint level = 0u; level < drawable; ++level) {
                 TwigLevel before = twigLevels[prototype.firstLevel + max(level, 1u) - 1u];
 
                 if (twigLevelDrawn(before, level == 0u, twigLevels[prototype.firstLevel + level], placedTwig.model, view.levels)) {

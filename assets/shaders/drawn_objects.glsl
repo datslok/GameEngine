@@ -34,6 +34,20 @@ layout(std430, set = 1, binding = SCENE_TWIGS_BINDING) readonly buffer SceneTwig
     Twig sceneTwigs[];
 };
 
+// The far leaf clusters, leaves and cells' shapes (render/gpu/twig_records.h, packTwigSets; one unused each without):
+// the mesh shaders' far leaves (stage 3e-iii-b).
+layout(std430, set = 1, binding = SCENE_FAR_CLUSTERS_BINDING) readonly buffer SceneFarClusters {
+    uvec4 sceneFarClusters[]; // a TwigFarCluster in two: the sphere (as floats' bits), then the leaves' run and first shape
+};
+
+layout(std430, set = 1, binding = SCENE_FAR_LEAVES_BINDING) readonly buffer SceneFarLeaves {
+    FarLeaf sceneFarLeaves[];
+};
+
+layout(std430, set = 1, binding = SCENE_FAR_SHAPES_BINDING) readonly buffer SceneFarShapes {
+    FarLeafShape sceneFarShapes[];
+};
+
 /*
 * An instance drawn and its entry's bits (thinned, fade), whichever kind of draw it came from; for a twig its part's
 * instance (its plant and part: the twig sways with its tree) and the twig's matrix, which places the prototype's
@@ -63,7 +77,9 @@ DrawnObject drawnObject(uint instanceIndex, uint baseInstance) {
     drawn.twigLean = vec3(0.0);
     drawn.plant = BONE_NO_TREE;
 
-    // A twig (the mesh shaders only: its entry is the instance and the base alike): its part as its placed entry's.
+    // A twig (the mesh shaders only: its entry is the instance and the base alike): its part as its placed entry's. A far
+    // leaf cluster is a twig whose matrix is none (its leaves are in the plant's frame); each leaf's own twig, whose
+    // number and lean it takes, comes with its pose (shadeVertex).
     if (baseInstance >= TWIG_INSTANCE_BASE) {
         uvec4 twig = sceneTwigEntries[instanceIndex - TWIG_INSTANCE_BASE];
         uvec2 placed = scenePlacedEntries[twig.x];
@@ -73,6 +89,11 @@ DrawnObject drawnObject(uint instanceIndex, uint baseInstance) {
         drawn.entry = placed.x;
         drawn.twig = true;
         drawn.twigPlant = floatBitsToUint(plant.pick);
+
+        if ((twig.z & TWIG_FAR_CLUSTER_BIT) != 0u) {
+            return drawn;
+        }
+
         Twig record = sceneTwigs[twig.y];
         drawn.twigMatrix = twigMatrix(record);
         drawn.twigNumber = twig.y;

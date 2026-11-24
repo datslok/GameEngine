@@ -74,6 +74,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each plant's tree this frame
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the bones' poses
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each liana anchor's tree's plant (render/gpu/liana_trees.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaf clusters (render/gpu/twig_records.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves' cells' shapes
     }};
 }
 
@@ -274,6 +277,9 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.bonePlantTrees,
         views.bonePoses,
         views.lianaTreePlants,
+        views.farClusters,
+        views.farLeaves,
+        views.farShapes,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

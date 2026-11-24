@@ -508,7 +508,7 @@ namespace {
         }
 
         constexpr std::uint32_t room = 4;
-        std::vector<GpuTwigEntry> entries(room * twigMostLevelClusters);
+        std::vector<GpuTwigEntry> entries(room * twigRegions);
         const auto put = [&](std::uint32_t region, std::uint32_t slot, std::uint32_t twig) {
             entries[region * room + slot] = GpuTwigEntry{0, twig, 10 * twig, 0};
         };
@@ -520,19 +520,26 @@ namespace {
         put(1, 1, 4);
         put(3, 0, 5);
 
+        // The far region: two far leaf clusters of the part, each one pair, its cluster the far cluster's number with the bit.
+        std::vector<GpuTwigFarCluster> farClusters(3);
+        farClusters[2] = GpuTwigFarCluster{.sphere = {1.0f, 2.0f, 3.0f, 0.5f}, .firstLeaf = 24, .leafCount = 7, .firstShape = 0};
+        entries[twigFarRegion * room + 0] = GpuTwigEntry{0, 0, twigFarClusterBit | 2u, 0};
+        entries[twigFarRegion * room + 1] = GpuTwigEntry{0, 0, twigFarClusterBit | 0u, 0};
+
         MeshClusterTables tables;
         tables.placed.entries = placedEntries;
         tables.placed.partInstances = partInstances;
         tables.placed.parts = parts;
         tables.placed.plants = plants;
-        tables.twigs.counts = {6, 2, 0, 1};
+        tables.twigs.counts = {6, 2, 0, 1, 2};
         tables.twigs.room = room;
         tables.twigs.entries = entries;
         tables.twigs.twigs = twigs;
+        tables.twigs.farClusters = farClusters;
 
         const CullDrawOrder order = meshClusterDrawOrder(CullDrawOrder{}, 0, CullDrawOrder{}, 1);
-        assert(order.order.size() == twigMostLevelClusters && order.runFirst[1] == 0 && order.runCount[1] == twigMostLevelClusters);
-        assert(order.order[2] == twigGroupBase + 2);
+        assert(order.order.size() == twigRegions && order.runFirst[1] == 0 && order.runCount[1] == twigRegions);
+        assert(order.order[2] == twigGroupBase + 2 && order.order[twigFarRegion] == twigGroupBase + twigFarRegion);
         tables.drawOrder = order.order;
         GpuCameraCull view{};
 
@@ -543,7 +550,7 @@ namespace {
 
         std::array<std::uint32_t, MESH_CLUSTER_WORK_WORDS> work{};
         const std::vector<std::uint32_t> ends = meshClusterWorkEnds(tables, view, work);
-        assert(work[MESH_CLUSTER_WORK_REAL] == 4 * 1 + 2 * 2 + 0 * 3 + 1 * 4); // region 0's six cut to its room of four
+        assert(work[MESH_CLUSTER_WORK_REAL] == 4 * 1 + 2 * 2 + 0 * 3 + 1 * 4 + 2 * 1); // region 0's six cut to its room of four
 
         std::vector<std::pair<std::uint32_t, std::uint32_t>> found;
 
@@ -558,7 +565,8 @@ namespace {
         const std::vector<std::pair<std::uint32_t, std::uint32_t>> expected{
             {twigInstanceBase + 0, 0},          {twigInstanceBase + 1, 10},         {twigInstanceBase + 2, 20},         {twigInstanceBase + 3, 30},
             {twigInstanceBase + room, 30},      {twigInstanceBase + room, 31},      {twigInstanceBase + room + 1, 40},  {twigInstanceBase + room + 1, 41},
-            {twigInstanceBase + 3 * room, 50},  {twigInstanceBase + 3 * room, 51},  {twigInstanceBase + 3 * room, 52}, {twigInstanceBase + 3 * room, 53}};
+            {twigInstanceBase + 3 * room, 50},  {twigInstanceBase + 3 * room, 51},  {twigInstanceBase + 3 * room, 52}, {twigInstanceBase + 3 * room, 53},
+            {twigInstanceBase + twigFarRegion * room, twigFarClusterBit | 2u}, {twigInstanceBase + twigFarRegion * room + 1, twigFarClusterBit | 0u}};
         assert(found == expected);
 
         const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, twigInstanceBase + 3 * room);
@@ -568,7 +576,68 @@ namespace {
             assert(std::abs(drawn.instance.model[value] - wanted.model[value]) < 1e-6f);
         }
 
-        assert(drawn.entry == placedEntries[0].plant && twigMeshClusterPairBound(room) == room * (1 + 2 + 3 + 4));
+        assert(drawn.entry == placedEntries[0].plant && drawn.farCluster == meshClusterNoFar);
+        assert(twigMeshClusterPairBound(room) == room * (1 + 2 + 3 + 4 + 1));
+
+        // A far cluster is drawn as its part (its leaves are in the plant's frame), not as a twig; its cluster is the far
+        // record's stand-in (twigFarMeshCluster), whose triangles the list counts.
+        const MeshClusterDrawn far = meshClusterDrawnAt(tables, twigInstanceBase + twigFarRegion * room);
+        const GpuInstance part = placedInstance(partInstances[0], plant);
+
+        for (int value = 0; value < 16; ++value) {
+            assert(far.instance.model[value] == part.model[value]);
+        }
+
+        assert(far.twig == meshClusterNoTwig && far.farCluster == 2 && far.entry == placedEntries[0].plant);
+        const GpuMeshCluster stood = meshClusterOfPair(tables, twigFarClusterBit | 2u);
+        assert(stood.sphere[3] == 0.5f && (stood.counts >> MESH_CLUSTER_TRIANGLE_SHIFT) == 7 * farLeafTriangles);
+
+        // Its pose: its part's tree's move on its sphere when the part is bound to bones and its tree posed, else none.
+        assert(!meshClusterPoseAt(tables, far, stood).posed);
+        std::vector<GpuPlacedPart> boundParts = parts;
+        boundParts[0].unused[1] = 1;
+        GpuBoneTree tree;
+        tree.firstPose = 0;
+        tree.move = 3.0f;
+        const std::vector<std::uint32_t> plantTrees{5u, 0u};
+        const std::vector<GpuBoneTree> trees{tree};
+        const std::vector<GpuBonePose> pool{packBonePose(WindBonePose{}, -1)};
+        MeshClusterTables bound = tables;
+        bound.placed.parts = boundParts;
+        bound.bones = BoneCullTables{plantTrees, trees, pool, {}, 5u};
+        const MeshClusterDrawn boundFar = meshClusterDrawnAt(bound, twigInstanceBase + twigFarRegion * room);
+        const MeshClusterPose pose = meshClusterPoseAt(bound, boundFar, stood);
+        assert(boundFar.partBound && pose.posed && pose.sphere[3] >= 0.5f * plant.scale + tree.move * plant.scale - 1e-4f);
+    }
+
+    /*
+    * A far cluster's stand-in in the cluster passes (twigFarMeshCluster): its sphere for the frustum and occlusion, its
+    * leaves' vertices and triangles counted, always in the cut (its node chose its level), never culled by facing (leaves
+    * are seen from both sides), bound to no bone (its part's pose bounds it). So a view keeps it exactly where its placed
+    * sphere is in the frustum.
+    */
+    void testAFarClustersStandIn() {
+        const GpuTwigFarCluster far{.sphere = {2.0f, 15.0f, -1.0f, 1.5f}, .firstLeaf = 40, .leafCount = 12, .firstShape = 24};
+        const GpuMeshCluster cluster = twigFarMeshCluster(far);
+        assert(cluster.sphere[0] == 2.0f && cluster.sphere[3] == 1.5f && cluster.cone[3] >= 1.0f);
+        assert((cluster.counts & 0xffu) == 12 * farLeafVertices && (cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT) == 12 * farLeafTriangles);
+        assert(cluster.ownError == 0.0f && cluster.parentError > static_cast<float>(MESH_CLUSTER_NEVER_COARSER) && !meshClusterBound(cluster));
+
+        const GpuInstance part = placedInstance(Mat4::translation(10.0f, 0.0f, 0.0f));
+        const GpuCullRecord record = stillRecord(Vec3{10.0f, 15.0f, 0.0f}, 14.0f);
+        std::size_t kept = 0;
+
+        for (float yaw = 0.0f; yaw < 6.28f; yaw += 0.05f) {
+            for (float distance : {0.5f, 20.0f, 300.0f}) {
+                const GpuCameraCull view = cutView(Vec3{12.0f - distance, 15.0f, -1.0f}, yaw, 1.0f);
+                const bool inView = sphereInFrustum(view.frustum, meshClusterPlacedSphere(far.sphere, part).data());
+                const std::uint32_t visibility = meshClusterVisibility(cluster, part, 0u, record, view, MeshClusterPose{});
+                assert((visibility != MESH_CLUSTER_HIDDEN) == inView);
+                kept += inView ? 1 : 0;
+            }
+        }
+
+        assert(kept > 0);
     }
 }
 
@@ -647,6 +716,7 @@ namespace {
         std::uint32_t nodesBefore = 0;
         std::uint32_t levelsBefore = 0;
         std::uint32_t leavesBefore = 0;
+        std::uint32_t clustersBefore = 0;
         const std::uint32_t cells = static_cast<std::uint32_t>(standInFarShapes().cells.size());
         const std::uint32_t firstShapes[4] = {0, 0, 0, cells};
         assert(packed.sets.size() == 4 && tables.farShapes.size() == 2 * cells);
@@ -683,7 +753,43 @@ namespace {
                 for (std::size_t level = 0; level < set.far.levels.size(); ++level) {
                     const TwigFarLevel& want = set.far.levels[level];
                     const GpuTwigFarLevel& got = tables.farLevels[levelsBefore + level];
-                    assert(got.firstLeaf == leavesBefore + want.firstLeaf && got.leafCount == want.leafCount && got.error == want.error);
+                    assert(got.leafCount == want.leafCount && got.error == want.error);
+
+                    // Its clusters: its leaves in order, farLeavesPerCluster to each but the last, each sphere holding
+                    // every vertex of its leaves as the mesh shader makes them, the set's shapes named.
+                    std::uint32_t next = leavesBefore + want.firstLeaf;
+                    assert(got.clusterCount == (want.leafCount + farLeavesPerCluster - 1) / farLeavesPerCluster);
+
+                    for (std::uint32_t number = got.firstCluster; number < got.firstCluster + got.clusterCount; ++number) {
+                        const GpuTwigFarCluster& cluster = tables.farClusters[number];
+                        const bool last = number + 1 == got.firstCluster + got.clusterCount;
+                        assert(cluster.firstLeaf == next && cluster.firstShape == record.firstShape && cluster.leafCount > 0);
+                        assert(cluster.leafCount == (last ? want.leafCount - (got.clusterCount - 1) * farLeavesPerCluster : farLeavesPerCluster));
+                        next += cluster.leafCount;
+                        const Vec3 centre{cluster.sphere[0], cluster.sphere[1], cluster.sphere[2]};
+                        float farthest = 0.0f;
+
+                        for (std::uint32_t leaf = cluster.firstLeaf; leaf < cluster.firstLeaf + cluster.leafCount; ++leaf) {
+                            const GpuFarLeaf& made = tables.farLeaves[leaf];
+                            const GpuFarLeafShape& shape = tables.farShapes[cluster.firstShape + ((made.sideCellNumber >> 16) & 0xffu)];
+
+                            for (std::uint32_t vertex = 0; vertex < farLeafVertices; ++vertex) {
+                                const float distance = (farLeafVertex(made, shape, vertex).position - centre).length();
+                                assert(distance <= cluster.sphere[3] * (1.0f + 1e-5f));
+                                farthest = std::max(farthest, distance);
+                            }
+                        }
+
+                        assert(farthest >= cluster.sphere[3] * 0.999f); // tight: some vertex on it
+                    }
+
+                    assert(next == leavesBefore + want.firstLeaf + want.leafCount);
+                }
+
+                assert(tables.farLevels[levelsBefore].firstCluster == clustersBefore);
+
+                for (std::size_t level = 0; level < set.far.levels.size(); ++level) {
+                    clustersBefore += tables.farLevels[levelsBefore + level].clusterCount;
                 }
 
                 for (std::size_t leaf = 0; leaf < set.far.leaves.size(); ++leaf) {
@@ -708,6 +814,7 @@ namespace {
 
         assert(tables.bricks.size() == bricksBefore && tables.twigs.size() == twigsBefore && packed.bindings.size() == twigsBefore);
         assert(tables.farNodes.size() == nodesBefore && tables.farLevels.size() == levelsBefore && tables.farLeaves.size() == leavesBefore);
+        assert(tables.farClusters.size() == clustersBefore);
         assert(tables.prototypes.empty() && tables.levels.empty());
 
         const std::vector<MeshHandle> missing{MeshHandle{3}, MeshHandle{4}, MeshHandle{5}};
@@ -779,7 +886,7 @@ namespace {
                 assert(draw.level >= node.firstLevel && draw.level < node.firstLevel + node.levelCount);
                 assert(draw.level == node.firstLevel || twigFarLevelFits(node, tables.farLevels[draw.level], part, view));
                 assert(draw.level + 1 == node.firstLevel + node.levelCount || !twigFarLevelFits(node, tables.farLevels[draw.level + 1], part, view));
-                assert(draw.firstLeaf == tables.farLevels[draw.level].firstLeaf && draw.leafCount == tables.farLevels[draw.level].leafCount);
+                assert(draw.firstCluster == tables.farLevels[draw.level].firstCluster && draw.clusterCount == tables.farLevels[draw.level].clusterCount);
                 assert(sphereInFrustum(view.frustum, meshClusterPlacedSphere(node.sphere, part).data()));
 
                 for (std::uint32_t brick = far.nodes[draw.node].firstBrick; brick < far.nodes[draw.node].firstBrick + far.nodes[draw.node].brickCount; ++brick) {
@@ -867,6 +974,44 @@ namespace {
         }
 
         assert(someLeftOut);
+    }
+
+    /*
+    * A far node of a part bound to bones is kept by its posed sphere (twigSpherePose: grown by its tree's move, as a
+    * brick's): a view facing away from the crown keeps no far node of a still tree, and every drawn one when the tree
+    * moves farther than the view's distance; a part not bound to bones is never posed.
+    */
+    void testFarNodesPosedByTheirTree() {
+        const FarTwigs made = farTwigs(3000);
+        const GpuInstance part = placedInstance(Mat4::identity());
+        const GpuCullRecord record = stillRecord(Vec3{0.0f, 15.0f, 0.0f}, 14.0f);
+        const GpuCameraCull away = cutView(Vec3{-480.0f, 15.0f, 0.0f}, 3.14159f, 8.0f);
+        GpuBoneTree tree;
+        tree.firstPose = 0;
+        tree.move = 2000.0f;
+        const std::vector<std::uint32_t> plantTrees{5u, 0u};
+        const std::vector<GpuBoneTree> trees{tree};
+        const std::vector<GpuBonePose> pool{packBonePose(WindBonePose{}, -1), packBonePose(WindBonePose{}, -1)};
+        const std::vector<std::uint32_t> bindings(made.tables.twigs.size(), swayUnbound);
+        const BoneCullTables bones{plantTrees, trees, pool, bindings, 5u};
+
+        std::vector<TwigFarDraw> still;
+        twigDrawsOnCpu(made.tables, part, 0u, record, away, nullptr, nullptr, false, &still);
+        std::vector<TwigFarDraw> unbound;
+        twigDrawsOnCpu(made.tables, part, 0u, record, away, nullptr, &bones, false, &unbound);
+        std::vector<TwigFarDraw> posed;
+        twigDrawsOnCpu(made.tables, part, 0u, record, away, nullptr, &bones, true, &posed);
+        assert(still.empty() && unbound.empty() && !posed.empty());
+
+        // Posed or not, the same nodes are chosen (the choice is by rest errors): facing the crown, still, draws them all.
+        const GpuCameraCull facing = cutView(Vec3{-480.0f, 15.0f, 0.0f}, 0.0f, 8.0f);
+        std::vector<TwigFarDraw> seen;
+        twigDrawsOnCpu(made.tables, part, 0u, record, facing, nullptr, nullptr, false, &seen);
+        assert(seen == posed);
+
+        const MeshClusterPose pose = twigSpherePose(made.tables.farNodes[0].sphere, part, true, tree);
+        const MeshClusterPose brick = twigBrickPose(made.tables.bricks[0], part, true, tree);
+        assert(pose.posed && pose.sphere[3] >= made.tables.farNodes[0].sphere[3] + tree.move && brick.posed);
     }
 
     /*
@@ -966,6 +1111,8 @@ void testTwigRecords() {
     testPackedSetsMoveTheirRuns();
     testABrickMakesOneChoice();
     testFarNodesOutOfViewAreLeftOut();
+    testFarNodesPosedByTheirTree();
+    testAFarClustersStandIn();
     testTwigGroupsInTheClusterPasses();
     testATwigsRecord();
     testAPrototypesLevels();
