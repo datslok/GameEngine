@@ -23,3 +23,18 @@ void bufferBarrier(VkCommandBuffer commands, VkBuffer buffer, const BufferUse& b
     dependency.pBufferMemoryBarriers = &barrier;
     vkCmdPipelineBarrier2(commands, &dependency);
 }
+
+void memoryBarrier(VkCommandBuffer commands, const BufferUse& before, const BufferUse& after) {
+    VkMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = before.stages;
+    barrier.srcAccessMask = before.access;
+    barrier.dstStageMask = after.stages;
+    barrier.dstAccessMask = after.access;
+
+    VkDependencyInfo dependency{};
+    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(commands, &dependency);
+}

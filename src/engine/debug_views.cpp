@@ -130,6 +130,18 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
         ++after;
     }
 
+    // The sun's virtual shadow maps' pages (ROADMAP phase 21 stage 4b), after the tiles: asked for this frame, of those
+    // kept from before and newly given room (EVICTED of them taken from cached pages), FAILED for want of room; STALE
+    // freed as their level slid or dropped; FREE left in the pool.
+    if (stats.virtualShadowPages) {
+        const VirtualShadowCounts& pages = *stats.virtualShadowPages;
+        const auto tilesLine = std::find(lines.begin(), lines.end(), tiles);
+        lines.insert(tilesLine + 1, "VSM PAGES " + std::to_string(pages.requested) + "  KEPT " + std::to_string(pages.kept) + "  NEW " +
+                                        std::to_string(pages.allocated) + " (EVICTED " + std::to_string(pages.evicted) + ")  FAILED " +
+                                        std::to_string(pages.failed) + "  STALE " + std::to_string(pages.stale) + "  FREE " +
+                                        std::to_string(pages.free));
+    }
+
     // The bones pass's (ROADMAP phase 21 stage 3c-iii-b): trees posed, those still for want of room, bones asked of the pool.
     if (stats.boneTrees > 0) {
         lines.insert(lines.begin() + after, "BONES TREES " + std::to_string(stats.boneTrees) + "  STILL " +

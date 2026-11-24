@@ -56,6 +56,7 @@
 #include "render/gpu/planar_reflection.h"
 #include "render/vulkan/vulkan_ambient_occlusion.h"
 #include "render/vulkan/vulkan_contact_shadows.h"
+#include "render/vulkan/vulkan_virtual_shadows.h"
 #include "render/vulkan/vulkan_depth_of_field.h"
 #include "render/vulkan/vulkan_motion_blur.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
@@ -390,6 +391,11 @@ private:
     // Ambient occlusion from the depth prepass (render/gpu/ambient_occlusion.h).
     std::unique_ptr<VulkanAmbientOcclusion> ambientOcclusion;
     std::unique_ptr<VulkanContactShadows> contactShadows;
+
+    // The sun's virtual shadow maps' pages (ROADMAP phase 21 stage 4): marked and given room after the prepass, the
+    // last frame's counts for F4.
+    std::unique_ptr<VulkanVirtualShadows> virtualShadows;
+    std::optional<VirtualShadowCounts> lastVirtualShadowCounts;
     std::unique_ptr<VulkanMotionBlur> motionBlur;
     std::unique_ptr<VulkanDepthOfField> depthOfField;
     bool depthOfFieldFresh = true;

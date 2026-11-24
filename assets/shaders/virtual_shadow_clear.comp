@@ -1,0 +1,44 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The first of the pages' passes each frame (render/vulkan/vulkan_virtual_shadows.h): last frame's asks, dirt and
+* failures cleared from every entry, its place in the pool kept; and this frame's counters started at 0, all but the
+* free list's top, which lasts. Starting again (options.z, the first frame or new settings): every entry and key emptied,
+* every page of the pool on the free list. The dispatch covers both the table and the pool.
+*/
+#include "virtual_shadow_pages.glsl"
+
+layout(local_size_x = VIRTUAL_SHADOW_RESOLVE_GROUP) in;
+
+void main() {
+    int index = int(gl_GlobalInvocationID.x);
+
+    bool startAgain = frame.options.z > 0.5;
+    int pool = frame.counts.z;
+
+    if (index < VIRTUAL_SHADOW_COUNTERS && index != VIRTUAL_SHADOW_COUNT_FREE) {
+        counters[index] = 0u;
+    }
+
+    if (startAgain && index == VIRTUAL_SHADOW_COUNT_FREE) {
+        counters[index] = uint(pool);
+    }
+
+    if (startAgain && index < pool) {
+        freePages[index] = uint(index);
+    }
+
+    if (index >= virtualShadowEntryCount()) {
+        return;
+    }
+
+    if (startAgain) {
+        table.entries[index] = 0u;
+        keys.keys[index] = uvec4(0u);
+        return;
+    }
+
+    uint cleared = VIRTUAL_SHADOW_ENTRY_REQUESTED | VIRTUAL_SHADOW_ENTRY_DIRTY | VIRTUAL_SHADOW_ENTRY_FAILED;
+    table.entries[index] &= ~cleared;
+}

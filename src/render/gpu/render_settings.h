@@ -19,6 +19,7 @@
 #include "render/gpu/tone_mapping.h"
 #include "render/gpu/transparency.h"
 #include "render/gpu/upscaling.h"
+#include "render/gpu/virtual_shadows.h"
 #include "render/gpu/volumetric_fog.h"
 #include "render/gpu/wind.h"
 #include "scene/level_of_detail.h"
@@ -33,6 +34,10 @@
 struct RenderSettings {
     LightPrioritySettings lights;
     ShadowSettings shadows;
+
+    // The sun's virtual shadow maps (render/gpu/virtual_shadows.h, ROADMAP phase 21 stage 4), being built beside the
+    // cascades: off by default until they draw (4c) and shadow (4d).
+    VirtualShadowSettings virtualShadows;
     BloomSettings bloom;
     ToneMappingSettings toneMapping;
 

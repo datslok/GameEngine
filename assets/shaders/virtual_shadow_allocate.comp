@@ -1,0 +1,63 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Allocating (render/vulkan/vulkan_virtual_shadows.h), one workgroup after resolving: the k-th entry needing a page takes
+* the k-th free page from the free list's top, then, once those run out, the place of the (k - free)-th entry only
+* cached, which is emptied; past both the pool is full and the entry is marked failed. A new place is dirty: its depths
+* must be drawn (4c). One workgroup, so the free list's new top is written after every take, behind a barrier.
+*/
+#include "virtual_shadow_pages.glsl"
+
+layout(local_size_x = VIRTUAL_SHADOW_ALLOCATE_GROUP) in;
+
+shared uint freeTop;
+shared uint needed;
+shared uint cached;
+
+void main() {
+    uint local = gl_LocalInvocationIndex;
+
+    if (local == 0u) {
+        freeTop = counters[VIRTUAL_SHADOW_COUNT_FREE];
+        needed = counters[VIRTUAL_SHADOW_COUNT_NEEDED];
+        cached = counters[VIRTUAL_SHADOW_COUNT_CACHED];
+    }
+
+    barrier();
+
+    for (uint k = local; k < needed; k += VIRTUAL_SHADOW_ALLOCATE_GROUP) {
+        int index = int(neededEntries[k]);
+        uint physical = 0u;
+        bool placed = false;
+
+        uvec2 source = virtualShadowAllocationSource(k, freeTop, cached);
+
+        if (source.x == VIRTUAL_SHADOW_FROM_FREE) {
+            physical = freePages[source.y];
+            placed = true;
+        } else if (source.x == VIRTUAL_SHADOW_FROM_CACHED) {
+            int victim = int(cachedEntries[source.y]);
+            physical = virtualShadowPhysicalPage(table.entries[victim]);
+            table.entries[victim] = 0u;
+            atomicAdd(counters[VIRTUAL_SHADOW_COUNT_EVICTED], 1u);
+            placed = true;
+        }
+
+        if (placed) {
+            uint flags = VIRTUAL_SHADOW_ENTRY_ALLOCATED | VIRTUAL_SHADOW_ENTRY_REQUESTED | VIRTUAL_SHADOW_ENTRY_DIRTY;
+            table.entries[index] = virtualShadowEntryWith(physical, flags);
+            keys.keys[index] = uvec4(virtualShadowCurrentKey(index), uint(frame.counts.w));
+            atomicAdd(counters[VIRTUAL_SHADOW_COUNT_ALLOCATED], 1u);
+        } else {
+            table.entries[index] |= VIRTUAL_SHADOW_ENTRY_FAILED;
+            atomicAdd(counters[VIRTUAL_SHADOW_COUNT_FAILED], 1u);
+        }
+    }
+
+    barrier();
+
+    if (local == 0u) {
+        counters[VIRTUAL_SHADOW_COUNT_FREE] = freeTop - min(needed, freeTop);
+    }
+}

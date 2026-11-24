@@ -18,4 +18,46 @@
 // The level of a point no level holds: past the last one, where the far shadow map answers.
 #define VIRTUAL_SHADOW_NO_LEVEL -1
 
+// How far round a pixel's texel the pages it may read are marked: a soft shadow's widest filter and blocker search
+// (MAX_SHADOW_FILTER_TEXELS and MAX_BLOCKER_SEARCH_TEXELS, 12 each). Half the margin's page, so a pixel marks at most
+// the four pages round a corner.
+#define VIRTUAL_SHADOW_FILTER_TEXELS 24
+
+// A page table entry: flags in the top bits, the physical page (its place in the pool) in the low 16.
+#define VIRTUAL_SHADOW_ENTRY_ALLOCATED 0x80000000u
+#define VIRTUAL_SHADOW_ENTRY_REQUESTED 0x40000000u
+#define VIRTUAL_SHADOW_ENTRY_DIRTY 0x20000000u
+#define VIRTUAL_SHADOW_ENTRY_FAILED 0x10000000u
+#define VIRTUAL_SHADOW_ENTRY_FLAGS 0xF0000000u
+#define VIRTUAL_SHADOW_ENTRY_PHYSICAL 0x0000FFFFu
+
+// Where the allocating pass finds the k-th needed entry a place (virtualShadowAllocationSource).
+#define VIRTUAL_SHADOW_FROM_FREE 0
+#define VIRTUAL_SHADOW_FROM_CACHED 1
+#define VIRTUAL_SHADOW_FROM_NOWHERE 2
+
+// The pool's most pages: 16 bits of an entry, and 4096 is Unreal's default; 16384 pages of 128 x 128 x 4 B are 1 GB.
+#define VIRTUAL_SHADOW_MAX_POOL_PAGES 16384
+
+// The passes' workgroups: marking a square of pixels, resolving a row of entries, one group allocating.
+#define VIRTUAL_SHADOW_MARK_GROUP_SIDE 8
+#define VIRTUAL_SHADOW_RESOLVE_GROUP 64
+#define VIRTUAL_SHADOW_ALLOCATE_GROUP 256
+
+// The pages' counters (uints): the free list's top lasts from frame to frame, the rest start at 0 every frame.
+#define VIRTUAL_SHADOW_COUNT_FREE 0
+#define VIRTUAL_SHADOW_COUNT_NEEDED 1
+#define VIRTUAL_SHADOW_COUNT_CACHED 2
+#define VIRTUAL_SHADOW_COUNT_REQUESTED 3
+#define VIRTUAL_SHADOW_COUNT_KEPT 4
+#define VIRTUAL_SHADOW_COUNT_ALLOCATED 5
+#define VIRTUAL_SHADOW_COUNT_EVICTED 6
+#define VIRTUAL_SHADOW_COUNT_FAILED 7
+#define VIRTUAL_SHADOW_COUNT_STALE 8
+#define VIRTUAL_SHADOW_COUNTERS 12
+
+// Set 1's bindings the main pass reads the pages through (render/vulkan/scene_layout.h).
+#define SCENE_VIRTUAL_SHADOW_FRAME_BINDING 59
+#define SCENE_VIRTUAL_SHADOW_TABLE_BINDING 60
+
 #endif

@@ -145,6 +145,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight, bindlessTextures->getLayout(),
                                                                 sceneLayout->getFrameLayout());
     contactShadows = std::make_unique<VulkanContactShadows>(device, nearestSampler.get(), framesInFlight);
+    virtualShadows = std::make_unique<VulkanVirtualShadows>(device, nearestSampler.get(), framesInFlight);
     motionBlur = std::make_unique<VulkanMotionBlur>(device, nearestSampler.get(), framesInFlight);
     depthOfField = std::make_unique<VulkanDepthOfField>(device, nearestSampler.get(), linearSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
@@ -1029,6 +1030,10 @@ FrameContext VulkanRenderer::beginFrame() {
         lastEyeAdaptation = adapted;
     }
 
+    if (const std::optional<VirtualShadowCounts> pages = virtualShadows->collect(frameIndex)) {
+        lastVirtualShadowCounts = pages;
+    }
+
     const std::optional<VulkanCameraCulling::Collected> culled = cameraCulling->collect(frameIndex);
 
     if (culled) {
@@ -1764,6 +1769,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.boneTreesStill = bones.still;
     stats.bonesAsked = bones.bonesAsked;
     stats.bonePool = bones.pool;
+    stats.virtualShadowPages = settings.virtualShadows.enabled ? lastVirtualShadowCounts : std::nullopt;
     const TwigTally twigTally = lastTwigTally.value_or(TwigTally{});
     stats.twigsTested = twigTally.tested;
     stats.twigsKept = twigTally.kept;
@@ -2068,6 +2074,17 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     for (const ContactLightPick& pick : contact.lights) {
         contactLightHistory.push_back(pick.entity);
     }
+
+    // The sun's virtual shadow maps (render/gpu/virtual_shadows.h): the clipmap moved to the camera and this frame's
+    // record written before the scene set points at it; marked after the prepass, which they need. The sun is the one
+    // with the cascades.
+    validateVirtualShadows(settings.virtualShadows);
+    const bool sunCasts = !sunLights.empty() && sunLights.front().castsShadows;
+    VirtualShadowSettings pageSettings = settings.virtualShadows;
+    pageSettings.enabled = pageSettings.enabled && settings.depthPrepass && inverseViewProjection && sunCasts;
+    virtualShadows->prepare(frame.frameIndex, pageSettings, cameraOrigin, sunCasts ? sunLights.front().direction : Vec3{},
+                            settings.shadows.directionalCasterReach, inverseViewProjection.value_or(Mat4::identity()),
+                            static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
 
     if (contact.runs() && !contactShadows->hasImages()) {
         contactShadows->ensureSize(sceneSize);
@@ -2514,6 +2531,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                               packContactShadowPass(relativeViewProjection, *inverseViewProjection, sceneSize, toSun, settings.contactShadows,
                                                     temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0, targets, contact.sun));
         endGpuPass(frame, GpuPass::ContactShadows);
+    }
+
+    if (virtualShadows->runs()) {
+        beginGpuPass(frame, GpuPass::VirtualShadowPages);
+        virtualShadows->mark(frame.commands, frame.descriptors, frame.frameIndex, depth);
+        endGpuPass(frame, GpuPass::VirtualShadowPages);
     }
 
     if (mirrorLight) {
@@ -3004,6 +3027,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     views.farClusters = twigView(twigDrawing->getFarClusters());
     views.farLeaves = twigView(twigDrawing->getFarLeaves());
     views.farShapes = twigView(twigDrawing->getFarShapes());
+    views.virtualShadowFrame = virtualShadows->frameRecord(frame.frameIndex);
+    views.virtualShadowTable = virtualShadows->pageTable();
     views.swayBindings = VkDescriptorBufferInfo{swayBindingRecords.empty() ? noPlacedRecords.get() : swayBindings.get(), 0, VK_WHOLE_SIZE};
     const auto boneView = [&](VkBuffer buffer) { return VkDescriptorBufferInfo{buffer != VK_NULL_HANDLE ? buffer : noPlacedRecords.get(), 0, VK_WHOLE_SIZE}; };
     views.boneTrees = boneView(bonePosing->getTrees());
@@ -4689,6 +4714,8 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
 
     ambientOcclusion->setFramesInFlight(count);
     contactShadows->setFramesInFlight(count);
+    virtualShadows->setFramesInFlight(count);
+    lastVirtualShadowCounts.reset();
     motionBlur->setFramesInFlight(count);
     depthOfField->setFramesInFlight(count);
 

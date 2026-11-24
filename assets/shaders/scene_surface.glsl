@@ -166,6 +166,19 @@ layout(set = 1, binding = 32) uniform sampler2D lightContactShadows;
 
 #include "render/gpu/contact_shadows_shared.h"
 
+// The sun's virtual shadow maps' record and page table (render/vulkan/vulkan_virtual_shadows.h): only their debug view
+// reads them so far (ROADMAP phase 21 stage 4b).
+#include "virtual_shadow_data.glsl"
+#include "virtual_shadows.glsl"
+
+layout(std430, set = 1, binding = SCENE_VIRTUAL_SHADOW_FRAME_BINDING) readonly buffer SceneVirtualShadowFrame {
+    VIRTUAL_SHADOW_FRAME_FIELDS
+} virtualShadowFrame;
+
+layout(std430, set = 1, binding = SCENE_VIRTUAL_SHADOW_TABLE_BINDING) readonly buffer SceneVirtualShadowTable {
+    uint virtualShadowEntries[];
+};
+
 #include "ambient_occlusion.glsl"
 
 #ifdef TRANSPARENT
@@ -869,6 +882,36 @@ vec4 surfaceTexture(uint slot, vec2 uv, bool shifted, vec2 gradientAcross, vec2 
     }
 
     return texture(textures[nonuniformEXT(slot)], uv, mipBias);
+}
+
+// The pages' debug view at a point measured from the camera: its colour and how much of the picture it covers.
+vec4 virtualShadowPageView(vec3 relative) {
+    int level = virtualShadowLevelFor(length(relative), virtualShadowFrame.options.x, virtualShadowFrame.counts.x);
+
+    if (level == VIRTUAL_SHADOW_NO_LEVEL) {
+        return vec4(0.0);
+    }
+
+    int pagesPerSide = virtualShadowFrame.counts.y;
+    VirtualShadowLevelData data = virtualShadowFrame.levels[level];
+    vec3 placed = virtualShadowLevelPoint(mat3(virtualShadowFrame.lightRotation) * relative, data.placement.xyz, vec2(data.placement.w, data.depth.x));
+    ivec2 slot = virtualShadowSlot(virtualShadowPageOf(placed.xy), data.pages.xy, pagesPerSide);
+    uint entry = virtualShadowEntries[virtualShadowTableIndex(level, slot, pagesPerSide)];
+    vec3 colour = virtualShadowLevelColour(level);
+
+    if ((entry & VIRTUAL_SHADOW_ENTRY_FAILED) != 0u) {
+        colour = vec3(1.0, 0.0, 0.0);
+    } else if ((entry & VIRTUAL_SHADOW_ENTRY_ALLOCATED) == 0u) {
+        colour = vec3(0.0);
+    } else if ((entry & VIRTUAL_SHADOW_ENTRY_DIRTY) != 0u) {
+        colour = vec3(1.0);
+    }
+
+    if (virtualShadowNearPageEdge(placed.xy, 2.0)) {
+        colour *= 0.25;
+    }
+
+    return vec4(colour, 0.6);
 }
 
 void main() {
@@ -1617,6 +1660,13 @@ void main() {
         reflectionStandIn = vec3(0.0);
     }
 #endif
+
+    // The virtual shadow maps' pages debug view: each pixel's level as its colour, its page outlined; a page given room
+    // this frame white, one the pool had no room for red, one never asked for (a pixel the marking missed) black.
+    if (virtualShadowFrame.options.y > 0.5 && virtualShadowFrame.counts.x > 0 && !captureView) {
+        vec4 pageView = virtualShadowPageView(relativePosition);
+        outputColour.rgb = mix(outputColour.rgb, pageView.rgb, pageView.a);
+    }
 
     // The heatmap debug view: the picture mostly covered by the colour of how many lights this pixel's cluster lists.
     if (shadingOptions.y != 0 && !captureView) {

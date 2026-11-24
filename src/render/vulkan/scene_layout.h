@@ -6,6 +6,7 @@
 #include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/gpu/placed_drawing_shared.h"
 #include "render/gpu/twig_drawing_shared.h"
+#include "render/gpu/virtual_shadows_shared.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
@@ -93,7 +94,9 @@ enum SceneBinding : std::uint32_t {
     FarShapesBinding = 56,
     LeafPyramidEarlyBinding = 57,
     LeafPyramidWholeBinding = 58,
-    SceneBindingCount = 59
+    VirtualShadowFrameBinding = 59,
+    VirtualShadowTableBinding = 60,
+    SceneBindingCount = 61
 };
 
 static_assert(FarClustersBinding == SCENE_FAR_CLUSTERS_BINDING && FarLeavesBinding == SCENE_FAR_LEAVES_BINDING && FarShapesBinding == SCENE_FAR_SHAPES_BINDING,
@@ -104,6 +107,8 @@ static_assert(LeafPyramidEarlyBinding == SCENE_LEAF_PYRAMID_EARLY_BINDING && Lea
 static_assert(BoneTreesBinding == SCENE_BONE_TREES_BINDING && BonePlantTreesBinding == SCENE_BONE_PLANT_TREES_BINDING &&
                   BonePosesBinding == SCENE_BONE_POSES_BINDING && SwayBindingsBinding == SCENE_SWAY_BINDINGS_BINDING,
               "The bones' bindings must match bone_vertex_data.glsl's");
+static_assert(VirtualShadowFrameBinding == SCENE_VIRTUAL_SHADOW_FRAME_BINDING && VirtualShadowTableBinding == SCENE_VIRTUAL_SHADOW_TABLE_BINDING,
+              "The virtual shadow maps' bindings must match scene_surface.glsl's");
 static_assert(LianaTreePlantsBinding == SCENE_LIANA_TREE_PLANTS_BINDING, "The lianas' trees' binding must match liana_data.glsl's");
 
 static_assert(PlacedPlantsBinding == SCENE_PLACED_PLANTS_BINDING && PlacedPartsBinding == SCENE_PLACED_PARTS_BINDING &&
@@ -267,6 +272,8 @@ struct SceneBufferViews {
     VkDescriptorBufferInfo farClusters{};     // the far leaf clusters, leaves and cells' shapes (stand-ins without; render/gpu/twig_records.h)
     VkDescriptorBufferInfo farLeaves{};
     VkDescriptorBufferInfo farShapes{};
+    VkDescriptorBufferInfo virtualShadowFrame{}; // the sun's virtual shadow maps' record and page table (render/vulkan/vulkan_virtual_shadows.h)
+    VkDescriptorBufferInfo virtualShadowTable{};
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

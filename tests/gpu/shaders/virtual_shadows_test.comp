@@ -23,5 +23,27 @@ void main() {
         testOutput(1, vec4(float(virtualShadowTableIndex(int(b.y), slot, pagesPerSide))));
     } else if (function == GPU_TEST_VIRTUAL_SHADOW_LEVEL_POINT) {
         testOutput(0, vec4(virtualShadowLevelPoint(a.xyz, testInput(1).xyz, testInput(2).xy), 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_MARKED_PAGES) {
+        vec4 b = testInput(1);
+        int pagesPerSide = int(b.y);
+        testOutput(0, vec4(virtualShadowMarkedPages(a.xy, a.z, pagesPerSide)));
+        testOutput(1, vec4(vec2(virtualShadowPageOfSlot(ivec2(b.zw), ivec2(a.w, b.x), pagesPerSide)), 0.0, 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_ENTRY) {
+        // a: the entry's high and low halves, the stored and current keys' x; b: their y, their generations.
+        vec4 b = testInput(1);
+        uint entry = (uint(a.x) << 16u) | uint(a.y);
+        uvec3 stored = uvec3(uint(a.z), uint(b.x), uint(b.z));
+        uvec3 current = uvec3(uint(a.w), uint(b.y), uint(b.w));
+        bool stale = virtualShadowEntryStale(entry, stored, current);
+        uint packed = virtualShadowEntryWith(uint(a.y), entry);
+        testOutput(0, vec4(stale ? 1.0 : 0.0, virtualShadowEntryNeeds(entry, stale) ? 1.0 : 0.0, float(virtualShadowPhysicalPage(entry)),
+                           float(packed >> 16u)));
+        uvec3 key = virtualShadowKeyOf(ivec2(a.zw), ivec2(-int(b.x), int(b.y)), uint(b.z));
+        testOutput(1, vec4(vec3(key), 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_SOURCE) {
+        uvec2 source = virtualShadowAllocationSource(uint(a.x), uint(a.y), uint(a.z));
+        testOutput(0, vec4(vec2(source), 0.0, 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_PAGE_VIEW) {
+        testOutput(0, vec4(virtualShadowLevelColour(int(a.x)), virtualShadowNearPageEdge(a.yz, a.w) ? 1.0 : 0.0));
     }
 }

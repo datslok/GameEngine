@@ -1,6 +1,7 @@
 #include "render/vulkan/vulkan_cloth.h"
 
 #include "render/gpu/compute_dispatch.h"
+#include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/cloth_pass_stamps.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_check.h"
@@ -112,38 +113,22 @@ namespace {
         return packed;
     }
 
-    void memoryBarrier(VkCommandBuffer commands, VkPipelineStageFlags2 sourceStages, VkAccessFlags2 sourceAccess, VkPipelineStageFlags2 laterStages,
-                       VkAccessFlags2 laterAccess) {
-        VkMemoryBarrier2 barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        barrier.srcStageMask = sourceStages;
-        barrier.srcAccessMask = sourceAccess;
-        barrier.dstStageMask = laterStages;
-        barrier.dstAccessMask = laterAccess;
-
-        VkDependencyInfo dependency{};
-        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dependency.memoryBarrierCount = 1;
-        dependency.pMemoryBarriers = &barrier;
-        vkCmdPipelineBarrier2(commands, &dependency);
-    }
-
     /*
     * Every pass reads and writes the points that the one before it wrote, so each waits for the last to finish and sees
     * its writes. Copies are among what it waits for: the readback and tick-start copies read the points that the next
     * passes overwrite, and the upload's copies write them.
     */
     void clothBarrier(VkCommandBuffer commands) {
-        memoryBarrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        memoryBarrier(commands,
+                      {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT},
+                      {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
     }
 
     // Before a copy out of the points: the passes' writes (and any earlier copy into the same buffers) reach it.
     void toCopyBarrier(VkCommandBuffer commands) {
-        memoryBarrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
-                      VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        memoryBarrier(commands,
+                      {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT},
+                      {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT});
     }
 
     // Data copied once into GPU memory, through one staging buffer.
@@ -787,8 +772,7 @@ void VulkanCloth::recordReadback(VkCommandBuffer commands, std::uint32_t slotInd
         vkCmdCopyBuffer(commands, velocities.get(), slot.readback.get(), 1, &velocityRegion);
     }
 
-    memoryBarrier(commands, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
-                  VK_ACCESS_2_HOST_READ_BIT);
+    memoryBarrier(commands, {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT}, {VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT});
     if (stamps) {
         stamps->mark(commands, ClothPass::Copy);
     }
@@ -902,7 +886,7 @@ void VulkanCloth::recordShape(VkCommandBuffer commands, std::uint32_t meshSlot, 
     if (device.supportsRayQueries()) {
         readers |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
     }
-    memoryBarrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, readers, reads);
+    memoryBarrier(commands, {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT}, {readers, reads});
     if (stamps) {
         stamps->mark(commands, ClothPass::Shape);
     }

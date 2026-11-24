@@ -22,7 +22,7 @@ It never reads files. Its camera copy takes the acquired frame's aspect ratio; `
 
 ## A frame (`render`)
 
-1. `updateDisplayOutput`: the window's HDR properties every frame; `swapchain.supportsHdr()` asked only when HDR comes on (`image-pipeline.md`).
+1. `updateDisplayOutput`: the window's HDR properties every frame; `swapchain.supportsHdr()` only when HDR comes on (`image-pipeline.md`).
 2. `prepareSwapchain`: rebuild after `waitIdle` when missing, out of date, HDR or present mode or frames in flight changed; HDR refused → SDR, marked unsupported; screen pipelines (tone mapping, lines, overlay) remade for a new format. False minimised (10 ms sleep).
 3. `bakeSkyVisibility` on the CPU (`sky-visibility.md`), before the fence wait.
 4. `beginFrame`: wait for the frame's fence; read back its timestamps, cloth stamps, depth ranges, eye adaptation and cloth points; reset its descriptor pools, uniforms and command pool; reset its query pool.
@@ -36,7 +36,7 @@ An exception mid-frame: `shadowMemory.forgetAll()`, then `abandonFrame` ends an 
 
 ## drawScene: CPU first
 
-Everything every view draws is settled before any command is recorded, so the scene buffers are written once (`writeScene`).
+Everything every view draws is settled before recording, so the scene buffers are written once (`writeScene`).
 
 1. Cloth ticks (`runCloths`), video memory read.
 2. Camera: `viewProjection` (world), `relativeViewProjection` (camera-relative, jittered for TAA), `motionViewProjection` (unjittered), last frame's for reprojection; `makeClusterGrid`.
@@ -44,7 +44,7 @@ Everything every view draws is settled before any command is recorded, so the sc
 4. `CameraCullTable::update`; only the glass and the flat-faced draws (the mirror's candidates) tested on the CPU. The flat mirror chosen; image lights added without ray-traced mirror search.
 5. `packLighting`, `planShadows`, `holdStaggeredCascades`, `attachShadows`; coloured shadow maps made if glass needs them.
 6. The frame's draw list laid out (`DrawListLayout`): the camera's region, `prepareShadowDraws` (which tiles to draw, their regions), the reflection probe's faces' and the mirror's, then transparent draws sorted far to near.
-7. Probe cascades, mirrored light pairs, ambient occlusion, contact shadows, fog, wind and sky visibility readied before the scene set is written.
+7. Probe cascades, mirrored light pairs, ambient occlusion, contact shadows, virtual shadow pages, fog, wind, sky visibility readied first.
 8. `writeScene`, debug line vertices and shadow tile data straight into upload memory; the lasting records (instances, materials, last-frame matrices) copied into GPU memory where they changed (`gpu-scene.md`).
 
 Draw list order (one buffer): main pass, shadow tiles, probe faces, mirror view, transparent. The main region, each probe face's and the mirror's, and each drawn shadow tile's hold every draw, written by the CULL pass (`gpu-driven.md`); the CPU writes only glass's entries.
@@ -71,6 +71,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 13 | Colour pyramid [PYRAMID] | AO gathers light from last frame's picture | `ambient-occlusion.md` |
 | 14-17 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
 | 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
+| 18b | Virtual shadow pages [VSMPAGES] | `virtualShadows.enabled`, the prepass, a shadowed sun | `virtual-shadows.md` |
 | 19 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
 | 20 | Main [MAIN] | always; also writes the velocity image (`anti-aliasing.md`); sky and stars in a block of their own after | here |
 | 21 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
@@ -112,7 +113,7 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 - `EngineSettings::framesInFlight`, 1 to `maxFramesInFlight` (2), clamped by `validFramesInFlight`.
 - Each frame owns: command pool and buffer, fence (created signalled), acquire semaphore, `FrameDescriptors`, `FrameUniforms`, `SceneBuffers`, timestamp query pool.
 - Shared by all frames: the frame images and the cluster masks (the fence order keeps them safe).
-- `setFramesInFlight`: waits for the GPU, `createFrames`, tells every per-frame helper (debug lines, depth ranges, reflections, eye adaptation, ray tracing, AO, contact shadows, blur, depth of field), drops cloth and probe read-backs a vanished frame would never collect; the swapchain is rebuilt (`swapchainFramesInFlight` differs).
+- `setFramesInFlight`: waits for the GPU, `createFrames`, tells every per-frame helper (debug lines, depth ranges, reflections, eye adaptation, ray tracing, AO, contact shadows, virtual shadow pages, blur, depth of field), drops cloth and probe read-backs a vanished frame would never collect; the swapchain is rebuilt (`swapchainFramesInFlight` differs).
 - ImGui keeps `maxFramesInFlight` buffer sets throughout.
 - Swapchain images: at least one per frame in flight, the surface's minimum, three for Mailbox (`chooseSwapchainImageCount`; format, present mode and extent choices beside it, tested in `swapchain_choice_test`).
 
@@ -129,13 +130,7 @@ The F4 readout groups them: setup to the prepass; lighting from `firstLightingPa
 
 ## Kept from SDL_GPU
 
-The port drew every golden image bit for bit the same, so these stay:
-
-- **Descriptor layout** for bloom, tone mapping, debug lines and the overlay (`ShaderResources`, sets shared through `DescriptorLayouts`): set 0 vertex textures (unused), set 1 vertex uniforms, set 2 fragment combined image samplers then storage buffers, set 3 fragment uniforms. Scene pipelines use the GPU scene's (`PipelineDescription::sharedLayout`).
-- **Pipelines:** depth clamp on, counter-clockwise front faces, line width 1, dynamic viewport and scissor. `setViewport` flips y (origin at `y + height`, negative height); `beginRendering` sets the whole target.
-- **Formats:** swapchain `B8G8R8A8_SRGB` (else `R8G8B8A8_SRGB`), or `R16G16B16A16_SFLOAT` in `EXTENDED_SRGB_LINEAR` for HDR; bloom levels `B10G11R11_UFLOAT_PACK32` when drawable, blendable and filterable.
-- **Shared samplers:** surfaces (trilinear, repeat, anisotropy 16 or the GPU's limit, `VK_LOD_CLAMP_NONE`); tables (bilinear, clamped); nearest; linear clamped; shadow compare (`GREATER_OR_EQUAL`, linear); shadow raw depth (nearest).
-- **Mipmaps:** linear blits from the level above, each `max(1, size >> level)`; a cut-out's built on the CPU to keep its coverage (`coveragePreservingMips`) and copied in with level 0; a BC7 texture's every level built on the CPU and copied in (the GPU cannot write blocks: [assets.md](assets.md#texture-compression)).
+The port's conventions, kept so every golden image stayed the same (descriptor layout, pipeline state, formats, samplers, mipmaps): `renderer-sdl-conventions.md`.
 
 ## Uniform blocks (`FrameUniforms`)
 
@@ -163,7 +158,7 @@ An `ImageState` names a use; `imageStateUse` gives its stages, accesses and layo
 
 - `imageBarrier(image, aspect, from, to, ImageContents, levels)` waits for the old stages, flushes only the old writes, makes data visible to all new accesses, changes layout (from undefined on `Discard`). `needsBarrier` is false only for the same read-only state twice.
 - `VulkanImage::transition` / `transitionImage` record it and remember the state across frames, so a write after last frame's read still waits.
-- Buffers: `bufferBarrier(commands, buffer, before, after)` with `BufferUse{stages, access}`.
+- Buffers: `bufferBarrier(commands, buffer, before, after)` with `BufferUse{stages, access}`; `memoryBarrier(commands, before, after)` on all memory (compute chains, uploads, acceleration structures).
 - Tested in `image_state_test`.
 
 ## Device and memory

@@ -1,0 +1,49 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Resolving (render/vulkan/vulkan_virtual_shadows.h), one invocation an entry, after marking:
+* - a place whose key is no longer its slot's (the level slid past it or dropped its pages) is stale: back to the free
+*   list, the entry emptied;
+* - an asked-for entry with a place is kept (its last use noted); one without (or stale) is listed as needing one;
+* - a place nobody asked for is listed as cached: the allocating pass may take it when the free list runs out.
+* Lists and the free list's top grow by atomics, so their order is the GPU's; what each holds is not.
+*/
+#include "virtual_shadow_pages.glsl"
+
+layout(local_size_x = VIRTUAL_SHADOW_RESOLVE_GROUP) in;
+
+void main() {
+    int index = int(gl_GlobalInvocationID.x);
+
+    if (index >= virtualShadowEntryCount()) {
+        return;
+    }
+
+    uvec3 current = virtualShadowCurrentKey(index);
+    uint entry = table.entries[index];
+    uvec4 stored = keys.keys[index];
+    bool stale = virtualShadowEntryStale(entry, stored.xyz, current);
+
+    if (stale) {
+        freePages[atomicAdd(counters[VIRTUAL_SHADOW_COUNT_FREE], 1u)] = virtualShadowPhysicalPage(entry);
+        atomicAdd(counters[VIRTUAL_SHADOW_COUNT_STALE], 1u);
+        entry &= ~(VIRTUAL_SHADOW_ENTRY_ALLOCATED | VIRTUAL_SHADOW_ENTRY_PHYSICAL);
+        table.entries[index] = entry;
+    }
+
+    bool requested = (entry & VIRTUAL_SHADOW_ENTRY_REQUESTED) != 0u;
+
+    if (requested) {
+        atomicAdd(counters[VIRTUAL_SHADOW_COUNT_REQUESTED], 1u);
+    }
+
+    if (virtualShadowEntryNeeds(entry, false)) {
+        neededEntries[atomicAdd(counters[VIRTUAL_SHADOW_COUNT_NEEDED], 1u)] = uint(index);
+    } else if (requested) {
+        atomicAdd(counters[VIRTUAL_SHADOW_COUNT_KEPT], 1u);
+        keys.keys[index].w = uint(frame.counts.w);
+    } else if ((entry & VIRTUAL_SHADOW_ENTRY_ALLOCATED) != 0u) {
+        cachedEntries[atomicAdd(counters[VIRTUAL_SHADOW_COUNT_CACHED], 1u)] = uint(index);
+    }
+}
