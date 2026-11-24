@@ -506,7 +506,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [ ] 3e-iii. Records uploaded; bricks drawn as their levels where level 0's error fits, culled by posed bounds
       - [x] 3e-iii-a. Every set's far tables packed; a brick's one choice, twigs or a far node, on the CPU (`leaf-bricks-3e-iii-a`)
       - [x] 3e-iii-b. The tables uploaded; the twig pass makes the choice; a mesh shader draws the far leaves' clusters (`leaf-bricks-3e-iii-b`)
-      - [ ] 3e-iii-c. F4 counts the far clusters; the four spots measured
+      - [x] 3e-iii-c. F4 counts the far clusters; the four spots measured: a net loss for now (`leaf-bricks-3e-iii-c`)
   - [ ] 3f. The leaf cards and shadow stand-ins retired; leaves cast opaque shadows
 - [ ] 4. Virtual shadow maps for the sun, the cascades retired; then the lamps
 - [ ] 5. A visibility buffer, a material pass, a compute rasteriser (plan: `docs/research/VISBUFFER.md`)

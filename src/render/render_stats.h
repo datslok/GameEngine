@@ -45,6 +45,13 @@ struct RenderStats {
     std::size_t twigsSwaying = 0;
     std::array<std::size_t, TWIG_MOST_LEVELS> twigsByLevel{};
     std::array<std::size_t, TWIG_MOST_LEVELS> twigTrianglesByLevel{};
+    // Their far levels (stage 3e-iii): bricks handing over to a far node, far nodes drawn (those merged from bricks apart),
+    // their levels' leaf clusters and triangles (before the cluster passes' culling).
+    std::size_t twigFarBricks = 0;
+    std::size_t twigFarNodes = 0;
+    std::size_t twigFarMerged = 0;
+    std::size_t twigFarClusters = 0;
+    std::size_t twigFarTriangles = 0;
 
     // The bones pass (render/gpu/bone_poses.h), while it runs: trees posed, those left still for want of room, the
     // bones asked for and the pool's room; none posed while it does not run.

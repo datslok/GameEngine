@@ -6,6 +6,7 @@
 #include "render/gpu/bone_poses.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/mesh_cluster_culling.h"
+#include "render/gpu/render_settings.h"
 #include "render/gpu/twig_records.h"
 #include "render/gpu/wind.h"
 #include "render/gpu/wind_bones.h"
@@ -20,8 +21,10 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "test_levels.h"
@@ -301,9 +304,15 @@ namespace {
         words[TWIG_TALLY_SWAYING] = 2;
         words[TWIG_TALLY_LEVEL_TWIGS + 1] = 4;
         words[TWIG_TALLY_LEVEL_TRIANGLES + TWIG_MOST_LEVELS - 1] = 9;
+        words[TWIG_TALLY_FAR_BRICKS] = 11;
+        words[TWIG_TALLY_FAR_NODES] = 6;
+        words[TWIG_TALLY_FAR_MERGED] = 3;
+        words[TWIG_TALLY_FAR_CLUSTERS] = 20;
+        words[TWIG_TALLY_FAR_TRIANGLES] = 900;
         const TwigTally read = readTwigTally(words);
         assert(read.tested == 7 && read.kept == 5 && read.swaying == 2 && read.levelTwigs[1] == 4 && read.levelTwigs[0] == 0);
         assert(read.levelTriangles[TWIG_MOST_LEVELS - 1] == 9 && read.levelTriangles[0] == 0);
+        assert(read.farBricks == 11 && read.farNodes == 6 && read.farMerged == 3 && read.farClusters == 20 && read.farTriangles == 900);
     }
 
     // A point carried by a twig's matrix (its rows) into the plant's frame.
@@ -467,6 +476,47 @@ namespace {
 
     // F4's TWIGS line: none without twigs tested; kept of tested, those kept for sway, then each level's twigs and
     // thousands of triangles up to the coarsest level drawn.
+    // Finds a bool field by group and name in a settings visit.
+    class BoolFinder : public SettingsVisitor {
+    public:
+        BoolFinder(std::string group, std::string name) : wantedGroup(std::move(group)), wantedName(std::move(name)) {}
+
+        bool* found = nullptr;
+
+    protected:
+        void visitFloat(const char*, float&, const FloatLimits&) override {}
+        void visitInt(const char*, int&, const IntLimits&) override {}
+        void visitChoice(const char*, int&, const char* const*, int, FieldApplies) override {}
+
+        void visitBool(const char* name, bool& value, FieldApplies) override {
+            if (group == wantedGroup && name == wantedName) {
+                found = &value;
+            }
+        }
+
+        void visitGroup(const char* name, const std::function<void()>& contents) override {
+            const std::string outer = group;
+            group = name;
+            contents();
+            group = outer;
+        }
+
+    private:
+        std::string wantedGroup;
+        std::string wantedName;
+        std::string group;
+    };
+
+    // Passes "Far leaves" (stage 3e-iii-c): on by default, the render settings' farLeaves, so F5, settings.cfg and the
+    // command line can turn the far levels off to compare.
+    void testTheFarLeavesSwitch() {
+        RenderSettings settings;
+        assert(settings.farLeaves);
+        BoolFinder finder("Passes", "Far leaves");
+        visit(settings, finder);
+        assert(finder.found == &settings.farLeaves);
+    }
+
     void testTheTwigsLine() {
         RenderStats stats;
 
@@ -481,6 +531,19 @@ namespace {
         stats.twigTrianglesByLevel = {36000, 4800, 1200};
         const std::vector<std::string> lines = renderStatsLines(stats);
         assert(std::find(lines.begin(), lines.end(), "TWIGS 300/1000  SWAY 50  LEVELS 200 60 40  TRIS 36K 4K 1K") != lines.end());
+
+        // The far line only once bricks hand over to their far levels.
+        for (const std::string& line : lines) {
+            assert(line.find("FAR") == std::string::npos);
+        }
+
+        stats.twigFarBricks = 900;
+        stats.twigFarNodes = 120;
+        stats.twigFarMerged = 40;
+        stats.twigFarClusters = 2400;
+        stats.twigFarTriangles = 115000;
+        const std::vector<std::string> far = renderStatsLines(stats);
+        assert(std::find(far.begin(), far.end(), "FAR BRICKS 900  NODES 120 (40 MERGED)  CLUSTERS 2400  TRIS 115K") != far.end());
     }
 }
 
@@ -871,8 +934,29 @@ namespace {
 
         for (const GpuCameraCull& view : views) {
             std::vector<TwigFarDraw> farDraws;
-            const std::vector<TwigDraw> draws = twigDrawsOnCpu(tables, part, 0u, record, view, nullptr, nullptr, false, &farDraws);
+            TwigTally tally;
+            const std::vector<TwigDraw> draws = twigDrawsOnCpu(tables, part, 0u, record, view, &tally, nullptr, false, &farDraws);
             std::vector<std::uint32_t> covered(tables.bricks.size(), 0);
+
+            // The tally: every brick handing over, each far node drawn (merged ones apart), its level's clusters and its
+            // leaves' triangles.
+            std::uint32_t handing = 0;
+            std::uint32_t merged = 0;
+            std::uint32_t farClusters = 0;
+            std::uint32_t farTriangles = 0;
+
+            for (std::uint32_t brick = 0; brick < tables.bricks.size(); ++brick) {
+                handing += twigFarNodeDrawn(tables, brick, part, view) != TWIG_FAR_NO_NODE ? 1 : 0;
+            }
+
+            for (const TwigFarDraw& draw : farDraws) {
+                merged += draw.node >= tables.bricks.size() ? 1 : 0;
+                farClusters += draw.clusterCount;
+                farTriangles += tables.farLevels[draw.level].leafCount * farLeafTriangles;
+            }
+
+            assert(tally.farBricks == handing && tally.farNodes == farDraws.size() && tally.farMerged == merged);
+            assert(tally.farClusters == farClusters && tally.farTriangles == farTriangles && tally.kept == draws.size());
             std::vector<bool> twigged(tables.bricks.size(), false);
 
             for (const TwigDraw& draw : draws) {
@@ -1121,4 +1205,5 @@ void testTwigRecords() {
     testTheTwigPassOnTheCpu();
     testAPosedTreesTwigs();
     testTheTwigsLine();
+    testTheFarLeavesSwitch();
 }

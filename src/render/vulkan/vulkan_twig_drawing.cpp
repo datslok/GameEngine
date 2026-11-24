@@ -26,8 +26,8 @@ namespace {
     constexpr VkDeviceSize regionsTallyOffset = countBytes + 4 * sizeof(std::uint32_t);
     constexpr VkDeviceSize tallyBytes = TWIG_TALLY_WORDS * sizeof(std::uint32_t);
 
-    // The most bricks, the most sources, the frame's bones stamp (twig_pass.glsl's TwigPush).
-    constexpr std::uint32_t pushBytes = 12;
+    // The most bricks, the most sources, the frame's bones stamp, whether far levels are drawn (twig_pass.glsl's TwigPush).
+    constexpr std::uint32_t pushBytes = 16;
 
     constexpr BufferUse computeWrite{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
     constexpr BufferUse computeReadWrite{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
@@ -179,7 +179,7 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
 * made ready for the cluster passes, the mesh shaders and the copy back of the counts.
 */
 void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descriptors, const PlacedInputs& placed, const BoneCullBuffers& bones,
-                               const GpuCameraCull& view, std::uint32_t frameIndex) {
+                               const GpuCameraCull& view, bool farLeaves, std::uint32_t frameIndex) {
     PerFrame& frame = frames.at(frameIndex);
     const VmaAllocator allocator = device.getAllocator();
     uploadBytes(allocator, frame.view, &view, sizeof(view));
@@ -203,7 +203,7 @@ void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descr
         storageBufferBinding(farNodes.get()),     storageBufferBinding(farLevels.get()),
     };
     bindings[3].buffer = placed.partInstances;
-    const std::uint32_t pushed[3] = {mostBricks, mostSources, bones.stamp};
+    const std::uint32_t pushed[4] = {mostBricks, mostSources, bones.stamp, farLeaves ? 1u : 0u};
 
     bindComputeSet(commands, device.getDevice(), descriptors, *sourcesPass, bindings);
     vkCmdPushConstants(commands, sourcesPass->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes, pushed);

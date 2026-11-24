@@ -54,7 +54,7 @@ void main() {
     BoneTree tree = boneCullTree(placed.x & DRAW_LIST_INSTANCE_MASK, push.boneStamp);
     bool partBound = placedParts[placed.y].unused1 != 0u;
     MeshClusterPose brickPose = twigBrickPose(brick, part, partBound, tree);
-    bool hasFar = set.z != TWIG_FAR_NO_NODE;
+    bool hasFar = set.z != TWIG_FAR_NO_NODE && push.farLeaves != 0u;
 
     // The brick's one choice, the same for the whole workgroup (twigFarNodeDrawn).
     if (local == 0u) {
@@ -73,6 +73,11 @@ void main() {
     if (farNode != TWIG_FAR_NO_NODE) {
         TwigFarNode node = twigFarNodes[farNode];
 
+        // Each far tally word has one writer, the first thread (the others write only the twigs' words).
+        if (local == 0u) {
+            groupTally[TWIG_TALLY_FAR_BRICKS] = 1u;
+        }
+
         if (node.firstBrick == set.x + gl_WorkGroupID.x && twigFarNodeKept(node, part, placed.x, record, view, twigSpherePose(node.sphere, part, partBound, tree))) {
             uint level = node.firstLevel;
 
@@ -81,6 +86,13 @@ void main() {
             }
 
             TwigFarLevel chosen = twigFarLevels[level];
+
+            if (local == 0u) {
+                groupTally[TWIG_TALLY_FAR_NODES] = 1u;
+                groupTally[TWIG_TALLY_FAR_MERGED] = farNode != set.z + gl_WorkGroupID.x ? 1u : 0u;
+                groupTally[TWIG_TALLY_FAR_CLUSTERS] = chosen.clusterCount;
+                groupTally[TWIG_TALLY_FAR_TRIANGLES] = chosen.leafCount * uint(FAR_LEAF_TRIANGLES);
+            }
 
             for (uint cluster = local; cluster < chosen.clusterCount; cluster += uint(TWIG_BRICK_SIZE)) {
                 uint slot = atomicAdd(twigCounts[TWIG_FAR_REGION], 1u);

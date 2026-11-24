@@ -134,6 +134,12 @@ The culling algorithm itself is unpublished (no talk slides found).
   - Built in 48 ms for all 11 at start-up.
 - **The record (3e-ii):** 28 B: foot as three floats (exact, as twigs' are); frame as a quaternion in four snorm16 (8 B; two octahedral directions would cost the same, but a quaternion rebuilds both axes square to each other); side as a half float (5e-4 relative, under 0.1 mm on a 10 cm leaf); cell and number a byte each; the twig's number (its binding, lean and tone). Fold and curl are one pair for every leaf, kept with the 24 cells' shapes (48 B each), not in the records.
   - Cost grows with bricks and brick clusters drawn, not with twigs in the valley; memory with variants (records), not trees.
+- **Measured in 3e-iii-c (home PC, release, hidden copy, three samples, GPU ms, far leaves on / off in the same session):** a net loss.
+  - Frame: rim 18.33 / 17.14, ring 31.27 / 29.39, wall 20.05 / 19.70, among the trees 27.63 / 26.42.
+  - Twig instances kept halve (ring 0.94M / 1.87M), and the culling gains 0.06-0.5 ms (TWIGS, MESHCULL, MESHLATE together).
+  - But the prepass and main pass lose 0.4-1.8 ms: triangles after culling rise 7-12% (ring 31.2M / 27.9M).
+  - [I] Why: almost every far node draws its level 0 (about 22 clusters a node, a brick's level 0 is about 23). Where twigs alone went on to levels 3 and 4 (ring 392K and 25K twigs, 9 and 8 triangles), the bricks still draw every level-2 leaf. A brick's error is its worst twig's (the largest leaf, the 1.5-times twigs), so its coarser levels fit later than most of its twigs'; the crown card takes over before merged nodes ever fit (0 merged drawn at every spot).
+  - The instances saved are worth about a third of a millisecond; the leaves are what cost.
 
 ## The plan (phase 21 stage 3)
 

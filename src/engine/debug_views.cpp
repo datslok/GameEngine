@@ -107,13 +107,25 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     std::vector<std::string> lines{camera, detail, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory), cells,
                                    exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)};
 
+    std::size_t after = 2;
+
     if (stats.twigsTested > 0) {
-        lines.insert(lines.begin() + 2, twigStatsText(stats));
+        lines.insert(lines.begin() + after, twigStatsText(stats));
+        ++after;
+    }
+
+    // The far levels' (ROADMAP phase 21 stage 3e-iii): bricks handing over, far nodes drawn (merged apart), their clusters
+    // and thousands of triangles.
+    if (stats.twigFarBricks > 0) {
+        lines.insert(lines.begin() + after, "FAR BRICKS " + std::to_string(stats.twigFarBricks) + "  NODES " + std::to_string(stats.twigFarNodes) + " (" +
+                                                std::to_string(stats.twigFarMerged) + " MERGED)  CLUSTERS " + std::to_string(stats.twigFarClusters) +
+                                                "  TRIS " + std::to_string(stats.twigFarTriangles / 1000) + "K");
+        ++after;
     }
 
     // The bones pass's (ROADMAP phase 21 stage 3c-iii-b): trees posed, those still for want of room, bones asked of the pool.
     if (stats.boneTrees > 0) {
-        lines.insert(lines.begin() + (stats.twigsTested > 0 ? 3 : 2), "BONES TREES " + std::to_string(stats.boneTrees) + "  STILL " +
+        lines.insert(lines.begin() + after, "BONES TREES " + std::to_string(stats.boneTrees) + "  STILL " +
                                                                          std::to_string(stats.boneTreesStill) + "  BONES " +
                                                                          std::to_string(stats.bonesAsked) + "/" + std::to_string(stats.bonePool));
     }

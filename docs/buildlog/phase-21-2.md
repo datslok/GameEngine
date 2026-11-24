@@ -130,3 +130,9 @@
   - **Posed bounds came with it** (`twigSpherePose`, shared with the bricks): far nodes and far clusters culled by their sphere grown by the tree's move; 3e-iii-c keeps the F4 counts and the measuring.
   - **11 planted bugs caught** (one missed at first, the far cluster's pose in the cluster passes; a test added): the far region's cluster count, order and pair bound, a far entry drawn as a twig, the stand-in's cut and counts, a cluster's sphere halved, its leaves not offset, the pose not grown, the node's pose ignored.
   - GPU test written (`twig_drawing_gpu_test`'s far mesh cluster), not run.
+- `leaf-bricks-3e-iii-c` (Nov 24 2026): F4's FAR line, Passes "Far leaves" to compare, the four spots measured: far leaves are a net loss for now.
+  - **FAR line:** bricks handing over, far nodes drawn (merged apart), clusters, triangles; counted once a workgroup by its first thread, mirrored by `twigDrawsOnCpu`.
+  - **Passes "Far leaves"** (on): added to measure on and off in the same session, since the probe and time of day shift between runs.
+  - **Measured:** frames 0.35-1.9 ms slower with far leaves (ring 31.27 against 29.39); figures and why in `LEAFGEOMETRY.md`.
+  - **Merged nodes never drawn:** the crown card takes over first, at all four spots.
+  - **6 planted bugs caught** (merged never counted, a triangle a leaf, handing bricks not counted, two tally words swapped, the line's merged count, the switch bound to the wrong field).

@@ -530,6 +530,11 @@ TwigTally readTwigTally(std::span<const std::uint32_t, TWIG_TALLY_WORDS> words) 
     tally.tested = words[TWIG_TALLY_TESTED];
     tally.kept = words[TWIG_TALLY_KEPT];
     tally.swaying = words[TWIG_TALLY_SWAYING];
+    tally.farBricks = words[TWIG_TALLY_FAR_BRICKS];
+    tally.farNodes = words[TWIG_TALLY_FAR_NODES];
+    tally.farMerged = words[TWIG_TALLY_FAR_MERGED];
+    tally.farClusters = words[TWIG_TALLY_FAR_CLUSTERS];
+    tally.farTriangles = words[TWIG_TALLY_FAR_TRIANGLES];
 
     for (std::uint32_t level = 0; level < twigMostLevels; ++level) {
         tally.levelTwigs[level] = words[TWIG_TALLY_LEVEL_TWIGS + level];
@@ -562,9 +567,24 @@ std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance
 
                 const MeshClusterPose nodePose = twigSpherePose(node.sphere, part, partBound, tree);
 
-                if (node.firstBrick == brickNumber && twigFarNodeKept(node, part, entry, record, view, nodePose) && farDraws != nullptr) {
+                if (tally != nullptr) {
+                    ++tally->farBricks;
+                }
+
+                if (node.firstBrick == brickNumber && twigFarNodeKept(node, part, entry, record, view, nodePose)) {
                     const std::uint32_t level = twigFarLevel(tables, node, part, view);
-                    farDraws->push_back(TwigFarDraw{drawn, level, tables.farLevels[level].firstCluster, tables.farLevels[level].clusterCount});
+                    const GpuTwigFarLevel& chosen = tables.farLevels[level];
+
+                    if (farDraws != nullptr) {
+                        farDraws->push_back(TwigFarDraw{drawn, level, chosen.firstCluster, chosen.clusterCount});
+                    }
+
+                    if (tally != nullptr) {
+                        ++tally->farNodes;
+                        tally->farMerged += drawn != brickNumber ? 1 : 0;
+                        tally->farClusters += chosen.clusterCount;
+                        tally->farTriangles += chosen.leafCount * farLeafTriangles;
+                    }
                 }
 
                 continue;
