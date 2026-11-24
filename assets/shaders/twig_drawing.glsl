@@ -1,5 +1,5 @@
 // Twigs drawn as instances of prototypes, included with #include "twig_drawing.glsl": mirrors render/gpu/twig_records.h
-// (twigInstance, twigPosed, twigLevel, twigBrickKept, twigKept, twigBrickPose) and declares its records. Pure functions, the errors' sides precise,
+// (twigInstance, twigPosed, twigLevel, twigBrickKept, twigKept, twigBrickPose, twigFarLevelFits, twigFarNodeKept) and declares its records. Pure functions, the errors' sides precise,
 // so the twig pass chooses what the cluster cut would.
 #ifndef TWIG_DRAWING_GLSL
 #define TWIG_DRAWING_GLSL
@@ -89,6 +89,33 @@ bool twigBrickKept(TwigBrick brick, InstanceData part, uint entry, CullRecord re
 // A twig (twigKept): its prototype's coarsest group's sphere, placed by the twig.
 bool twigKept(TwigLevel coarsest, InstanceData twig, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
     return twigSphereKept(coarsest.sphere, twig.model, twig, entry, record, view, pose);
+}
+
+// A far node: its sphere in the plant's frame, its levels' run, its first brick, its parent. Must match GpuTwigFarNode.
+struct TwigFarNode {
+    vec4 sphere;
+    uint firstLevel;
+    uint levelCount;
+    uint firstBrick;
+    uint parent;
+};
+
+// A far node's level: its leaves' run and its error. Must match GpuTwigFarLevel.
+struct TwigFarLevel {
+    uint firstLeaf;
+    uint leafCount;
+    float error;
+    uint unused;
+};
+
+// Whether a far node's level fits the view (twigFarLevelFits): its error on the node's sphere placed by the part's model.
+bool twigFarLevelFits(TwigFarNode node, TwigFarLevel level, mat4 model, LevelView view) {
+    return meshClusterErrorPixels(node.sphere, level.error, model, view) <= view.pixelError;
+}
+
+// Whether a view keeps a far node (twigFarNodeKept): its sphere in the plant's frame, placed by the part.
+bool twigFarNodeKept(TwigFarNode node, InstanceData part, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
+    return twigSphereKept(node.sphere, part.model, part, entry, record, view, pose);
 }
 
 // How a brick stands (twigBrickPose): posed with its tree (tree.firstPose not BONE_NO_POSE) when its part is bound,

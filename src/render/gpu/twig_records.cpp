@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 std::uint32_t packTwigBinding(const TwigInstance& twig) {
@@ -328,6 +329,142 @@ MeshClusterPose twigBrickPose(const GpuTwigBrick& brick, const GpuInstance& part
     return meshClusterPosed(grown, part, part.sway[3], Vec2{tree.lean[0], tree.lean[1]});
 }
 
+bool twigFarLevelFits(const GpuTwigFarNode& node, const GpuTwigFarLevel& level, const GpuInstance& part, const GpuCameraCull& view) {
+    return meshClusterErrorPixels(node.sphere, level.error, part, view) <= view.levels.pixelError;
+}
+
+bool twigFarNodeKept(const GpuTwigFarNode& node, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
+                     const MeshClusterPose& pose) {
+    return twigSphereKept(node.sphere, part, part, entry, record, view, pose);
+}
+
+namespace {
+    // Whether two shapes' records are alike in every number.
+    bool sameFarLeafShape(const GpuFarLeafShape& a, const GpuFarLeafShape& b) {
+        return std::memcmp(&a, &b, sizeof(GpuFarLeafShape)) == 0;
+    }
+}
+
+/*
+* Shapes are shared by comparing a set's whole run with each run already packed (the forest's sets all share one), so
+* the table holds a run a distinct set of shapes.
+*/
+PackedTwigSets packTwigSets(std::span<const TwigSet* const> sets, std::span<const MeshHandle> prototypeMeshes) {
+    PackedTwigSets packed;
+    TwigTables& tables = packed.tables;
+    std::vector<std::uint32_t> shapeRuns; // each distinct run's first shape; every run has the same length per set
+
+    for (const TwigSet* set : sets) {
+        const auto twigOffset = static_cast<std::uint32_t>(tables.twigs.size());
+        const auto brickOffset = static_cast<std::uint32_t>(tables.bricks.size());
+        GpuTwigSet record{.firstBrick = brickOffset, .brickCount = static_cast<std::uint32_t>(set->bricks.size())};
+
+        for (const TwigBrick& brick : set->bricks) {
+            GpuTwigBrick made = packTwigBrick(brick);
+            made.firstTwig += twigOffset;
+            tables.bricks.push_back(made);
+        }
+
+        for (const TwigInstance& twig : set->twigs) {
+            const MeshHandle mesh = set->prototypes.at(twig.prototype);
+            const auto found = std::find_if(prototypeMeshes.begin(), prototypeMeshes.end(), [&](const MeshHandle& other) { return other.index == mesh.index; });
+
+            if (found == prototypeMeshes.end()) {
+                throw std::invalid_argument("A twig's prototype is not among the prototype meshes");
+            }
+
+            GpuTwig made = packTwig(twig);
+            made.prototype = static_cast<std::uint32_t>(found - prototypeMeshes.begin());
+            tables.twigs.push_back(made);
+            packed.bindings.push_back(packTwigBinding(twig));
+        }
+
+        const TwigFarLevels& far = set->far;
+
+        if (!far.nodes.empty()) {
+            const auto nodeOffset = static_cast<std::uint32_t>(tables.farNodes.size());
+            const auto levelOffset = static_cast<std::uint32_t>(tables.farLevels.size());
+            const auto leafOffset = static_cast<std::uint32_t>(tables.farLeaves.size());
+            record.firstNode = nodeOffset;
+
+            for (const TwigFarNode& node : far.nodes) {
+                tables.farNodes.push_back(GpuTwigFarNode{.sphere = {node.centre.x, node.centre.y, node.centre.z, node.radius},
+                                                         .firstLevel = levelOffset + node.firstLevel,
+                                                         .levelCount = node.levelCount,
+                                                         .firstBrick = brickOffset + node.firstBrick,
+                                                         .parent = node.parent == twigFarNoNode ? TWIG_FAR_NO_NODE : nodeOffset + node.parent});
+            }
+
+            for (const TwigFarLevel& level : far.levels) {
+                tables.farLevels.push_back(GpuTwigFarLevel{.firstLeaf = leafOffset + level.firstLeaf, .leafCount = level.leafCount, .error = level.error});
+            }
+
+            for (const FarLeaf& leaf : far.leaves) {
+                GpuFarLeaf made = packFarLeaf(leaf);
+                made.twig += twigOffset;
+                tables.farLeaves.push_back(made);
+            }
+
+            std::vector<GpuFarLeafShape> shapes;
+
+            for (const FarLeafShape& shape : far.shapes.cells) {
+                shapes.push_back(packFarLeafShape(shape, far.shapes.foldRadians, far.shapes.curl));
+            }
+
+            const auto sameRun = [&](std::uint32_t first) {
+                return first + shapes.size() <= tables.farShapes.size() &&
+                       std::equal(shapes.begin(), shapes.end(), tables.farShapes.begin() + first, sameFarLeafShape);
+            };
+            const auto shared = std::find_if(shapeRuns.begin(), shapeRuns.end(), sameRun);
+
+            if (shared != shapeRuns.end()) {
+                record.firstShape = *shared;
+            } else {
+                record.firstShape = static_cast<std::uint32_t>(tables.farShapes.size());
+                shapeRuns.push_back(record.firstShape);
+                tables.farShapes.insert(tables.farShapes.end(), shapes.begin(), shapes.end());
+            }
+        }
+
+        packed.sets.push_back(record);
+    }
+
+    return packed;
+}
+
+/*
+* Up the chain while the parent fits: the nodes that fit are a run from the brick up (twigFarLevelFits), so the first
+* parent that does not ends it.
+*/
+std::uint32_t twigFarNodeDrawn(const TwigTables& tables, std::uint32_t brickNode, const GpuInstance& part, const GpuCameraCull& view) {
+    const auto fits = [&](std::uint32_t node) {
+        const GpuTwigFarNode& record = tables.farNodes[node];
+        return twigFarLevelFits(record, tables.farLevels[record.firstLevel], part, view);
+    };
+
+    if (!fits(brickNode)) {
+        return TWIG_FAR_NO_NODE;
+    }
+
+    std::uint32_t node = brickNode;
+
+    while (tables.farNodes[node].parent != TWIG_FAR_NO_NODE && fits(tables.farNodes[node].parent)) {
+        node = tables.farNodes[node].parent;
+    }
+
+    return node;
+}
+
+std::uint32_t twigFarLevel(const TwigTables& tables, const GpuTwigFarNode& node, const GpuInstance& part, const GpuCameraCull& view) {
+    std::uint32_t level = node.firstLevel;
+
+    while (level + 1 < node.firstLevel + node.levelCount && twigFarLevelFits(node, tables.farLevels[level + 1], part, view)) {
+        ++level;
+    }
+
+    return level;
+}
+
 MeshClusterPose twigPose(const GpuTwigLevel& coarsest, const GpuInstance& part, const GpuTwig& twig, std::uint32_t binding, std::span<const GpuBonePose> pool,
                          const GpuBoneTree& tree) {
     const bool bound = binding != swayUnbound;
@@ -357,13 +494,32 @@ TwigTally readTwigTally(std::span<const std::uint32_t, TWIG_TALLY_WORDS> words) 
 
 // The tally as twig_cull.comp counts: every twig of every brick tested, whether its brick is kept or not.
 std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance& part, std::uint32_t entry, const GpuCullRecord& record,
-                                     const GpuCameraCull& view, TwigTally* tally, const BoneCullTables* bones, bool partBound) {
+                                     const GpuCameraCull& view, TwigTally* tally, const BoneCullTables* bones, bool partBound,
+                                     std::vector<TwigFarDraw>* farDraws) {
     std::vector<TwigDraw> draws;
     const GpuBoneTree tree = bones != nullptr ? boneCullTree(*bones, entry & DRAW_LIST_INSTANCE_MASK) : GpuBoneTree{};
+    const bool hasFar = !tables.farNodes.empty();
 
-    for (const GpuTwigBrick& brick : tables.bricks) {
+    for (std::uint32_t brickNumber = 0; brickNumber < tables.bricks.size(); ++brickNumber) {
+        const GpuTwigBrick& brick = tables.bricks[brickNumber];
+
         if (tally != nullptr) {
             tally->tested += brick.twigCount;
+        }
+
+        if (hasFar) {
+            const std::uint32_t drawn = twigFarNodeDrawn(tables, brickNumber, part, view);
+
+            if (drawn != TWIG_FAR_NO_NODE) {
+                const GpuTwigFarNode& node = tables.farNodes[drawn];
+
+                if (node.firstBrick == brickNumber && twigFarNodeKept(node, part, entry, record, view, MeshClusterPose{}) && farDraws != nullptr) {
+                    const std::uint32_t level = twigFarLevel(tables, node, part, view);
+                    farDraws->push_back(TwigFarDraw{drawn, level, tables.farLevels[level].firstLeaf, tables.farLevels[level].leafCount});
+                }
+
+                continue;
+            }
         }
 
         if (!twigBrickKept(brick, part, entry, record, view, twigBrickPose(brick, part, partBound, tree))) {
@@ -384,7 +540,8 @@ std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance
                 continue;
             }
 
-            const std::uint32_t level = twigLevel(levels, prototype.levelCount, placed, view);
+            const std::uint32_t drawable = hasFar ? std::min<std::uint32_t>(prototype.levelCount, TWIG_BRICK_LEVEL + 1) : prototype.levelCount;
+            const std::uint32_t level = twigLevel(levels, drawable, placed, view);
             const GpuTwigLevel& chosen = levels[level];
             draws.push_back(TwigDraw{number, chosen.firstCluster, chosen.clusterCount});
 
