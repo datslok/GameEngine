@@ -166,3 +166,8 @@
   - **Proposed:** 4096² levels from 0.5 m to 8 km chosen by distance (0.5-1 pixel a texel at 1440p), one depth range sliding across the light, a D32 pool of 4096 pages, still and moving slices, today's PCSS through the table.
   - **The user's picks:** clip distances with the hardware depth test first (crowns about 100 leaves deep), atomics the fallback; cascades kept for GPUs without mesh shaders; the far map kept for fog, probes, cards and missing pages.
   - **Expected:** a still frame about today's 0.7-1.2 ms; the gain is swaying and turning (today 3.8-5.4 ms), finer texels and leaves casting as drawn.
+- `vsm-4a-clipmap` (Nov 24 2026): the clipmap's maths on the CPU and in `virtual_shadows.glsl` (`virtual-shadows.md`).
+  - **Changed from the plan:** each level its own depth range (16 half-widths either side, re-centred after 15), not one for all: 16 km in a float is 1 mm steps, nearly four of the finest level's 0.24 mm texels; per level under a quarter texel. Casters past the 200 m reach stay the far map's.
+  - **Level choice by doubling,** not `log2`: exact in floats, so marking, sampling and the CPU agree to the bit.
+  - **`sunLightRotation`** split out of `cascadeBox`, shared by both.
+  - **7 planted bugs caught** (the reach's edge given to the next level, slack not less one, negative pages unwrapped, the caster reach left out of the range, no margin, the camera snapped down instead of to the nearest page: caught only once points at the level's reach straight across the light were tested, the depth centre not kept).

@@ -1,0 +1,122 @@
+#include "gpu_check.h"
+#include "gpu_test_functions.h"
+
+#include "render/gpu/virtual_shadows.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace {
+    const std::string shader = gpuTestShader("virtual_shadows_test");
+
+    /*
+    * Distances across every level and exactly on each level's reach and a float step either side of it, for both
+    * resolutions: (distance, first usable half-width, levels). The choice is by doubling, so CPU and GPU agree exactly.
+    */
+    void checkLevelChoice(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{41};
+        std::vector<GpuVec4> inputs;
+
+        for (int pagesPerSide : {32, 64}) {
+            const float firstUsable = virtualShadowUsableHalfWidth(0.5f, pagesPerSide);
+
+            for (int level = 0; level < 15; ++level) {
+                const float reach = virtualShadowUsableHalfWidth(virtualShadowHalfWidth(0.5f, level), pagesPerSide);
+
+                for (float distance : {std::nextafter(reach, 0.0f), reach, std::nextafter(reach, 1e9f)}) {
+                    inputs.push_back(gpuVec4(distance, firstUsable, 15.0f));
+                }
+            }
+
+            for (int i = 0; i < 200; ++i) {
+                inputs.push_back(gpuVec4(std::exp(random.between(-3.0f, 10.0f)), firstUsable, static_cast<float>(1 + i % 16)));
+            }
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_LEVEL, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const GpuVec4& in = inputs[i];
+            const int expected = virtualShadowLevelFor(in[0], in[1], static_cast<int>(in[2]));
+            report.check("virtualShadowLevelFor", exactTolerance, static_cast<float>(expected), outputs[i][0]);
+        }
+    }
+
+    // Texels across a level (and a little outside it, for the page alone), origin slots, levels and both resolutions:
+    // (texel x, texel y, origin slot x, y), (pages a side, level).
+    void checkPagesAndSlots(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{42};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 400; ++i) {
+            const int pagesPerSide = i % 2 == 0 ? 32 : 64;
+            const float side = static_cast<float>(pagesPerSide * virtualShadowPageTexels);
+            inputs.push_back(gpuVec4(random.between(-200.0f, side + 200.0f), random.between(-200.0f, side + 200.0f),
+                                     std::floor(random.between(0.0f, static_cast<float>(pagesPerSide) - 0.01f)),
+                                     std::floor(random.between(0.0f, static_cast<float>(pagesPerSide) - 0.01f))));
+            inputs.push_back(gpuVec4(static_cast<float>(pagesPerSide), std::floor(random.between(0.0f, 15.99f))));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_PAGE, inputs, 2, 2);
+
+        for (std::size_t i = 0; i < inputs.size() / 2; ++i) {
+            const GpuVec4& texel = inputs[2 * i];
+            const int pagesPerSide = static_cast<int>(inputs[2 * i + 1][0]);
+            const int level = static_cast<int>(inputs[2 * i + 1][1]);
+            const VirtualShadowPage page = virtualShadowPageOf(texel[0], texel[1]);
+            const VirtualShadowPage inLevel{std::clamp(page.x, 0, pagesPerSide - 1), std::clamp(page.y, 0, pagesPerSide - 1)};
+            const VirtualShadowPage origin{static_cast<int>(texel[2]), static_cast<int>(texel[3])};
+            const VirtualShadowPage slot = virtualShadowSlot(inLevel, origin, pagesPerSide);
+            const GpuVec4& out = outputs[2 * i];
+
+            report.check("virtualShadowPageOf", exactTolerance, static_cast<float>(page.x), out[0]);
+            report.check("virtualShadowPageOf", exactTolerance, static_cast<float>(page.y), out[1]);
+            report.check("virtualShadowSlot", exactTolerance, static_cast<float>(slot.x), out[2]);
+            report.check("virtualShadowSlot", exactTolerance, static_cast<float>(slot.y), out[3]);
+            report.check("virtualShadowTableIndex", exactTolerance, static_cast<float>(virtualShadowTableIndex(level, slot, pagesPerSide)),
+                         outputs[2 * i + 1][0]);
+        }
+    }
+
+    // Points up to a level's half-width from the camera at every level's scale, placements as the clipmap makes them
+    // (the camera within half a page of the centre): (light-space point), (camera texel x, y, inverse texel), (depth
+    // scale, offset).
+    void checkLevelPoint(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{43};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 300; ++i) {
+            const int level = i % 15;
+            const float halfWidth = virtualShadowHalfWidth(0.5f, level);
+            const float range = 2.0f * 16.0f * halfWidth + 200.0f;
+            inputs.push_back(gpuVec4(random.between(-halfWidth, halfWidth), random.between(-halfWidth, halfWidth), random.between(-halfWidth, halfWidth)));
+            inputs.push_back(gpuVec4(random.between(1984.0f, 2112.0f), random.between(1984.0f, 2112.0f), 1.0f / virtualShadowTexelSize(halfWidth, 32)));
+            inputs.push_back(gpuVec4(1.0f / range, random.between(0.3f, 0.7f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_LEVEL_POINT, inputs, 3, 1);
+
+        for (std::size_t i = 0; i < inputs.size() / 3; ++i) {
+            const GpuVec4& point = inputs[3 * i];
+            const GpuVec4& place = inputs[3 * i + 1];
+            const GpuVec4& depth = inputs[3 * i + 2];
+            VirtualShadowPlacement placement;
+            placement.cameraTexelX = place[0];
+            placement.cameraTexelY = place[1];
+            placement.inverseTexel = place[2];
+            placement.depthScale = depth[0];
+            placement.depthOffset = depth[1];
+            const Vec3 expected = virtualShadowLevelPoint(Vec3{point[0], point[1], point[2]}, placement);
+            report.check("virtualShadowLevelPoint", arithmeticTolerance, expected, Vec3{outputs[i][0], outputs[i][1], outputs[i][2]});
+        }
+    }
+}
+
+void gpuTestVirtualShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
+    checkLevelChoice(runner, report);
+    checkPagesAndSlots(runner, report);
+    checkLevelPoint(runner, report);
+}

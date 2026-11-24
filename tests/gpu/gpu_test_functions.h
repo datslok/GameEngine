@@ -84,6 +84,11 @@
 #define GPU_TEST_SUN_SHADOW_BIAS 2
 #define GPU_TEST_DISTANT_OCCLUDERS 3
 
+// virtual_shadows_test.comp
+#define GPU_TEST_VIRTUAL_SHADOW_LEVEL 0
+#define GPU_TEST_VIRTUAL_SHADOW_PAGE 1
+#define GPU_TEST_VIRTUAL_SHADOW_LEVEL_POINT 2
+
 // ray_tracing_test.comp
 #define GPU_TEST_CAMERA_RAY 0
 

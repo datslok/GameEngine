@@ -1,0 +1,27 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs virtual_shadows.glsl's functions on the cases virtual_shadows_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "virtual_shadows.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_VIRTUAL_SHADOW_LEVEL) {
+        testOutput(0, vec4(float(virtualShadowLevelFor(a.x, a.y, int(a.z)))));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_PAGE) {
+        vec4 b = testInput(1);
+        int pagesPerSide = int(b.x);
+        ivec2 page = virtualShadowPageOf(a.xy);
+        ivec2 slot = virtualShadowSlot(clamp(page, ivec2(0), ivec2(pagesPerSide - 1)), ivec2(a.zw), pagesPerSide);
+        testOutput(0, vec4(vec2(page), vec2(slot)));
+        testOutput(1, vec4(float(virtualShadowTableIndex(int(b.y), slot, pagesPerSide))));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_LEVEL_POINT) {
+        testOutput(0, vec4(virtualShadowLevelPoint(a.xyz, testInput(1).xyz, testInput(2).xy), 0.0));
+    }
+}

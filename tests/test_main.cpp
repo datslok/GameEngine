@@ -156,6 +156,7 @@ void testShadowMap();
 void testShadowAtlas();
 void testSoftShadow();
 void testCascades();
+void testVirtualShadows();
 void testDepthRange();
 void testDdgi();
 void testDdgiSampling();
@@ -478,6 +479,7 @@ const RoutineTest routineTests[] = {
     {"testShadowAtlas", testShadowAtlas},
     {"testSoftShadow", testSoftShadow},
     {"testCascades", testCascades},
+    {"testVirtualShadows", testVirtualShadows},
     {"testDepthRange", testDepthRange},
     {"testAtmosphere", testAtmosphere},
     {"testRayTracing", testRayTracing},
