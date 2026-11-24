@@ -131,30 +131,11 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
         levelRecords.insert(levelRecords.end(), levels.begin(), levels.end());
     }
 
-    std::vector<std::array<std::uint32_t, 4>> setRecords;
-    std::vector<GpuTwigBrick> brickRecords;
-    std::vector<GpuTwig> twigRecords;
-    std::vector<std::uint32_t> bindingRecords;
+    PackedTwigSets packed = packTwigSets(table.twigSets, prototypeMeshes);
     mostBricks = 0;
 
-    for (const TwigSet* set : table.twigSets) {
-        setRecords.push_back({static_cast<std::uint32_t>(brickRecords.size()), static_cast<std::uint32_t>(set->bricks.size()), 0, 0});
-        mostBricks = std::max(mostBricks, static_cast<std::uint32_t>(set->bricks.size()));
-        const auto twigOffset = static_cast<std::uint32_t>(twigRecords.size());
-
-        for (const TwigBrick& brick : set->bricks) {
-            GpuTwigBrick packed = packTwigBrick(brick);
-            packed.firstTwig += twigOffset;
-            brickRecords.push_back(packed);
-        }
-
-        for (const TwigInstance& twig : set->twigs) {
-            GpuTwig packed = packTwig(twig);
-            packed.prototype = static_cast<std::uint32_t>(
-                std::find(prototypeMeshes.begin(), prototypeMeshes.end(), set->prototypes.at(twig.prototype)) - prototypeMeshes.begin());
-            twigRecords.push_back(packed);
-            bindingRecords.push_back(packTwigBinding(twig));
-        }
+    for (const GpuTwigSet& set : packed.sets) {
+        mostBricks = std::max(mostBricks, set.brickCount);
     }
 
     // Every frame in flight reads the tables: none may be reading them while they are remade.
@@ -162,11 +143,14 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
         device.waitIdle();
     }
 
-    uploadBytes(allocator, sets, setRecords.data(), setRecords.size() * sizeof(setRecords[0]));
+    // The far tables (packed.tables.far*) go up in 3e-iii-b, with the pass that reads them.
+    const std::vector<GpuTwigBrick>& brickRecords = packed.tables.bricks;
+    const std::vector<GpuTwig>& twigRecords = packed.tables.twigs;
+    uploadBytes(allocator, sets, packed.sets.data(), packed.sets.size() * sizeof(GpuTwigSet));
     uploadBytes(allocator, bricks, brickRecords.data(), std::max<std::size_t>(brickRecords.size(), 1) * sizeof(GpuTwigBrick));
     uploadBytes(allocator, twigs, twigRecords.data(), std::max<std::size_t>(twigRecords.size(), 1) * sizeof(GpuTwig));
-    uploadBytes(allocator, twigBindings, bindingRecords.data(), std::max<std::size_t>(bindingRecords.size(), 1) * sizeof(std::uint32_t));
-    twigBindingRecords = std::move(bindingRecords);
+    uploadBytes(allocator, twigBindings, packed.bindings.data(), std::max<std::size_t>(packed.bindings.size(), 1) * sizeof(std::uint32_t));
+    twigBindingRecords = std::move(packed.bindings);
     uploadBytes(allocator, prototypes, prototypeRecords.data(), prototypeRecords.size() * sizeof(GpuTwigPrototype));
     uploadBytes(allocator, levels, levelRecords.data(), levelRecords.size() * sizeof(GpuTwigLevel));
     madeFrom = table.twigSets;

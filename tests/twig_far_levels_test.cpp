@@ -14,53 +14,6 @@
 #include "twig_helpers.h"
 
 namespace {
-    // Three prototypes handing over 4, 5 and 3 leaves of different sides, areas and reaches, grown 2, 1.8 and 2.2 times
-    // over their finest sides.
-    std::vector<TwigFarLeaves> testPrototypes() {
-        std::vector<TwigFarLeaves> prototypes;
-        const std::uint32_t counts[3] = {4, 5, 3};
-        const float growths[3] = {2.0f, 1.8f, 2.2f};
-
-        for (std::uint32_t prototype = 0; prototype < 3; ++prototype) {
-            TwigFarLeaves& made = prototypes.emplace_back();
-            made.growth = growths[prototype];
-
-            for (std::uint32_t leaf = 0; leaf < counts[prototype]; ++leaf) {
-                const float turn = 0.7f * static_cast<float>(leaf + prototype);
-                const Vec3 towardsTip{-std::sin(turn), std::cos(turn), 0.0f};
-                made.leaves.push_back(TwigLeafPlace{.foot = Vec3{0.02f * static_cast<float>(leaf), 0.05f * static_cast<float>(leaf + 1), 0.0f},
-                                                    .towardsTip = towardsTip,
-                                                    .facing = Vec3{0.0f, 0.0f, 1.0f},
-                                                    .side = 0.06f + 0.01f * static_cast<float>(leaf),
-                                                    .area = 0.3f + 0.05f * static_cast<float>(prototype),
-                                                    .reach = 1.05f,
-                                                    .cell = (leaf * 5 + prototype) % 24,
-                                                    .number = leaf * 3 + 1});
-                made.error = std::max(made.error, made.leaves.back().side / made.growth * (made.growth - 1.0f));
-            }
-        }
-
-        return prototypes;
-    }
-
-    // The 24 cells the test leaves name, each a slightly different shape, folded and curled.
-    FarLeafShapes testShapes() {
-        FarLeafShapes shapes{.cells = {}, .foldRadians = 0.25f, .curl = 0.08f};
-
-        for (int cell = 0; cell < 24; ++cell) {
-            const float step = static_cast<float>(cell) * 0.01f;
-            shapes.cells.push_back(FarLeafShape{.base = 0.05f + step,
-                                                .tip = 0.95f - step,
-                                                .up = 0.5f + step,
-                                                .left = 0.3f - step,
-                                                .right = 0.28f,
-                                                .uvMin = Vec2{static_cast<float>(cell % 6) / 6.0f, static_cast<float>(cell / 6) / 4.0f},
-                                                .uvMax = Vec2{static_cast<float>(cell % 6 + 1) / 6.0f, static_cast<float>(cell / 6 + 1) / 4.0f}});
-        }
-
-        return shapes;
-    }
-
     TwigSet testSet(std::size_t twigs) {
         return makeTwigSet({MeshHandle{3}, MeshHandle{4}, MeshHandle{5}}, {1.2f, 1.0f, 0.8f}, scatteredTwigs(twigs));
     }
@@ -121,9 +74,9 @@ namespace {
         assert((carried.towardsTip - Vec3{0.0f, 0.0f, -1.0f}).length() < 1e-6f && (carried.facing - Vec3{1.0f, 0.0f, 0.0f}).length() < 1e-6f);
         assert(near(carried.side, 0.3f, 1e-6f) && carried.cell == 7 && carried.number == 9 && carried.twig == 42);
 
-        const std::vector<TwigFarLeaves> prototypes = testPrototypes();
+        const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(2000);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, testShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
         assert(far.nodes.size() > set.bricks.size());
 
         for (std::size_t brick = 0; brick < set.bricks.size(); ++brick) {
@@ -152,9 +105,9 @@ namespace {
     * cluster is left (only the last fits one); every record of a level carries its growth.
     */
     void testFarLevelsNestAndKeepTheArea() {
-        const std::vector<TwigFarLeaves> prototypes = testPrototypes();
+        const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(3000);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, testShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
 
         // Each node's full area: its bricks' finest levels'.
         std::vector<float> fullArea(far.nodes.size(), 0.0f);
@@ -229,9 +182,9 @@ namespace {
     * finest size.
     */
     void testFarErrorsRise() {
-        const std::vector<TwigFarLeaves> prototypes = testPrototypes();
+        const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(1500);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, testShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
 
         for (std::size_t index = 0; index < far.nodes.size(); ++index) {
             const TwigFarNode& node = far.nodes[index];
@@ -277,9 +230,9 @@ namespace {
     * and its children's spheres.
     */
     void testFarTreeFollowsTheSplit() {
-        const std::vector<TwigFarLeaves> prototypes = testPrototypes();
+        const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(2500);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, testShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
         std::size_t roots = 0;
 
         for (std::size_t index = 0; index < far.nodes.size(); ++index) {
@@ -313,18 +266,18 @@ namespace {
         assert(roots == 1 && far.nodes.size() == 2 * set.bricks.size() - 1);
 
         // The same set makes the same levels; a prototype not handed over is refused; no twigs, nothing.
-        const TwigFarLevels again = makeTwigFarLevels(set, prototypes, testShapes());
+        const TwigFarLevels again = makeTwigFarLevels(set, prototypes, standInFarShapes());
         assert(again.leaves.size() == far.leaves.size() && again.levels.size() == far.levels.size());
 
         for (std::size_t leaf = 0; leaf < far.leaves.size(); ++leaf) {
             assert(sameFarLeaf(again.leaves[leaf], far.leaves[leaf]));
         }
-        assert(throwsInvalid([&] { makeTwigFarLevels(set, {prototypes[0], prototypes[1]}, testShapes()); }));
-        FarLeafShapes fewer = testShapes();
+        assert(throwsInvalid([&] { makeTwigFarLevels(set, {prototypes[0], prototypes[1]}, standInFarShapes()); }));
+        FarLeafShapes fewer = standInFarShapes();
         fewer.cells.resize(10);
         assert(throwsInvalid([&] { makeTwigFarLevels(set, prototypes, fewer); }));
         assert(far.shapes.cells.size() == 24 && far.shapes.curl == 0.08f);
-        const TwigFarLevels none = makeTwigFarLevels(makeTwigSet({}, {}, {}), prototypes, testShapes());
+        const TwigFarLevels none = makeTwigFarLevels(makeTwigSet({}, {}, {}), prototypes, standInFarShapes());
         assert(none.leaves.empty() && none.levels.empty() && none.nodes.empty());
     }
 }

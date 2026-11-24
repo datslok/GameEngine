@@ -24,7 +24,7 @@
 | `cloth_helpers.h` | `untetheredSettings` |
 | `cull_helpers.h` | `randomCullScene`, `packCullSceneLevels` (GPU-driven drawing's scenes); `testView`, `cutView`, `placedInstance`, `stillRecord` (mesh cluster views) |
 | `planting_helpers.h` | `straightMaps`, `rollingGround`, `threeLayers`, `samePlant` (planting from maps) |
-| `twig_helpers.h` | `scatteredTwigs` (twigs through a crown, for twig sets and their far levels) |
+| `twig_helpers.h` | `scatteredTwigs` (twigs through a crown, for twig sets and their far levels); `standInFarLeaves`, `standInFarShapes` (far levels' inputs) |
 | `mesh_helpers.h` | `rippledSheet` (a curved open sheet for mesh tools); cluster cuts: `positionNumbers`, `openEdges`, `enclosedVolume` |
 
 ## Known issue

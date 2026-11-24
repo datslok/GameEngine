@@ -115,3 +115,11 @@
   - **A missed planted bug:** swapping a leaf's half widths passed, as the stand-in leaves are symmetric; a leaf bitten on one side now catches it (the bite had to cover the one-row trace's height, which moves with the leaf).
   - **9 planted bugs caught** (two signs in `fromBasis`, the winding, the curl's sign, the number left off the texture coordinate, the quaternion's halves swapped, one triangle a normal, the fold's angle for its tangent, half widths swapped).
   - GPU test written (`twig_drawing_gpu_test`'s far leaf vertices), not run.
+- `leaf-bricks-3e-iii-a` (Nov 24 2026): every set's far tables packed (`packTwigSets`) and each brick's one choice, twigs or a far node, made on the CPU twin; nothing uploaded or drawn by them yet.
+  - **Upload waits for 3e-iii-b** (3e-ii's rule: no buffer unused for a step); `VulkanTwigDrawing::prepare` now packs through `packTwigSets`, the far tables left out.
+  - **Merged nodes need no coordination:** a brick walks up its chain while the parent fits; fitting runs from the bricks up (a parent's sphere holds its children's, its errors never less), so every brick under a node finds it, and its first brick draws it. Cost grows with bricks tested and the chain's depth (about 7).
+  - **Twigs stop at level 2 in a set with far levels:** so the switch moves no leaf. Tested on the forest's twigs: wherever a brick's node fits, each of its twigs would draw level 2 or coarser by itself. Levels 3-4 were rare (392K and 25K twigs at the ring, 9 and 8 triangles each).
+  - **Far leaves' twigs offset by the sets before** (the tone and binding gotcha from 3e-ii).
+  - **Sweeps:** a 3000-twig crown from 12 m to 480 m at 8 px, then the pixel error grown: 47 bricks, then 27, 8 and 3 merged nodes, then the root alone.
+  - **9 planted bugs caught** (a leaf's twig, a node's parent and first brick not offset, shapes never shared, every brick drawing its node, twigs not stopped at level 2, never up the chain, always the finest far level, far nodes not culled).
+  - GPU test written (`twig_drawing_gpu_test`'s far node), not run.

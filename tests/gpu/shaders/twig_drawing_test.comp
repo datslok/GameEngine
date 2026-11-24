@@ -101,6 +101,38 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_TWIG_FAR_NODE) {
+        // Inputs: the part's model, normal matrix and scale (9), the node's sphere, (the level's error, the pixel error,
+        // record flags, view flags), the record's bounds, the eye (w pixels a metre away), the frustum's six planes.
+        // Output: (fits, kept), the node unposed.
+        InstanceData part = testInstance(0u);
+        TwigFarNode node = TwigFarNode(testInput(9), 0u, 1u, 0u, TWIG_FAR_NO_NODE);
+        vec4 numbers = testInput(10);
+        TwigFarLevel level = TwigFarLevel(0u, 12u, numbers.x, 0u);
+        CullRecord record;
+        record.bounds = testInput(11);
+        record.levelSphere = record.bounds;
+        record.flags = uint(numbers.z);
+        record.mesh = 0u;
+        record.hiddenBelowError = 0.0;
+        record.shadowCascades = 0;
+        CameraCull view;
+        view.levels.eye = testInput(12);
+        view.levels.pixelError = numbers.y;
+        view.levels.flags = 0u;
+        view.flags = uint(numbers.w);
+        view.swayFadeEnd = 0.0;
+
+        for (int plane = 0; plane < 6; ++plane) {
+            view.frustum.planes[plane] = testInput(13u + uint(plane));
+        }
+
+        bool fits = twigFarLevelFits(node, level, part.model, view.levels);
+        bool kept = twigFarNodeKept(node, part, 0u, record, view, meshClusterUnposed(false));
+        testOutput(0, vec4(fits ? 1.0 : 0.0, kept ? 1.0 : 0.0, 0.0, 0.0));
+        return;
+    }
+
     if (function == GPU_TEST_FAR_LEAF_VERTEX) {
         // Inputs: (the foot, the first turn word's bits), (the second turn word's, the side cell number word's and the
         // twig's bits, the vertex), the shape's three vec4s. Outputs: the position, normal, (uv), tangent.

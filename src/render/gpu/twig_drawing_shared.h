@@ -20,6 +20,12 @@
 // The most levels a prototype has (a twig of up to 2^7 leaves halved to one).
 #define TWIG_MOST_LEVELS 8
 
+// The coarsest twig level a set with far levels draws (scene/twig_set.h's twigBrickLevel): past it its bricks take over.
+#define TWIG_BRICK_LEVEL 2
+
+// No far node: a set without far levels (its record's first node), the root's parent.
+#define TWIG_FAR_NO_NODE 0xffffffffu
+
 // The cull pass's tally (F4's TWIGS line, ROADMAP phase 21 stage 5-0; TwigTally), its words after the regions' room:
 // twigs tested, kept, kept for sway, a spare, then each level's twigs kept and their triangles.
 #define TWIG_TALLY_TESTED 0

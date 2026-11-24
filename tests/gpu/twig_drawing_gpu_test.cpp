@@ -264,6 +264,81 @@ namespace {
             report.check("twigBrickKept", exactTolerance, twigBrickKept(c.brick, c.part, 0u, c.record, c.view, pose) ? 1.0f : 0.0f, outputs[2 * i][0]);
         }
     }
+
+    /*
+    * A far node's level fitting and the node kept equal the mirror's: random parts, nodes, errors and views, still and
+    * swaying records, cases within rounding of the pixel error or a plane left out.
+    */
+    void checkFarNode(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{67};
+        struct Case {
+            GpuInstance part{};
+            GpuTwigFarNode node;
+            GpuTwigFarLevel level;
+            GpuCullRecord record;
+            GpuCameraCull view{};
+        };
+        std::vector<Case> all;
+        std::vector<GpuVec4> inputs;
+
+        for (int index = 0; index < 1200; ++index) {
+            Case c;
+            c.part = randomPart(random);
+            c.node.sphere[0] = random.between(-8.0f, 8.0f);
+            c.node.sphere[1] = random.between(5.0f, 25.0f);
+            c.node.sphere[2] = random.between(-8.0f, 8.0f);
+            c.node.sphere[3] = random.between(0.5f, 10.0f);
+            c.level.error = random.between(0.01f, 5.0f);
+            c.record.bounds[0] = c.part.model[12];
+            c.record.bounds[1] = c.part.model[13] + 15.0f;
+            c.record.bounds[2] = c.part.model[14];
+            c.record.bounds[3] = 20.0f;
+            c.record.flags = index % 3 == 1 ? CULL_SWAYS : 0u;
+            const Vec3 eye{random.between(-300.0f, 300.0f), random.between(1.0f, 60.0f), random.between(-300.0f, 300.0f)};
+            const float yaw = random.between(0.0f, 6.28f);
+            const Mat4 projection = toGpuDepthRange(Mat4::perspective(0.9f, 16.0f / 9.0f, 0.1f, 2000.0f));
+            const Mat4 look = Mat4::lookAt(eye, eye + Vec3{std::cos(yaw), -0.1f, std::sin(yaw)}, Vec3{0.0f, 1.0f, 0.0f});
+            LevelView levels;
+            levels.eye = eye;
+            c.view = packCameraCull(Frustum::fromClipMatrix(projection * look, ClipDepth::OneToZero), levels, false, false, 0.0f);
+            c.view.levels.eye[3] = 1080.0f / (2.0f * std::tan(0.45f));
+            c.view.levels.pixelError = random.between(0.5f, 4.0f);
+            all.push_back(c);
+            pushPart(inputs, c.part);
+            inputs.push_back(gpuVec4(c.node.sphere[0], c.node.sphere[1], c.node.sphere[2], c.node.sphere[3]));
+            inputs.push_back(gpuVec4(c.level.error, c.view.levels.pixelError, static_cast<float>(c.record.flags), static_cast<float>(c.view.flags)));
+            inputs.push_back(gpuVec4(c.record.bounds[0], c.record.bounds[1], c.record.bounds[2], c.record.bounds[3]));
+            inputs.push_back(gpuVec4(c.view.levels.eye[0], c.view.levels.eye[1], c.view.levels.eye[2], c.view.levels.eye[3]));
+
+            for (const auto& plane : c.view.frustum.planes) {
+                inputs.push_back(gpuVec4(plane[0], plane[1], plane[2], plane[3]));
+            }
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TWIG_FAR_NODE, inputs, 19, 1);
+
+        for (std::size_t i = 0; i < all.size(); ++i) {
+            const Case& c = all[i];
+            const float pixels = meshClusterErrorPixels(c.node.sphere, c.level.error, c.part, c.view);
+
+            if (std::fabs(pixels - c.view.levels.pixelError) > 1e-3f * c.view.levels.pixelError) {
+                report.check("twigFarLevelFits", exactTolerance, twigFarLevelFits(c.node, c.level, c.part, c.view) ? 1.0f : 0.0f, outputs[i][0]);
+            }
+
+            const std::array<float, 4> placed = meshClusterPlacedSphere(c.node.sphere, c.part);
+            bool nearEdge = false;
+
+            for (const auto& plane : c.view.frustum.planes) {
+                const float distance = plane[0] * placed[0] + plane[1] * placed[1] + plane[2] * placed[2] + plane[3] + placed[3];
+                nearEdge = nearEdge || std::fabs(distance) < 1e-3f;
+            }
+
+            if (!nearEdge) {
+                report.check("twigFarNodeKept", exactTolerance, twigFarNodeKept(c.node, c.part, 0u, c.record, c.view, MeshClusterPose{}) ? 1.0f : 0.0f,
+                             outputs[i][1]);
+            }
+        }
+    }
 }
 
 namespace {
@@ -332,5 +407,6 @@ void gpuTestTwigDrawing(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkInstance(runner, report);
     checkLevelDrawn(runner, report);
     checkBrickKept(runner, report);
+    checkFarNode(runner, report);
     checkFarLeafVertex(runner, report);
 }

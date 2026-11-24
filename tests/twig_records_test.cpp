@@ -573,6 +573,302 @@ namespace {
 }
 
 namespace {
+    // Real twigs (the forest's, from a stand-in atlas) in a set with far levels, and the tables the twig pass reads of it:
+    // the set packed alone, each prototype's levels from its given cluster levels, each run where a pool would hold it.
+    struct FarTwigs {
+        std::vector<TwigPrototype> prototypes;
+        TwigSet set;
+        TwigTables tables;
+    };
+
+    FarTwigs farTwigs(std::size_t count) {
+        const LeafAtlas atlas = standInLeafAtlas(64, forestTreeLeafColumns, forestTreeLeafRows, forestLeafStandIn);
+        const ForestTwigSettings settings;
+        const TracedLeaves leaves = traceAtlasLeaves(atlas, 3, 1.0f);
+        FarTwigs made;
+        made.prototypes = buildTwigPrototypes(leaves, settings, 1.0f, 0.22f, 3);
+        std::vector<TwigFarLeaves> handed;
+        std::vector<float> reaches;
+        std::vector<MeshHandle> meshes;
+
+        for (const TwigPrototype& twig : made.prototypes) {
+            handed.push_back(twigFarLeaves(twig));
+            reaches.push_back(meshReach(twigLeafMesh(twig).mesh));
+            meshes.push_back(MeshHandle{static_cast<std::uint32_t>(meshes.size())});
+        }
+
+        made.set = makeTwigSet(meshes, reaches, scatteredTwigs(count, static_cast<std::uint32_t>(made.prototypes.size())));
+        made.set.far = makeTwigFarLevels(made.set, handed, twigFarLeafShapes(leaves, settings));
+        const TwigSet* sets[1] = {&made.set};
+        made.tables = packTwigSets(sets, meshes).tables;
+        std::uint32_t pool = 0;
+
+        for (const TwigPrototype& twig : made.prototypes) {
+            const TwigLeafMesh mesh = twigLeafMesh(twig);
+            const MeshClusters clusters = buildGivenClusterLevels(mesh.mesh, mesh.coarser);
+            const std::vector<GpuTwigLevel> levels = packTwigLevels(clusters, pool);
+            made.tables.prototypes.push_back(GpuTwigPrototype{static_cast<std::uint32_t>(made.tables.levels.size()), static_cast<std::uint32_t>(levels.size())});
+            made.tables.levels.insert(made.tables.levels.end(), levels.begin(), levels.end());
+            pool += static_cast<std::uint32_t>(clusters.clusters.size());
+        }
+
+        return made;
+    }
+
+    // Two far leaf records alike in every word.
+    bool sameGpuFarLeaf(const GpuFarLeaf& a, const GpuFarLeaf& b) {
+        return a.foot[0] == b.foot[0] && a.foot[1] == b.foot[1] && a.foot[2] == b.foot[2] && a.turn[0] == b.turn[0] && a.turn[1] == b.turn[1] &&
+               a.sideCellNumber == b.sideCellNumber && a.twig == b.twig;
+    }
+
+    /*
+    * Sets packed into one table each: every run moved past the sets before (bricks' twigs, far nodes' levels, first
+    * bricks and parents, far levels' leaves, far leaves' twigs: a leaf's twig must be the table's, or it takes another
+    * twig's binding, lean and tone), a set without far levels naming no node, sets with the same shapes sharing one run
+    * and a set with others its own, prototypes numbered by their meshes; a prototype not among the meshes refused.
+    */
+    void testPackedSetsMoveTheirRuns() {
+        const std::vector<TwigFarLeaves> handed = standInFarLeaves();
+        const std::vector<float> reaches{1.2f, 1.0f, 0.8f};
+        TwigSet first = makeTwigSet({MeshHandle{3}, MeshHandle{4}, MeshHandle{5}}, reaches, scatteredTwigs(700));
+        first.far = makeTwigFarLevels(first, handed, standInFarShapes());
+        const TwigSet plain = makeTwigSet({MeshHandle{9}, MeshHandle{4}}, {1.0f, 1.0f}, scatteredTwigs(200, 2));
+        TwigSet third = makeTwigSet({MeshHandle{5}, MeshHandle{3}, MeshHandle{4}}, reaches, scatteredTwigs(300));
+        third.far = makeTwigFarLevels(third, handed, standInFarShapes());
+        TwigSet curled = third;
+        curled.far.shapes.curl = 0.2f;
+        const std::vector<MeshHandle> meshes{MeshHandle{3}, MeshHandle{4}, MeshHandle{5}, MeshHandle{9}};
+        const std::vector<const TwigSet*> sets{&first, &plain, &third, &curled};
+        const PackedTwigSets packed = packTwigSets(sets, meshes);
+        const TwigTables& tables = packed.tables;
+
+        std::uint32_t bricksBefore = 0;
+        std::uint32_t twigsBefore = 0;
+        std::uint32_t nodesBefore = 0;
+        std::uint32_t levelsBefore = 0;
+        std::uint32_t leavesBefore = 0;
+        const std::uint32_t cells = static_cast<std::uint32_t>(standInFarShapes().cells.size());
+        const std::uint32_t firstShapes[4] = {0, 0, 0, cells};
+        assert(packed.sets.size() == 4 && tables.farShapes.size() == 2 * cells);
+
+        for (std::size_t number = 0; number < sets.size(); ++number) {
+            const TwigSet& set = *sets[number];
+            const GpuTwigSet& record = packed.sets[number];
+            assert(record.firstBrick == bricksBefore && record.brickCount == set.bricks.size());
+
+            for (std::size_t brick = 0; brick < set.bricks.size(); ++brick) {
+                assert(tables.bricks[bricksBefore + brick].firstTwig == twigsBefore + set.bricks[brick].firstTwig);
+            }
+
+            for (std::size_t twig = 0; twig < set.twigs.size(); ++twig) {
+                const GpuTwig& got = tables.twigs[twigsBefore + twig];
+                const MeshHandle mesh = set.prototypes[set.twigs[twig].prototype];
+                assert(meshes[got.prototype].index == mesh.index && got.rows[0][3] == set.twigs[twig].foot.x);
+                assert(packed.bindings[twigsBefore + twig] == packTwigBinding(set.twigs[twig]));
+            }
+
+            if (set.far.nodes.empty()) {
+                assert(record.firstNode == TWIG_FAR_NO_NODE);
+            } else {
+                assert(record.firstNode == nodesBefore && record.firstShape == firstShapes[number]);
+
+                for (std::size_t node = 0; node < set.far.nodes.size(); ++node) {
+                    const TwigFarNode& want = set.far.nodes[node];
+                    const GpuTwigFarNode& got = tables.farNodes[nodesBefore + node];
+                    assert(got.sphere[0] == want.centre.x && got.sphere[3] == want.radius && got.levelCount == want.levelCount);
+                    assert(got.firstLevel == levelsBefore + want.firstLevel && got.firstBrick == bricksBefore + want.firstBrick);
+                    assert(got.parent == (want.parent == twigFarNoNode ? TWIG_FAR_NO_NODE : nodesBefore + want.parent));
+                }
+
+                for (std::size_t level = 0; level < set.far.levels.size(); ++level) {
+                    const TwigFarLevel& want = set.far.levels[level];
+                    const GpuTwigFarLevel& got = tables.farLevels[levelsBefore + level];
+                    assert(got.firstLeaf == leavesBefore + want.firstLeaf && got.leafCount == want.leafCount && got.error == want.error);
+                }
+
+                for (std::size_t leaf = 0; leaf < set.far.leaves.size(); ++leaf) {
+                    GpuFarLeaf want = packFarLeaf(set.far.leaves[leaf]);
+                    want.twig += twigsBefore;
+                    assert(sameGpuFarLeaf(tables.farLeaves[leavesBefore + leaf], want));
+                }
+
+                for (std::uint32_t cell = 0; cell < cells; ++cell) {
+                    const GpuFarLeafShape want = packFarLeafShape(set.far.shapes.cells[cell], set.far.shapes.foldRadians, set.far.shapes.curl);
+                    const GpuFarLeafShape& got = tables.farShapes[record.firstShape + cell];
+                    assert(got.shape[1] == want.shape[1] && got.curl == want.curl && got.raise == want.raise && got.uvRect[2] == want.uvRect[2]);
+                }
+            }
+
+            bricksBefore += static_cast<std::uint32_t>(set.bricks.size());
+            twigsBefore += static_cast<std::uint32_t>(set.twigs.size());
+            nodesBefore += static_cast<std::uint32_t>(set.far.nodes.size());
+            levelsBefore += static_cast<std::uint32_t>(set.far.levels.size());
+            leavesBefore += static_cast<std::uint32_t>(set.far.leaves.size());
+        }
+
+        assert(tables.bricks.size() == bricksBefore && tables.twigs.size() == twigsBefore && packed.bindings.size() == twigsBefore);
+        assert(tables.farNodes.size() == nodesBefore && tables.farLevels.size() == levelsBefore && tables.farLeaves.size() == leavesBefore);
+        assert(tables.prototypes.empty() && tables.levels.empty());
+
+        const std::vector<MeshHandle> missing{MeshHandle{3}, MeshHandle{4}, MeshHandle{5}};
+        assert(throwsInvalid([&] { packTwigSets(sets, missing); }));
+    }
+
+    // The level a twig draw's first cluster starts in its prototype's run (TWIG_MOST_LEVELS when none).
+    std::uint32_t drawnTwigLevel(const TwigTables& tables, const TwigDraw& draw) {
+        const GpuTwigPrototype& prototype = tables.prototypes[tables.twigs[draw.twig].prototype];
+
+        for (std::uint32_t level = 0; level < prototype.levelCount; ++level) {
+            if (tables.levels[prototype.firstLevel + level].firstCluster == draw.firstCluster) {
+                return level;
+            }
+        }
+
+        return TWIG_MOST_LEVELS;
+    }
+
+    // Whether a far node's finest level fits the view.
+    bool farNodeFits(const TwigTables& tables, std::uint32_t node, const GpuInstance& part, const GpuCameraCull& view) {
+        return twigFarLevelFits(tables.farNodes[node], tables.farLevels[tables.farNodes[node].firstLevel], part, view);
+    }
+
+    /*
+    * One choice a brick, from inside the crown to far past it (the cluster cut's rule on the far tree): no brick drawn
+    * as twigs and as a far node, nor by two far nodes; each far node drawn fits and its parent does not, at its coarsest
+    * level that fits, in the frustum; twigs never coarser than the bricks' level. Where a node fits, every node below
+    * it does (so every brick under it finds it), and every twig of a brick whose node fits would draw twigBrickLevel or
+    * coarser by itself (so the bricks take over from exactly the leaves the twigs showed: no leaf moves). Near views draw
+    * only twigs, far ones only the root, between them both.
+    */
+    void testABrickMakesOneChoice() {
+        const FarTwigs made = farTwigs(3000);
+        const TwigTables& tables = made.tables;
+        const TwigFarLevels& far = made.set.far;
+        const auto root = static_cast<std::uint32_t>(far.nodes.size() - 1);
+        const GpuInstance part = placedInstance(Mat4::identity());
+        const GpuCullRecord record = stillRecord(Vec3{0.0f, 15.0f, 0.0f}, 14.0f);
+        bool onlyTwigs = false;
+        bool both = false;
+        bool onlyRoot = false;
+
+        // Nearer and nearer to 480 m (within the view's 500 m), then the pixel error grown there until the root is reached.
+        std::vector<GpuCameraCull> views;
+
+        for (float distance = 12.0f; distance < 480.0f; distance *= 1.05f) {
+            views.push_back(cutView(Vec3{-distance, 15.0f, 0.0f}, 0.0f, 8.0f));
+        }
+
+        for (float pixels = 8.0f; pixels < 20000.0f; pixels *= 1.2f) {
+            views.push_back(cutView(Vec3{-480.0f, 15.0f, 0.0f}, 0.0f, pixels));
+        }
+
+        for (const GpuCameraCull& view : views) {
+            std::vector<TwigFarDraw> farDraws;
+            const std::vector<TwigDraw> draws = twigDrawsOnCpu(tables, part, 0u, record, view, nullptr, nullptr, false, &farDraws);
+            std::vector<std::uint32_t> covered(tables.bricks.size(), 0);
+            std::vector<bool> twigged(tables.bricks.size(), false);
+
+            for (const TwigDraw& draw : draws) {
+                assert(drawnTwigLevel(tables, draw) <= TWIG_BRICK_LEVEL);
+                twigged[draw.twig / twigBrickSize] = true;
+            }
+
+            for (const TwigFarDraw& draw : farDraws) {
+                const GpuTwigFarNode& node = tables.farNodes[draw.node];
+                assert(farNodeFits(tables, draw.node, part, view) && (node.parent == TWIG_FAR_NO_NODE || !farNodeFits(tables, node.parent, part, view)));
+                assert(draw.level >= node.firstLevel && draw.level < node.firstLevel + node.levelCount);
+                assert(draw.level == node.firstLevel || twigFarLevelFits(node, tables.farLevels[draw.level], part, view));
+                assert(draw.level + 1 == node.firstLevel + node.levelCount || !twigFarLevelFits(node, tables.farLevels[draw.level + 1], part, view));
+                assert(draw.firstLeaf == tables.farLevels[draw.level].firstLeaf && draw.leafCount == tables.farLevels[draw.level].leafCount);
+                assert(sphereInFrustum(view.frustum, meshClusterPlacedSphere(node.sphere, part).data()));
+
+                for (std::uint32_t brick = far.nodes[draw.node].firstBrick; brick < far.nodes[draw.node].firstBrick + far.nodes[draw.node].brickCount; ++brick) {
+                    ++covered[brick];
+                }
+            }
+
+            for (std::size_t brick = 0; brick < tables.bricks.size(); ++brick) {
+                assert(covered[brick] <= 1 && !(covered[brick] == 1 && twigged[brick]));
+            }
+
+            for (std::uint32_t node = 0; node < far.nodes.size(); ++node) {
+                const std::uint32_t parent = tables.farNodes[node].parent;
+                assert(parent == TWIG_FAR_NO_NODE || !farNodeFits(tables, parent, part, view) || farNodeFits(tables, node, part, view));
+            }
+
+            for (std::uint32_t brick = 0; brick < tables.bricks.size(); ++brick) {
+                if (!farNodeFits(tables, brick, part, view)) {
+                    continue;
+                }
+
+                for (std::uint32_t twig = tables.bricks[brick].firstTwig; twig < tables.bricks[brick].firstTwig + tables.bricks[brick].twigCount; ++twig) {
+                    const GpuTwigPrototype& prototype = tables.prototypes[tables.twigs[twig].prototype];
+                    const GpuInstance placed = twigInstance(part, tables.twigs[twig]);
+                    assert(twigLevel(&tables.levels[prototype.firstLevel], prototype.levelCount, placed, view) >= TWIG_BRICK_LEVEL);
+                }
+            }
+
+            onlyTwigs = onlyTwigs || (!draws.empty() && farDraws.empty());
+            both = both || (!draws.empty() && !farDraws.empty());
+            onlyRoot = onlyRoot || (draws.empty() && farDraws.size() == 1 && farDraws[0].node == root);        }
+
+        assert(onlyTwigs && both && onlyRoot);
+    }
+
+    /*
+    * A far node is drawn by its first brick only where it is in the frustum: a view facing away from part of the crown
+    * leaves some nodes out, and each brick not drawn by anything has its node, or its twigs, out of view. The twig pass's
+    * other bricks are unchanged by the far tree: a set without far nodes draws the same twigs there, its levels cut at
+    * twigBrickLevel.
+    */
+    void testFarNodesOutOfViewAreLeftOut() {
+        const FarTwigs made = farTwigs(3000);
+        const TwigTables& tables = made.tables;
+        TwigTables plain = tables;
+        plain.farNodes.clear();
+        const GpuInstance part = placedInstance(Mat4::identity());
+        const GpuCullRecord record = stillRecord(Vec3{0.0f, 15.0f, 0.0f}, 14.0f);
+        bool someLeftOut = false;
+
+        for (float distance = 30.0f; distance < 3000.0f; distance *= 1.2f) {
+            // Turned a little, so the view's edge cuts through the crown.
+            const GpuCameraCull view = cutView(Vec3{-distance, 15.0f, 0.0f}, 0.35f * 30.0f / distance + 0.01f, 1.0f);
+            std::vector<TwigFarDraw> farDraws;
+            const std::vector<TwigDraw> draws = twigDrawsOnCpu(tables, part, 0u, record, view, nullptr, nullptr, false, &farDraws);
+            const std::vector<TwigDraw> plainDraws = twigDrawsOnCpu(plain, part, 0u, record, view);
+
+            for (std::uint32_t brick = 0; brick < tables.bricks.size(); ++brick) {
+                const std::uint32_t node = twigFarNodeDrawn(tables, brick, part, view);
+                const bool farDrawn = std::any_of(farDraws.begin(), farDraws.end(), [&](const TwigFarDraw& draw) { return draw.node == node; });
+                const auto inBrick = [&](const TwigDraw& draw) { return draw.twig / twigBrickSize == brick; };
+
+                if (node == TWIG_FAR_NO_NODE) {
+                    std::vector<TwigDraw> mine;
+                    std::vector<TwigDraw> wanted;
+                    std::copy_if(draws.begin(), draws.end(), std::back_inserter(mine), inBrick);
+                    std::copy_if(plainDraws.begin(), plainDraws.end(), std::back_inserter(wanted), inBrick);
+
+                    for (TwigDraw& want : wanted) {
+                        const GpuTwigPrototype& prototype = tables.prototypes[tables.twigs[want.twig].prototype];
+                        const GpuTwigLevel& cut = tables.levels[prototype.firstLevel + std::min<std::uint32_t>(TWIG_BRICK_LEVEL, prototype.levelCount - 1)];
+                        if (drawnTwigLevel(tables, want) > TWIG_BRICK_LEVEL) {
+                            want.firstCluster = cut.firstCluster;
+                            want.clusterCount = cut.clusterCount;
+                        }
+                    }
+
+                    assert(mine == wanted);
+                } else {
+                    const bool inView = sphereInFrustum(view.frustum, meshClusterPlacedSphere(tables.farNodes[node].sphere, part).data());
+                    assert(farDrawn == inView);
+                    someLeftOut = someLeftOut || !inView;
+                }
+            }
+        }
+
+        assert(someLeftOut);
+    }
+
     /*
     * A far leaf's record keeps its foot exactly, its frame to snorm16 (about 3e-5), its side to a half float, its cell,
     * number and twig exactly; a cell or number past a byte is refused. A shape's record keeps its numbers and the fold's
@@ -614,22 +910,10 @@ namespace {
     * the prototype's. Twigs of every prototype, turned at random and scaled.
     */
     void testFarLeavesAreTheTwigsLevel() {
-        const LeafAtlas atlas = standInLeafAtlas(64, forestTreeLeafColumns, forestTreeLeafRows, forestLeafStandIn);
-        const ForestTwigSettings settings;
-        const TracedLeaves leaves = traceAtlasLeaves(atlas, 3, 1.0f);
-        const std::vector<TwigPrototype> prototypes = buildTwigPrototypes(leaves, settings, 1.0f, 0.22f, 3);
-        std::vector<TwigFarLeaves> handed;
-        std::vector<float> reaches;
-        std::vector<MeshHandle> meshes;
-
-        for (const TwigPrototype& twig : prototypes) {
-            handed.push_back(twigFarLeaves(twig));
-            reaches.push_back(meshReach(twigLeafMesh(twig).mesh));
-            meshes.push_back(MeshHandle{static_cast<std::uint32_t>(meshes.size())});
-        }
-
-        const TwigSet set = makeTwigSet(meshes, reaches, scatteredTwigs(300, static_cast<std::uint32_t>(prototypes.size())));
-        const TwigFarLevels far = makeTwigFarLevels(set, handed, twigFarLeafShapes(leaves, settings));
+        const FarTwigs made = farTwigs(300);
+        const std::vector<TwigPrototype>& prototypes = made.prototypes;
+        const TwigSet& set = made.set;
+        const TwigFarLevels& far = set.far;
         std::size_t checked = 0;
 
         for (std::size_t brick = 0; brick < set.bricks.size(); ++brick) {
@@ -679,6 +963,9 @@ namespace {
 void testTwigRecords() {
     testAFarLeafsRecord();
     testFarLeavesAreTheTwigsLevel();
+    testPackedSetsMoveTheirRuns();
+    testABrickMakesOneChoice();
+    testFarNodesOutOfViewAreLeftOut();
     testTwigGroupsInTheClusterPasses();
     testATwigsRecord();
     testAPrototypesLevels();
