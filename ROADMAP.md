@@ -514,7 +514,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
   - [x] 3f. Leaves' opaque shadows moved into stage 4; today's shadows measured (`leaf-shadows-3f-plan`)
 - [ ] 4. Virtual shadow maps for the sun, the cascades retired, leaves casting as drawn; then the lamps (plan: `docs/research/VIRTUALSHADOWMAPS.md`)
   - [x] 4a. Level boxes, page snapping, wrapped addresses, level choice: CPU maths mirrored in `.glsl` (`vsm-4a-clipmap`)
-  - [ ] 4b. Pages marked from depth, the page table and pool allocated on the GPU; F4 counts, a view by level
+  - [x] 4b. Pages marked from depth, the page table and pool allocated on the GPU; F4 counts, a view by level (`vsm-4b-pages`)
   - [ ] 4c. Clusters drawn into their pages, every page every frame; the main pass reading them behind a switch
   - [ ] 4d. Soft shadows through the page table, a coarser page or the far map where one is missing
   - [ ] 4e. Pages cached until something in them moves; still and moving slices; swaying trees

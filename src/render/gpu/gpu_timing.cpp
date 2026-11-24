@@ -54,6 +54,8 @@ const char* gpuPassName(GpuPass pass) {
         return "AOUPSAMPLE";
     case GpuPass::ContactShadows:
         return "CONTACT";
+    case GpuPass::VirtualShadowPages:
+        return "VSMPAGES";
     case GpuPass::MirroredLights:
         return "MIRROR";
     case GpuPass::Main:

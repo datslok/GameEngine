@@ -8,6 +8,7 @@
 #include "render/gpu/twig_drawing_shared.h"
 #include "render/gpu/upscaling.h"
 #include "render/gpu/video_memory.h"
+#include "render/gpu/virtual_shadows.h"
 #include "scene/mesh_level.h"
 
 #include <array>
@@ -65,6 +66,10 @@ struct RenderStats {
     std::size_t boneTreesStill = 0;
     std::size_t bonesAsked = 0;
     std::size_t bonePool = 0;
+
+    // The sun's virtual shadow maps' pages (render/gpu/virtual_shadows.h), while they are on: asked for, kept, given
+    // room, taken from cached ones, failed for want of room, freed as stale, left free; none while off.
+    std::optional<VirtualShadowCounts> virtualShadowPages;
 
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;

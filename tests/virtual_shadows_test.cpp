@@ -1,9 +1,13 @@
+#include "engine/debug_views.h"
 #include "engine/settings_file.h"
 #include "math/mat4.h"
 #include "render/gpu/cascades.h"
 #include "render/gpu/virtual_shadows.h"
+#include "render/render_stats.h"
 #include "test_levels.h"
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -61,6 +65,9 @@ namespace {
         bad.levelCount = maxVirtualShadowLevels + 1;
         assert(throwsInvalid([&] { validateVirtualShadows(bad); }));
         bad = {};
+        bad.poolPages = maxVirtualShadowPoolPages + 1;
+        assert(throwsInvalid([&] { validateVirtualShadows(bad); }));
+        bad = {};
         bad.depthSlack = 1.0f;
         assert(throwsInvalid([&] { validateVirtualShadows(bad); }));
 
@@ -69,8 +76,11 @@ namespace {
             visit(settings, visitor);
         };
         const std::vector<std::string> warnings = applySettings(
-            {{"firstLevelHalfWidth", "1"}, {"levels", "12"}, {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}}, walk, StartupFields::Keep);
+            {{"enabled", "true"}, {"showPages", "true"}, {"poolPages", "2048"}, {"firstLevelHalfWidth", "1"}, {"levels", "12"},
+             {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}},
+            walk, StartupFields::Keep);
         assert(warnings.empty());
+        assert(settings.enabled && settings.showPages && settings.poolPages == 2048);
         assert(settings.firstHalfWidth == 1.0f && settings.levelCount == 12);
         assert(settings.resolution == VirtualShadowResolution::Pages64 && settings.depthSlack == 32.0f);
         assert(virtualShadowPagesPerSide(VirtualShadowResolution::Pages32) == 32);
@@ -326,7 +336,326 @@ namespace {
     }
 }
 
+namespace {
+    // A pixel marks its own page and those within the filter's reach: one inside a page, two by an edge, four by a
+    // corner, never past the level's sides.
+    void testMarkedPages() {
+        const float reach = static_cast<float>(virtualShadowFilterTexels);
+        const VirtualShadowPage none{};
+        assert((virtualShadowMarkedPages(200.0f, 200.0f, reach, 32) == VirtualShadowPageSpan{VirtualShadowPage{1, 1}, VirtualShadowPage{1, 1}}));
+        assert((virtualShadowMarkedPages(130.0f, 200.0f, reach, 32) == VirtualShadowPageSpan{VirtualShadowPage{0, 1}, VirtualShadowPage{1, 1}}));
+        assert((virtualShadowMarkedPages(250.0f, 260.0f, reach, 32) == VirtualShadowPageSpan{VirtualShadowPage{1, 1}, VirtualShadowPage{2, 2}}));
+        assert((virtualShadowMarkedPages(5.0f, 4090.0f, reach, 32) == VirtualShadowPageSpan{VirtualShadowPage{0, 31}, VirtualShadowPage{0, 31}}));
+        assert((virtualShadowMarkedPages(100.0f, 100.0f, reach, 32).first == none));
+    }
+
+    // A slot's page is its page again, at every origin.
+    void testSlotsTurnBackIntoPages() {
+        for (int pagesPerSide : {32, 64}) {
+            for (int origin = 0; origin < pagesPerSide; origin += 7) {
+                for (int x = 0; x < pagesPerSide; ++x) {
+                    const VirtualShadowPage page{x, (x * 5) % pagesPerSide};
+                    const VirtualShadowPage originSlot{origin, (origin * 3) % pagesPerSide};
+                    assert(virtualShadowPageOfSlot(virtualShadowSlot(page, originSlot, pagesPerSide), originSlot, pagesPerSide) == page);
+                }
+            }
+        }
+    }
+
+    // Packing an entry, and the two questions resolving asks of it.
+    void testEntries() {
+        const std::uint32_t entry = virtualShadowEntryWith(4095, virtualShadowEntryAllocated | virtualShadowEntryDirty);
+        assert(virtualShadowPhysicalPage(entry) == 4095 && (entry & virtualShadowEntryAllocated) != 0 && (entry & virtualShadowEntryDirty) != 0);
+        assert(virtualShadowPhysicalPage(virtualShadowEntryWith(70000, 0)) == (70000u & 0xFFFFu));
+
+        const VirtualShadowKey key{7, 9, 2};
+        assert(!virtualShadowEntryStale(entry, key, key));
+        assert(virtualShadowEntryStale(entry, key, VirtualShadowKey{8, 9, 2}));
+        assert(virtualShadowEntryStale(entry, key, VirtualShadowKey{7, 9, 3}));
+        assert(!virtualShadowEntryStale(0, key, VirtualShadowKey{8, 9, 2}));
+
+        const std::uint32_t asked = virtualShadowEntryRequested;
+        assert(virtualShadowEntryNeeds(asked, false));
+        assert(!virtualShadowEntryNeeds(asked | entry, false));
+        assert(virtualShadowEntryNeeds(asked | entry, true));
+        assert(!virtualShadowEntryNeeds(entry, true));
+
+        assert((virtualShadowAllocationSource(0, 3, 2) == VirtualShadowSource{VIRTUAL_SHADOW_FROM_FREE, 2}));
+        assert((virtualShadowAllocationSource(2, 3, 2) == VirtualShadowSource{VIRTUAL_SHADOW_FROM_FREE, 0}));
+        assert((virtualShadowAllocationSource(3, 3, 2) == VirtualShadowSource{VIRTUAL_SHADOW_FROM_CACHED, 0}));
+        assert((virtualShadowAllocationSource(4, 3, 2) == VirtualShadowSource{VIRTUAL_SHADOW_FROM_CACHED, 1}));
+        assert(virtualShadowAllocationSource(5, 3, 2).from == VIRTUAL_SHADOW_FROM_NOWHERE);
+    }
+
+    /*
+    * The four passes on the CPU, with the functions they share with the shaders, in one order the GPU's atomics might
+    * take: clear, mark (the entries asked for), resolve, allocate. Enough to follow pages over frames.
+    */
+    struct SimulatedPages {
+        int levels = 0;
+        int pagesPerSide = 0;
+        std::vector<std::uint32_t> table;
+        std::vector<VirtualShadowKey> keys;
+        std::vector<std::uint32_t> freePages;
+        std::uint32_t freeTop = 0;
+
+        SimulatedPages(int levelCount, int sidePages, int pool):
+            levels(levelCount), pagesPerSide(sidePages),
+            table(static_cast<std::size_t>(levelCount * sidePages * sidePages), 0),
+            keys(table.size()), freePages(static_cast<std::size_t>(pool)), freeTop(static_cast<std::uint32_t>(pool)) {
+            for (int page = 0; page < pool; ++page) {
+                freePages[static_cast<std::size_t>(page)] = static_cast<std::uint32_t>(page);
+            }
+        }
+
+        VirtualShadowKey currentKey(const GpuVirtualShadowFrame& frame, int index) const {
+            const int perLevel = pagesPerSide * pagesPerSide;
+            const int level = index / perLevel;
+            const VirtualShadowPage slot{(index % perLevel) % pagesPerSide, (index % perLevel) / pagesPerSide};
+            const GpuVirtualShadowLevel& data = frame.levels[level];
+            const VirtualShadowPage page = virtualShadowPageOfSlot(slot, VirtualShadowPage{data.pages[0], data.pages[1]}, pagesPerSide);
+            return virtualShadowKeyOf(page, data.pages[2], data.pages[3], data.key[0]);
+        }
+
+        VirtualShadowCounts frame(const GpuVirtualShadowFrame& frame, const std::vector<int>& asked) {
+            VirtualShadowCounts counts;
+
+            for (std::uint32_t& entry : table) {
+                entry &= ~(virtualShadowEntryRequested | virtualShadowEntryDirty | virtualShadowEntryFailed);
+            }
+
+            for (int index : asked) {
+                table[static_cast<std::size_t>(index)] |= virtualShadowEntryRequested;
+            }
+
+            std::vector<int> needed;
+            std::vector<int> cached;
+
+            for (int index = 0; index < static_cast<int>(table.size()); ++index) {
+                std::uint32_t& entry = table[static_cast<std::size_t>(index)];
+
+                if (virtualShadowEntryStale(entry, keys[static_cast<std::size_t>(index)], currentKey(frame, index))) {
+                    freePages[freeTop++] = virtualShadowPhysicalPage(entry);
+                    ++counts.stale;
+                    entry &= ~(virtualShadowEntryAllocated | 0xFFFFu);
+                }
+
+                const bool requested = (entry & virtualShadowEntryRequested) != 0;
+                counts.requested += requested ? 1 : 0;
+
+                if (virtualShadowEntryNeeds(entry, false)) {
+                    needed.push_back(index);
+                } else if (requested) {
+                    ++counts.kept;
+                } else if ((entry & virtualShadowEntryAllocated) != 0) {
+                    cached.push_back(index);
+                }
+            }
+
+            for (std::uint32_t k = 0; k < needed.size(); ++k) {
+                const std::size_t index = static_cast<std::size_t>(needed[k]);
+                const VirtualShadowSource source = virtualShadowAllocationSource(k, freeTop, static_cast<std::uint32_t>(cached.size()));
+                std::uint32_t physical = 0;
+
+                if (source.from == VIRTUAL_SHADOW_FROM_NOWHERE) {
+                    table[index] |= virtualShadowEntryFailed;
+                    ++counts.failed;
+                    continue;
+                }
+
+                if (source.from == VIRTUAL_SHADOW_FROM_FREE) {
+                    physical = freePages[source.index];
+                } else {
+                    std::uint32_t& victim = table[static_cast<std::size_t>(cached[source.index])];
+                    physical = virtualShadowPhysicalPage(victim);
+                    victim = 0;
+                    ++counts.evicted;
+                }
+
+                table[index] = virtualShadowEntryWith(physical, virtualShadowEntryAllocated | virtualShadowEntryRequested | virtualShadowEntryDirty);
+                keys[index] = currentKey(frame, static_cast<int>(index));
+                ++counts.allocated;
+            }
+
+            freeTop -= std::min(freeTop, static_cast<std::uint32_t>(needed.size()));
+            counts.free = freeTop;
+            return counts;
+        }
+
+        // No physical page held by two entries, and none both held and free.
+        bool consistent() const {
+            std::vector<int> holders(freePages.size(), 0);
+
+            for (std::uint32_t entry : table) {
+                if ((entry & virtualShadowEntryAllocated) != 0) {
+                    ++holders[virtualShadowPhysicalPage(entry)];
+                }
+            }
+
+            for (std::uint32_t slot = 0; slot < freeTop; ++slot) {
+                ++holders[freePages[slot]];
+            }
+
+            for (int count : holders) {
+                if (count != 1) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    };
+
+    // The table entries a set of world points ask for this frame in one level, as the marking pass finds them (their
+    // own page only); the points must be within the level's reach.
+    std::vector<int> askedFor(const GpuVirtualShadowFrame& frame, const VirtualShadowClipmap& clipmap, const Vec3& camera, const std::vector<Vec3>& points,
+                              int level) {
+        std::vector<int> asked;
+        const int pagesPerSide = frame.counts[1];
+
+        for (const Vec3& point : points) {
+            assert(virtualShadowLevelFor((point - camera).length(), frame.options[0], frame.counts[0]) <= level);
+            const Vec3 placed = inLevel(clipmap, level, camera, point);
+            const VirtualShadowPage slot = virtualShadowSlot(virtualShadowPageOf(placed.x, placed.y),
+                                                             VirtualShadowPage{frame.levels[level].pages[0], frame.levels[level].pages[1]}, pagesPerSide);
+            asked.push_back(virtualShadowTableIndex(level, slot, pagesPerSide));
+        }
+
+        std::sort(asked.begin(), asked.end());
+        asked.erase(std::unique(asked.begin(), asked.end()), asked.end());
+        return asked;
+    }
+
+    /*
+    * Pages over frames: asked-for pages get places and keep them while asked for; a camera walking across the light
+    * keeps every page still in its level (no stale ones) and gives new ones room; a dropped level frees its pages;
+    * a pool too small evicts cached pages first and only then fails; no place is ever held twice.
+    */
+    void testPagesOverFrames() {
+        VirtualShadowSettings settings;
+        settings.levelCount = 4;
+        settings.poolPages = 64;
+        const Vec3 sun = Vec3{0.2f, -0.9f, 0.3f}.normalized();
+        const Vec3 across = sun.cross(Vec3{0.0f, 1.0f, 0.0f}).normalized();
+        std::array<std::uint32_t, maxVirtualShadowLevels> generations{};
+        generations.fill(1);
+        SimulatedPages pages{settings.levelCount, 32, settings.poolPages};
+
+        // A row of points across the light near the camera, in level 2 (half-width 2 m, 4096 texels of 1 mm) all along
+        // the walk below, a few pages wide.
+        Vec3 camera{10.0f, 5.0f, -3.0f};
+        std::optional<VirtualShadowClipmap> clipmap = freshClipmap(camera, sun, settings);
+        std::vector<Vec3> points;
+
+        for (int i = -10; i <= 10; ++i) {
+            points.push_back(camera + across * (0.06f * static_cast<float>(i)) + Vec3{0.0f, -0.5f, 0.0f});
+        }
+
+        GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 1);
+        std::vector<int> asked = askedFor(frame, *clipmap, camera, points, 2);
+        VirtualShadowCounts counts = pages.frame(frame, asked);
+        assert(counts.requested == asked.size() && counts.allocated == asked.size() && counts.kept == 0 && counts.failed == 0);
+        assert(counts.free == 64 - asked.size() && pages.consistent());
+
+        counts = pages.frame(frame, asked);
+        assert(counts.kept == asked.size() && counts.allocated == 0 && counts.stale == 0);
+
+        // Walking: the camera slides a few pages across the light; the same world points keep their pages.
+        for (int step = 0; step < 5; ++step) {
+            camera = camera + across * 0.1f;
+            const VirtualShadowClipmapUpdate update = updateVirtualShadowClipmap(clipmap, camera, sun, settings, casterReach);
+            assert(update.droppedLevels == 0);
+            clipmap = update.clipmap;
+            frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 2);
+            asked = askedFor(frame, *clipmap, camera, points, 2);
+            counts = pages.frame(frame, asked);
+            assert(counts.stale == 0 && counts.kept == asked.size() && counts.allocated == 0 && pages.consistent());
+        }
+
+        // A dropped level: every page of it stale, then given room again.
+        ++generations[2];
+        frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 3);
+        counts = pages.frame(frame, asked);
+        assert(counts.stale == asked.size() && counts.allocated == asked.size() && counts.kept == 0 && pages.consistent());
+
+        // A crowd asking for more than the pool: the cached pages go first, then failures.
+        std::vector<int> crowd;
+
+        for (int index = 0; index < 100; ++index) {
+            crowd.push_back(3 * 1024 + index);
+        }
+
+        counts = pages.frame(frame, crowd);
+        assert(counts.allocated == 64 && counts.evicted == asked.size() && counts.failed == 100 - 64 && counts.free == 0);
+        assert(pages.consistent());
+    }
+
+    // The frame's record: the clipmap's numbers placed for the camera, each level's generation and first page.
+    void testFrameRecord() {
+        VirtualShadowSettings settings;
+        settings.levelCount = 6;
+        settings.poolPages = 512;
+        const Vec3 camera{-4000.5f, 30.0f, 2500.25f};
+        const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{0.1f, -1.0f, 0.2f}.normalized(), settings);
+        std::array<std::uint32_t, maxVirtualShadowLevels> generations{};
+
+        for (std::size_t level = 0; level < generations.size(); ++level) {
+            generations[level] = static_cast<std::uint32_t>(10 + level);
+        }
+
+        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, camera, generations, Mat4::identity(), 1920.0f, 1080.0f, true, 77);
+        assert(frame.counts[0] == 6 && frame.counts[1] == 32 && frame.counts[2] == 512 && frame.counts[3] == 77);
+        assert(frame.options[0] == virtualShadowUsableHalfWidth(0.5f, 32) && frame.options[1] == 1.0f);
+        assert(frame.screen[0] == 1920.0f && frame.screen[3] == 1.0f / 1080.0f);
+
+        for (int level = 0; level < 6; ++level) {
+            const VirtualShadowPlacement placement = virtualShadowPlacement(clipmap, level, camera);
+            const GpuVirtualShadowLevel& packed = frame.levels[level];
+            assert(packed.placement[0] == placement.cameraTexelX && packed.placement[2] == placement.inverseTexel);
+            assert(packed.placement[3] == placement.depthScale && packed.depth[0] == placement.depthOffset);
+            assert(packed.pages[0] == placement.originSlot.x && packed.pages[1] == placement.originSlot.y);
+            assert(packed.pages[2] == static_cast<std::int32_t>(clipmap.levels[static_cast<std::size_t>(level)].firstPageX));
+            assert(packed.key[0] == 10u + static_cast<std::uint32_t>(level));
+        }
+
+        assert(frame.levels[6].key[0] == 0);
+    }
+
+    // The counters by name, and F4's line under the tiles' while the pages are on.
+    void testCountsAndStatsLine() {
+        std::array<std::uint32_t, VIRTUAL_SHADOW_COUNTERS> counters{};
+        counters[VIRTUAL_SHADOW_COUNT_REQUESTED] = 900;
+        counters[VIRTUAL_SHADOW_COUNT_KEPT] = 850;
+        counters[VIRTUAL_SHADOW_COUNT_ALLOCATED] = 50;
+        counters[VIRTUAL_SHADOW_COUNT_EVICTED] = 7;
+        counters[VIRTUAL_SHADOW_COUNT_FAILED] = 2;
+        counters[VIRTUAL_SHADOW_COUNT_STALE] = 12;
+        counters[VIRTUAL_SHADOW_COUNT_FREE] = 3100;
+        const VirtualShadowCounts counts = virtualShadowCountsFrom(counters);
+        assert(counts.requested == 900 && counts.kept == 850 && counts.allocated == 50 && counts.evicted == 7);
+        assert(counts.failed == 2 && counts.stale == 12 && counts.free == 3100);
+
+        RenderStats stats;
+        const auto pagesLine = [](const std::vector<std::string>& lines) {
+            return std::find_if(lines.begin(), lines.end(), [](const std::string& line) { return line.starts_with("VSM"); });
+        };
+        std::vector<std::string> lines = renderStatsLines(stats);
+        assert(pagesLine(lines) == lines.end());
+        stats.virtualShadowPages = counts;
+        lines = renderStatsLines(stats);
+        const auto line = pagesLine(lines);
+        assert(line != lines.end() && *line == "VSM PAGES 900  KEPT 850  NEW 50 (EVICTED 7)  FAILED 2  STALE 12  FREE 3100");
+        assert(line != lines.begin() && (line - 1)->starts_with("TILES"));
+    }
+}
+
 void testVirtualShadows() {
+    testMarkedPages();
+    testSlotsTurnBackIntoPages();
+    testEntries();
+    testPagesOverFrames();
+    testFrameRecord();
+    testCountsAndStatsLine();
     testSettings();
     testLevelSizes();
     testLevelChoice();

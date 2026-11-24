@@ -79,6 +79,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves' cells' shapes
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the early list's occlusion pyramid (the mesh shaders' far leaves)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex},              // the whole frame's
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // the sun's virtual shadow maps' record (render/gpu/virtual_shadows.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // their page table
     }};
 }
 
@@ -284,6 +286,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.farShapes,
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
+        views.virtualShadowFrame,
+        views.virtualShadowTable,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

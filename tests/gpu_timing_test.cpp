@@ -105,13 +105,15 @@ void testGpuTiming() {
     }
 
     // The fog's grid is lit right after the shadows, whose atlas it reads, before the depth prepass; the depth prepass is
-    // recorded after it, then ambient occlusion (in four parts, below), contact shadows and the mirrored lights, which read its depth, right before the main pass,
+    // recorded after it, then ambient occlusion (in four parts, below), contact shadows, the virtual shadow maps' pages and the mirrored lights, which read its depth, right before the main pass,
     // whose depth it fills and which shades their light.
     {
         assert(static_cast<int>(GpuPass::Shadows) + 1 == static_cast<int>(GpuPass::Fog));
         assert(static_cast<int>(GpuPass::Fog) + 1 == static_cast<int>(GpuPass::DepthPrepass));
         assert(std::string(gpuPassName(GpuPass::Fog)) == "FOG");
-        assert(static_cast<int>(GpuPass::ContactShadows) + 1 == static_cast<int>(GpuPass::MirroredLights));
+        assert(static_cast<int>(GpuPass::ContactShadows) + 1 == static_cast<int>(GpuPass::VirtualShadowPages));
+        assert(static_cast<int>(GpuPass::VirtualShadowPages) + 1 == static_cast<int>(GpuPass::MirroredLights));
+        assert(std::string(gpuPassName(GpuPass::VirtualShadowPages)) == "VSMPAGES");
         assert(std::string(gpuPassName(GpuPass::ContactShadows)) == "CONTACT");
         assert(std::string(gpuPassName(GpuPass::AmbientOcclusion)) == "AO");
         assert(static_cast<int>(GpuPass::MirroredLights) + 1 == static_cast<int>(GpuPass::Main));
@@ -164,7 +166,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 6, 0, 11, 8, 4, 1, 8, 0, 0, 0, 2, 40, 17, 25, 12, 0, 9, 4, 16, 7, 3, 2, 6, 0, 14, 900, 5, 0, 6, 20, 0, 10, 11, 0, 13, 30, 5, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];

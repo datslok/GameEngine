@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "math/mat4.h"
 #include "math/vec3.h"
 #include "render/gpu/virtual_shadows_shared.h"
 
@@ -47,6 +48,17 @@ inline constexpr std::array<const char*, 2> virtualShadowResolutionNames = {"32 
 int virtualShadowPagesPerSide(VirtualShadowResolution resolution);
 
 struct VirtualShadowSettings {
+    // The pages marked and given room each frame (ROADMAP phase 21 stage 4b); nothing is drawn into them until 4c, so
+    // off by default and on only to look at the pages' debug view and F4's VSM line.
+    bool enabled = false;
+
+    // A debug view: each pixel tinted by its level, its page's edges outlined, pages given room this frame white, pages
+    // the pool had no room for red.
+    bool showPages = false;
+
+    // The pool's pages, shared by every level (Unreal's default 4096: 256 MB of 32-bit depth once drawn into, 4c).
+    int poolPages = 4096;
+
     // The finest level's half-width: everything nearer the camera than about this shares its texels.
     float firstHalfWidth = 0.5f;
 
@@ -151,3 +163,114 @@ VirtualShadowPlacement virtualShadowPlacement(const VirtualShadowClipmap& clipma
 
 // A point's texel (x, y) and depth (z) in a level, from its light-space position measured from the camera.
 Vec3 virtualShadowLevelPoint(const Vec3& lightPoint, const VirtualShadowPlacement& placement);
+
+/*
+* The pages (stage 4b). Each frame the marking pass flags the page under every pixel on screen, and the pages round it
+* a soft shadow's filter may read (VIRTUAL_SHADOW_FILTER_TEXELS); the resolving pass then decides each table entry's
+* fate, and the allocating pass gives the pages that need one a place in the pool: a free one, else one only cached.
+* An entry remembers which page of the world its place holds (its key: the world page across the light and the level's
+* generation, bumped whenever the level drops its pages), so a page that slid out of its level or was dropped is known
+* by its key no longer matching and goes back to the free list.
+*/
+inline constexpr std::uint32_t virtualShadowEntryAllocated = VIRTUAL_SHADOW_ENTRY_ALLOCATED;
+inline constexpr std::uint32_t virtualShadowEntryRequested = VIRTUAL_SHADOW_ENTRY_REQUESTED;
+inline constexpr std::uint32_t virtualShadowEntryDirty = VIRTUAL_SHADOW_ENTRY_DIRTY;
+inline constexpr std::uint32_t virtualShadowEntryFailed = VIRTUAL_SHADOW_ENTRY_FAILED;
+inline constexpr int virtualShadowFilterTexels = VIRTUAL_SHADOW_FILTER_TEXELS;
+inline constexpr int maxVirtualShadowPoolPages = VIRTUAL_SHADOW_MAX_POOL_PAGES;
+
+// The pages a pixel at these texels of a level marks: those its texel's square of reach texels each way touches,
+// clamped to the level (x, y the first page, z, w the last).
+struct VirtualShadowPageSpan {
+    VirtualShadowPage first;
+    VirtualShadowPage last;
+
+    bool operator==(const VirtualShadowPageSpan&) const = default;
+};
+
+VirtualShadowPageSpan virtualShadowMarkedPages(float texelX, float texelY, float reach, int pagesPerSide);
+
+// The reverse of virtualShadowSlot: which page of its level a table slot holds now.
+VirtualShadowPage virtualShadowPageOfSlot(const VirtualShadowPage& slot, const VirtualShadowPage& originSlot, int pagesPerSide);
+
+// Which page of the world (across the light, low 32 bits) and which drawing of its level a table entry stands for.
+struct VirtualShadowKey {
+    std::uint32_t pageX = 0;
+    std::uint32_t pageY = 0;
+    std::uint32_t generation = 0;
+
+    bool operator==(const VirtualShadowKey&) const = default;
+};
+
+// The key a level's page has this frame: the level's first page plus the page, and the level's generation.
+VirtualShadowKey virtualShadowKeyOf(const VirtualShadowPage& pageInLevel, std::int32_t firstPageX, std::int32_t firstPageY, std::uint32_t generation);
+
+// An entry with a place in the pool whose key is no longer its slot's: its depths are another page's, so it is freed.
+bool virtualShadowEntryStale(std::uint32_t entry, const VirtualShadowKey& stored, const VirtualShadowKey& current);
+
+// An entry a pixel asked for that has no place (or only a stale one): it needs one from the pool.
+bool virtualShadowEntryNeeds(std::uint32_t entry, bool stale);
+
+std::uint32_t virtualShadowPhysicalPage(std::uint32_t entry);
+
+/*
+* Where the k-th entry needing a place gets one, with freeTop pages on the free list and cached entries listed: the free
+* list's k-th page from the top (VIRTUAL_SHADOW_FROM_FREE, the list's index), else the (k - freeTop)-th cached entry's
+* place (VIRTUAL_SHADOW_FROM_CACHED, the cached list's index), else none: the pool is full (VIRTUAL_SHADOW_FROM_NOWHERE).
+*/
+struct VirtualShadowSource {
+    int from = VIRTUAL_SHADOW_FROM_NOWHERE;
+    std::uint32_t index = 0;
+
+    bool operator==(const VirtualShadowSource&) const = default;
+};
+
+VirtualShadowSource virtualShadowAllocationSource(std::uint32_t k, std::uint32_t freeTop, std::uint32_t cached);
+std::uint32_t virtualShadowEntryWith(std::uint32_t physicalPage, std::uint32_t flags);
+
+// The pages' debug view (the main pass, while VirtualShadowSettings::showPages): a colour a level, six in turn (none
+// red: red marks a page the pool had no room for), and whether a texel lies within width texels of its page's edge.
+Vec3 virtualShadowLevelColour(int level);
+bool virtualShadowNearPageEdge(float texelX, float texelY, float width);
+
+// What the resolving and allocating passes counted this frame (VIRTUAL_SHADOW_COUNT_*), for F4's VSM line.
+struct VirtualShadowCounts {
+    std::uint32_t requested = 0;
+    std::uint32_t kept = 0;
+    std::uint32_t allocated = 0;
+    std::uint32_t evicted = 0;
+    std::uint32_t failed = 0;
+    std::uint32_t stale = 0;
+    std::uint32_t free = 0;
+};
+
+VirtualShadowCounts virtualShadowCountsFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_COUNTERS>& counters);
+
+// One level for the shader (std430): virtualShadowPlacement's numbers, the level's first page (low 32 bits) and
+// generation for the keys.
+struct GpuVirtualShadowLevel {
+    float placement[4];   // x, y the camera's texel, z the inverse texel size, w the depth scale
+    float depth[4];       // x the depth offset
+    std::int32_t pages[4]; // x, y the first page's table slot, z, w the first page across the light (low 32 bits)
+    std::uint32_t key[4]; // x the level's generation
+};
+
+static_assert(sizeof(GpuVirtualShadowLevel) == 64, "GpuVirtualShadowLevel must match virtual_shadow_data.glsl's");
+
+// The clipmap for the passes and the main pass (std430, set 1 binding SCENE_VIRTUAL_SHADOW_FRAME_BINDING).
+struct GpuVirtualShadowFrame {
+    float lightRotation[16];          // sunLightRotation, column-major: camera-relative points to the light's axes
+    float inverseViewProjection[16];  // the camera's, camera-relative and jittered: pixels back to points
+    float screen[4];                  // the render size in pixels, and its inverse
+    float options[4];                 // x the first level's usable half-width, y 1 shows the pages' debug view, z 1 starts the pages again
+    std::int32_t counts[4];           // x the levels, y the pages a level's side, z the pool's pages, w the frame
+    GpuVirtualShadowLevel levels[maxVirtualShadowLevels];
+};
+
+static_assert(sizeof(GpuVirtualShadowFrame) == 1200, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
+
+// The frame's record: the clipmap placed for this camera, each level's generation, the frame's counter.
+GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap, const Vec3& camera,
+                                             const std::array<std::uint32_t, maxVirtualShadowLevels>& generations,
+                                             const Mat4& inverseViewProjection, float width, float height, bool showPages,
+                                             std::uint32_t frame);

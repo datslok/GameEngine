@@ -34,6 +34,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Ambient occlusion", [&] {
         visit(settings.ambientOcclusion, visitor);
     });
+    visitor.group("Virtual shadows", [&] {
+        visit(settings.virtualShadows, visitor);
+    });
     visitor.group("Contact shadows", [&] {
         visit(settings.contactShadows, visitor);
     });

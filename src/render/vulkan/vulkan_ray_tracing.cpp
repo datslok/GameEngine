@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_ray_tracing.h"
+#include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_check.h"
 #include "render/vulkan/vulkan_device.h"
@@ -27,18 +28,8 @@ namespace {
     // Everything later in the frame that can read an acceleration structure: building a structure on top of it, and ray
     // queries in fragment and compute shaders.
     void structureBarrier(VkCommandBuffer commands, VkPipelineStageFlags2 laterStages) {
-        VkMemoryBarrier2 barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-        barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        barrier.dstStageMask = laterStages;
-        barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-
-        VkDependencyInfo dependency{};
-        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dependency.memoryBarrierCount = 1;
-        dependency.pMemoryBarriers = &barrier;
-        vkCmdPipelineBarrier2(commands, &dependency);
+        memoryBarrier(commands, {VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR},
+                      {laterStages, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR});
     }
 
     constexpr VkPipelineStageFlags2 rayQueryStages = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;

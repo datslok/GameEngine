@@ -1,0 +1,75 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_vote : require
+
+/*
+* Marking (render/vulkan/vulkan_virtual_shadows.h): every pixel with a surface asks for the page its point lands on in
+* its level, and the pages round it a soft shadow's filter may read (VIRTUAL_SHADOW_FILTER_TEXELS each way, so one to
+* four pages). The point comes back from the prepass's depth, measured from the camera; its level from its distance.
+* Neighbouring pixels mostly ask for the same pages, so an entry already asked for is not written again, and a wave
+* whose pixels all ask for one entry sends one write.
+*/
+#include "virtual_shadow_pages.glsl"
+#include "screen_reflections.glsl"
+
+layout(local_size_x = VIRTUAL_SHADOW_MARK_GROUP_SIDE, local_size_y = VIRTUAL_SHADOW_MARK_GROUP_SIDE) in;
+
+layout(set = 0, binding = 7) uniform sampler2D sceneDepth;
+
+void ask(int index) {
+    if ((table.entries[index] & VIRTUAL_SHADOW_ENTRY_REQUESTED) == 0u) {
+        atomicOr(table.entries[index], VIRTUAL_SHADOW_ENTRY_REQUESTED);
+    }
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    int index = -1;
+    ivec4 span = ivec4(0, 0, -1, -1);
+    int level = VIRTUAL_SHADOW_NO_LEVEL;
+
+    if (all(lessThan(pixel, ivec2(frame.screen.xy)))) {
+        float depth = texelFetch(sceneDepth, pixel, 0).r;
+        vec3 point = vec3(0.0);
+
+        if (depth > GPU_FAR_DEPTH) {
+            point = positionAtPixel(frame.inverseViewProjection, vec2(pixel) + 0.5, depth, frame.screen.xy);
+            level = virtualShadowLevelFor(length(point), frame.options.x, frame.counts.x);
+        }
+
+        if (level != VIRTUAL_SHADOW_NO_LEVEL) {
+            VirtualShadowLevelData data = frame.levels[level];
+            vec3 lightPoint = mat3(frame.lightRotation) * point;
+            vec3 placed = virtualShadowLevelPoint(lightPoint, data.placement.xyz, vec2(data.placement.w, data.depth.x));
+            span = virtualShadowMarkedPages(placed.xy, float(VIRTUAL_SHADOW_FILTER_TEXELS), frame.counts.y);
+
+            ivec2 slot = virtualShadowSlot(virtualShadowPageOf(placed.xy), data.pages.xy, frame.counts.y);
+            index = virtualShadowTableIndex(level, slot, frame.counts.y);
+        }
+    }
+
+    // The common case: a whole wave on one page, nowhere near its edges.
+    bool onePage = span.x == span.z && span.y == span.w;
+
+    if (subgroupAll(onePage && index >= 0) && subgroupAllEqual(index)) {
+        if (subgroupElect()) {
+            ask(index);
+        }
+
+        return;
+    }
+
+    if (level == VIRTUAL_SHADOW_NO_LEVEL) {
+        return;
+    }
+
+    VirtualShadowLevelData data = frame.levels[level];
+
+    for (int y = span.y; y <= span.w; ++y) {
+        for (int x = span.x; x <= span.z; ++x) {
+            ivec2 slot = virtualShadowSlot(ivec2(x, y), data.pages.xy, frame.counts.y);
+            ask(virtualShadowTableIndex(level, slot, frame.counts.y));
+        }
+    }
+}

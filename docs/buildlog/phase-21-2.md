@@ -171,3 +171,9 @@
   - **Level choice by doubling,** not `log2`: exact in floats, so marking, sampling and the CPU agree to the bit.
   - **`sunLightRotation`** split out of `cascadeBox`, shared by both.
   - **7 planted bugs caught** (the reach's edge given to the next level, slack not less one, negative pages unwrapped, the caster reach left out of the range, no margin, the camera snapped down instead of to the nearest page: caught only once points at the level's reach straight across the light were tested, the depth centre not kept).
+- `vsm-4b-pages` (Nov 24 2026): the pages marked from the prepass's depth and given room on the GPU, F4's VSM line, the pages' debug view (`virtual-shadows.md`).
+  - **Four passes:** clear, mark (a pixel's page and its filter's, 1-4, one write a wave on one page), resolve (stale, kept, needing, cached), allocate (free pages, then cached ones, then failed). Entries carry keys (world page, level generation), so a slid or dropped level's pages are found stale without the CPU listing them.
+  - **Off by default** until 4c draws into the pages; on for F5's debug view and F4.
+  - **`memoryBarrier`** shared in `buffer_barrier` (cloth's own copy, the mesh pool's and ray tracing's built on it).
+  - **Allocation tested on the CPU** by running the four passes' shared functions over frames (walking, a dropped level, a full pool).
+  - **7 planted bugs caught** (the marked span's low edge shifted, a slot's page not wrapped, a stale entry not needing a place, the free list read one off, keys without the generation, every level packed with the first level's generation, F4's line above the tiles').

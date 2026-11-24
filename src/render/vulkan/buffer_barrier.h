@@ -14,3 +14,7 @@ struct BufferUse {
 
 // One barrier on the whole of a buffer, from one use to the next. Recorded outside any rendering block.
 void bufferBarrier(VkCommandBuffer commands, VkBuffer buffer, const BufferUse& before, const BufferUse& after);
+
+// One barrier on all memory, from one use to the next: for work that touches many buffers (or none named), such as
+// a chain of compute passes, an upload every later reader waits for, or acceleration structures.
+void memoryBarrier(VkCommandBuffer commands, const BufferUse& before, const BufferUse& after);

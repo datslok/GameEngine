@@ -1,5 +1,6 @@
 #include "render/vulkan/vulkan_mesh_pool.h"
 #include "render/mesh_upload.h"
+#include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_device.h"
 
@@ -188,23 +189,15 @@ std::uint64_t VulkanMeshPool::getHeldBytes() const {
 * later submissions.
 */
 void meshUploadBarrier(VkCommandBuffer commands, const VulkanDevice& device) {
-    VkMemoryBarrier2 barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
-    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT | VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
-    barrier.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-                            VK_ACCESS_2_TRANSFER_READ_BIT;
+    BufferUse later{VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT | VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                    VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                        VK_ACCESS_2_TRANSFER_READ_BIT};
 
     if (device.supportsRayQueries()) {
-        barrier.dstStageMask |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-        barrier.dstAccessMask |= VK_ACCESS_2_SHADER_READ_BIT;
+        later.stages |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+        later.access |= VK_ACCESS_2_SHADER_READ_BIT;
     }
 
-    VkDependencyInfo dependency{};
-    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependency.memoryBarrierCount = 1;
-    dependency.pMemoryBarriers = &barrier;
-    vkCmdPipelineBarrier2(commands, &dependency);
+    memoryBarrier(commands, {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT}, later);
 }
