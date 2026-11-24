@@ -161,3 +161,8 @@
   - **Found:** the cascades draw no clusters (indexed meshes through `shadow.vert`), so leaves in them first need clusters drawn into tiles, which stage 4's pages need anyway; Horizon chose shadow levels by cascade (ours by the tile's texels already), Unreal stops sway when small (ours since 3c-iv-c). Sources in `LEAFGEOMETRY.md`, Shadows.
   - **The user's pick:** skip 3f; leaves cast from their own records once, in stage 4, rather than through a cascade path stage 4 retires.
   - **Measured** (four spots): the stand-ins' shadows 0.7-1.2 ms standing still; every cascade redrawn each frame (as turning) 3.8-5.4 ms, the frame 3-5.5 ms more: stage 4's bar.
+- `vsm-4-plan` (Nov 24 2026): stage 4 researched and planned, steps 4a-4h (`VIRTUALSHADOWMAPS.md`).
+  - **Read:** Unreal, Sakmary's thesis and Timberdoodle, EEVEE Next, Frogfood, StratusGFX, Olsson 2015, Treyarch's sparse shadow trees; every GPU-driven one keeps a page table, not sparse textures (binding 730 pages measured at 30 ms).
+  - **Proposed:** 4096² levels from 0.5 m to 8 km chosen by distance (0.5-1 pixel a texel at 1440p), one depth range sliding across the light, a D32 pool of 4096 pages, still and moving slices, today's PCSS through the table.
+  - **The user's picks:** clip distances with the hardware depth test first (crowns about 100 leaves deep), atomics the fallback; cascades kept for GPUs without mesh shaders; the far map kept for fog, probes, cards and missing pages.
+  - **Expected:** a still frame about today's 0.7-1.2 ms; the gain is swaying and turning (today 3.8-5.4 ms), finer texels and leaves casting as drawn.
