@@ -21,7 +21,7 @@ Each file's `Covers:` line names the code it describes (the pre-commit reminder 
 | Area | Docs |
 |---|---|
 | Build | `docs/architecture/build.md` (makefile, the two builds, shaders, dependencies, packaging) |
-| Engine | `docs/architecture/engine-core.md` (loop, ticks, determinism, jobs, entities, input), `docs/architecture/game-interface.md` (the `Game` hooks, the frame description, culling, debug drawing, render stats), `docs/architecture/settings-and-commands.md` (settings file, F5, presets, commands, launch options) |
+| Engine | `docs/architecture/engine-core.md` (loop, ticks, determinism, jobs, entities, input), `docs/architecture/game-interface.md` (the `Game` hooks, the frame description, culling, debug drawing, render stats), `docs/architecture/debug-views.md` (debug drawing, F4), `docs/architecture/settings-and-commands.md` (settings file, F5, presets, commands, launch options) |
 | Testing | `docs/architecture/testing.md` (golden images, GPU tests of shader libraries) |
 | Renderer | `docs/architecture/renderer.md` (pass order, `VulkanRenderer`), `docs/architecture/renderer-sdl-conventions.md` (kept from SDL_GPU), `docs/architecture/gpu-scene.md`, `docs/architecture/depth.md`, `docs/architecture/gpu-driven.md`, `docs/architecture/mesh-clusters.md`, `docs/architecture/twig-drawing.md`, `docs/architecture/gpu-timing.md` |
 | Lights and shadows | `docs/architecture/lights.md`, `docs/architecture/clustered-shading.md`, `docs/architecture/lights-and-shadow-atlas.md`, `docs/architecture/sun-shadows.md` (cascades, contact shadows), `docs/architecture/virtual-shadows.md` (the sun's virtual shadow maps, phase 21 stage 4) |
