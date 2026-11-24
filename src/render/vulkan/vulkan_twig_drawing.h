@@ -25,8 +25,10 @@ class VulkanDevice;
 * The camera's twigs culled on the GPU (ROADMAP phase 21 stage 3b-iii; render/gpu/twig_records.h), between the placed
 * plants' passes and the mesh cluster passes: twig_sources (one thread: the camera's placed entries of twig parts, each
 * with its part's twig set, and the cull pass's dispatch) and twig_cull (a workgroup a source's brick: each twig kept at
-* its level, its entry in the region of that level's cluster count). The cluster passes take the regions as groups and
-* the mesh shaders build each twig's instance from its entry.
+* its level, its entry in the region of that level's cluster count; a brick whose far node fits makes its one choice
+* instead, its node's first brick putting the node's level's leaf clusters in the far region, stage 3e-iii-b). The
+* cluster passes take the regions as groups and the mesh shaders build each twig's instance from its entry, and each far
+* leaf cluster's leaves from the far tables.
 *
 * The twig tables (the placed table's twig sets' bricks and twigs, their prototypes' levels from the pool's records)
 * are made once when the sets change and shared by every frame in flight; the view, groups, sources, dispatch, regions and
@@ -67,6 +69,12 @@ public:
     VkBuffer getRegions(std::uint32_t frameIndex) const;
     VkBuffer getEntries(std::uint32_t frameIndex) const;
     VkBuffer getTwigs() const;
+
+    // The far leaf clusters, leaves and cells' shapes (packTwigSets), for the cluster passes and mesh shaders; none
+    // (VK_NULL_HANDLE) before the first prepare with twig sets.
+    VkBuffer getFarClusters() const;
+    VkBuffer getFarLeaves() const;
+    VkBuffer getFarShapes() const;
     // One binding word a twig beside its record (packTwigBinding), for the bones (ROADMAP phase 21 stage 3c-iii).
     VkBuffer getTwigBindings() const;
 
@@ -78,7 +86,7 @@ public:
 
     // What a frame's passes counted: each region's entries written, and the cull pass's tally (F4's TWIGS line).
     struct Collected {
-        std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS> counts{};
+        std::array<std::uint32_t, TWIG_REGIONS> counts{};
         TwigTally tally;
     };
 
@@ -112,6 +120,11 @@ private:
     std::vector<std::uint32_t> twigBindingRecords;
     VulkanBuffer prototypes;
     VulkanBuffer levels;
+    VulkanBuffer farNodes;
+    VulkanBuffer farLevels;
+    VulkanBuffer farClusters;
+    VulkanBuffer farLeaves;
+    VulkanBuffer farShapes;
     std::vector<const TwigSet*> madeFrom;
     std::vector<std::uint32_t> madePlaces;
     std::uint32_t mostBricks = 0;

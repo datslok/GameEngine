@@ -133,6 +133,19 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_TWIG_FAR_MESH_CLUSTER) {
+        // Inputs: the far cluster's sphere, (its leaves). Outputs: the stand-in's sphere, own sphere, group sphere,
+        // (own error, nothing coarser, cone cutoff, counts' bits), (bound).
+        TwigFarCluster far = TwigFarCluster(testInput(0), 0u, uint(testInput(1).x), 0u, 0u);
+        MeshCluster cluster = twigFarMeshCluster(far);
+        testOutput(0, cluster.sphere);
+        testOutput(1, cluster.ownSphere);
+        testOutput(2, cluster.parentSphere);
+        testOutput(3, vec4(cluster.ownError, cluster.parentError > MESH_CLUSTER_NEVER_COARSER ? 1.0 : 0.0, cluster.cone.w, uintBitsToFloat(cluster.counts)));
+        testOutput(4, vec4(meshClusterBound(cluster) ? 1.0 : 0.0, 0.0, 0.0, 0.0));
+        return;
+    }
+
     if (function == GPU_TEST_FAR_LEAF_VERTEX) {
         // Inputs: (the foot, the first turn word's bits), (the second turn word's, the side cell number word's and the
         // twig's bits, the vertex), the shape's three vec4s. Outputs: the position, normal, (uv), tangent.

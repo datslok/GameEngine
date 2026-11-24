@@ -6,6 +6,7 @@
 #include "render/gpu/mesh_cluster_culling.h"
 #include "core/half_float.h"
 #include "math/quat.h"
+#include "scene/twig_far_levels.h"
 
 #include <algorithm>
 #include <cmath>
@@ -321,11 +322,15 @@ GpuTwig twigPosed(const GpuTwig& twig, const WindBonePose& pose) {
 }
 
 MeshClusterPose twigBrickPose(const GpuTwigBrick& brick, const GpuInstance& part, bool partBound, const GpuBoneTree& tree) {
+    return twigSpherePose(brick.sphere, part, partBound, tree);
+}
+
+MeshClusterPose twigSpherePose(const float sphere[4], const GpuInstance& part, bool partBound, const GpuBoneTree& tree) {
     if (!partBound || tree.firstPose == boneNoPose) {
         return MeshClusterPose{.bound = partBound};
     }
 
-    const float grown[4] = {brick.sphere[0], brick.sphere[1], brick.sphere[2], brick.sphere[3] + tree.move};
+    const float grown[4] = {sphere[0], sphere[1], sphere[2], sphere[3] + tree.move};
     return meshClusterPosed(grown, part, part.sway[3], Vec2{tree.lean[0], tree.lean[1]});
 }
 
@@ -342,6 +347,40 @@ namespace {
     // Whether two shapes' records are alike in every number.
     bool sameFarLeafShape(const GpuFarLeafShape& a, const GpuFarLeafShape& b) {
         return std::memcmp(&a, &b, sizeof(GpuFarLeafShape)) == 0;
+    }
+
+    /*
+    * A cluster of count leaves from first (shapes: the set's own run, named by firstShape in the table): its sphere the
+    * box of every vertex the mesh shader makes of them, out to the farthest, so culling by it never loses a leaf.
+    */
+    GpuTwigFarCluster farClusterOf(const std::vector<GpuFarLeaf>& leaves, std::uint32_t first, std::uint32_t count,
+                                   const std::vector<GpuFarLeafShape>& shapes, std::uint32_t firstShape) {
+        std::vector<Vec3> points;
+
+        for (std::uint32_t leaf = first; leaf < first + count; ++leaf) {
+            const GpuFarLeafShape& shape = shapes.at((leaves[leaf].sideCellNumber >> 16) & 0xffu);
+
+            for (std::uint32_t vertex = 0; vertex < farLeafVertices; ++vertex) {
+                points.push_back(farLeafVertex(leaves[leaf], shape, vertex).position);
+            }
+        }
+
+        Vec3 low = points.front();
+        Vec3 high = points.front();
+
+        for (const Vec3& point : points) {
+            low = Vec3{std::min(low.x, point.x), std::min(low.y, point.y), std::min(low.z, point.z)};
+            high = Vec3{std::max(high.x, point.x), std::max(high.y, point.y), std::max(high.z, point.z)};
+        }
+
+        const Vec3 centre = (low + high) * 0.5f;
+        float radius = 0.0f;
+
+        for (const Vec3& point : points) {
+            radius = std::max(radius, (point - centre).length());
+        }
+
+        return GpuTwigFarCluster{.sphere = {centre.x, centre.y, centre.z, radius}, .firstLeaf = first, .leafCount = count, .firstShape = firstShape};
     }
 }
 
@@ -395,10 +434,6 @@ PackedTwigSets packTwigSets(std::span<const TwigSet* const> sets, std::span<cons
                                                          .parent = node.parent == twigFarNoNode ? TWIG_FAR_NO_NODE : nodeOffset + node.parent});
             }
 
-            for (const TwigFarLevel& level : far.levels) {
-                tables.farLevels.push_back(GpuTwigFarLevel{.firstLeaf = leafOffset + level.firstLeaf, .leafCount = level.leafCount, .error = level.error});
-            }
-
             for (const FarLeaf& leaf : far.leaves) {
                 GpuFarLeaf made = packFarLeaf(leaf);
                 made.twig += twigOffset;
@@ -423,6 +458,18 @@ PackedTwigSets packTwigSets(std::span<const TwigSet* const> sets, std::span<cons
                 record.firstShape = static_cast<std::uint32_t>(tables.farShapes.size());
                 shapeRuns.push_back(record.firstShape);
                 tables.farShapes.insert(tables.farShapes.end(), shapes.begin(), shapes.end());
+            }
+
+            for (const TwigFarLevel& level : far.levels) {
+                GpuTwigFarLevel made{.firstCluster = static_cast<std::uint32_t>(tables.farClusters.size()), .error = level.error, .leafCount = level.leafCount};
+
+                for (std::uint32_t first = 0; first < level.leafCount; first += farLeavesPerCluster) {
+                    const std::uint32_t count = std::min(farLeavesPerCluster, level.leafCount - first);
+                    tables.farClusters.push_back(farClusterOf(tables.farLeaves, leafOffset + level.firstLeaf + first, count, shapes, record.firstShape));
+                    ++made.clusterCount;
+                }
+
+                tables.farLevels.push_back(made);
             }
         }
 
@@ -513,9 +560,11 @@ std::vector<TwigDraw> twigDrawsOnCpu(const TwigTables& tables, const GpuInstance
             if (drawn != TWIG_FAR_NO_NODE) {
                 const GpuTwigFarNode& node = tables.farNodes[drawn];
 
-                if (node.firstBrick == brickNumber && twigFarNodeKept(node, part, entry, record, view, MeshClusterPose{}) && farDraws != nullptr) {
+                const MeshClusterPose nodePose = twigSpherePose(node.sphere, part, partBound, tree);
+
+                if (node.firstBrick == brickNumber && twigFarNodeKept(node, part, entry, record, view, nodePose) && farDraws != nullptr) {
                     const std::uint32_t level = twigFarLevel(tables, node, part, view);
-                    farDraws->push_back(TwigFarDraw{drawn, level, tables.farLevels[level].firstLeaf, tables.farLevels[level].leafCount});
+                    farDraws->push_back(TwigFarDraw{drawn, level, tables.farLevels[level].firstCluster, tables.farLevels[level].clusterCount});
                 }
 
                 continue;

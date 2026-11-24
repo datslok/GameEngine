@@ -17,6 +17,14 @@
 // passes take each region as a group of entries with that many clusters each.
 #define TWIG_MOST_LEVEL_CLUSTERS 4
 
+// After them the far region: a far leaf cluster an entry (one cluster each), its cluster's number with
+// TWIG_FAR_CLUSTER_BIT (in the entry's first cluster, then in its pair's cluster), so the cluster passes and mesh shaders
+// tell a far cluster from a pooled one. The counts take TWIG_REGION_WORDS words (two uvec4s).
+#define TWIG_FAR_REGION TWIG_MOST_LEVEL_CLUSTERS
+#define TWIG_REGIONS (TWIG_MOST_LEVEL_CLUSTERS + 1)
+#define TWIG_REGION_WORDS 8
+#define TWIG_FAR_CLUSTER_BIT 0x80000000u
+
 // The most levels a prototype has (a twig of up to 2^7 leaves halved to one).
 #define TWIG_MOST_LEVELS 8
 
@@ -35,16 +43,20 @@
 #define TWIG_TALLY_LEVEL_TRIANGLES (TWIG_TALLY_LEVEL_TWIGS + TWIG_MOST_LEVELS)
 #define TWIG_TALLY_WORDS (TWIG_TALLY_LEVEL_TRIANGLES + TWIG_MOST_LEVELS)
 
-// The twig passes' storage buffers (twig_pass.glsl; from TWIG_BONE_BINDING the bones' four, bone_cull_data.glsl), and
-// the workgroup of the pass gathering their sources.
+// The twig passes' storage buffers (twig_pass.glsl; from TWIG_BONE_BINDING the bones' four, bone_cull_data.glsl; from
+// TWIG_FAR_BINDING the far nodes and levels), and the workgroup of the pass gathering their sources.
 #define TWIG_BONE_BINDING 16
-#define TWIG_PASS_BINDINGS 20
+#define TWIG_FAR_BINDING 20
+#define TWIG_PASS_BINDINGS 22
 #define TWIG_SOURCES_GROUP_SIZE 64
 
 // The scene set's twig entries, twigs and their bindings to their trees' bones (render/vulkan/scene_layout.h), for the
-// mesh shaders' twig instances.
+// mesh shaders' twig instances; and the far leaf clusters, leaves and cells' shapes, for their far leaves.
 #define SCENE_TWIG_ENTRIES_BINDING 46
 #define SCENE_TWIGS_BINDING 47
 #define SCENE_TWIG_BINDINGS_BINDING 49
+#define SCENE_FAR_CLUSTERS_BINDING 54
+#define SCENE_FAR_LEAVES_BINDING 55
+#define SCENE_FAR_SHAPES_BINDING 56
 
 #endif

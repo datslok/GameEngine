@@ -8,6 +8,7 @@
 #include <cstring>
 #include <map>
 #include <stdexcept>
+#include <type_traits>
 
 namespace {
     constexpr VkBufferUsageFlags storage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
@@ -15,11 +16,13 @@ namespace {
     // The most sources the cull pass takes: a workgroup row each, within the dispatch's y limit.
     constexpr std::uint32_t mostSources = 65535;
 
-    // A region's most room (64 MB of entries for the four); the room grows to fit up to here.
+    // A region's most room (64 MB of entries for each); the room grows to fit up to here.
     constexpr std::uint32_t largestRoom = 1u << 22;
 
-    // The regions buffer as twig_pass.glsl lays it out: the counts, the room, then the tally.
-    constexpr VkDeviceSize countBytes = TWIG_MOST_LEVEL_CLUSTERS * sizeof(std::uint32_t);
+    // The regions buffer as twig_pass.glsl lays it out: the counts (TWIG_REGION_WORDS), the room, then the tally; the
+    // read back copies the regions' counts, then the tally.
+    constexpr VkDeviceSize countBytes = TWIG_REGION_WORDS * sizeof(std::uint32_t);
+    constexpr VkDeviceSize readCountBytes = TWIG_REGIONS * sizeof(std::uint32_t);
     constexpr VkDeviceSize regionsTallyOffset = countBytes + 4 * sizeof(std::uint32_t);
     constexpr VkDeviceSize tallyBytes = TWIG_TALLY_WORDS * sizeof(std::uint32_t);
 
@@ -84,8 +87,8 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
     ensureBuffer(allocator, frame.dispatch, 3 * sizeof(std::uint32_t), storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.regions, regionsTallyOffset + tallyBytes, storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                  BufferMemory::Gpu);
-    ensureBuffer(allocator, frame.entries, VkDeviceSize{room} * TWIG_MOST_LEVEL_CLUSTERS * 4 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
-    ensureBuffer(allocator, frame.readback, countBytes + tallyBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
+    ensureBuffer(allocator, frame.entries, VkDeviceSize{room} * TWIG_REGIONS * 4 * sizeof(std::uint32_t), storage, BufferMemory::Gpu);
+    ensureBuffer(allocator, frame.readback, readCountBytes + tallyBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
     frame.room = room;
 
     std::vector<MeshHandle> prototypeMeshes;
@@ -143,7 +146,6 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
         device.waitIdle();
     }
 
-    // The far tables (packed.tables.far*) go up in 3e-iii-b, with the pass that reads them.
     const std::vector<GpuTwigBrick>& brickRecords = packed.tables.bricks;
     const std::vector<GpuTwig>& twigRecords = packed.tables.twigs;
     uploadBytes(allocator, sets, packed.sets.data(), packed.sets.size() * sizeof(GpuTwigSet));
@@ -151,6 +153,19 @@ bool VulkanTwigDrawing::prepare(const PlacedTable& table, const std::function<Me
     uploadBytes(allocator, twigs, twigRecords.data(), std::max<std::size_t>(twigRecords.size(), 1) * sizeof(GpuTwig));
     uploadBytes(allocator, twigBindings, packed.bindings.data(), std::max<std::size_t>(packed.bindings.size(), 1) * sizeof(std::uint32_t));
     twigBindingRecords = std::move(packed.bindings);
+
+    // The far tables, one unused record each without (every binding needs a buffer).
+    const auto uploadAtLeastOne = [&](VulkanBuffer& buffer, const auto& records) {
+        using Record = typename std::decay_t<decltype(records)>::value_type;
+        const Record none{};
+        uploadBytes(allocator, buffer, records.empty() ? static_cast<const void*>(&none) : static_cast<const void*>(records.data()),
+                    std::max<std::size_t>(records.size(), 1) * sizeof(Record));
+    };
+    uploadAtLeastOne(farNodes, packed.tables.farNodes);
+    uploadAtLeastOne(farLevels, packed.tables.farLevels);
+    uploadAtLeastOne(farClusters, packed.tables.farClusters);
+    uploadAtLeastOne(farLeaves, packed.tables.farLeaves);
+    uploadAtLeastOne(farShapes, packed.tables.farShapes);
     uploadBytes(allocator, prototypes, prototypeRecords.data(), prototypeRecords.size() * sizeof(GpuTwigPrototype));
     uploadBytes(allocator, levels, levelRecords.data(), levelRecords.size() * sizeof(GpuTwigLevel));
     madeFrom = table.twigSets;
@@ -174,7 +189,7 @@ void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descr
 
     // The room after the counts (the previous use of this frame's regions finished with its fence).
     const std::uint32_t roomWords[4] = {frame.room, 0, 0, 0};
-    vkCmdUpdateBuffer(commands, frame.regions.get(), 4 * sizeof(std::uint32_t), sizeof(roomWords), roomWords);
+    vkCmdUpdateBuffer(commands, frame.regions.get(), countBytes, sizeof(roomWords), roomWords);
     bufferBarrier(commands, frame.regions.get(), transferWrite, computeReadWrite);
 
     std::vector<ComputeBinding> bindings{
@@ -185,6 +200,7 @@ void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descr
         storageBufferBinding(frame.sources.get()), storageBufferBinding(frame.dispatch.get()), storageBufferBinding(frame.regions.get()),
         storageBufferBinding(frame.entries.get()), storageBufferBinding(bones.plantTrees), storageBufferBinding(bones.trees),
         storageBufferBinding(bones.poses),        storageBufferBinding(bones.twigBindings),
+        storageBufferBinding(farNodes.get()),     storageBufferBinding(farLevels.get()),
     };
     bindings[3].buffer = placed.partInstances;
     const std::uint32_t pushed[3] = {mostBricks, mostSources, bones.stamp};
@@ -205,8 +221,8 @@ void VulkanTwigDrawing::record(VkCommandBuffer commands, FrameDescriptors& descr
     bufferBarrier(commands, frame.regions.get(), computeReadWrite, then);
     bufferBarrier(commands, frame.entries.get(), computeWrite, then);
 
-    // The counts, then the tally (past the room) straight after them.
-    const VkBufferCopy copies[2] = {{0, 0, countBytes}, {regionsTallyOffset, countBytes, tallyBytes}};
+    // The regions' counts, then the tally (past the room) straight after them.
+    const VkBufferCopy copies[2] = {{0, 0, readCountBytes}, {regionsTallyOffset, readCountBytes, tallyBytes}};
     vkCmdCopyBuffer(commands, frame.regions.get(), frame.readback.get(), 2, copies);
     frame.pending = true;
 }
@@ -221,6 +237,18 @@ VkBuffer VulkanTwigDrawing::getEntries(std::uint32_t frameIndex) const {
 
 VkBuffer VulkanTwigDrawing::getTwigs() const {
     return twigs.get();
+}
+
+VkBuffer VulkanTwigDrawing::getFarClusters() const {
+    return farClusters.get();
+}
+
+VkBuffer VulkanTwigDrawing::getFarLeaves() const {
+    return farLeaves.get();
+}
+
+VkBuffer VulkanTwigDrawing::getFarShapes() const {
+    return farShapes.get();
 }
 
 VkBuffer VulkanTwigDrawing::getTwigBindings() const {
@@ -247,9 +275,9 @@ std::optional<VulkanTwigDrawing::Collected> VulkanTwigDrawing::collect(std::uint
     frame.readback.invalidate();
     Collected collected;
     const auto* mapped = static_cast<const std::uint8_t*>(frame.readback.getMapped());
-    std::memcpy(collected.counts.data(), mapped, countBytes);
+    std::memcpy(collected.counts.data(), mapped, readCountBytes);
     std::array<std::uint32_t, TWIG_TALLY_WORDS> tally{};
-    std::memcpy(tally.data(), mapped + countBytes, tallyBytes);
+    std::memcpy(tally.data(), mapped + readCountBytes, tallyBytes);
     collected.tally = readTwigTally(tally);
     const std::uint32_t most = *std::max_element(collected.counts.begin(), collected.counts.end());
 

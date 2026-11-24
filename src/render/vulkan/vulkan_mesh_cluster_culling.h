@@ -73,6 +73,7 @@ public:
         VkBuffer regions = VK_NULL_HANDLE;
         VkBuffer entries = VK_NULL_HANDLE;
         VkBuffer twigs = VK_NULL_HANDLE;
+        VkBuffer farClusters = VK_NULL_HANDLE;
     };
 
     struct Inputs {

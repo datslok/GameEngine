@@ -125,7 +125,7 @@ std::vector<ComputeBinding> VulkanMeshClusterCulling::passBindings(const PerFram
         placedOr(placed.partInstances.buffer),       placedOr(placed.parts),                     placedOr(placed.plants),
         placedOr(frame.inputs.twigs.regions),        placedOr(frame.inputs.twigs.entries),       placedOr(frame.inputs.twigs.twigs),
         placedOr(frame.inputs.bones.plantTrees),     placedOr(frame.inputs.bones.trees),         placedOr(frame.inputs.bones.poses),
-        placedOr(frame.inputs.bones.twigBindings),
+        placedOr(frame.inputs.bones.twigBindings),     placedOr(frame.inputs.twigs.farClusters),
     };
     all[7].buffer = frame.inputs.instances;
 

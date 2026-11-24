@@ -102,10 +102,11 @@ layout(std430, set = 0, binding = 17) readonly buffer PlacedPlants {
 };
 
 // The camera's twigs (render/gpu/twig_records.h; one unused record each without): each region's entries the twig pass
-// wrote (region r's draw r + 1 clusters each) and a region's room, the entries (a placed entry's place, the twig, its
-// level's first cluster) and the twigs.
+// wrote (region r's draw r + 1 clusters each; the far region's one far leaf cluster each) and a region's room, the
+// entries (a placed entry's place, the twig, its level's first cluster: a far cluster's number with
+// TWIG_FAR_CLUSTER_BIT in the far region), the twigs, and the far leaf clusters.
 layout(std430, set = 0, binding = 18) readonly buffer TwigRegions {
-    uvec4 twigCounts;
+    uint twigCounts[TWIG_REGION_WORDS];
     uvec4 twigRoom; // x
 };
 
@@ -115,6 +116,10 @@ layout(std430, set = 0, binding = 19) readonly buffer TwigEntries {
 
 layout(std430, set = 0, binding = 20) readonly buffer Twigs {
     Twig twigs[];
+};
+
+layout(std430, set = 0, binding = MESH_CLUSTER_FAR_BINDING) readonly buffer TwigFarClusters {
+    TwigFarCluster twigFarClusters[];
 };
 
 // The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands; and the
@@ -141,10 +146,11 @@ DrawCommand groupCommand(uint group) {
     return group < setup.w ? commands[views[0].slices.z + group] : placedCommands[group - setup.w];
 }
 
-// A group's clusters: first, count (a twig region's first is each entry's own: meshClusterPairKept).
+// A group's clusters: first, count (a twig region's first is each entry's own: meshClusterPairKept; the far region's one).
 uvec2 groupClusters(uint group) {
     if (group >= TWIG_GROUP_BASE) {
-        return uvec2(0u, group - TWIG_GROUP_BASE + 1u);
+        uint region = group - TWIG_GROUP_BASE;
+        return uvec2(0u, region == uint(TWIG_FAR_REGION) ? 1u : region + 1u);
     }
 
     if (group < setup.w) {
@@ -161,7 +167,10 @@ uint groupPairs(uint group) {
 }
 
 // What a pair's place draws (meshClusterDrawnAt): its instance, entry bits and record; a placed plant's number
-// (BONE_NO_TREE for a frame's draw), and a twig's part and number (MESH_CLUSTER_NO_TWIG otherwise).
+// (BONE_NO_TREE for a frame's draw), and a twig's part and number (MESH_CLUSTER_NO_TWIG otherwise); a far leaf
+// cluster's number (MESH_CLUSTER_NO_FAR otherwise) and whether its part is bound to bones.
+const uint MESH_CLUSTER_NO_FAR = 0xffffffffu;
+
 struct MeshClusterDrawn {
     InstanceData instance;
     uint entry;
@@ -169,7 +178,18 @@ struct MeshClusterDrawn {
     uint plant;
     InstanceData part;
     uint twig;
+    uint farCluster;
+    bool partBound;
 };
+
+// A pair's cluster (meshClusterOfPair): the pool's, or a far leaf cluster's stand-in (TWIG_FAR_CLUSTER_BIT).
+MeshCluster meshClusterOfPair(uint cluster) {
+    if ((cluster & TWIG_FAR_CLUSTER_BIT) != 0u) {
+        return twigFarMeshCluster(twigFarClusters[cluster & ~TWIG_FAR_CLUSTER_BIT]);
+    }
+
+    return clusters[cluster];
+}
 
 /*
 * A frame's draw through the draw list, or, from PLACED_INSTANCE_BASE, a placed entry's part placed by its plant, as the
@@ -192,8 +212,14 @@ MeshClusterDrawn meshClusterDrawnAt(uint place) {
         drawn.entry = placed.x;
         drawn.part = drawn.instance;
         drawn.twig = MESH_CLUSTER_NO_TWIG;
+        drawn.farCluster = MESH_CLUSTER_NO_FAR;
+        drawn.partBound = false;
 
-        if (twig) {
+        // A far leaf cluster is drawn as its part (its leaves are in the plant's frame).
+        if (twig && (twigEntry.z & TWIG_FAR_CLUSTER_BIT) != 0u) {
+            drawn.farCluster = twigEntry.z & ~TWIG_FAR_CLUSTER_BIT;
+            drawn.partBound = placedParts[placed.y].unused1 != 0u;
+        } else if (twig) {
             drawn.instance = twigInstance(drawn.part, twigs[twigEntry.y]);
             drawn.twig = twigEntry.y;
         }
@@ -208,6 +234,8 @@ MeshClusterDrawn meshClusterDrawnAt(uint place) {
     drawn.plant = BONE_NO_TREE;
     drawn.part = drawn.instance;
     drawn.twig = MESH_CLUSTER_NO_TWIG;
+    drawn.farCluster = MESH_CLUSTER_NO_FAR;
+    drawn.partBound = false;
     return drawn;
 }
 
@@ -217,6 +245,10 @@ MeshClusterDrawn meshClusterDrawnAt(uint place) {
 */
 MeshClusterPose meshClusterPoseAt(MeshClusterDrawn drawn, MeshCluster cluster) {
     BoneTree tree = drawn.plant == BONE_NO_TREE ? BoneTree(0u, 0u, BONE_NO_POSE, 0.0, vec4(0.0)) : boneCullTree(drawn.plant, pass.boneStamp);
+
+    if (drawn.farCluster != MESH_CLUSTER_NO_FAR) {
+        return twigSpherePose(cluster.sphere, drawn.part, drawn.partBound, tree);
+    }
 
     if (drawn.twig != MESH_CLUSTER_NO_TWIG) {
         uint binding = drawn.twig < uint(boneCullTwigBindings.length()) ? boneCullTwigBindings[drawn.twig] : SWAY_UNBOUND;
@@ -318,7 +350,7 @@ bool meshClusterPairKept(uint pair, out MeshClusterItem item, out bool candidate
     uint firstCluster = group >= TWIG_GROUP_BASE ? twigEntries[entry - TWIG_INSTANCE_BASE].z : grouped.x;
     item = MeshClusterItem(entry, firstCluster + within % grouped.y);
     MeshClusterDrawn drawn = meshClusterDrawnAt(item.entry);
-    MeshCluster cluster = clusters[item.cluster];
+    MeshCluster cluster = meshClusterOfPair(item.cluster);
     InstanceData instance = drawn.instance;
     MeshClusterPose pose = meshClusterPoseAt(drawn, cluster);
     uint visibility = meshClusterVisibility(cluster, instance, drawn.entry, drawn.record, views[0], pose);

@@ -77,25 +77,22 @@ struct TwigPose {
     BoneDrawn drawn;
     WindBonePose now;
     WindBonePose last;
+    uint farTwig; // a far leaf's twig (its number and lean); NO_FAR_TWIG for a twig's own vertex or none
 };
 
+const uint NO_FAR_TWIG = 0xffffffffu;
+
 TwigPose noTwigPose() {
-    return TwigPose(BoneDrawn(BONE_NO_POSE, SWAY_UNBOUND, vec4(0.0)), windRestPose(), windRestPose());
+    return TwigPose(BoneDrawn(BONE_NO_POSE, SWAY_UNBOUND, vec4(0.0)), windRestPose(), windRestPose(), NO_FAR_TWIG);
 }
 
-// The pose of the twig a mesh cluster pair draws (instanceIndex from TWIG_INSTANCE_BASE), none for any other draw.
-TwigPose twigPoseOf(uint instanceIndex) {
+// The pose of a twig (its number in the twig table) of a placed entry's plant (its entry bits).
+TwigPose twigPoseOfTwig(uint plantEntry, uint twigNumber) {
     TwigPose pose = noTwigPose();
-
-    if (instanceIndex < uint(TWIG_INSTANCE_BASE)) {
-        return pose;
-    }
-
-    uvec4 twig = sceneTwigEntries[instanceIndex - TWIG_INSTANCE_BASE];
-    pose.drawn = boneDrawnBy(drawnInstance(scenePlacedEntries[twig.x].x), sceneTwigBindings[twig.y]);
+    pose.drawn = boneDrawnBy(drawnInstance(plantEntry), sceneTwigBindings[twigNumber]);
 
     if (bonePosed(pose.drawn)) {
-        vec3 foot = twigMatrix(sceneTwigs[twig.y])[3].xyz;
+        vec3 foot = twigMatrix(sceneTwigs[twigNumber])[3].xyz;
         BoneVertexPoses now = boneVertexPoses(pose.drawn, false);
         pose.now = windRigidPose(now.own, now.parent, now.weight, foot);
 #ifdef MAIN_MOTION
@@ -104,6 +101,23 @@ TwigPose twigPoseOf(uint instanceIndex) {
 #endif
     }
 
+    return pose;
+}
+
+// The pose of the twig a mesh cluster pair draws (instanceIndex from TWIG_INSTANCE_BASE), none for any other draw.
+TwigPose twigPoseOf(uint instanceIndex) {
+    if (instanceIndex < uint(TWIG_INSTANCE_BASE)) {
+        return noTwigPose();
+    }
+
+    uvec4 twig = sceneTwigEntries[instanceIndex - TWIG_INSTANCE_BASE];
+    return twigPoseOfTwig(scenePlacedEntries[twig.x].x, twig.y);
+}
+
+// A far leaf's pose: its own twig's, with the twig named (each leaf of a far cluster rides its own twig).
+TwigPose farLeafPose(uint plantEntry, uint twigNumber) {
+    TwigPose pose = twigPoseOfTwig(plantEntry, twigNumber);
+    pose.farTwig = twigNumber;
     return pose;
 }
 
@@ -176,6 +190,13 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
     vec3 relative = vec3(0.0);
     DrawnObject drawn = drawnObject(instanceIndex, baseInstance);
     uint entry = drawn.entry;
+
+    // A far leaf takes its own twig's number (its tone) and lean.
+    if (drawn.twig && twigPose.farTwig != NO_FAR_TWIG) {
+        drawn.twigNumber = twigPose.farTwig;
+        drawn.twigLean = sceneTwigs[twigPose.farTwig].lean;
+    }
+
     InstanceData instance = drawn.instance;
 
     // A twig (render/gpu/twig_records.h): its prototype's vertex placed in its part's frame by the twig's matrix first,

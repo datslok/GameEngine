@@ -88,7 +88,7 @@ The same switch draws the list: the camera's prepass and main pass draw each sty
 
 ## Twigs
 
-A plant's twigs drawn as instances of prototypes, culled a brick, then a twig, before their clusters, which take them as groups: `twig-drawing.md`.
+A plant's twigs drawn as instances of prototypes, culled a brick, then a twig, before their clusters, which take them as groups: `twig-drawing.md`. Far leaf clusters come through the same passes: a pair whose cluster carries `TWIG_FAR_CLUSTER_BIT` is tested by its stand-in record (`meshClusterOfPair`, `twigFarMeshCluster`) and drawn by the mesh shader's far branch.
 
 ## Tests
 

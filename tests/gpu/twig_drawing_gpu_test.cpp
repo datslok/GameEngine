@@ -265,6 +265,40 @@ namespace {
         }
     }
 
+    // A far cluster's stand-in (twigFarMeshCluster) equals the mirror's exactly: random spheres and leaf counts.
+    void checkFarMeshCluster(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{71};
+        std::vector<GpuTwigFarCluster> all;
+        std::vector<GpuVec4> inputs;
+
+        for (int index = 0; index < 200; ++index) {
+            GpuTwigFarCluster far{.sphere = {random.between(-50.0f, 50.0f), random.between(0.0f, 40.0f), random.between(-50.0f, 50.0f), random.between(0.05f, 3.0f)},
+                                  .leafCount = 1 + static_cast<std::uint32_t>(index % 12)};
+            all.push_back(far);
+            inputs.push_back(gpuVec4(far.sphere[0], far.sphere[1], far.sphere[2], far.sphere[3]));
+            inputs.push_back(gpuVec4(static_cast<float>(far.leafCount)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TWIG_FAR_MESH_CLUSTER, inputs, 2, 5);
+
+        for (std::size_t i = 0; i < all.size(); ++i) {
+            const GpuMeshCluster want = twigFarMeshCluster(all[i]);
+            const GpuVec4* got = &outputs[5 * i];
+            const float* spheres[3] = {want.sphere, want.ownSphere, want.parentSphere};
+
+            for (int sphere = 0; sphere < 3; ++sphere) {
+                report.check("twigFarMeshCluster sphere", exactTolerance, Vec3{spheres[sphere][0], spheres[sphere][1], spheres[sphere][2]}, vec3From(got[sphere]));
+                report.check("twigFarMeshCluster radius", exactTolerance, spheres[sphere][3], got[sphere][3]);
+            }
+
+            report.check("twigFarMeshCluster own error", exactTolerance, want.ownError, got[3][0]);
+            report.check("twigFarMeshCluster nothing coarser", exactTolerance, 1.0f, got[3][1]);
+            report.check("twigFarMeshCluster cone", exactTolerance, want.cone[3], got[3][2]);
+            report.check("twigFarMeshCluster counts", exactTolerance, static_cast<float>(want.counts), static_cast<float>(std::bit_cast<std::uint32_t>(got[3][3])));
+            report.check("twigFarMeshCluster bound", exactTolerance, meshClusterBound(want) ? 1.0f : 0.0f, got[4][0]);
+        }
+    }
+
     /*
     * A far node's level fitting and the node kept equal the mirror's: random parts, nodes, errors and views, still and
     * swaying records, cases within rounding of the pixel error or a plane left out.
@@ -408,5 +442,6 @@ void gpuTestTwigDrawing(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkLevelDrawn(runner, report);
     checkBrickKept(runner, report);
     checkFarNode(runner, report);
+    checkFarMeshCluster(runner, report);
     checkFarLeafVertex(runner, report);
 }

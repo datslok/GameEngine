@@ -48,6 +48,45 @@ layout(buffer_reference, std430) readonly buffer MeshVertexFloats {
 // A twig's pose, made by the workgroup's first thread for all its vertices (one twig a pair).
 shared TwigPose workgroupTwig;
 
+// A far leaf cluster's leaves (stage 3e-iii-b): as many as fit a cluster's vertices and triangles, each its own twig's
+// pose, made once a leaf for its five vertices.
+const uint FAR_LEAVES_A_CLUSTER = min(uint(MESH_CLUSTER_MAX_VERTICES) / uint(FAR_LEAF_VERTICES), uint(MESH_CLUSTER_MAX_TRIANGLES) / uint(FAR_LEAF_TRIANGLES));
+shared TwigPose farLeafPoses[FAR_LEAVES_A_CLUSTER];
+
+/*
+* A far leaf cluster's pair (its cluster's number with TWIG_FAR_CLUSTER_BIT): each leaf's record made into its row
+* (farLeafVertex, in the plant's frame), placed as its part's vertex by the vertex shaders' body, riding its own twig's
+* pose and taking its twig's tone and lean (farLeafPose); its triangles each leaf's four.
+*/
+void drawFarCluster(MeshClusterItem item) {
+    uint far = item.cluster & ~TWIG_FAR_CLUSTER_BIT;
+    uvec4 run = sceneFarClusters[2u * far + 1u];
+    uint leaves = min(run.y, FAR_LEAVES_A_CLUSTER);
+    uint vertexCount = leaves * uint(FAR_LEAF_VERTICES);
+    uint triangleCount = leaves * uint(FAR_LEAF_TRIANGLES);
+    SetMeshOutputsEXT(vertexCount, triangleCount);
+    uint plantEntry = scenePlacedEntries[sceneTwigEntries[item.entry - TWIG_INSTANCE_BASE].x].x;
+
+    for (uint leaf = gl_LocalInvocationIndex; leaf < leaves; leaf += MESH_CLUSTER_MESH_THREADS) {
+        farLeafPoses[leaf] = farLeafPose(plantEntry, sceneFarLeaves[run.x + leaf].twig);
+    }
+
+    barrier();
+
+    for (uint slot = gl_LocalInvocationIndex; slot < vertexCount; slot += MESH_CLUSTER_MESH_THREADS) {
+        uint leaf = slot / uint(FAR_LEAF_VERTICES);
+        FarLeaf record = sceneFarLeaves[run.x + leaf];
+        FarLeafShape shape = sceneFarShapes[run.z + ((record.sideCellNumber >> 16) & 0xffu)];
+        FarLeafVertex made = farLeafVertex(record, shape, slot % uint(FAR_LEAF_VERTICES));
+        shadeVertex(slot, made.position, made.normal, made.uv, made.tangent, made.position, item.entry, item.entry, 0, 0u, farLeafPoses[leaf]);
+    }
+
+    for (uint triangle = gl_LocalInvocationIndex; triangle < triangleCount; triangle += MESH_CLUSTER_MESH_THREADS) {
+        uint leaf = triangle / uint(FAR_LEAF_TRIANGLES);
+        gl_PrimitiveTriangleIndicesEXT[triangle] = farLeafTriangle(triangle % uint(FAR_LEAF_TRIANGLES)) + uvec3(leaf * uint(FAR_LEAF_VERTICES));
+    }
+}
+
 void main() {
     // The workgroup's pair within its style's run of its list, the same for the whole workgroup; none past the run.
     MeshClusterWords totals = MeshClusterWords(meshClusterBuffers[0].zw);
@@ -61,6 +100,12 @@ void main() {
 
     uint place = totals.words[listTotals + MESH_CLUSTER_TOTAL_LIST_FIRST] + totals.words[listTotals + MESH_CLUSTER_TOTAL_RUN_FIRST + drawnStyle] + inRun;
     MeshClusterItem item = MeshClusterItems(meshClusterBuffers[0].xy).items[place];
+
+    // The same for the whole workgroup, so its barriers are met by every thread.
+    if ((item.cluster & TWIG_FAR_CLUSTER_BIT) != 0u) {
+        drawFarCluster(item);
+        return;
+    }
     MeshCluster cluster = MeshClusterRecords(meshClusterBuffers[1].xy).records[item.cluster];
     uint vertexCount = cluster.counts & 0xffu;
     uint triangleCount = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;

@@ -29,7 +29,7 @@ void main() {
     twigDispatch[0] = push.mostBricks;
     twigDispatch[1] = count;
     twigDispatch[2] = 1u;
-    for (uint region = 0u; region < uint(TWIG_MOST_LEVEL_CLUSTERS); ++region) {
+    for (uint region = 0u; region < uint(TWIG_REGIONS); ++region) {
         twigCounts[region] = 0u;
     }
 

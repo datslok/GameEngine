@@ -319,13 +319,17 @@ struct MeshClusterPlacedTables {
 /*
 * The camera's twigs as the passes read them (phase 21 stage 3b-iii; render/gpu/twig_records.h): each region's entries
 * written by the twig pass (region r's entries draw r + 1 clusters each; a count may pass the room, the rest lost), the
-* room a region has (region r's entries from r times it), the entries and the twigs. Empty without twigs.
+* room a region has (region r's entries from r times it), the entries and the twigs. The last region (twigFarRegion)
+* holds far leaf clusters, one an entry, its first cluster the far cluster's number with twigFarClusterBit (stage
+* 3e-iii-b); the far clusters and whether each placed part is bound to bones (its skeleton, GpuPlacedPart::unused[1])
+* go with them. Empty without twigs.
 */
 struct MeshClusterTwigTables {
-    std::array<std::uint32_t, TWIG_MOST_LEVEL_CLUSTERS> counts{};
+    std::array<std::uint32_t, TWIG_REGIONS> counts{};
     std::uint32_t room = 0;
     std::span<const GpuTwigEntry> entries;
     std::span<const GpuTwig> twigs;
+    std::span<const GpuTwigFarCluster> farClusters;
 };
 
 /*
@@ -349,19 +353,22 @@ struct MeshClusterTables {
 /*
 * The order the passes walk: each style's run of the draws' pooled groups, then its run of the placed groups, numbered
 * after the draws' drawGroups, then, in twigStyle's run (none below 0), the twig regions (twigGroupBase + 0 to
-* TWIG_MOST_LEVEL_CLUSTERS - 1); every place pooled. Cost grows with the groups.
+* TWIG_REGIONS - 1, the far region last); every place pooled. Cost grows with the groups.
 */
 CullDrawOrder meshClusterDrawOrder(const CullDrawOrder& draws, std::uint32_t drawGroups, const CullDrawOrder& placed, int twigStyle = -1);
 
-// The most pairs the twig regions can hold: each region's room times its clusters (1 + 2 + ... + TWIG_MOST_LEVEL_CLUSTERS).
+// The most pairs the twig regions can hold: each region's room times its clusters (1 + 2 + ... + TWIG_MOST_LEVEL_CLUSTERS,
+// and 1 for the far region).
 std::uint64_t twigMeshClusterPairBound(std::uint32_t room);
 
 /*
 * What a pair's place draws: its instance, its entry's bits (thinned, fade, with its draw's or plant's number) and its
 * record; a placed plant's number (BONE_NO_TREE for a frame's draw), and a twig's part (placed by its plant) and number
-* (in twigs.twigs; meshClusterNoTwig otherwise).
+* (in twigs.twigs; meshClusterNoTwig otherwise); a far leaf cluster's number (meshClusterNoFar otherwise: it is drawn as
+* its part, its leaves in the plant's frame) and whether its part is bound to bones.
 */
 inline constexpr std::uint32_t meshClusterNoTwig = MESH_CLUSTER_NO_TWIG;
+inline constexpr std::uint32_t meshClusterNoFar = 0xffffffffu;
 
 struct MeshClusterDrawn {
     GpuInstance instance{};
@@ -370,7 +377,19 @@ struct MeshClusterDrawn {
     std::uint32_t plant = boneNoTree;
     GpuInstance part{};
     std::uint32_t twig = meshClusterNoTwig;
+    std::uint32_t farCluster = meshClusterNoFar;
+    bool partBound = false;
 };
+
+/*
+* A far leaf cluster as the cluster passes test it (mirrored by twig_drawing.glsl): its sphere (own and group alike),
+* its leaves' vertices and triangles, always in the cut (own error 0, nothing coarser: its node chose its level), never
+* culled by facing, bound to no bone (twigSpherePose bounds it by its tree's move).
+*/
+GpuMeshCluster twigFarMeshCluster(const GpuTwigFarCluster& far);
+
+// A pair's cluster: the pool's, or a far cluster's stand-in when its number carries twigFarClusterBit.
+GpuMeshCluster meshClusterOfPair(const MeshClusterTables& tables, std::uint32_t cluster);
 
 /*
 * The instance at a place the passes and mesh shaders read (a pair's entry): a frame's draw through the draw list, or,
