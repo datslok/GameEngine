@@ -165,7 +165,7 @@ Then, independently, `drawWindField` while `WindSettings::showField` is on (wind
 
 ## Render stats and the F4 readout
 
-`renderer.getLastFrameStats()` returns `RenderStats` (`render/render_stats.h`): last frame's counts, each mesh counted once per view. GPU timings, eye adaptation and cloth timings are as late as the frames in flight.
+`renderer.getLastFrameStats()` returns `RenderStats` (`render/render_stats.h`): last frame's counts, each mesh once a view. GPU timings, eye adaptation and cloth timings are as late as the frames in flight.
 
 `renderStatsLines(stats)` gives the readout's text, a line each (also the `stats` command's reply, followed by the camera and profiler lines):
 
