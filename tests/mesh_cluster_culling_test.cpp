@@ -18,6 +18,7 @@
 #include "render/gpu/wind.h"
 #include "render/gpu/wind_bones.h"
 #include "render/render_stats.h"
+#include "scene/twig_far_levels_shared.h"
 #include "scene/indexed_mesh.h"
 #include "scene/level_of_detail.h"
 #include "scene/mesh.h"
@@ -1102,6 +1103,108 @@ namespace {
         assert(meshClusterPyramidLevel({0, 0, 63, 2}, 4) == 3);
     }
 
+    /*
+    * A far leaf is never hidden by a depth it shows in (stage 3e-v-b): leaves of five vertices 0.1-1.5 m across (so
+    * their boxes span one pyramid cell or several), ahead
+    * of walls or behind them, each drawn into the walls' depth (points of its hull, reversed-Z: the nearer wins) before
+    * its pyramid is built, as the main pass's whole-frame pyramid holds the leaf's own depth. A leaf hidden by that
+    * pyramid won no pixel; many behind walls are hidden. Its box holds its vertices; one it cannot project is never on
+    * screen; the margin keeps a leaf a rounding nearer than the pyramid seen.
+    */
+    void testFarLeafHiddenOnlyWhenUnseen() {
+        std::mt19937 random(31);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const RenderSize size{191, 107};
+        const Vec2 screen{static_cast<float>(size.width), static_cast<float>(size.height)};
+        const float yaw = 0.3f;
+        const Mat4 viewProjection = testRelativeViewProjection(Vec3{}, yaw);
+        int hidden = 0;
+        int seen = 0;
+
+        for (int round = 0; round < 500; ++round) {
+            std::vector<float> depths = wallDepths(random, size, viewProjection, yaw);
+            const std::array<float, 4> centre = sphereAhead(random, yaw);
+            std::array<Vec4, FAR_LEAF_VERTICES> clips{};
+            const float across = 0.1f + unit(random) * 1.4f;
+
+            for (Vec4& clip : clips) {
+                const Vec3 offset{(unit(random) - 0.5f) * across, (unit(random) - 0.5f) * across, (unit(random) - 0.5f) * across};
+                clip = viewProjection * Vec4{centre[0] + offset.x, centre[1] + offset.y, centre[2] + offset.z, 1.0f};
+            }
+
+            const MeshClusterScreenBox box = farLeafScreenBox(clips, screen);
+            assert(box.onScreen);
+
+            for (const Vec4& clip : clips) {
+                const Vec2 pixel = ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, screen);
+                assert(pixel.x >= box.box[0] && pixel.x <= box.box[2] && pixel.y >= box.box[1] && pixel.y <= box.box[3]);
+                assert(clip.z / clip.w < box.nearestDepth);
+            }
+
+            // The leaf drawn: points of its hull (random weights of its vertices), each at its pixel if nearer.
+            bool won = false;
+
+            for (int sample = 0; sample < 200; ++sample) {
+                Vec4 point{};
+                float total = 0.0f;
+
+                for (const Vec4& clip : clips) {
+                    const float weight = unit(random);
+                    point = point + clip * weight;
+                    total += weight;
+                }
+
+                point = point * (1.0f / total);
+                const Vec2 pixel = ndcToPixel(Vec2{point.x / point.w, point.y / point.w}, screen);
+                const int x = static_cast<int>(std::floor(pixel.x));
+                const int y = static_cast<int>(std::floor(pixel.y));
+
+                if (x < 0 || y < 0 || x >= static_cast<int>(size.width) || y >= static_cast<int>(size.height)) {
+                    continue;
+                }
+
+                float& at = depths[static_cast<std::size_t>(y) * size.width + static_cast<std::size_t>(x)];
+
+                if (point.z / point.w > at) {
+                    at = point.z / point.w;
+                    won = true;
+                }
+            }
+
+            const DepthPyramid pyramid = buildDepthPyramid(depths, size, DepthReduction::Farthest);
+
+            if (meshClusterBoxHidden(pyramid, box)) {
+                assert(!won);
+                ++hidden;
+            } else if (won) {
+                ++seen;
+            }
+        }
+
+        assert(hidden > 50 && seen > 50);
+
+        // A vertex on the camera's plane: no box.
+        std::array<Vec4, FAR_LEAF_VERTICES> cut{};
+        cut.fill(Vec4{0.0f, 0.0f, 0.5f, 1.0f});
+        cut[3].w = 0.0f;
+        assert(!farLeafScreenBox(cut, screen).onScreen);
+
+        // A flat pyramid at depth: a leaf a rounding farther is still seen (the margin), a percent farther hidden.
+        const float depth = 0.01f;
+        const DepthPyramid flat = buildDepthPyramid(std::vector<float>(static_cast<std::size_t>(size.width) * size.height, depth), size, DepthReduction::Farthest);
+        std::array<Vec4, FAR_LEAF_VERTICES> near{};
+        std::array<Vec4, FAR_LEAF_VERTICES> far{};
+
+        for (std::size_t vertex = 0; vertex < near.size(); ++vertex) {
+            const float x = -0.1f + 0.05f * static_cast<float>(vertex);
+            near[vertex] = Vec4{x, 0.1f, depth * (1.0f - 1e-6f), 1.0f};
+            far[vertex] = Vec4{x, 0.1f, depth * 0.99f, 1.0f};
+        }
+
+        assert(!meshClusterBoxHidden(flat, farLeafScreenBox(near, screen)));
+        assert(meshClusterBoxHidden(flat, farLeafScreenBox(far, screen)));
+    }
+
     // A list's pairs as a sorted copy, for set tests.
     std::vector<GpuMeshClusterItem> sortedItems(std::vector<GpuMeshClusterItem> items) {
         std::sort(items.begin(), items.end(), [](const GpuMeshClusterItem& a, const GpuMeshClusterItem& b) {
@@ -1336,6 +1439,7 @@ void testMeshClusterCulling() {
     testPlacedPlantsCullAsTheirEntities();
     testThePlacedPairBound();
     testScreenBoxHoldsTheSphere();
+    testFarLeafHiddenOnlyWhenUnseen();
     testOcclusionHidesNothingSeen();
     testTwoPassesMissNothing();
     testOcclusionRecord();

@@ -3,6 +3,7 @@
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/bone_poses_shared.h"
 #include "render/gpu/liana_trees_shared.h"
+#include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/gpu/placed_drawing_shared.h"
 #include "render/gpu/twig_drawing_shared.h"
 #include "render/vulkan/frame_descriptors.h"
@@ -90,11 +91,15 @@ enum SceneBinding : std::uint32_t {
     FarClustersBinding = 54,
     FarLeavesBinding = 55,
     FarShapesBinding = 56,
-    SceneBindingCount = 57
+    LeafPyramidEarlyBinding = 57,
+    LeafPyramidWholeBinding = 58,
+    SceneBindingCount = 59
 };
 
 static_assert(FarClustersBinding == SCENE_FAR_CLUSTERS_BINDING && FarLeavesBinding == SCENE_FAR_LEAVES_BINDING && FarShapesBinding == SCENE_FAR_SHAPES_BINDING,
               "The far leaves' bindings must match drawn_objects.glsl's");
+static_assert(LeafPyramidEarlyBinding == SCENE_LEAF_PYRAMID_EARLY_BINDING && LeafPyramidWholeBinding == SCENE_LEAF_PYRAMID_WHOLE_BINDING,
+              "The far leaves' pyramids' bindings must match mesh_cluster_draw.glsl's");
 
 static_assert(BoneTreesBinding == SCENE_BONE_TREES_BINDING && BonePlantTreesBinding == SCENE_BONE_PLANT_TREES_BINDING &&
                   BonePosesBinding == SCENE_BONE_POSES_BINDING && SwayBindingsBinding == SCENE_SWAY_BINDINGS_BINDING,
@@ -230,6 +235,8 @@ struct SceneImages {
     SampledImage glassDepths;       // and their nearest glass depths
     SampledImage windSprings;       // the wind field's springs, this frame's and last frame's (render/gpu/wind.h)
     SampledImage windPreviousSprings;
+    SampledImage leafPyramidEarly;  // the occlusion pyramids the mesh shaders test far leaves against (stand-ins without)
+    SampledImage leafPyramidWhole;
 };
 
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light

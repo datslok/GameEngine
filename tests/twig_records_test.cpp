@@ -544,6 +544,15 @@ namespace {
         stats.twigFarTriangles = 115000;
         const std::vector<std::string> far = renderStatsLines(stats);
         assert(std::find(far.begin(), far.end(), "FAR BRICKS 900  NODES 120 (40 MERGED)  CLUSTERS 2400  TRIS 115K") != far.end());
+
+        // Once the mesh shaders test far leaves (stage 3e-v-b): the main pass's hidden of tested, then the late prepass's.
+        stats.twigFarLeavesTested = 28000;
+        stats.twigFarLeavesHidden = 9000;
+        stats.twigFarLeavesLateTested = 600;
+        stats.twigFarLeavesLateHidden = 50;
+        const std::vector<std::string> tested = renderStatsLines(stats);
+        assert(std::find(tested.begin(), tested.end(),
+                         "FAR BRICKS 900  NODES 120 (40 MERGED)  CLUSTERS 2400  TRIS 115K  LEAVES HIDDEN 9000/28000 (LATE 50/600)") != tested.end());
     }
 }
 

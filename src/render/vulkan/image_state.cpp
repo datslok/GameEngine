@@ -40,6 +40,10 @@ ImageStateUse imageStateUse(ImageState state) {
     case ImageState::ComputeRead:
         return {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_ACCESS_2_NONE,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    case ImageState::MeshComputeRead:
+        // Naming the mesh stage needs the GPU's mesh shaders: only used with them.
+        return {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_ACCESS_2_NONE,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     case ImageState::ComputeStorage:
         // Storage images are only readable and writable in the general layout.
         return {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,

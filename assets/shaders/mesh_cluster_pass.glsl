@@ -5,6 +5,7 @@
 #define MESH_CLUSTER_PASS_GLSL
 
 #include "mesh_cluster_culling.glsl"
+#include "mesh_cluster_pyramid.glsl"
 #include "placed_drawing.glsl"
 #include "twig_drawing.glsl"
 
@@ -276,38 +277,10 @@ uint listTotals() {
 layout(set = 0, binding = MESH_CLUSTER_PYRAMID_BINDING) uniform sampler2D lastPyramid;
 layout(set = 0, binding = MESH_CLUSTER_PYRAMID_BINDING + 1) uniform sampler2D thisPyramid;
 
-/*
-* Whether a pyramid hides a sphere (measured from the camera) seen through the view-projection: every cell its box covers,
-* at the level where it spans at most two each way, farther than its nearest point (meshClusterHidden). The two pyramids
-* are of one size, so the occlusion record's.
-*/
+// Whether a pyramid hides a sphere (measured from the camera) seen through the view-projection (meshClusterHidden). The
+// two pyramids are of one size, so the occlusion record's.
 bool meshClusterHiddenIn(sampler2D pyramid, vec4 sphere, mat4 viewProjection) {
-    ivec2 size = ivec2(occlusion.pyramid.xy);
-    MeshClusterScreenBox box = meshClusterScreenBox(sphere, viewProjection, vec2(size));
-
-    if (!box.onScreen) {
-        return false;
-    }
-
-    ivec4 pixels = meshClusterBoxPixels(box.box, size);
-
-    if (pixels.x > pixels.z || pixels.y > pixels.w) {
-        return false;
-    }
-
-    int level = meshClusterPyramidLevel(pixels, int(occlusion.pyramid.z));
-    ivec2 levelSize = textureSize(pyramid, level);
-    ivec4 cells = ivec4(pyramidCell(pixels.x, level, levelSize.x), pyramidCell(pixels.y, level, levelSize.y), pyramidCell(pixels.z, level, levelSize.x),
-                        pyramidCell(pixels.w, level, levelSize.y));
-    float farthest = GPU_NEAR_DEPTH;
-
-    for (int y = cells.y; y <= cells.w; ++y) {
-        for (int x = cells.x; x <= cells.z; ++x) {
-            farthest = fartherDepth(farthest, texelFetch(pyramid, ivec2(x, y), level).r);
-        }
-    }
-
-    return box.nearestDepth < farthest;
+    return meshClusterBoxHiddenIn(pyramid, meshClusterScreenBox(sphere, viewProjection, vec2(occlusion.pyramid.xy)));
 }
 
 /*

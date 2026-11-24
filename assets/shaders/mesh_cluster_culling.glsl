@@ -1,14 +1,15 @@
 // Mesh clusters culled a view, included with #include "mesh_cluster_culling.glsl": mirrors render/gpu/mesh_cluster_culling.h
 // (meshClusterLargestScale, meshClusterPlacedSphere, meshClusterWorldSphere, meshClusterErrorPixels, meshClusterInCut,
 // meshClusterEyeInMesh, meshClusterFacesAway, meshClusterShapeFixed, meshClusterSways, meshClusterPosed, meshClusterSeenWhole,
-// meshClusterBound, meshClusterCullSphere, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterBoxPixels,
-// meshClusterPyramidLevel). Pure functions: the pyramid's and the bones' reads are the passes' (mesh_cluster_pass.glsl,
-// meshClusterHidden; bone_cull_data.glsl).
+// meshClusterBound, meshClusterCullSphere, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterEmptyBox,
+// meshClusterBoxTake, farLeafScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure functions: the pyramid's and
+// the bones' reads are the passes' (mesh_cluster_pyramid.glsl, meshClusterBoxHidden; bone_cull_data.glsl).
 #ifndef MESH_CLUSTER_CULLING_GLSL
 #define MESH_CLUSTER_CULLING_GLSL
 
 #include "render/gpu/instance_shared.h"
 #include "render/gpu/mesh_cluster_culling_shared.h"
+#include "scene/twig_far_levels_shared.h"
 #include "camera_culling.glsl"
 #include "instance_data.glsl"
 
@@ -221,28 +222,59 @@ struct MeshClusterScreenBox {
     bool onScreen;
 };
 
+// A box holding nothing yet, least past most (meshClusterEmptyBox).
+MeshClusterScreenBox meshClusterEmptyBox() {
+    return MeshClusterScreenBox(vec4(3.4e38, 3.4e38, -3.4e38, -3.4e38), -3.4e38, false);
+}
+
+// The box grown to hold a clip-space point; false, the box untouched, when it is within MESH_CLUSTER_SMALLEST_W of the
+// camera's plane or behind it (meshClusterBoxTake).
+bool meshClusterBoxTake(inout MeshClusterScreenBox box, vec4 clip, vec2 size) {
+    if (!(clip.w > MESH_CLUSTER_SMALLEST_W)) {
+        return false;
+    }
+
+    vec2 pixel = ndcToPixel(clip.xy / clip.w, size);
+    box.box.xy = min(box.box.xy, pixel);
+    box.box.zw = max(box.box.zw, pixel);
+    box.nearestDepth = max(box.nearestDepth, clip.z / clip.w);
+    return true;
+}
+
 /*
 * A sphere (xyz centre measured from the camera, w radius) through a camera-relative view-projection: its box's eight
 * corners' pixels, least and most, and the nearest corner depth; not on screen when a corner is within
 * MESH_CLUSTER_SMALLEST_W of the camera's plane or behind it (meshClusterScreenBox).
 */
 MeshClusterScreenBox meshClusterScreenBox(vec4 sphere, mat4 viewProjection, vec2 size) {
-    MeshClusterScreenBox result = MeshClusterScreenBox(vec4(3.4e38, 3.4e38, -3.4e38, -3.4e38), -3.4e38, false);
+    MeshClusterScreenBox result = meshClusterEmptyBox();
 
     for (int corner = 0; corner < 8; ++corner) {
         vec3 offset = vec3((corner & 1) != 0 ? sphere.w : -sphere.w, (corner & 2) != 0 ? sphere.w : -sphere.w, (corner & 4) != 0 ? sphere.w : -sphere.w);
-        vec4 clip = viewProjection * vec4(sphere.xyz + offset, 1.0);
 
-        if (!(clip.w > MESH_CLUSTER_SMALLEST_W)) {
+        if (!meshClusterBoxTake(result, viewProjection * vec4(sphere.xyz + offset, 1.0), size)) {
             return MeshClusterScreenBox(vec4(0.0), 0.0, false);
         }
-
-        vec2 pixel = ndcToPixel(clip.xy / clip.w, size);
-        result.box.xy = min(result.box.xy, pixel);
-        result.box.zw = max(result.box.zw, pixel);
-        result.nearestDepth = max(result.nearestDepth, clip.z / clip.w);
     }
 
+    result.onScreen = true;
+    return result;
+}
+
+/*
+* A far leaf's screen box from its vertices' clip positions (farLeafScreenBox, stage 3e-v-b): their box, their nearest
+* depth taken MESH_CLUSTER_LEAF_DEPTH_MARGIN nearer (the main pass's pyramid holds the leaf's own depth, rounded apart).
+*/
+MeshClusterScreenBox farLeafScreenBox(vec4 clips[FAR_LEAF_VERTICES], vec2 size) {
+    MeshClusterScreenBox result = meshClusterEmptyBox();
+
+    for (int vertex = 0; vertex < FAR_LEAF_VERTICES; ++vertex) {
+        if (!meshClusterBoxTake(result, clips[vertex], size)) {
+            return MeshClusterScreenBox(vec4(0.0), 0.0, false);
+        }
+    }
+
+    result.nearestDepth *= 1.0 + MESH_CLUSTER_LEAF_DEPTH_MARGIN;
     result.onScreen = true;
     return result;
 }

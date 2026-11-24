@@ -63,6 +63,11 @@
 // A box corner nearer the camera's plane than this (clip w) cannot be projected: the cluster is never hidden.
 #define MESH_CLUSTER_SMALLEST_W 0.001
 
+// A far leaf's nearest depth taken this much nearer (a fraction of it, reversed-Z) before its occlusion test (stage
+// 3e-v-b): the main pass tests it against a pyramid holding its own depth, rasterised from its vertices but rounded
+// apart from the test's, a few float steps (1e-7 each); 1e-4 keeps it seen, and is 1 cm at 100 m.
+#define MESH_CLUSTER_LEAF_DEPTH_MARGIN 1.0e-4
+
 // The work: the styles' first pairs (each a whole block), then their end, then the pairs that are real.
 #define MESH_CLUSTER_WORK_STYLE_FIRST 0
 #define MESH_CLUSTER_WORK_END 4
@@ -83,7 +88,21 @@
 // The mesh shader's workgroup: one warp on NVIDIA's GPUs, each thread placing up to two vertices and four triangles.
 #define MESH_CLUSTER_MESH_THREADS 32
 
-// The mesh shaders' push constants (the style drawn, then the list) sit after the vertex shaders' (GpuShadowView, GpuCaptureView).
+// The pyramid the mesh shaders test each far leaf against (stage 3e-v-b; their third push constant): none (the early
+// prepass: last frame's depth could hide a leaf seen now, and nothing would draw it), this frame's early list's (the
+// late prepass), or the whole frame's (the main pass, after the prepass drew every depth). Each in set 1 at its binding.
+#define MESH_CLUSTER_LEAF_TEST_NONE 0u
+#define MESH_CLUSTER_LEAF_TEST_EARLY 1u
+#define MESH_CLUSTER_LEAF_TEST_WHOLE 2u
+#define SCENE_LEAF_PYRAMID_EARLY_BINDING 57
+#define SCENE_LEAF_PYRAMID_WHOLE_BINDING 58
+
+// The far leaf tally in the totals buffer, after both lists' totals (MESH_CLUSTER_LISTS times MESH_CLUSTER_TOTAL_WORDS):
+// the far leaves the main pass tested and hid, then the late prepass's; added once a workgroup, cleared at each cull.
+#define MESH_CLUSTER_LEAF_TALLY_FIRST 26
+#define MESH_CLUSTER_LEAF_TALLY_WORDS 4
+
+// The mesh shaders' push constants (the style drawn, the list, the far leaves' pyramid) sit after the vertex shaders' (GpuShadowView, GpuCaptureView).
 #define MESH_CLUSTER_PUSH_OFFSET 112
 #define MESH_CLUSTER_PUSH_BYTES 16
 

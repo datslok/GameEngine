@@ -52,6 +52,12 @@ struct RenderStats {
     std::size_t twigFarMerged = 0;
     std::size_t twigFarClusters = 0;
     std::size_t twigFarTriangles = 0;
+    // The far leaves the mesh shaders tested against a pyramid and hid (stage 3e-v-b): the main pass's, the late
+    // prepass's; none tested without far leaf occlusion.
+    std::size_t twigFarLeavesTested = 0;
+    std::size_t twigFarLeavesHidden = 0;
+    std::size_t twigFarLeavesLateTested = 0;
+    std::size_t twigFarLeavesLateHidden = 0;
 
     // The bones pass (render/gpu/bone_poses.h), while it runs: trees posed, those left still for want of room, the
     // bones asked for and the pool's room; none posed while it does not run.

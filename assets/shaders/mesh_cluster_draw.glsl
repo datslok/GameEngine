@@ -19,13 +19,25 @@ out gl_MeshPerVertexEXT {
 
 #include "triangle_vertex.glsl"
 #include "mesh_cluster_culling.glsl"
+#include "mesh_cluster_pyramid.glsl"
 
-// The style drawn and its list (MESH_CLUSTER_EARLY or _LATE) (render/vulkan/scene_layout.h: after the vertex shaders'
-// push constants).
+// The style drawn, its list (MESH_CLUSTER_EARLY or _LATE) and the pyramid its far leaves are tested against
+// (MESH_CLUSTER_LEAF_TEST_*) (render/vulkan/scene_layout.h: after the vertex shaders' push constants).
 layout(push_constant) uniform MeshClusterDraw {
     layout(offset = MESH_CLUSTER_PUSH_OFFSET) uint drawnStyle;
     uint drawnList;
+    uint farLeafTest;
 };
+
+// The occlusion pyramids (render/vulkan/vulkan_mesh_cluster_culling.h): this frame's early list's depth, and the whole
+// frame's (built after the prepass, the next frame's history).
+layout(set = 1, binding = SCENE_LEAF_PYRAMID_EARLY_BINDING) uniform sampler2D earlyLeafPyramid;
+layout(set = 1, binding = SCENE_LEAF_PYRAMID_WHOLE_BINDING) uniform sampler2D wholeLeafPyramid;
+
+// Whether a primitive is culled before rasterising: a far leaf hidden behind the pyramid; every other false.
+out perprimitiveEXT gl_MeshPerPrimitiveEXT {
+    bool gl_CullPrimitiveEXT;
+} gl_MeshPrimitivesEXT[];
 
 // The buffers, by the addresses frame_data.glsl's meshClusterBuffers holds.
 layout(buffer_reference, std430) readonly buffer MeshClusterItems {
@@ -53,10 +65,40 @@ shared TwigPose workgroupTwig;
 const uint FAR_LEAVES_A_CLUSTER = min(uint(MESH_CLUSTER_MAX_VERTICES) / uint(FAR_LEAF_VERTICES), uint(MESH_CLUSTER_MAX_TRIANGLES) / uint(FAR_LEAF_TRIANGLES));
 shared TwigPose farLeafPoses[FAR_LEAVES_A_CLUSTER];
 
+// Each far leaf vertex's clip position as placed, whether each leaf is hidden, and how many are (stage 3e-v-b).
+shared vec4 farLeafClips[FAR_LEAVES_A_CLUSTER * uint(FAR_LEAF_VERTICES)];
+shared uint farLeafHidden[FAR_LEAVES_A_CLUSTER];
+shared uint farLeavesHidden;
+
+// The totals buffer written: the far leaf tally after both lists' totals (MESH_CLUSTER_LEAF_TALLY_FIRST).
+layout(buffer_reference, std430) buffer MeshClusterTally {
+    uint words[];
+};
+
+/*
+* Whether a far leaf is hidden behind this draw's pyramid: its vertices' box (farLeafScreenBox) wholly behind it. The
+* pyramid is the render size, as the viewport its clip positions land in.
+*/
+bool farLeafBehindPyramid(uint leaf) {
+    vec4 clips[FAR_LEAF_VERTICES];
+
+    for (uint vertex = 0u; vertex < uint(FAR_LEAF_VERTICES); ++vertex) {
+        clips[vertex] = farLeafClips[leaf * uint(FAR_LEAF_VERTICES) + vertex];
+    }
+
+    if (farLeafTest == MESH_CLUSTER_LEAF_TEST_EARLY) {
+        return meshClusterBoxHiddenIn(earlyLeafPyramid, farLeafScreenBox(clips, vec2(textureSize(earlyLeafPyramid, 0))));
+    }
+
+    return meshClusterBoxHiddenIn(wholeLeafPyramid, farLeafScreenBox(clips, vec2(textureSize(wholeLeafPyramid, 0))));
+}
+
 /*
 * A far leaf cluster's pair (its cluster's number with TWIG_FAR_CLUSTER_BIT): each leaf's record made into its row
 * (farLeafVertex, in the plant's frame), placed as its part's vertex by the vertex shaders' body, riding its own twig's
-* pose and taking its twig's tone and lean (farLeafPose); its triangles each leaf's four.
+* pose and taking its twig's tone and lean (farLeafPose); its triangles each leaf's four. With a pyramid pushed, a leaf
+* hidden behind it has its triangles culled before rasterising: a leaf is far smaller than its cluster, so hides far
+* more often (one test a leaf, at the triangles that cost). Its vertices are still placed: their count is set first.
 */
 void drawFarCluster(MeshClusterItem item) {
     uint far = item.cluster & ~TWIG_FAR_CLUSTER_BIT;
@@ -78,12 +120,44 @@ void drawFarCluster(MeshClusterItem item) {
         FarLeaf record = sceneFarLeaves[run.x + leaf];
         FarLeafShape shape = sceneFarShapes[run.z + ((record.sideCellNumber >> 16) & 0xffu)];
         FarLeafVertex made = farLeafVertex(record, shape, slot % uint(FAR_LEAF_VERTICES));
-        shadeVertex(slot, made.position, made.normal, made.uv, made.tangent, made.position, item.entry, item.entry, 0, 0u, farLeafPoses[leaf]);
+        vec3 relative = shadeVertex(slot, made.position, made.normal, made.uv, made.tangent, made.position, item.entry, item.entry, 0, 0u, farLeafPoses[leaf]);
+        farLeafClips[slot] = relativeViewProjection * vec4(relative, 1.0);
+    }
+
+    // The push constant is the same for the whole draw, so every thread meets these barriers.
+    bool testing = farLeafTest != MESH_CLUSTER_LEAF_TEST_NONE;
+
+    if (testing) {
+        if (gl_LocalInvocationIndex == 0u) {
+            farLeavesHidden = 0u;
+        }
+
+        barrier();
+
+        for (uint leaf = gl_LocalInvocationIndex; leaf < leaves; leaf += MESH_CLUSTER_MESH_THREADS) {
+            bool hidden = farLeafBehindPyramid(leaf);
+            farLeafHidden[leaf] = hidden ? 1u : 0u;
+
+            if (hidden) {
+                atomicAdd(farLeavesHidden, 1u);
+            }
+        }
+
+        barrier();
+
+        // The tally (F4's FAR line): the main pass's words first, then the late prepass's; once a workgroup.
+        if (gl_LocalInvocationIndex == 0u) {
+            MeshClusterTally tally = MeshClusterTally(meshClusterBuffers[0].zw);
+            uint first = uint(MESH_CLUSTER_LEAF_TALLY_FIRST) + (farLeafTest == MESH_CLUSTER_LEAF_TEST_WHOLE ? 0u : 2u);
+            atomicAdd(tally.words[first], leaves);
+            atomicAdd(tally.words[first + 1u], farLeavesHidden);
+        }
     }
 
     for (uint triangle = gl_LocalInvocationIndex; triangle < triangleCount; triangle += MESH_CLUSTER_MESH_THREADS) {
         uint leaf = triangle / uint(FAR_LEAF_TRIANGLES);
         gl_PrimitiveTriangleIndicesEXT[triangle] = farLeafTriangle(triangle % uint(FAR_LEAF_TRIANGLES)) + uvec3(leaf * uint(FAR_LEAF_VERTICES));
+        gl_MeshPrimitivesEXT[triangle].gl_CullPrimitiveEXT = testing && farLeafHidden[leaf] != 0u;
     }
 }
 
@@ -145,5 +219,6 @@ void main() {
         }
 
         gl_PrimitiveTriangleIndicesEXT[triangle] = corners;
+        gl_MeshPrimitivesEXT[triangle].gl_CullPrimitiveEXT = false;
     }
 }

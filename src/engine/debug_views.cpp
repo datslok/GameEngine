@@ -115,11 +115,18 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     }
 
     // The far levels' (ROADMAP phase 21 stage 3e-iii): bricks handing over, far nodes drawn (merged apart), their clusters
-    // and thousands of triangles.
+    // and thousands of triangles; once tested, the far leaves the main pass hid of those it tested, and the late prepass's.
     if (stats.twigFarBricks > 0) {
-        lines.insert(lines.begin() + after, "FAR BRICKS " + std::to_string(stats.twigFarBricks) + "  NODES " + std::to_string(stats.twigFarNodes) + " (" +
-                                                std::to_string(stats.twigFarMerged) + " MERGED)  CLUSTERS " + std::to_string(stats.twigFarClusters) +
-                                                "  TRIS " + std::to_string(stats.twigFarTriangles / 1000) + "K");
+        std::string far = "FAR BRICKS " + std::to_string(stats.twigFarBricks) + "  NODES " + std::to_string(stats.twigFarNodes) + " (" +
+                          std::to_string(stats.twigFarMerged) + " MERGED)  CLUSTERS " + std::to_string(stats.twigFarClusters) + "  TRIS " +
+                          std::to_string(stats.twigFarTriangles / 1000) + "K";
+
+        if (stats.twigFarLeavesTested > 0) {
+            far += "  LEAVES HIDDEN " + std::to_string(stats.twigFarLeavesHidden) + "/" + std::to_string(stats.twigFarLeavesTested) + " (LATE " +
+                   std::to_string(stats.twigFarLeavesLateHidden) + "/" + std::to_string(stats.twigFarLeavesLateTested) + ")";
+        }
+
+        lines.insert(lines.begin() + after, far);
         ++after;
     }
 

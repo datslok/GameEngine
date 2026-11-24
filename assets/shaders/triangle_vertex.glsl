@@ -182,8 +182,9 @@ invariant gl_Position;
 * first: baseInstance, placed plants' from PLACED_INSTANCE_BASE), its number in its own mesh (meshVertex: the per-vertex
 * records of hanging things and thinned cards count from the mesh's first vertex) and in the vertex pool (poolVertex:
 * its binding to its tree's bones); for a twig, its pose (twigPoseOf, made once a workgroup; noTwigPose otherwise).
+* Returns the vertex measured from the camera (the mesh shaders test far leaves by it: they may not read their outputs).
 */
-void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tangent, vec3 previousPosition, uint instanceIndex, uint baseInstance,
+vec3 shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tangent, vec3 previousPosition, uint instanceIndex, uint baseInstance,
                  int meshVertex, uint poolVertex, TwigPose twigPose) {
     // A frame's draw, or a placed plant's part (drawn_objects.glsl).
     // The vertex measured from the camera, kept here and written once at the end (a mesh shader may not read its outputs).
@@ -245,7 +246,7 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
         stillMotion(vertexSlot, relative);
 #endif
         VERTEX_OUT(relativePosition) = relative;
-        return;
+        return relative;
     }
 
     /*
@@ -279,7 +280,7 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
         stillMotion(vertexSlot, relative);
 #endif
         VERTEX_OUT(relativePosition) = relative;
-        return;
+        return relative;
     }
 
     /*
@@ -314,7 +315,7 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
         }
 #endif
         VERTEX_OUT(relativePosition) = relative;
-        return;
+        return relative;
     }
 
     // Thinned cards (scene/card_thinning.h): each shrunk or grown about its stem as the view's distance allows, in every view
@@ -408,6 +409,7 @@ void shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
 
     VERTEX_OUT(worldTangent) = vec4(tangentLength > 0.0 ? transformedTangent / tangentLength : vec3(0.0), tangent.w * handedness.x);
     VERTEX_OUT(relativePosition) = relative;
+    return relative;
 }
 
 #ifndef MESH_CLUSTER_SHADER

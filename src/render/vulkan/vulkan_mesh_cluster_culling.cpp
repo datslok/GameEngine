@@ -46,7 +46,11 @@ namespace {
         vkCmdPushConstants(commands, pipeline.getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes, words);
     }
 
-    constexpr VkDeviceSize totalBytes = MESH_CLUSTER_LISTS * MESH_CLUSTER_TOTAL_WORDS * sizeof(std::uint32_t);
+    // Both lists' totals, then the far leaf tally.
+    static_assert(MESH_CLUSTER_LEAF_TALLY_FIRST == MESH_CLUSTER_LISTS * MESH_CLUSTER_TOTAL_WORDS, "The far leaf tally follows both lists' totals");
+    constexpr VkDeviceSize tallyOffset = MESH_CLUSTER_LEAF_TALLY_FIRST * sizeof(std::uint32_t);
+    constexpr VkDeviceSize tallyBytes = MESH_CLUSTER_LEAF_TALLY_WORDS * sizeof(std::uint32_t);
+    constexpr VkDeviceSize totalBytes = tallyOffset + tallyBytes;
 }
 
 VulkanMeshClusterCulling::VulkanMeshClusterCulling(const VulkanDevice& device, VkSampler nearest, std::uint32_t framesInFlight):
@@ -59,6 +63,7 @@ VulkanMeshClusterCulling::VulkanMeshClusterCulling(const VulkanDevice& device, V
     writePass = std::make_unique<ComputePipeline>(device, passDescription("assets/shaders/mesh_cluster_write.comp.spv", sharedBuffers + 3, true));
     history = std::make_unique<VulkanDepthPyramid>(device, nearest, DepthReduction::Farthest, "Occlusion pyramid");
     earlyDepth = std::make_unique<VulkanDepthPyramid>(device, nearest, DepthReduction::Farthest, "Occlusion pyramid, early list");
+    pyramidRead = device.supportsMeshShaders() ? ImageState::MeshComputeRead : ImageState::ComputeRead;
     setFramesInFlight(framesInFlight);
 }
 
@@ -100,7 +105,8 @@ VulkanMeshClusterCulling::ListAddresses VulkanMeshClusterCulling::prepare(std::u
     const VkBufferUsageFlags readable = storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     frame.room = room;
     ensureBuffer(allocator, frame.items, MESH_CLUSTER_LISTS * VkDeviceSize{frame.room} * sizeof(GpuMeshClusterItem), readable, BufferMemory::Gpu);
-    ensureBuffer(allocator, frame.totals, totalBytes, readable, BufferMemory::Gpu);
+    // The totals cleared in part too (the far leaf tally, cull).
+    ensureBuffer(allocator, frame.totals, totalBytes, readable | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu);
     ensureBuffer(allocator, frame.taskCommands, MESH_CLUSTER_LISTS * MESH_CLUSTER_STYLES * 3 * sizeof(std::uint32_t),
                  storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, BufferMemory::Gpu);
     return ListAddresses{frame.items.getDeviceAddress(), frame.totals.getDeviceAddress()};
@@ -108,9 +114,40 @@ VulkanMeshClusterCulling::ListAddresses VulkanMeshClusterCulling::prepare(std::u
 
 void VulkanMeshClusterCulling::makeReadable(VkCommandBuffer commands, VulkanDepthPyramid& pyramid, bool& built) {
     if (pyramid.getImage().getState() == ImageState::Undefined) {
-        pyramid.getImage().transition(commands, ImageState::ComputeRead, ImageContents::Discard);
+        pyramid.getImage().transition(commands, pyramidRead, ImageContents::Discard);
         built = false;
     }
+}
+
+bool VulkanMeshClusterCulling::makePyramids() {
+    if (pyramidSize.width == 0 || pyramidSize.height == 0) {
+        return false;
+    }
+
+    if (!pyramidsMade) {
+        history->ensureSize(pyramidSize);
+        earlyDepth->ensureSize(pyramidSize);
+        pyramidsMade = true;
+    }
+
+    return true;
+}
+
+// Made here when the scene's set is written before the first cull, so it points at the images cull will use.
+std::optional<SampledImage> VulkanMeshClusterCulling::sampledEarlyDepth() {
+    if (!makePyramids()) {
+        return std::nullopt;
+    }
+
+    return SampledImage{earlyDepth->getImage().getView(), nearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+}
+
+std::optional<SampledImage> VulkanMeshClusterCulling::sampledWholeDepth() {
+    if (!makePyramids()) {
+        return std::nullopt;
+    }
+
+    return SampledImage{history->getImage().getView(), nearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
 std::vector<ComputeBinding> VulkanMeshClusterCulling::passBindings(const PerFrame& frame, std::initializer_list<VkBuffer> own, bool pyramids) const {
@@ -165,14 +202,8 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
         throw std::logic_error("Mesh cluster culling needs prepare before cull, each frame");
     }
 
-    if (pyramidSize.width == 0 || pyramidSize.height == 0) {
+    if (!makePyramids()) {
         throw std::logic_error("Mesh cluster culling needs the render size before cull");
-    }
-
-    if (!pyramidsMade) {
-        history->ensureSize(pyramidSize);
-        earlyDepth->ensureSize(pyramidSize);
-        pyramidsMade = true;
     }
 
     ++culls;
@@ -223,6 +254,16 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     vkCmdUpdateBuffer(commands, frame.dispatch.get(), 0, sizeof(started), started);
     bufferBarrier(commands, frame.dispatch.get(), transferWrite, computeWrite);
 
+    // The far leaf tally cleared for this frame's mesh shaders (only with occlusion: they test leaves then), ready for their
+    // atomics and for the scan pass's writes to the totals beside it. The last copy of it (this frame in flight's previous
+    // frame) finished long ago.
+    if (inputs.occlusion) {
+        vkCmdFillBuffer(commands, frame.totals.get(), tallyOffset, tallyBytes, 0);
+        const BufferUse tallyUse{VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT,
+                                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
+        bufferBarrier(commands, frame.totals.get(), transferWrite, tallyUse);
+    }
+
     // The camera culling's entries, last made ready for the vertex shaders, read here too.
     bufferBarrier(commands, inputs.drawList, computeWrite, computeRead);
 
@@ -251,11 +292,12 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
 * the copies back), the task commands for the indirect draws.
 */
 void VulkanMeshClusterCulling::recordList(VkCommandBuffer commands, FrameDescriptors& descriptors, PerFrame& frame, std::uint32_t list) {
+    // The mesh shaders read the lists and totals, and add the far leaf tally into the totals (atomics: a write too).
     BufferUse drawRead{VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT};
 
     if (device.supportsMeshShaders()) {
         drawRead.stages |= VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT;
-        drawRead.access |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+        drawRead.access |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     }
 
     if (list == MESH_CLUSTER_LATE) {
@@ -300,7 +342,7 @@ void VulkanMeshClusterCulling::cullLate(VkCommandBuffer commands, FrameDescripto
         throw std::logic_error("Mesh cluster culling's late list needs occlusion on in cull");
     }
 
-    earlyDepth->build(commands, descriptors, depth);
+    earlyDepth->build(commands, descriptors, depth, pyramidRead);
     earlyDepthBuilt = true;
     recordList(commands, descriptors, frame, MESH_CLUSTER_LATE);
     readBack(commands, frame);
@@ -308,12 +350,27 @@ void VulkanMeshClusterCulling::cullLate(VkCommandBuffer commands, FrameDescripto
 
 // The whole frame's depth as the next frame's history, with this frame's view-projection and camera.
 void VulkanMeshClusterCulling::keepDepth(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth) {
-    history->build(commands, descriptors, depth);
+    history->build(commands, descriptors, depth, pyramidRead);
     historyBuilt = true;
     historyKept = true;
     historyCull = culls;
     historyViewProjection = frameViewProjection;
     historyOrigin = frameOrigin;
+}
+
+/*
+* After the main pass, the far leaf tally its mesh shaders and the late prepass's added, over the copy readBack made
+* before them (that copy, a transfer, finished writing first).
+*/
+void VulkanMeshClusterCulling::readLeafTally(VkCommandBuffer commands, std::uint32_t frameIndex) {
+    PerFrame& frame = frames.at(frameIndex);
+    const BufferUse meshWrite{VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
+    const BufferUse transferRead{VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT};
+    bufferBarrier(commands, frame.totals.get(), meshWrite, transferRead);
+    bufferBarrier(commands, frame.readback.get(), transferWrite, transferWrite);
+    const VkBufferCopy tallyCopy{tallyOffset, tallyOffset, tallyBytes};
+    vkCmdCopyBuffer(commands, frame.totals.get(), frame.readback.get(), 1, &tallyCopy);
+    bufferBarrier(commands, frame.readback.get(), transferWrite, hostRead);
 }
 
 // Both lists' totals, and the lists when asked (the totals and items made ready for transfer by recordList).
@@ -352,9 +409,13 @@ std::optional<VulkanMeshClusterCulling::Collected> VulkanMeshClusterCulling::col
         room = std::min(std::max(room, std::bit_ceil(collected.totals[list][MESH_CLUSTER_TOTAL_KEPT])), largestMeshClusterRoom);
     }
 
+    if (frame.occlusion) {
+        std::memcpy(collected.leafTally.data(), words + MESH_CLUSTER_LEAF_TALLY_FIRST, tallyBytes);
+    }
+
     if (frame.itemsPending) {
         frame.itemsPending = false;
-        const auto* items = reinterpret_cast<const GpuMeshClusterItem*>(words + MESH_CLUSTER_LISTS * MESH_CLUSTER_TOTAL_WORDS);
+        const auto* items = reinterpret_cast<const GpuMeshClusterItem*>(words + totalBytes / sizeof(std::uint32_t));
 
         for (std::uint32_t list = 0; list < (frame.occlusion ? MESH_CLUSTER_LISTS : 1u); ++list) {
             const GpuMeshClusterItem* first = items + VkDeviceSize{list} * frame.room;

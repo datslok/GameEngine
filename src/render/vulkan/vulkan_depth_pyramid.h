@@ -27,8 +27,9 @@ public:
     // The levels at the render size, remade when it changes; the GPU must be idle (the renderer waits).
     void ensureSize(RenderSize render);
 
-    // Record every level from the depth image (left readable by compute); the pyramid ends readable by compute.
-    void build(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth);
+    // Record every level from the depth image (left readable by compute); the pyramid ends in readState (by compute
+    // unless told; the occlusion pyramids by mesh shaders too).
+    void build(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth, ImageState readState = ImageState::ComputeRead);
 
     VulkanImage& getImage();
     std::uint32_t getLevels() const;

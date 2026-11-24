@@ -157,6 +157,29 @@ The culling algorithm itself is unpublished (no talk slides found).
   - Four spots, far leaves on minus off (home PC, release, hidden copy, three samples, GPU ms; trees / rim / ring / wall): +1.42 / -0.71 / +1.73 / -2.42, mean -0.00, from +1.06 at 3e-iv's 50. Session noise about a millisecond.
   - Ring: clusters kept 0.59M (from 0.65M; 0.53M with far leaves off), hidden 1.14M (from 1.08M), triangles after culling 30.4M (from 33.0M; 27.5M off).
   - [I] Break-even, not yet a gain: the far clusters kept still outnumber the twig clusters they replace; 3e-v-b's per-leaf test goes at the triangles left.
+- **Measured in 3e-v-b (home PC, release, hidden copy, three samples, GPU ms, far leaf occlusion on minus off; trees / rim / ring / wall):** +0.55 / +0.09 / -0.35 / +0.01, again with the tally +0.46 / -0.01 / -0.27 / -0.14: nothing past noise.
+  - Yet it hides nearly every far leaf it tests: main pass 666K of 674K (99%) / 541K of 582K (93%) / 1.30M of 1.30M (99.8%) / 6K of 12K (52%); the late prepass alike (ring 830K of 833K).
+  - [I] A far crown is dense: a leaf about a pixel, dozens on each pixel, only the outer layer seen. A cluster's sphere (1.24 m) nearly always shows, its leaves nearly never. Dropping triangles before rasterising saves little: the early prepass draws every leaf untested, and every kept cluster's mesh shader still runs and places all its vertices.
+  - Far leaves off is still faster: trees -1.6, ring -2.2 ms, rim and wall even.
+  - **The user's pick (Nov 24 2026):** research fewer far leaves first (where we draw about 100 a pixel).
+
+## How many far leaves (researched Nov 24 2026)
+
+The far levels keep a leaf's area as they prune (Cook's rule), so a crown's depth complexity, about 100 leaves a pixel at the ring, never falls: the geometric error never sees that inner leaves are hidden.
+
+- **Neubert, Pirk, Deussen, Dachsbacher 2011** ([Improved model- and view-dependent pruning of large botanical scenes](https://graphics.uni-konstanz.de/publikationen/Neubert2011ImprovedModelView/Neubert2011ImprovedModelView.pdf), CGF 30(6)) [V, read]:
+  - Quality as precision and recall of covered pixels against the full model; Q = 1 - sqrt((1-P)^2 + (1-R)^2). Same Q at any screen size for a given kept share λ.
+  - Area-keeping scale s = 1/λ (Cook) is too much for dense crowns (spruce: users chose 1.1 at λ 0.6, Cook 1.65; 2.2 at 0.2, Cook 5) and too little for sparse ones (beech about 6.9 at 0.2); s_opt per model from the PR curve, tabulated at start-up.
+  - **Order of pruning** (survival priority, sorted once, a level a prefix, as Sequential Point Trees): density (metaballs at leaf centres, radius 5% of the plant's height; leaves in dense regions go first: they overdraw, and their pixels stay covered) and silhouette (leaves near the crown's hull, facing out, kept longest); combined P = P_silhouette^2 + P_density with a little randomness. Geometry needed for Cook's quality: stochastic with s_opt 10% less, density 17%, combined 30%, silhouette 41% (best for distant views).
+  - Level from distance: Cook's λ(d) = (1-d)^2 (d normalised), then the least λ matching its quality.
+  - Occlusion: sample points on each tree's hull tested against last frame's depth; λ_occl = λ_opt(d) · max(f, 0.1), f the share seen; hysteresis.
+  - 5000 trees (1.3 billion vertices) at 8-25 fps, 1600x1200, GTX 295, about 26M vertices a frame; 60-70% faster than Cook at the same quality.
+- **Gumbau, Remolar, Chover, Rebollo 2011** (View-dependent pruning for real-time rendering of trees, C&G 35(2), [record](https://repositori.uji.es/xmlui/handle/10234/47365)) [S abstract; the text refused automated reads]: the less visible foliage found per view in real time from its distance and place in the crown, drawn coarser; area and colour corrected.
+- **Cook et al. 2007** (above): pruning starts where an element reaches about a pixel, the kept share halving each time the distance grows by h: the count follows the screen, not the geometric error.
+- **Nanite Foliage** ([docs](https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-foliage), experimental) [V]: clusters become bricks of 4x4x4 voxels (at most 128 a cluster) where that is less error than triangles, "near pixel-sized"; each voxel a distribution of normals, one picked stochastically a pixel; voxel clusters binned apart, sorted into depth buckets and drawn front to back. No coverage or opacity scheme published. [I] The limit of the idea: about one primitive a pixel, cost with the screen.
+- **Bruneton and Neyret 2012** ([Real-time realistic rendering and lighting of forests](https://diglib.eg.org/handle/10.1111/v31i2pp373-382)) [S abstract]: far forest as a shader on the terrain for sub-pixel effects; another far form, not this step.
+- [I] **For here:** a count rule beside the error rule (a far node draws no finer than D leaves a pixel of its sphere on screen; one compare a node), then Neubert's shell-first order if coarse crowns look wrong (start-up only).
+- **The user's pick (Nov 24 2026): skipped.** Far leaves cost at most about 2 ms over twigs (6% of the frame at trees and ring, none at rim and wall); the near twigs are the larger cost. Revisit if far leaves' shadows (3f) make them dear.
 
 ## The plan (phase 21 stage 3)
 

@@ -31,6 +31,20 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_FAR_LEAF_SCREEN_BOX) {
+        // Inputs: the leaf's five clip positions, (width, height). Outputs: the box, (nearest depth with its margin, on screen).
+        vec4 clips[FAR_LEAF_VERTICES];
+
+        for (int vertex = 0; vertex < FAR_LEAF_VERTICES; ++vertex) {
+            clips[vertex] = testInput(uint(vertex));
+        }
+
+        MeshClusterScreenBox box = farLeafScreenBox(clips, testInput(uint(FAR_LEAF_VERTICES)).xy);
+        testOutput(0, box.box);
+        testOutput(1, vec4(box.nearestDepth, box.onScreen ? 1.0 : 0.0, 0.0, 0.0));
+        return;
+    }
+
     if (function == GPU_TEST_MESH_CLUSTER_KEPT) {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the

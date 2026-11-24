@@ -72,6 +72,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visitor.field("Mesh cluster occlusion", settings.meshClusterOcclusion);
         visitor.field("Twigs", settings.twigs);
         visitor.field("Far leaves", settings.farLeaves);
+        visitor.field("Far leaf occlusion", settings.farLeafOcclusion);
         visitor.field("Clustered shading", settings.clusteredShading);
         visitor.field("Cluster heatmap", settings.clusterHeatmap);
         visitor.field("Normal map filtering", settings.normalMapFiltering);
