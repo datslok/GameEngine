@@ -140,6 +140,7 @@ The culling algorithm itself is unpublished (no talk slides found).
   - But the prepass and main pass lose 0.4-1.8 ms: triangles after culling rise 7-12% (ring 31.2M / 27.9M).
   - [I] Why: almost every far node draws its level 0 (about 22 clusters a node, a brick's level 0 is about 23). Where twigs alone went on to levels 3 and 4 (ring 392K and 25K twigs, 9 and 8 triangles), the bricks still draw every level-2 leaf. A brick's error is its worst twig's (the largest leaf, the 1.5-times twigs), so its coarser levels fit later than most of its twigs'; the crown card takes over before merged nodes ever fit (0 merged drawn at every spot).
   - The instances saved are worth about a third of a millisecond; the leaves are what cost.
+  - **The user's pick (Nov 24 2026):** far leaves stay on (performance is not the goal yet; the path stays exercised); 3e-iv fixes the brick error before 3f, where leaf shadows (a twig pass a shadow view) should show their real worth.
 
 ## The plan (phase 21 stage 3)
 
