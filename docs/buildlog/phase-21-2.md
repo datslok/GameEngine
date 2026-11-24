@@ -136,3 +136,10 @@
   - **Measured:** frames 0.35-1.9 ms slower with far leaves (ring 31.27 against 29.39); figures and why in `LEAFGEOMETRY.md`.
   - **Merged nodes never drawn:** the crown card takes over first, at all four spots.
   - **6 planted bugs caught** (merged never counted, a triangle a leaf, handing bricks not counted, two tally words swapped, the line's merged count, the switch bound to the wrong field).
+- `leaf-bricks-3e-iv` (Nov 24 2026): a far level's error from its typical leaf (Twigs "Far error percentile", 50; 100 the worst, as before); measured: the levels coarsen, the frame does not gain.
+  - **Nearest rank, shared:** `nearestRank` (`math/percentile.h`) replaces the cloth yardstick's own copy; a place within a ten-thousandth over a whole one counts as it (0.99f of 100 edges had landed on place 100).
+  - **A brick's floor counts each leaf:** its twigs' errors once a leaf handed over, so a twig of many leaves weighs as much as it covers.
+  - **"No leaf moves" holds only at 100:** below, a brick takes over while its largest twigs would still be at level 1; tested instead that the twigs holding the percentile of its leaves would be at level 2 by themselves.
+  - **Measured at 100, 75, 50:** far leaves a mean loss of 0.25, 1.04 and 1.06 ms; at 50 a third of nodes reach level 1, as a third of twigs reach level 3; still no merged node. Figures in `LEAFGEOMETRY.md`.
+  - **The cause found:** occlusion hides half the clusters it did (1.08M against 2.07M at the ring): a far cluster's leaves spread over its brick. 3e-v groups them by place (the user's pick; 50 kept).
+  - **8 planted bugs caught** (the floor at the worst, the floor reset each level, the percentile ignored, the rank's place off by one, no float tolerance, a twig counted once, the brick floor too low for the hand-over, the percentile's check removed: missed at first, as the rank refused it too; an empty set's refusal added).

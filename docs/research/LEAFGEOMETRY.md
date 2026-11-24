@@ -126,6 +126,7 @@ The culling algorithm itself is unpublished (no talk slides found).
   - A brick is drawn as twigs where its level 0's error does not fit, as its levels where it does: one choice a brick, the cluster cut's rule (a group drawn when its error fits and its parent's does not), so twigs and bricks never overlap or leave a gap.
   - Leaves keep their twig's bone binding and flutter, posed rigidly as their twig; bounds from the bones (3c-iv), no facing test.
   - The same records give 3f's shadows an opaque leaf set without cut-out cards.
+  - A level's error is its leaves' at a percentile (3e-iv; Twigs "Far error percentile", 50), not its worst leaf's: at 100 a brick waited for its largest leaf (a 1.5-times twig's) and stayed at level 0 where most of its twigs had gone on.
 - **Measured in 3e-i (default forest, 11 variants, release, home PC):**
   - 71.7K twigs, 4.4 leaves a twig at level 2: 313K records at the bricks' finest levels, 625K with every level its own run; about 14 MB at 24 B, 17 MB at 28 B (the estimate's 3-5 MB counted fewer twigs). Sharing records between a brick's levels would halve it.
   - [I] A one-row leaf is 5 vertices: 12 a cluster under the 64-vertex limit, not the 31 the triangles allow. So a brick's 64 twigs become about 22 clusters, not 10: 26.7K finest clusters against 71.7K twig workgroups, 2.7 times fewer. A mesh shader declaring more vertices for records (3e-ii) could fit 31.
@@ -141,6 +142,11 @@ The culling algorithm itself is unpublished (no talk slides found).
   - [I] Why: almost every far node draws its level 0 (about 22 clusters a node, a brick's level 0 is about 23). Where twigs alone went on to levels 3 and 4 (ring 392K and 25K twigs, 9 and 8 triangles), the bricks still draw every level-2 leaf. A brick's error is its worst twig's (the largest leaf, the 1.5-times twigs), so its coarser levels fit later than most of its twigs'; the crown card takes over before merged nodes ever fit (0 merged drawn at every spot).
   - The instances saved are worth about a third of a millisecond; the leaves are what cost.
   - **The user's pick (Nov 24 2026):** far leaves stay on (performance is not the goal yet; the path stays exercised); 3e-iv fixes the brick error before 3f, where leaf shadows (a twig pass a shadow view) should show their real worth.
+- **Measured in 3e-iv (home PC, release, hidden copy, three samples, far leaves on minus off, GPU ms; trees / rim / ring / wall):** the errors now coarsen, the frame does not gain.
+  - Percentile 100 (the worst leaf, as 3e-iii): +1.08 / +0.80 / +0.07 / -0.97, mean +0.25. 75: +1.54 / +0.89 / +3.03 / -1.31, mean +1.04. 50: +0.50 / +1.60 / +2.68 / -0.55, mean +1.06. Session noise is about a millisecond.
+  - At 50 more bricks hand over (ring 20.1K, against 15.6K at 100), and about a third of the nodes draw level 1 (18.9 clusters a node, against 22.9; level 0 about 23, level 1 about 12), as a third of twigs alone reach level 3 (392K of 1.2M). Still 0 merged nodes.
+  - [I] What costs is occlusion, not the leaves: at the ring, at 50, far leaves on leave fewer clusters (3.13M against 3.99M), but far fewer hidden behind near trees (1.08M against 2.07M), so more reach the screen (0.65M against 0.54M). A twig is small, its sphere hidden easily; a far cluster takes 12 leaves in brick order, at coarser levels scattered over the whole brick, its sphere large.
+  - **The user's pick (Nov 24 2026):** the percentile stays at 50 (the levels are right; the loss is the clusters' size), and 3e-v makes far clusters of nearby leaves, researched first.
 
 ## The plan (phase 21 stage 3)
 

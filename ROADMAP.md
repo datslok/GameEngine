@@ -503,11 +503,12 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
   - [ ] 3e. Far levels above the twigs, merged into each variant's coarse levels (`leaf-bricks-3e-plan`)
     - [x] 3e-i. Each variant's brick levels on the CPU, from its twigs' level-2 leaves as records (`leaf-bricks-3e-i`)
     - [x] 3e-ii. Leaf records packed for the GPU, a record's leaf made as the mesh shader will, mirrored in C++ (`leaf-bricks-3e-ii`)
-    - [ ] 3e-iii. Records uploaded; bricks drawn as their levels where level 0's error fits, culled by posed bounds
+    - [x] 3e-iii. Records uploaded; bricks drawn as their levels where level 0's error fits, culled by posed bounds
       - [x] 3e-iii-a. Every set's far tables packed; a brick's one choice, twigs or a far node, on the CPU (`leaf-bricks-3e-iii-a`)
       - [x] 3e-iii-b. The tables uploaded; the twig pass makes the choice; a mesh shader draws the far leaves' clusters (`leaf-bricks-3e-iii-b`)
       - [x] 3e-iii-c. F4 counts the far clusters; the four spots measured: a net loss for now (`leaf-bricks-3e-iii-c`)
-  - [ ] 3e-iv. A brick's error from its typical leaf, not its worst, so its levels coarsen as its twigs'; measured
+  - [x] 3e-iv. A brick's error from its typical leaf, not its worst, so its levels coarsen as its twigs'; measured (`leaf-bricks-3e-iv`)
+  - [ ] 3e-v. Far clusters of nearby leaves, so occlusion hides them as it hides twigs; researched first
   - [ ] 3f. The leaf cards and shadow stand-ins retired; leaves cast opaque shadows
 - [ ] 4. Virtual shadow maps for the sun, the cascades retired; then the lamps
 - [ ] 5. A visibility buffer, a material pass, a compute rasteriser (plan: `docs/research/VISBUFFER.md`)

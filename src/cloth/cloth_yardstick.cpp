@@ -1,4 +1,5 @@
 #include "cloth/cloth_yardstick.h"
+#include "math/percentile.h"
 
 #include "scene/mesh.h"
 
@@ -8,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -57,10 +59,7 @@ SheetMeasure measureSheet(const Cloth& cloth, int squares) {
     return measure;
 }
 
-/*
-* The percentile is the strain at place ceil(share x edges) in the edges sorted by strain, counted from 1: the least
-* strain that share of them are at or below.
-*/
+// The percentile is the edges' strains' nearest rank (math/percentile.h): the least strain that share are at or below.
 GarmentMeasure measureGarment(const Cloth& cloth, const std::vector<std::uint32_t>& hem, float floorHeight, const ClothFields& fields) {
     const std::vector<Vec3>& positions = cloth.particles.positions;
     GarmentMeasure measure;
@@ -76,10 +75,7 @@ GarmentMeasure measureGarment(const Cloth& cloth, const std::vector<std::uint32_
     }
     if (!strains.empty()) {
         measure.meanStretch = static_cast<float>(stretchSum / static_cast<double>(strains.size()));
-        const double place = std::ceil(static_cast<double>(garmentStrainPercentile) * static_cast<double>(strains.size()));
-        const auto at = strains.begin() + std::max<std::ptrdiff_t>(static_cast<std::ptrdiff_t>(place), 1) - 1;
-        std::nth_element(strains.begin(), at, strains.end());
-        measure.percentileStrain = *at;
+        measure.percentileStrain = nearestRank(std::move(strains), garmentStrainPercentile);
     }
 
     for (const ClothStitch& stitch : cloth.stitches) {

@@ -108,6 +108,7 @@ Conventions (row-major `Mat4`, column vectors, right-handed, unit `Quat`s): root
 | `math/transform.h` | `Transform` (`getMatrix` = T·R·S), `interpolate` (lerp, slerp the short way) |
 | `math/aabb.h`, `math/ray.h`, `math/frustum.h`, `math/closest_points.h`, `math/delaunay.h` | Bounds, rays, culling planes, segment and triangle distances, Bowyer-Watson triangulation |
 | `math/angles.h`, `math/smooth_step.h` | `fullTurnRadians`, `radiansFromDegrees`, `wrapAngle` (to -pi..pi); `smoothStep`, GLSL's smoothstep, for every C++ mirror |
+| `math/percentile.h` | `nearestRank`: the least value a share of them are at or below (the cloth yardstick's strain, the far leaves' errors) |
 | `scene/interpolation.h` | `getRenderTransform` (Interpolation above) |
 | `core/hash.h`, `hash.glsl`, `hash64.glsl` | `Fnv1aHash` (change checks, the simulation hash), `mixBits` (before using a hash's bits as random numbers; mirrored for shaders with 64-bit whole numbers, numbers in `hash_shared.h`), `pcg3d` (GPU-friendly, mirrored) |
 | `core/profiler.h` | `Profiler`, `timeSection`: CPU sections averaged over `defaultProfileWindowSeconds` for F4 |

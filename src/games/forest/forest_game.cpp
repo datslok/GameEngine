@@ -1848,7 +1848,7 @@ void ForestGame::buildTwigs(World& world, AssetManager& assets) {
 
     for (const std::vector<PlacedTwig>& twigs : treeTwigs) {
         TwigSet set = treeTwigSet(twigs, prototypeMeshes, twigReaches);
-        set.far = makeTwigFarLevels(set, twigFarLeavesOf, twigFarShapes);
+        set.far = makeTwigFarLevels(set, twigFarLeavesOf, twigFarShapes, twigSettings.farErrorPercentile);
         treeTwigSets.push_back(std::make_shared<const TwigSet>(std::move(set)));
     }
 

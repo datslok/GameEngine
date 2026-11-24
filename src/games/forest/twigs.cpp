@@ -84,6 +84,7 @@ void visit(ForestTwigSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Tilt", settings.tiltDegrees, {.min = 0.0f, .max = 60.0f, .unit = "degrees", .applies = FieldApplies::AtStartup});
     visitor.field("Inset", settings.insetTexels, {.min = 0.0f, .max = 8.0f, .unit = "texels", .applies = FieldApplies::AtStartup});
     visitor.field("Stem radius", settings.stemRadius, {.min = 0.0f, .max = 0.05f, .sliderMax = 0.02f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Far error percentile", settings.farErrorPercentile, {.min = 1.0f, .max = 100.0f, .unit = "%", .applies = FieldApplies::AtStartup});
 }
 
 TracedLeaves traceAtlasLeaves(const LeafAtlas& atlas, int mostRows, float insetTexels) {

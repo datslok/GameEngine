@@ -41,6 +41,10 @@ struct ForestTwigSettings {
 
     // The stem's radius at its foot (metres), thinning to a third at its tip.
     float stemRadius = 0.006f;
+
+    // The share of a brick level's leaves (percent) whose error its own error covers (scene/twig_far_levels.h): 100
+    // waits for the worst leaf, lower lets a level stand for its typical one (stage 3e-iv).
+    float farErrorPercentile = 50.0f;
 };
 
 void visit(ForestTwigSettings& settings, SettingsVisitor& visitor);

@@ -1,5 +1,7 @@
 #include "scene/twig_far_levels.h"
 
+#include "math/percentile.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -76,7 +78,7 @@ namespace {
 
         const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(2000);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes(), farErrorWorstPercentile);
         assert(far.nodes.size() > set.bricks.size());
 
         for (std::size_t brick = 0; brick < set.bricks.size(); ++brick) {
@@ -107,7 +109,7 @@ namespace {
     void testFarLevelsNestAndKeepTheArea() {
         const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(3000);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes(), farErrorWorstPercentile);
 
         // Each node's full area: its bricks' finest levels'.
         std::vector<float> fullArea(far.nodes.size(), 0.0f);
@@ -184,7 +186,7 @@ namespace {
     void testFarErrorsRise() {
         const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(1500);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes(), farErrorWorstPercentile);
 
         for (std::size_t index = 0; index < far.nodes.size(); ++index) {
             const TwigFarNode& node = far.nodes[index];
@@ -232,7 +234,7 @@ namespace {
     void testFarTreeFollowsTheSplit() {
         const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
         const TwigSet set = testSet(2500);
-        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes());
+        const TwigFarLevels far = makeTwigFarLevels(set, prototypes, standInFarShapes(), farErrorWorstPercentile);
         std::size_t roots = 0;
 
         for (std::size_t index = 0; index < far.nodes.size(); ++index) {
@@ -266,19 +268,97 @@ namespace {
         assert(roots == 1 && far.nodes.size() == 2 * set.bricks.size() - 1);
 
         // The same set makes the same levels; a prototype not handed over is refused; no twigs, nothing.
-        const TwigFarLevels again = makeTwigFarLevels(set, prototypes, standInFarShapes());
+        const TwigFarLevels again = makeTwigFarLevels(set, prototypes, standInFarShapes(), farErrorWorstPercentile);
         assert(again.leaves.size() == far.leaves.size() && again.levels.size() == far.levels.size());
 
         for (std::size_t leaf = 0; leaf < far.leaves.size(); ++leaf) {
             assert(sameFarLeaf(again.leaves[leaf], far.leaves[leaf]));
         }
-        assert(throwsInvalid([&] { makeTwigFarLevels(set, {prototypes[0], prototypes[1]}, standInFarShapes()); }));
+        assert(throwsInvalid([&] { makeTwigFarLevels(set, {prototypes[0], prototypes[1]}, standInFarShapes(), farErrorWorstPercentile); }));
         FarLeafShapes fewer = standInFarShapes();
         fewer.cells.resize(10);
-        assert(throwsInvalid([&] { makeTwigFarLevels(set, prototypes, fewer); }));
+        assert(throwsInvalid([&] { makeTwigFarLevels(set, prototypes, fewer, farErrorWorstPercentile); }));
         assert(far.shapes.cells.size() == 24 && far.shapes.curl == 0.08f);
-        const TwigFarLevels none = makeTwigFarLevels(makeTwigSet({}, {}, {}), prototypes, standInFarShapes());
+        const TwigFarLevels none = makeTwigFarLevels(makeTwigSet({}, {}, {}), prototypes, standInFarShapes(), farErrorWorstPercentile);
         assert(none.leaves.empty() && none.levels.empty() && none.nodes.empty());
+    }
+
+    /*
+    * The nearest rank: the smallest value with at least the share of the values at or under it, so share 1 is the
+    * largest; nothing given, 0; a share outside (0, 1] refused.
+    */
+    void testNearestRank() {
+        const std::vector<float> values{5.0f, 1.0f, 4.0f, 2.0f, 3.0f};
+        assert(nearestRank(values, 1.0f) == 5.0f);
+        assert(nearestRank(values, 0.5f) == 3.0f);
+        assert(nearestRank(values, 0.6f) == 3.0f && nearestRank(values, 0.61f) == 4.0f);
+        assert(nearestRank(values, 0.2f) == 1.0f && nearestRank(values, 0.01f) == 1.0f);
+        assert(nearestRank({}, 0.5f) == 0.0f);
+        assert(throwsInvalid([&] { nearestRank(values, 0.0f); }));
+        assert(throwsInvalid([&] { nearestRank(values, 1.005f); }));
+        assert(throwsInvalid([&] { nearestRank(values, std::nanf("")); }));
+    }
+
+    /*
+    * Below 100, a level's error is its typical leaf's (ROADMAP phase 21 stage 3e-iv): a brick's finest the percentile
+    * of its leaves' twig errors (the twig level's times the twig's scale, once a leaf), each coarser level the
+    * percentile of its grown leaves' strays, never under the level before's, a merged node's floor its children's last.
+    * The leaves and levels are the worst leaf's exactly; only errors fall, and some do.
+    */
+    void testFarErrorsFromATypicalLeaf() {
+        const std::vector<TwigFarLeaves> prototypes = standInFarLeaves();
+        const TwigSet set = testSet(1500);
+        const float percentile = 50.0f;
+        const TwigFarLevels worst = makeTwigFarLevels(set, prototypes, standInFarShapes(), farErrorWorstPercentile);
+        const TwigFarLevels typical = makeTwigFarLevels(set, prototypes, standInFarShapes(), percentile);
+        assert(typical.leaves.size() == worst.leaves.size() && typical.levels.size() == worst.levels.size());
+
+        for (std::size_t leaf = 0; leaf < worst.leaves.size(); ++leaf) {
+            assert(sameFarLeaf(typical.leaves[leaf], worst.leaves[leaf]));
+        }
+
+        std::size_t lower = 0;
+
+        for (std::size_t index = 0; index < typical.nodes.size(); ++index) {
+            const TwigFarNode& node = typical.nodes[index];
+            float floor = 0.0f;
+
+            if (node.children[0] == twigFarNoNode) {
+                std::vector<float> twigErrors;
+
+                for (std::uint32_t twig = set.bricks[index].firstTwig; twig < set.bricks[index].firstTwig + set.bricks[index].twigCount; ++twig) {
+                    const TwigFarLeaves& handed = prototypes[set.twigs[twig].prototype];
+                    twigErrors.insert(twigErrors.end(), handed.leaves.size(), handed.error * set.twigs[twig].scale);
+                }
+
+                floor = nearestRank(twigErrors, percentile / 100.0f);
+            } else {
+                for (const std::uint32_t child : node.children) {
+                    const TwigFarNode& made = typical.nodes[child];
+                    floor = std::max(floor, typical.levels[made.firstLevel + made.levelCount - 1].error);
+                }
+            }
+
+            for (std::uint32_t level = node.firstLevel; level < node.firstLevel + node.levelCount; ++level) {
+                const TwigFarLevel& made = typical.levels[level];
+                std::vector<float> strays;
+
+                for (std::uint32_t leaf = made.firstLeaf; leaf < made.firstLeaf + made.leafCount && made.density > 0; ++leaf) {
+                    const FarLeaf& record = typical.leaves[leaf];
+                    const TwigInstance& twig = set.twigs[record.twig];
+                    strays.push_back(record.side - sourceOf(set, prototypes, record).side * twig.scale / prototypes[twig.prototype].growth);
+                }
+
+                floor = std::max(floor, nearestRank(strays, percentile / 100.0f));
+                assert(near(made.error, floor, 1e-6f));
+                assert(made.error <= worst.levels[level].error);
+                lower += made.error < worst.levels[level].error * 0.99f ? 1 : 0;
+            }
+        }
+
+        assert(lower * 2 > typical.levels.size());
+        assert(throwsInvalid([&] { makeTwigFarLevels(set, prototypes, standInFarShapes(), 0.0f); }));
+        assert(throwsInvalid([&] { makeTwigFarLevels(makeTwigSet({}, {}, {}), prototypes, standInFarShapes(), 101.0f); }));
     }
 }
 
@@ -287,4 +367,6 @@ void testTwigFarLevels() {
     testFarLevelsNestAndKeepTheArea();
     testFarErrorsRise();
     testFarTreeFollowsTheSplit();
+    testNearestRank();
+    testFarErrorsFromATypicalLeaf();
 }
