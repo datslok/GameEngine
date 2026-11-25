@@ -77,9 +77,9 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 | 29, 30 | sky visibility grid and cascades | `sky-visibility.md` |
 | 31, 32 | contact shadow masks | `sun-shadows.md` |
 | 35, 36 | terrain heights and patches | terrain (`scene/terrain`) |
-| 37-41 | wind field, springs (two; 37-39 compute too, for the bones pass), hanging vertices, anchors | wind (`render/gpu/wind`) |
+| 37-41 | wind field, springs (two; 37-39 compute too, for the bones pass), hanging vertices, lianas' records (41 compute too, for their anchors' motions) | wind (`render/gpu/wind`) |
 | 42 | card thinning records | card thinning (`scene/card_thinning`) |
-| 43-45 | the planting cells' slots' plants, placed parts' instances, every view's placed entries | `planting.md` (Placed plants drawn) |
+| 43-45 | the planting cells' slots' plants (compute too, the lianas' motions), placed parts' instances, every view's placed entries | `planting.md` (Placed plants drawn) |
 | 59-62 | the sun's virtual shadow maps' record and page table (vertex too: the mesh shaders drawing into the pages), their pool's depth (fragment: the main pass, the debug view), the pool's whole-number view as a storage image (the atomics' fragment shaders; a 1 x 1 stand-in otherwise) | `virtual-shadows.md` |
 
 **Sharing:** `SceneLayout` owns set 1's layout and one pipeline layout of both sets plus the push constant, shared by the main, prepass, shadow, tile reset, velocity and coloured-shadow pipelines and the cluster pass (`sharedLayout`). `bindScene` binds both sets once per pass (graphics by default; compute for the cluster pass) and they stay bound across those pipelines. The glass ray pipelines add the ray tracing set; transparent pipelines add a set 2 of their own.
