@@ -309,6 +309,24 @@ Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, 
     return offset + windFlutterOffset(place, windFlutterAmount(sway.w, lean, modelHeight, sway.y), flutterRate, seconds);
 }
 
+/*
+* Each of windSwayOffset's parts at its largest: kept moves the bent vertex back by at most the sideways step (the
+* triangle inequality on its length), so the bend within twice it; the bob within WIND_BRANCH_SHARE of the lean times
+* the distance from the trunk; the flutter within windFlutterReach's sqrt(3). The share is highest at the top.
+*/
+float windSwayReach(const Vec4& sway, float scale, float top, float trunkDistance) {
+    if (sway.x < 0.0f) {
+        return 0.0f;
+    }
+
+    const float share = std::max(top, 0.0f) / std::max(sway.y, 1e-4f);
+    const float grow = std::min(share, 1.0f);
+    const float bend = 2.0f * sway.y * scale * share * share;
+    const float bob = static_cast<float>(WIND_BRANCH_SHARE) * std::max(trunkDistance, 0.0f) * grow;
+    const float flutter = 1.7320508f * std::fabs(sway.w) * grow;
+    return static_cast<float>(WIND_MOST_LEAN) * (bend + bob + flutter);
+}
+
 bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadius, const Vec3& camera, const WindSettings& settings) {
     return sway.kind != SwayKind::Still && settings.enabled && settings.sway && (boundsCentre - camera).length() - std::max(boundsRadius, 0.0f) < settings.swayFadeEnd;
 }

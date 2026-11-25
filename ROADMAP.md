@@ -522,6 +522,9 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [x] 4c-iii. The main pass reading a page's depth (hard edges, the cascades' bias), cascades where none; a switch
     - [x] 4c-iv. Fragment atomics into an R32 pool behind a switch; both measured at the four spots
     - [x] 4c-v. The pages' cost broken down in F4 (by level, seen or not, kept whole), measured, before a lever (`vsm-breakdown`)
+    - [x] 4c-vi. Swaying clusters culled by their own spheres grown by the wind's reach, not kept whole (`vsm-sway-bounds`)
+    - [ ] 4c-vii. Lianas culled by bounds of their own clusters as bent, not their tree's
+    - [ ] 4c-viii. Terrain patches' clusters culled by their own heights, not the patch's
   - [ ] 4d. Soft shadows through the page table, a coarser page or the far map where one is missing
   - [ ] 4e. Pages cached until something in them moves; still and moving slices; swaying trees
   - [ ] 4f. Leaves casting from their twigs and far records; the shadow stand-ins retired

@@ -1,6 +1,7 @@
 // Mesh clusters culled a view, included with #include "mesh_cluster_culling.glsl": mirrors render/gpu/mesh_cluster_culling.h
 // (meshClusterLargestScale, meshClusterPlacedSphere, meshClusterWorldSphere, meshClusterErrorPixels, meshClusterInCut,
-// meshClusterEyeInMesh, meshClusterFacesAway, meshClusterShapeFixed, meshClusterSways, meshClusterPosed, meshClusterSeenWhole,
+// meshClusterEyeInMesh, meshClusterFacesAway, meshClusterShapeFixed, meshClusterSways, meshClusterPosed, meshClusterSwayReach,
+// meshClusterSwayingPose, meshClusterSeenWhole,
 // meshClusterBound, meshClusterCullSphere, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterEmptyBox,
 // meshClusterBoxTake, farLeafScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure functions: the pyramid's and
 // the bones' reads are the passes' (mesh_cluster_pyramid.glsl, meshClusterBoxHidden; bone_cull_data.glsl).
@@ -155,9 +156,38 @@ MeshClusterPose meshClusterPosed(vec4 sphere, mat4 placedBy, float flutter, vec2
     return MeshClusterPose(true, true, placed);
 }
 
-// Whether the view keeps every cluster of the draw (meshClusterSeenWhole): its shape not its mesh's, or swaying unbound.
+// The farthest the wind's per-vertex sway moves any of the cluster's vertices (meshClusterSwayReach): from the top of
+// its sphere and its farthest across from the trunk, through the draw's origin (for grass each blade's foot below it).
+float meshClusterSwayReach(MeshCluster cluster, InstanceData instance) {
+    vec4 placed = meshClusterWorldSphere(cluster, instance.model);
+    float trunkDistance = int(instance.sway.x) == WIND_CATEGORY_GRASS ? (abs(cluster.sphere.y) + cluster.sphere.w) * length(instance.model[1].xz)
+                                                                     : length(placed.xz - instance.model[3].xz) + placed.w;
+    return windSwayReach(instance.sway, instance.handedness.y, cluster.sphere.y + cluster.sphere.w, trunkDistance);
+}
+
+// Where the view grows swaying clusters, an unbound cluster of a draw of its mesh's shape swaying per vertex: posed
+// unbound on its sphere grown by its sway's reach, when that is smaller than its draw's bounds; else the pose given
+// (meshClusterSwayingPose).
+MeshClusterPose meshClusterSwayingPose(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
+    if (pose.bound || (view.flags & CAMERA_CULL_SWAY_REACH) == 0u || !meshClusterShapeFixed(instance, entry) || !meshClusterSways(record, view)) {
+        return pose;
+    }
+
+    vec4 sphere = meshClusterWorldSphere(cluster, instance.model);
+    sphere.w += meshClusterSwayReach(cluster, instance);
+
+    // A small plant's grown cluster can outgrow the plant: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds.w >= 0.0 && record.bounds.w <= sphere.w) {
+        return pose;
+    }
+
+    return MeshClusterPose(false, true, sphere);
+}
+
+// Whether the view keeps every cluster of the draw (meshClusterSeenWhole): its shape not its mesh's, or swaying unbound
+// and not posed by its sway's reach.
 bool meshClusterSeenWhole(InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
-    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && meshClusterSways(record, view));
+    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
 }
 
 // Whether a cluster's vertices are bound to bones: its first slot not empty (meshClusterBound).

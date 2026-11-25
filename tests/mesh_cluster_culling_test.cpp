@@ -444,6 +444,148 @@ namespace {
         assert(!meshClusterKept(cluster, plain, 0u, swaying, shortReach));
     }
 
+    // A bush from its foot up to 3 m, its sway's height: a ball of radius 1.5 standing on the origin.
+    IndexedMesh testBush() {
+        IndexedMesh bush = buildIndexedMesh(Mesh::sphere(24, 12));
+
+        for (MeshVertex& vertex : bush.vertices) {
+            vertex.position = Vec3{vertex.position.x * 1.5f, (vertex.position.y + 1.0f) * 1.5f, vertex.position.z * 1.5f};
+        }
+
+        return bush;
+    }
+
+    /*
+    * A cluster of a draw swaying without bones, where the view grows such clusters (CAMERA_CULL_SWAY_REACH, ROADMAP
+    * phase 21 4c-vi): posed unbound on its sphere grown by its sway's reach (meshClusterSwayReach), which holds every
+    * vertex as windSwayOffset moves it at any spring, fade and time (a plant from its origin, grass from each blade's
+    * foot, turned and scaled), its sphere bounding their highest and farthest across, and not needlessly loose: some
+    * vertex moves a third of it.
+    */
+    void testTheSwayReachHoldsEveryVertex() {
+        std::mt19937 random(11);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const IndexedMesh bush = testBush();
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(bush, ClusterLevels::One), 0, 0, 0);
+        GpuCameraCull view = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, true, 1000.0f);
+        view.flags |= CAMERA_CULL_SWAY_REACH;
+        const Vec2 flutterRate{3.0f, 2.0f};
+        float closest = 0.0f;
+        std::size_t tested = 0;
+
+        for (int round = 0; round < 24; ++round) {
+            const int category = round % 2 == 0 ? WIND_CATEGORY_PLANTS : WIND_CATEGORY_GRASS;
+            const float scale = 0.5f + 2.5f * unit(random);
+            const Vec3 axis = Vec3{unit(random) - 0.5f, 2.0f, unit(random) - 0.5f}.normalized();
+            const Vec3 place{(unit(random) - 0.5f) * 40.0f, unit(random) * 3.0f, (unit(random) - 0.5f) * 40.0f};
+            GpuInstance instance =
+                placedInstance(Transform{.position = place, .rotation = Quat::fromAxisAngle(axis, 6.0f * unit(random)), .scale = Vec3{scale, scale, scale}}.getMatrix());
+            instance.handedness[1] = scale;
+            const Vec4 sway{static_cast<float>(category), 3.0f, 0.3f + 2.0f * unit(random), 0.5f * unit(random)};
+            instance.sway[0] = sway.x;
+            instance.sway[1] = sway.y;
+            instance.sway[2] = sway.z;
+            instance.sway[3] = sway.w;
+            GpuCullRecord record = stillRecord(place, 100.0f * scale); // bounds larger than any grown cluster
+            record.flags |= CULL_SWAYS;
+
+            for (const GpuMeshCluster& cluster : packed.clusters) {
+                const MeshClusterPose pose = meshClusterSwayingPose(cluster, instance, 0u, record, view, MeshClusterPose{});
+                assert(pose.posed && !pose.bound && !meshClusterSeenWhole(instance, 0u, record, view, pose));
+                const float reach = meshClusterSwayReach(cluster, instance);
+                const Vec3 centre{pose.sphere[0], pose.sphere[1], pose.sphere[2]};
+                float top = 0.0f;
+                float across = 0.0f;
+
+                for (std::uint32_t vertex = 0; vertex < (cluster.counts & 0xFFu); ++vertex) {
+                    const Vec3 position = bush.vertices[packed.vertices[cluster.firstVertex + vertex] - cluster.meshFirstVertex].position;
+                    const Vec3 world = worldPoint(instance, position);
+                    const Vec3 footInMesh = category == WIND_CATEGORY_GRASS ? Vec3{position.x, 0.0f, position.z} : Vec3{0.0f, 0.0f, 0.0f};
+                    const Vec3 fromFoot = world - worldPoint(instance, footInMesh);
+                    top = std::max(top, position.y);
+                    across = std::max(across, std::sqrt(fromFoot.x * fromFoot.x + fromFoot.z * fromFoot.z));
+
+                    for (int sample = 0; sample < 4; ++sample) {
+                        const Vec2 spring{(unit(random) - 0.5f) * 40.0f, (unit(random) - 0.5f) * 40.0f};
+                        const float fade = sample == 0 ? 1.0f : unit(random);
+                        const Vec3 offset = windSwayOffset(fromFoot, position.y, world, sway, scale, spring, fade, flutterRate, 10.0f * unit(random));
+                        assert(offset.length() <= reach * (1.0f + 1e-5f) + 1e-6f);
+                        assert((world + offset - centre).length() <= pose.sphere[3] * (1.0f + 1e-5f) + 1e-5f);
+                        closest = std::max(closest, offset.length() / reach);
+                        ++tested;
+                    }
+                }
+
+                // The cluster's sphere bounds its vertices' highest and, at its top, their farthest across.
+                assert(top <= cluster.sphere[1] + cluster.sphere[3] + 1e-5f);
+                assert(reach >= windSwayReach(sway, scale, cluster.sphere[1] + cluster.sphere[3], across) * (1.0f - 1e-5f) - 1e-6f);
+            }
+        }
+
+        assert(tested > 1000 && closest > 0.33f);
+    }
+
+    /*
+    * The sway's reach culls a swaying draw's clusters one by one: a bush behind the eye is hidden, where without the
+    * reach (CAMERA_CULL_SWAY_REACH) its draw is kept whole, as it is when its bounds are no larger than the grown
+    * cluster's (a small plant's). A pose bound to bones, a draw not of its mesh's shape, one not swaying or a view
+    * without the sway keep their pose; a still sway reaches nowhere; meshClusterPoseIn grows a pair's.
+    */
+    void testTheSwayReachCullsEachCluster() {
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(testBush(), ClusterLevels::One), 0, 0, 0);
+        const GpuCameraCull without = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, true, 1000.0f);
+        GpuCameraCull view = without;
+        view.flags |= CAMERA_CULL_SWAY_REACH;
+        const Vec3 behind{-30.0f, 0.0f, 0.0f};
+        GpuInstance instance = placedInstance(Mat4::translation(behind.x, behind.y, behind.z));
+        instance.handedness[1] = 1.0f;
+        const float sway[4] = {static_cast<float>(WIND_CATEGORY_PLANTS), 3.0f, 1.0f, 0.2f};
+        std::copy(std::begin(sway), std::end(sway), std::begin(instance.sway));
+        GpuCullRecord record = stillRecord(behind + Vec3{0.0f, 1.5f, 0.0f}, 12.0f);
+        record.flags |= CULL_SWAYS;
+        GpuInstance liana = instance;
+        liana.hanging[3] = 1;
+        const GpuCullRecord still = stillRecord(behind + Vec3{0.0f, 1.5f, 0.0f}, 1.5f);
+        const GpuCameraCull calm = [&] {
+            GpuCameraCull noSway = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, false, 1000.0f);
+            noSway.flags |= CAMERA_CULL_SWAY_REACH;
+            return noSway;
+        }();
+        const MeshClusterPose bound{.bound = true};
+
+        for (const GpuMeshCluster& cluster : packed.clusters) {
+            assert(meshClusterSwayReach(cluster, instance) > 0.0f);
+            const MeshClusterPose pose = meshClusterSwayingPose(cluster, instance, 0u, record, view, MeshClusterPose{});
+            assert(!meshClusterKept(cluster, instance, 0u, record, view, pose));
+
+            GpuCullRecord tight = record;
+            tight.bounds[3] = pose.sphere[3];
+            assert(!meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{}).posed);
+            assert(meshClusterKept(cluster, instance, 0u, tight, view, meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{})));
+            tight.bounds[3] = pose.sphere[3] * 1.01f;
+            assert(meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{}).posed);
+            tight.bounds[3] = -1.0f;
+            assert(meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{}).posed);
+            assert(meshClusterKept(cluster, instance, 0u, record, without, meshClusterSwayingPose(cluster, instance, 0u, record, without, MeshClusterPose{})));
+
+            assert(meshClusterSwayingPose(cluster, instance, 0u, record, view, bound).sphere == bound.sphere);
+            assert(!meshClusterSwayingPose(cluster, liana, 0u, record, view, MeshClusterPose{}).posed);
+            assert(!meshClusterSwayingPose(cluster, instance, DRAW_LIST_THINNED_BIT, record, view, MeshClusterPose{}).posed);
+            assert(!meshClusterSwayingPose(cluster, instance, 0u, still, view, MeshClusterPose{}).posed);
+            assert(!meshClusterSwayingPose(cluster, instance, 0u, record, calm, MeshClusterPose{}).posed);
+
+            MeshClusterDrawn drawn;
+            drawn.instance = instance;
+            drawn.record = record;
+            const MeshClusterPose found = meshClusterPoseIn(MeshClusterTables{}, drawn, cluster, view);
+            assert(found.posed && !found.bound && found.sphere == pose.sphere);
+        }
+
+        GpuInstance stillSway = instance;
+        stillSway.sway[0] = -1.0f;
+        assert(meshClusterSwayReach(packed.clusters.front(), stillSway) == 0.0f);
+    }
+
     // The clusters the cut draws, by number.
     std::vector<std::uint32_t> cutClusters(const PackedMeshClusters& packed, const GpuInstance& instance, const GpuCameraCull& view) {
         std::vector<std::uint32_t> drawn;
@@ -1435,6 +1577,8 @@ void testMeshClusterCulling() {
     testPackingKeepsEachClustersBones();
     testACulledClusterHidesNothing();
     testADrawNotRigidKeepsEverything();
+    testTheSwayReachHoldsEveryVertex();
+    testTheSwayReachCullsEachCluster();
     testAPosedClusterHidesNothing();
     testThePoseOfAPair();
     testPackingKeepsTheCut();

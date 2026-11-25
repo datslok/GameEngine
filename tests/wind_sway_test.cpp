@@ -231,6 +231,45 @@ namespace {
         assert(windFlutterReach(0.0f, Vec2{0.3f, 0.4f}) == 0.0f && near(windFlutterReach(-0.2f, Vec2{0.3f, 0.4f}), 0.1f * std::sqrt(3.0f), 1e-6f));
     }
 
+    // The farthest windSwayOffset moves a vertex in a storm from any side, over ten seconds.
+    float largestSway(const Vec3& fromFoot, float modelHeight, const Vec4& sway, float scale) {
+        float largest = 0.0f;
+
+        for (int side = 0; side < 16; ++side) {
+            const float angle = 0.3927f * static_cast<float>(side);
+            const Vec2 spring{30.0f * std::cos(angle), 30.0f * std::sin(angle)};
+
+            for (int step = 0; step < 200; ++step) {
+                const float seconds = 0.05f * static_cast<float>(step);
+                largest = std::max(largest, windSwayOffset(fromFoot, modelHeight, fromFoot, sway, scale, spring, 1.0f, leafRate, seconds).length());
+            }
+        }
+
+        return largest;
+    }
+
+    /*
+    * How far a part of a swaying thing can move (windSwayReach, the culling's pad for clusters swaying unbound, ROADMAP
+    * phase 21 4c-vi): a storm stays within it where each of its parts rules, so none can go: a tall plant scaled up
+    * (the bend, in metres), a short one fluttering hard (the flutter), a low branch far from the trunk (the bob). Nothing
+    * for a still sway or a part at or below its foot.
+    */
+    void testTheSwayReach() {
+        const Vec4 plant{static_cast<float>(WIND_CATEGORY_PLANTS), 3.0f, 1.0f, 0.0f};
+        const float tall = largestSway(Vec3{0.0f, 9.0f, 0.0f}, 3.0f, plant, 3.0f);
+        assert(tall <= windSwayReach(plant, 3.0f, 3.0f, 0.0f) && tall > 3.5f);
+
+        const Vec4 fluttering{static_cast<float>(WIND_CATEGORY_PLANTS), 0.5f, 1.0f, 5.0f};
+        const float shiver = largestSway(Vec3{0.0f, 0.5f, 0.0f}, 0.5f, fluttering, 1.0f);
+        assert(shiver <= windSwayReach(fluttering, 1.0f, 0.5f, 0.0f) && shiver > 1.0f);
+
+        const float branch = largestSway(Vec3{6.0f, 0.3f, 0.0f}, 0.3f, plant, 1.0f);
+        assert(branch <= windSwayReach(plant, 1.0f, 0.3f, 6.0f) && branch > 0.045f);
+
+        assert(windSwayReach(packSway(WindSway{}), 1.0f, 3.0f, 6.0f) == 0.0f);
+        assert(windSwayReach(plant, 1.0f, 0.0f, 6.0f) == 0.0f && windSwayReach(plant, 1.0f, -1.0f, 6.0f) == 0.0f);
+    }
+
     /*
     * The flutter on its own: nothing for no amount, each direction within it; twice as fast at twice the hertz (the same
     * shiver at half the time) and the same shiver twice as far along at twice the metres. The sway's flutter is it, at
@@ -486,6 +525,7 @@ void testWindSway() {
     testTheFlutter();
     testTheFlutterAmount();
     testTheFlutterReach();
+    testTheSwayReach();
     testTheFlutterRate();
     testTheLeavesFlutterInStep();
     testWhichDrawsSway();

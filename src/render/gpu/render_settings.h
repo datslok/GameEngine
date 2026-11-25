@@ -103,6 +103,11 @@ struct RenderSettings {
     // covers at most this many pixels (Nanite's 1). More draws fewer triangles and shows the levels switching.
     float meshClusterErrorPixels = 1.0f;
 
+    // Mesh clusters of draws swaying without bones culled one by one by their spheres grown by the sway's reach
+    // (meshClusterSwayingPose, ROADMAP phase 21 4c-vi), in the camera's and the sun's virtual shadow views; off keeps
+    // every cluster of such a draw near the camera, for comparing.
+    bool meshClusterSwayReach = true;
+
     // With mesh clusters drawn and the depth prepass on: two-pass occlusion (docs/research/OCCLUSION.md), the early list
     // tested against last frame's depth, the late list against this frame's, F4's LATE and HIDDEN.
     bool meshClusterOcclusion = true;

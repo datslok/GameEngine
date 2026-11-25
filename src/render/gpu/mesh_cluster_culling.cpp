@@ -86,7 +86,7 @@ namespace {
                           const MeshClusterOcclusionView* occlusion) {
         const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, pair.entry);
         const GpuMeshCluster cluster = meshClusterOfPair(tables, pair.cluster);
-        const MeshClusterPose pose = meshClusterPoseAt(tables, drawn, cluster);
+        const MeshClusterPose pose = meshClusterPoseIn(tables, drawn, cluster, view);
         const std::uint32_t visibility = meshClusterVisibility(cluster, drawn.instance, drawn.entry, drawn.record, view, pose);
         const bool late = occlusion != nullptr && occlusion->list == MESH_CLUSTER_LATE;
 
@@ -306,9 +306,47 @@ MeshClusterPose meshClusterPosed(const float sphere[4], const GpuInstance& place
     return MeshClusterPose{.bound = true, .posed = true, .sphere = placed};
 }
 
+/*
+* A vertex p of the cluster is within its sphere (c, r): its height at most c.y + r; from the foot the model's turning
+* part times p, across within the placed sphere's centre's across the origin plus its radius; for grass the turning
+* part times (0, p.y, 0), across within |p.y| times the model's y column's across.
+*/
+float meshClusterSwayReach(const GpuMeshCluster& cluster, const GpuInstance& instance) {
+    float trunkDistance = 0.0f;
+
+    if (static_cast<int>(instance.sway[0]) == WIND_CATEGORY_GRASS) {
+        const Vec3 up = modelColumn(instance, 1);
+        trunkDistance = (std::fabs(cluster.sphere[1]) + cluster.sphere[3]) * std::sqrt(up.x * up.x + up.z * up.z);
+    } else {
+        const std::array<float, 4> placed = meshClusterWorldSphere(cluster, instance);
+        const Vec3 fromOrigin = Vec3{placed[0], placed[1], placed[2]} - modelColumn(instance, 3);
+        trunkDistance = std::sqrt(fromOrigin.x * fromOrigin.x + fromOrigin.z * fromOrigin.z) + placed[3];
+    }
+
+    const Vec4 sway{instance.sway[0], instance.sway[1], instance.sway[2], instance.sway[3]};
+    return windSwayReach(sway, instance.handedness[1], cluster.sphere[1] + cluster.sphere[3], trunkDistance);
+}
+
+MeshClusterPose meshClusterSwayingPose(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
+                                       const GpuCameraCull& view, const MeshClusterPose& pose) {
+    if (pose.bound || (view.flags & CAMERA_CULL_SWAY_REACH) == 0u || !meshClusterShapeFixed(instance, entry) || !meshClusterSways(record, view)) {
+        return pose;
+    }
+
+    std::array<float, 4> sphere = meshClusterWorldSphere(cluster, instance);
+    sphere[3] += meshClusterSwayReach(cluster, instance);
+
+    // A small plant's grown cluster can outgrow the plant: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds[3] >= 0.0f && record.bounds[3] <= sphere[3]) {
+        return pose;
+    }
+
+    return MeshClusterPose{.bound = false, .posed = true, .sphere = sphere};
+}
+
 bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
                           const MeshClusterPose& pose) {
-    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && meshClusterSways(record, view));
+    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
 }
 
 bool meshClusterBound(const GpuMeshCluster& cluster) {
@@ -674,6 +712,10 @@ MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClu
     return meshClusterPosed(sphere, drawn.instance, drawn.instance.sway[3], Vec2{tree.lean[0], tree.lean[1]});
 }
 
+MeshClusterPose meshClusterPoseIn(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster, const GpuCameraCull& view) {
+    return meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(tables, drawn, cluster));
+}
+
 // Own and group spheres the far cluster's, so the cut's two tests take the same one; its counts as a mesh cluster's.
 GpuMeshCluster twigFarMeshCluster(const GpuTwigFarCluster& far) {
     GpuMeshCluster cluster;
@@ -834,7 +876,7 @@ bool nearAMeshClusterEdge(const GpuMeshCluster& cluster, const GpuInstance& inst
 bool nearAMeshClusterEdge(const MeshClusterTables& tables, const GpuMeshClusterItem& item, const GpuCameraCull& view) {
     const MeshClusterDrawn drawn = meshClusterDrawnAt(tables, item.entry);
     const GpuMeshCluster cluster = meshClusterOfPair(tables, item.cluster);
-    return nearAMeshClusterEdge(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(tables, drawn, cluster));
+    return nearAMeshClusterEdge(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseIn(tables, drawn, cluster, view));
 }
 
 // Sorted, then walked together: equal pairs match, the rest are one side's only.

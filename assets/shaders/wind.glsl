@@ -164,6 +164,21 @@ vec3 windSwayOffset(vec3 fromFoot, float modelHeight, vec3 place, vec4 sway, flo
     return offset + windFlutterOffset(place, windFlutterAmount(sway.w, lean, modelHeight, sway.y), flutterRate, seconds);
 }
 
+// The farthest windSwayOffset moves any vertex of a part of a swaying thing: top its highest height in the mesh's frame,
+// trunkDistance its farthest from the trunk in the world, across (windSwayReach).
+float windSwayReach(vec4 sway, float scale, float top, float trunkDistance) {
+    if (sway.x < 0.0) {
+        return 0.0;
+    }
+
+    float share = max(top, 0.0) / max(sway.y, 1e-4);
+    float grow = min(share, 1.0);
+    float bend = 2.0 * sway.y * scale * share * share;
+    float bob = float(WIND_BRANCH_SHARE) * max(trunkDistance, 0.0) * grow;
+    float flutter = 1.7320508 * abs(sway.w) * grow;
+    return float(WIND_MOST_LEAN) * (bend + bob + flutter);
+}
+
 // A hanging vertex's own swing and flutter (windSwingOffset).
 vec3 windSwingOffset(float arm, vec3 place, float swing, float flutter, vec2 spring, float fade, vec2 flutterRate, float seconds) {
     vec2 lean = windFadedLean(spring, swing, fade);

@@ -49,9 +49,10 @@ void main() {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the
         // record's bounds, the eye, the frustum's six planes, the own sphere, the parent sphere, (own error, parent
-        // error, pixel error, level flags), (the pose's bound, posed), the pose's sphere. Outputs: (kept, seen whole,
-        // faces away from the eye brought into the mesh, largest scale), the world sphere, (in the cut, own error's
-        // pixels, parent error's pixels).
+        // error, pixel error, level flags), (the pose's bound, posed), the pose's sphere, the sway, (the model's scale).
+        // The pose as the sway's reach leaves it (meshClusterSwayingPose). Outputs: (kept, seen whole, faces away from the
+        // eye brought into the mesh, largest scale), the world sphere, (in the cut, own error's pixels, parent error's
+        // pixels), (the sway's reach, the pose's bound, posed), the pose's sphere.
         MeshCluster cluster;
         cluster.sphere = testInput(0);
         cluster.cone = testInput(1);
@@ -73,10 +74,10 @@ void main() {
         InstanceData instance;
         instance.model = mat4(testInput(3), testInput(4), testInput(5), testInput(6));
         instance.normalMatrix = mat4(1.0);
-        instance.handedness = vec4(1.0);
+        instance.handedness = vec4(1.0, testInput(23).x, 1.0, 1.0);
         vec4 kinds = testInput(8);
         instance.material = uvec4(0u, 0u, uint(kinds.x), uint(kinds.y));
-        instance.sway = vec4(-1.0);
+        instance.sway = testInput(22);
         instance.hanging = uvec4(0u, 0u, 0u, uint(kinds.z));
         instance.levelSphere = vec4(0.0);
 
@@ -104,7 +105,7 @@ void main() {
         float determinant = meshClusterDeterminant(instance.model);
         bool away = determinant > 0.0 && meshClusterFacesAway(cluster, meshClusterEyeInMesh(instance.model, view.levels.eye.xyz, determinant));
         vec4 posing = testInput(20);
-        MeshClusterPose pose = MeshClusterPose(posing.x != 0.0, posing.y != 0.0, testInput(21));
+        MeshClusterPose pose = meshClusterSwayingPose(cluster, instance, entry, record, view, MeshClusterPose(posing.x != 0.0, posing.y != 0.0, testInput(21)));
         testOutput(0, vec4(meshClusterKept(cluster, instance, entry, record, view, pose) ? 1.0 : 0.0,
                            meshClusterSeenWhole(instance, entry, record, view, pose) ? 1.0 : 0.0,
                            away ? 1.0 : 0.0, meshClusterLargestScale(instance.model)));
@@ -112,5 +113,7 @@ void main() {
         testOutput(2, vec4(meshClusterInCut(cluster, instance.model, view.levels) ? 1.0 : 0.0,
                            meshClusterErrorPixels(cluster.ownSphere, cluster.ownError, instance.model, view.levels),
                            meshClusterErrorPixels(cluster.parentSphere, cluster.parentError, instance.model, view.levels), 0.0));
+        testOutput(3, vec4(meshClusterSwayReach(cluster, instance), pose.bound ? 1.0 : 0.0, pose.posed ? 1.0 : 0.0, 0.0));
+        testOutput(4, pose.sphere);
     }
 }

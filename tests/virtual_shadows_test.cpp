@@ -1027,11 +1027,18 @@ namespace {
         header[levelWord(14, VIRTUAL_SHADOW_LEVEL_PAIRS)] = 3000;
         header[levelWord(14, VIRTUAL_SHADOW_LEVEL_TRIANGLES)] = 30000000;
         header[levelWord(15, VIRTUAL_SHADOW_LEVEL_CLUSTERS)] = 7;
-        const std::uint32_t casters[VIRTUAL_SHADOW_CASTER_WORDS] = {120000, 5100000, 300000, 30200000, 400000, 20100000, 2000, 50000, 3000000};
+        const std::uint32_t casters[VIRTUAL_SHADOW_CASTER_WORDS] = {120000, 5100000, 300000, 30200000, 400000, 20100000, 2000, 50000, 3000000,
+                                                                    1500, 41000, 2600000};
 
         for (int word = 0; word < VIRTUAL_SHADOW_CASTER_WORDS; ++word) {
             header[VIRTUAL_SHADOW_HEADER_CASTERS + word] = casters[word];
         }
+
+        const auto shapeWord = [](int shape, int word) { return VIRTUAL_SHADOW_HEADER_SHAPES + VIRTUAL_SHADOW_LEVEL_WORDS * shape + word; };
+        header[shapeWord(VIRTUAL_SHADOW_SHAPE_TERRAIN, VIRTUAL_SHADOW_LEVEL_CLUSTERS)] = 6000;
+        header[shapeWord(VIRTUAL_SHADOW_SHAPE_TERRAIN, VIRTUAL_SHADOW_LEVEL_PAIRS)] = 300000;
+        header[shapeWord(VIRTUAL_SHADOW_SHAPE_TERRAIN, VIRTUAL_SHADOW_LEVEL_TRIANGLES)] = 25000000;
+        header[shapeWord(VIRTUAL_SHADOW_SHAPE_THINNED, VIRTUAL_SHADOW_LEVEL_TRIANGLES)] = 1700;
 
         const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, 262144, true);
         assert(drawn.costs);
@@ -1042,6 +1049,10 @@ namespace {
         assert(costs.seenClusters == 120000 && costs.seenTriangles == 5100000 && costs.unseenClusters == 300000);
         assert(costs.unseenTriangles == 30200000 && costs.unseenPairs == 400000 && costs.unseenPairTriangles == 20100000);
         assert(costs.wholeClusters == 2000 && costs.wholePairs == 50000 && costs.wholePairTriangles == 3000000);
+        assert(costs.swayingClusters == 1500 && costs.swayingPairs == 41000 && costs.swayingPairTriangles == 2600000);
+        assert(costs.shapes[VIRTUAL_SHADOW_SHAPE_TERRAIN].clusters == 6000 && costs.shapes[VIRTUAL_SHADOW_SHAPE_TERRAIN].pairs == 300000);
+        assert(costs.shapes[VIRTUAL_SHADOW_SHAPE_TERRAIN].triangles == 25000000 && costs.shapes[VIRTUAL_SHADOW_SHAPE_THINNED].triangles == 1700);
+        assert(costs.shapes[VIRTUAL_SHADOW_SHAPE_LIANA].pairs == 0);
 
         RenderStats stats;
         stats.virtualShadowPages = VirtualShadowCounts{};
@@ -1049,13 +1060,14 @@ namespace {
         stats.virtualShadowDrawn = drawn;
         const std::vector<std::string> lines = renderStatsLines(stats);
         const auto drawnLine = std::find_if(lines.begin(), lines.end(), [](const std::string& line) { return line.starts_with("VSM DRAWN"); });
-        assert(drawnLine != lines.end() && drawnLine + 2 < lines.end());
+        assert(drawnLine != lines.end() && drawnLine + 3 < lines.end());
         assert(*(drawnLine + 1) == "VSM LEVELS (CLUSTERS:PAIRS:TRIS)  L0 4K:12K:1.2M  L14 900:3K:30.0M");
-        assert(*(drawnLine + 2) == "VSM SEEN 120K 5.1M TRIS  UNSEEN 300K 30.2M TRIS, 400K PAIRS 20.1M  WHOLE 2K, 50K PAIRS 3.0M");
+        assert(*(drawnLine + 2) == "VSM SEEN 120K 5.1M TRIS  UNSEEN 300K 30.2M TRIS, 400K PAIRS 20.1M  WHOLE 2K, 50K PAIRS 3.0M (SWAYING 1K, 41K PAIRS 2.6M)");
+        assert(*(drawnLine + 3) == "VSM SHAPES (CLUSTERS:PAIRS:TRIS)  TERRAIN 6K:300K:25.0M  LIANAS 0:0:0  CARDS 0:0:0  GROUND 0:0:0  THINNED 0:0:1K");
 
         stats.virtualShadowDrawn->costs.reset();
         const std::vector<std::string> plain = renderStatsLines(stats);
-        assert(std::none_of(plain.begin(), plain.end(), [](const std::string& line) { return line.starts_with("VSM LEVELS") || line.starts_with("VSM SEEN"); }));
+        assert(std::none_of(plain.begin(), plain.end(), [](const std::string& line) { return line.starts_with("VSM LEVELS") || line.starts_with("VSM SEEN") || line.starts_with("VSM SHAPES"); }));
     }
 
     /*

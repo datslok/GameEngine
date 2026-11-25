@@ -240,6 +240,15 @@ float windFlutterReach(float flutter, const Vec2& lean);
 Vec3 windSwayOffset(const Vec3& fromFoot, float modelHeight, const Vec3& place, const Vec4& sway, float scale, const Vec2& spring, float fade,
                     const Vec2& flutterRate, float seconds);
 
+/*
+* The farthest windSwayOffset moves any vertex of a part of a swaying thing, at any spring, fade and time (metres):
+* top its highest height in the mesh's own frame, trunkDistance its farthest from the trunk in the world (across, as
+* windSwayOffset's branches bob by it; ROADMAP phase 21 4c-vi). The lean is softly held under WIND_MOST_LEAN; the bend's sideways step, at most lean height s^2 (s top's
+* height share), moves a vertex at most twice that once its distance from the foot is kept; the branches' bob and the
+* leaves' flutter grow with the share up to 1. Nothing for a still sway.
+*/
+float windSwayReach(const Vec4& sway, float scale, float top, float trunkDistance);
+
 // Whether a draw sways this frame: it has a sway, and part of it is nearer the camera than the fade's end.
 bool drawSways(const WindSway& sway, const Vec3& boundsCentre, float boundsRadius, const Vec3& camera, const WindSettings& settings);
 

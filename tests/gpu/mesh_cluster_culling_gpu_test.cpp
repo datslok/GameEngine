@@ -28,7 +28,8 @@ namespace {
         MeshClusterPose pose;
     };
 
-    // Clusters of a sphere placed round random eyes: turned, scaled unevenly, some mirrored, some swaying, thinned,
+    // Clusters of a sphere placed round random eyes: turned, scaled unevenly, some mirrored, some swaying (of every
+    // category or still, half the views growing them by the sway's reach), thinned,
     // double-sided or of another kind, some bound to bones (posed, with a sphere moved near the cluster's, or not), half
     // from every level under several pixel errors (some views orthographic), so every branch of meshClusterKept and the
     // cut is reached.
@@ -69,6 +70,12 @@ namespace {
             c.record.bounds[2] = place.z;
             c.record.bounds[3] = 5.0f;
             c.record.flags = (index % 4 == 1 ? CULL_SWAYS : 0u) | (index % 7 == 2 ? CULL_DOUBLE_SIDED : 0u);
+            c.instance.handedness[1] = random.between(0.3f, 4.0f);
+            c.instance.sway[0] = index % 5 == 0 ? -1.0f : static_cast<float>(index % 3);
+            c.instance.sway[1] = random.between(0.5f, 20.0f);
+            c.instance.sway[2] = random.between(0.0f, 3.0f);
+            c.instance.sway[3] = random.between(0.0f, 0.5f);
+            c.view.flags |= index % 2 == 0 ? CAMERA_CULL_SWAY_REACH : 0u;
             c.pose.bound = index % 6 >= 3;
             c.pose.posed = index % 6 >= 4;
 
@@ -109,6 +116,8 @@ namespace {
         inputs.push_back(gpuVec4(c.cluster.ownError, c.cluster.parentError, c.view.levels.pixelError, static_cast<float>(c.view.levels.flags)));
         inputs.push_back(gpuVec4(c.pose.bound ? 1.0f : 0.0f, c.pose.posed ? 1.0f : 0.0f));
         inputs.push_back(gpuVec4(c.pose.sphere[0], c.pose.sphere[1], c.pose.sphere[2], c.pose.sphere[3]));
+        inputs.push_back(gpuVec4(c.instance.sway[0], c.instance.sway[1], c.instance.sway[2], c.instance.sway[3]));
+        inputs.push_back(gpuVec4(c.instance.handedness[1]));
 
         return inputs;
     }
@@ -128,13 +137,17 @@ namespace {
             inputs.insert(inputs.end(), one.begin(), one.end());
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_KEPT, inputs, 22, 3);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_KEPT, inputs, 24, 5);
 
         for (std::size_t i = 0; i < all.size(); ++i) {
             const Case& c = all[i];
-            const GpuVec4& choice = outputs[3 * i];
-            const GpuVec4& sphere = outputs[3 * i + 1];
-            const GpuVec4& cut = outputs[3 * i + 2];
+            const GpuVec4& choice = outputs[5 * i];
+            const GpuVec4& sphere = outputs[5 * i + 1];
+            const GpuVec4& cut = outputs[5 * i + 2];
+            const GpuVec4& swaying = outputs[5 * i + 3];
+            const GpuVec4& posedSphere = outputs[5 * i + 4];
+            const MeshClusterPose pose = meshClusterSwayingPose(c.cluster, c.instance, c.entry, c.record, c.view, c.pose);
+            report.check("meshClusterSwayReach", arithmeticTolerance, meshClusterSwayReach(c.cluster, c.instance), swaying[0]);
             const std::array<float, 4> expected = meshClusterWorldSphere(c.cluster, c.instance);
             report.check("meshClusterLargestScale", arithmeticTolerance, meshClusterLargestScale(c.instance), choice[3]);
             report.check("meshClusterWorldSphere", arithmeticTolerance, Vec3{expected[0], expected[1], expected[2]}, Vec3{sphere[0], sphere[1], sphere[2]});
@@ -146,20 +159,28 @@ namespace {
                              meshClusterErrorPixels(c.cluster.parentSphere, c.cluster.parentError, c.instance, c.view), cut[2]);
             }
 
-            if (nearAMeshClusterEdge(c.cluster, c.instance, c.entry, c.record, c.view, c.pose)) {
+            if (nearAMeshClusterEdge(c.cluster, c.instance, c.entry, c.record, c.view, pose)) {
                 continue;
+            }
+
+            report.check("meshClusterSwayingPose", exactTolerance, Vec3{pose.bound ? 1.0f : 0.0f, pose.posed ? 1.0f : 0.0f, 0.0f}, Vec3{swaying[1], swaying[2], 0.0f});
+
+            if (pose.posed) {
+                report.check("meshClusterSwayingPose sphere", arithmeticTolerance, Vec3{pose.sphere[0], pose.sphere[1], pose.sphere[2]},
+                             Vec3{posedSphere[0], posedSphere[1], posedSphere[2]});
+                report.check("meshClusterSwayingPose radius", arithmeticTolerance, pose.sphere[3], posedSphere[3]);
             }
 
             const float determinant = meshClusterDeterminant(c.instance);
             const Vec3 eye{c.view.levels.eye[0], c.view.levels.eye[1], c.view.levels.eye[2]};
             const bool away = determinant > 0.0f && meshClusterFacesAway(c.cluster, meshClusterEyeInMesh(c.instance, eye, determinant));
             report.check("meshClusterInCut", exactTolerance, meshClusterInCut(c.cluster, c.instance, c.view) ? 1.0f : 0.0f, cut[0]);
-            const bool whole = meshClusterSeenWhole(c.instance, c.entry, c.record, c.view, c.pose);
-            report.check("meshClusterKept", exactTolerance, meshClusterKept(c.cluster, c.instance, c.entry, c.record, c.view, c.pose) ? 1.0f : 0.0f, choice[0]);
+            const bool whole = meshClusterSeenWhole(c.instance, c.entry, c.record, c.view, pose);
+            report.check("meshClusterKept", exactTolerance, meshClusterKept(c.cluster, c.instance, c.entry, c.record, c.view, pose) ? 1.0f : 0.0f, choice[0]);
             report.check("meshClusterSeenWhole", exactTolerance, whole ? 1.0f : 0.0f, choice[1]);
 
             // The facing's edge is measured only where it is used: draws not seen whole and not posed.
-            if (!whole && !c.pose.posed) {
+            if (!whole && !pose.posed) {
                 report.check("meshClusterFacesAway", exactTolerance, away ? 1.0f : 0.0f, choice[2]);
             }
         }
