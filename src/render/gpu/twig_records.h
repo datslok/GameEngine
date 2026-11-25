@@ -3,10 +3,12 @@
 #include "render/gpu/camera_culling.h"
 #include "render/gpu/cull_records.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/instance_shared.h"
 #include "render/gpu/twig_drawing_shared.h"
 #include "math/vec2.h"
 #include "math/vec4.h"
 #include "scene/mesh_clusters.h"
+#include "scene/card_thinning_shared.h"
 #include "scene/twig_far_levels_shared.h"
 #include "scene/twig_set.h"
 
@@ -74,6 +76,25 @@ std::uint32_t packTwigBinding(const TwigInstance& twig);
 
 // A brick's record.
 GpuTwigBrick packTwigBrick(const TwigBrick& brick);
+
+/*
+* A crown fading into its card (ROADMAP phase 21 stage 3g; docs/research/LOD.md, Hiding the switches). Across the
+* camera's fade band the card dithers in (render/gpu/level_fade.h), while the twigs, opaque and so with no fragment shader
+* in the depth prepass to take the dither's discard, shrink away one by one at their own fixed ranks, as the leaf cards
+* did (scene/card_thinning.h): a twig about its base, a far leaf about its foot by its own twig's rank, so a twig and the
+* far leaves made from it go together. Nothing is discarded, so the prepass keeps testing depth early.
+*
+* The least rank leaves every twig gone by the band's last step: there the kept share is half a step, below any rank
+* less the thinning band.
+*/
+inline constexpr float twigFadeLeastRank = static_cast<float>(CARD_THINNING_BAND) + 1.0f / static_cast<float>(DRAW_LIST_FADE_STEPS);
+
+// A twig's rank, fixed by its plant (its pick's bits) and its number: twigFadeLeastRank to 1, evenly.
+float twigFadeRank(std::uint32_t plant, std::uint32_t twig);
+
+// How whole a twig of this rank is while its part's draw list entry fades (its fade field, level_fade.h): 1 when not
+// fading or for the coarser level; else its presence (cardPresence) at the kept share, 1 less the fade's share.
+float twigFadePresence(std::uint32_t fadeField, float rank);
 
 /*
 * A prototype's levels from its clusters (a chain, as buildGivenClusterLevels makes: group k level k's clusters, which

@@ -434,6 +434,28 @@ namespace {
             report.check("farLeafVertex tangent", exactTolerance, want.tangent.w, outputs[4 * i + 3][3]);
         }
     }
+
+    // A crown fading into its card (stage 3g): ranks of plants and twigs over their whole words (the GPU may fuse the
+    // product and sum the CPU rounds apart: arithmetic tolerance), and presences for every fade step either level and ranks through the band.
+    void checkFade(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        std::vector<GpuVec4> inputs;
+        const auto bits = [](std::uint32_t word) { return std::bit_cast<float>(word); };
+
+        for (std::uint32_t i = 0; i < 512; ++i) {
+            const std::uint32_t plant = i * 2654435761u;
+            const std::uint32_t twig = (i * 40503u) ^ (i << 20);
+            const std::uint32_t field = i % 4 == 0 ? 0u : ((i % 3 == 0 ? DRAW_LIST_FADE_COARSE : 0u) | (1u + i % DRAW_LIST_FADE_STEPS));
+            inputs.push_back(gpuVec4(bits(plant), bits(twig), bits(field), static_cast<float>(i % 101) / 100.0f));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TWIG_FADE, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const GpuVec4& in = inputs[i];
+            report.check("twigFadeRank", arithmeticTolerance, twigFadeRank(std::bit_cast<std::uint32_t>(in[0]), std::bit_cast<std::uint32_t>(in[1])), outputs[i][0]);
+            report.check("twigFadePresence", arithmeticTolerance, twigFadePresence(std::bit_cast<std::uint32_t>(in[2]), in[3]), outputs[i][1]);
+        }
+    }
 }
 
 void gpuTestTwigDrawing(GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -444,4 +466,5 @@ void gpuTestTwigDrawing(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkFarNode(runner, report);
     checkFarMeshCluster(runner, report);
     checkFarLeafVertex(runner, report);
+    checkFade(runner, report);
 }

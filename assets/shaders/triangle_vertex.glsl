@@ -205,6 +205,14 @@ vec3 shadeVertex(uint vertexSlot, vec3 position, vec3 normal, vec2 uv, vec4 tang
     // lean as the cards' were (the leaf normal blend), and the leaf's number in its texture coordinate swapped for its
     // tone seed (foliage_shading.glsl; the fragment shader tones it when its material asks).
     if (drawn.twig) {
+        // A twig of a crown fading into its card shrinks about its base at its own rank (twigFadePresence); a far leaf's
+        // vertex comes already shrunk about its foot (drawFarCluster).
+        if (twigPose.farTwig == NO_FAR_TWIG) {
+            float presence = twigFadePresence(drawListFade(entry), twigFadeRank(drawn.twigPlant, drawn.twigNumber));
+            position *= presence;
+            previousPosition *= presence;
+        }
+
         mat3 twigTurn = mat3(drawn.twigMatrix);
         position = (drawn.twigMatrix * vec4(position, 1.0)).xyz;
         previousPosition = (drawn.twigMatrix * vec4(previousPosition, 1.0)).xyz;
