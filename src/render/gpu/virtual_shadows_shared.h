@@ -11,17 +11,21 @@
 #define VIRTUAL_SHADOW_MAX_LEVELS 16
 
 // How many pages a point is kept from its level's edge (the level choice's margin): the level slides by whole pages, so
-// the camera sits up to half a page off its centre, and the other half page (64 texels) holds a soft shadow's widest
-// filter and blocker search (24 texels) inside the level.
+// the camera sits up to half a page off its centre, and the other half page (64 texels) holds a soft shadow's rays
+// (VIRTUAL_SHADOW_RAY_TEXELS) inside the level.
 #define VIRTUAL_SHADOW_MARGIN_PAGES 1
 
 // The level of a point no level holds: past the last one, where the far shadow map answers.
 #define VIRTUAL_SHADOW_NO_LEVEL -1
 
-// How far round a pixel's texel the pages it may read are marked: a soft shadow's widest filter and blocker search
-// (MAX_SHADOW_FILTER_TEXELS and MAX_BLOCKER_SEARCH_TEXELS, 12 each). Half the margin's page, so a pixel marks at most
-// the four pages round a corner.
-#define VIRTUAL_SHADOW_FILTER_TEXELS 24
+// How far across a soft shadow's rays reach from their point, in its level's texels (virtual_shadow_rays.glsl): the
+// cascades' widest penumbra (MAX_SHADOW_FILTER_TEXELS), as Unreal clamps its penumbra, so a point's samples all lie on
+// the pages it marked.
+#define VIRTUAL_SHADOW_RAY_TEXELS 12
+
+// How far round a pixel's texel the pages it may read are marked: its rays' reach. Under half the margin's page, so a
+// pixel marks at most the four pages round a corner.
+#define VIRTUAL_SHADOW_FILTER_TEXELS VIRTUAL_SHADOW_RAY_TEXELS
 
 // A page table entry: flags in the top bits, the physical page (its place in the pool) in the low 16.
 #define VIRTUAL_SHADOW_ENTRY_ALLOCATED 0x80000000u

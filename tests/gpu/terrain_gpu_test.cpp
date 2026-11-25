@@ -118,7 +118,7 @@ namespace {
         for (std::size_t i = 0; i < boxes.size(); ++i) {
             const GpuVec4& placement = inputs[3 * i];
             const GpuVec4& footprint = inputs[3 * i + 2];
-            const TerrainPatch patch{.corner = Vec2{placement[0], placement[1]}, .size = placement[2], .quads = placement[3], .spacing = inputs[3 * i + 1][2]};
+            const TerrainPatch patch{.corner = Vec2{placement[0], placement[1]}, .size = placement[2], .quads = placement[3], .spacing = inputs[3 * i + 1][2], .uvCorner = Vec2{}};
             const Vec4 expected = terrainClusterBox(patch, Vec4{footprint[0], footprint[1], footprint[2], footprint[3]});
             report.check("terrainClusterBox", exactTolerance, Vec3{expected.x, expected.y, expected.z}, Vec3{boxes[i][0], boxes[i][1], boxes[i][2]});
             report.check("terrainClusterBox", exactTolerance, expected.w, boxes[i][3]);

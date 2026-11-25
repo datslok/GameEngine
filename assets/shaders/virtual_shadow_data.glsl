@@ -21,6 +21,7 @@ struct VirtualShadowLevelData {
     ivec4 counts;                /* x the levels, y the pages a level's side, z the pool's pages, w the frame */  \
     ivec4 pool;                  /* x the pool's pages a row, y the pairs' room, z, w its width, height (texels) */\
     vec4 shading;                /* x 1 the main pass reads the pages, y the bias's base, z 1 costs counted */     \
+    vec4 soft;                   /* the soft shadows' rays: x rays, y samples a ray, z the extrapolated slope */   \
     vec4 cameraPlanes[6];        /* the camera's culling frustum (CullFrustum), for the costs */                    \
     VirtualShadowLevelData levels[VIRTUAL_SHADOW_MAX_LEVELS];
 

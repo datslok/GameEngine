@@ -86,7 +86,7 @@ The engine already has most of the parts:
 | Which clusters | culled a level against its box and a pyramid of dirty pages (Sakmary's HPB), twigs and far leaves through the same passes; the cut and twig choices the camera's | a caster must be the same in every level, or a seam shows where levels meet [S, Epic answer]; the camera's cut changes under a pixel, so it never redraws a page |
 | Cache | invalidated by the scene's still changes and movers' bounds (old and new), by posed bounds for swaying trees; still and moving slices (Unreal's, our far map's): a page with movers copies its still depth and draws them over | cost grows with what changed |
 | Swaying trees | dirty in the moving slice every frame they sway; a tree that starts or stops swaying redraws its still pages once | bounded by the 0.1 screen share ring |
-| Soft shadows | today's PCSS (16 blocker taps, 16 filter taps, penumbra in metres) through the page table; taps clamped inside their page | keeps the approved look; SMRT is noisy without a temporal upscaler tuned for it |
+| Soft shadows (reopened Nov 25 2026: SMRT, see the re-check) | today's PCSS (16 blocker taps, 16 filter taps, penumbra in metres) through the page table; taps clamped inside their page | keeps the approved look; SMRT is noisy without a temporal upscaler tuned for it |
 | Bias | today's sun bias along the light, in the level's texels | already level-agnostic |
 | Level seams | a hard switch | texels near a pixel make levels hard to tell apart (Stratus, Unreal) |
 | Readers without depth | fog, probe captures, impostor cards: the far map kept as the coarse fallback | Unreal's coarse pages do this job; the far map is cached and keeps its movers apart already |
@@ -123,7 +123,7 @@ What each cost grows with (hard rule 11):
 | 4a | Level boxes, page snapping, wrapped addresses, level choice, depth range: CPU maths mirrored in a `.glsl` library | tests: a point's level holds it, a slide keeps cached pages' addresses, the choice matches texel targets |
 | 4b | Marking, page table, allocation, overflow on the GPU; F4 counts pages; a view colouring each pixel by level and page | the user checks the view by eye; counts at the four spots |
 | 4c | Clusters drawn into pages (clip distances), every page redrawn every frame; the main pass can read it (a switch, the cascades kept) | the user compares both by eye; timings |
-| 4d | PCSS through the page table, the coarser fallback, the far map behind | soft edges as today's; tests for the lookups |
+| 4d | SMRT through the page table, the coarser fallback, the far map behind ("soft shadows through the pages") | penumbrae against the exact disc; the four spots measured |
 | 4e | The cache: invalidation, still and moving slices, swaying trees | nothing redrawn when still; the four spots measured |
 | 4f | Leaves casting from their twigs and far records; shadow stand-ins retired | by eye; timings |
 | 4g | Mirror, probe, cards and fog moved over; cascades kept only for GPUs without mesh shaders | golden views; the user checks by eye |
@@ -180,6 +180,87 @@ A terrain patch (`scene/terrain`, CDLOD) is one flat grid mesh (32 x 32 quads, 2
 - **Expected:** a cluster in its own few pages, not its patch's 16 clusters' worth: the terrain's pages' triangles about 5 to 10 times fewer (5.6-7.6 M to about 1 M), VSMDRAW perhaps 0.5-1 ms less; small next to caching (4e). The camera's passes gain too: today every cluster of a patch in the frustum is kept, none culled by the pyramid.
 - **Decided (the user, Nov 25 2026): the bounds on the GPU.** A min/max pyramid a height grid, each level's texel the lowest and highest of the 2 x 2 below, down to the grid's own spacing (about 2.7 times the heights' memory), built when the heights are uploaded. A cluster's box from the patch's corner and size, grown by one spacing; the finest grid holding it whole, its level where the box spans at most 2 x 2 texels, four reads; the sphere round that box. Mirrored in C++, a switch (`passes.meshClusterTerrainBounds`) to time it on and off. Not the CPU table first offered: its cost is the CPU's every frame for every patch, and GPU selection, terrain occlusion and changing land (phase 15) want the pyramid.
 - **Cost grows with** the terrain clusters culled: four reads and a sphere each, a view; the pyramid's build with the heights, once.
+
+## The design's picks re-checked (Nov 25 2026, before 4d)
+
+Each pick of "The design proposed" and what was built since, against what current engines ship and what each cost grows with; a pick resting on reuse, an earlier note or ease is reopened.
+
+| Pick | Current engines | Its reason | Verdict |
+|---|---|---|---|
+| Soft shadows: PCSS | Unreal: SMRT (rays over the sun's disc through the map) | "keeps the approved look"; "SMRT is noisy without a temporal upscaler", but TAA came since | **Reopened: SMRT** (4d) |
+| Eviction: the GPU's order, not least recently used (built in 4b, `virtual-shadows.md`) | Unreal keeps unused pages 60 frames [S, third party]; EEVEE frees the oldest cached first; only Sakmary takes any, and found returning to evicted areas spiked | "as Sakmary's", simpler; this doc's own design said the oldest first | **Reopened: oldest first**, in 4e (a cache's hit rate is 4e's whole gain) |
+| Overflow: the level bias coarsens next frame (Unreal 5.4, above 85% of the pool) | Unreal 5.4 | planned, never built: a full pool marks pages `FAILED` and the cascades shade them | **Still owed:** with 4d-ii's fallback, before 4g retires the cascades |
+| Bias: the cascades' along the light, in the level's texels | Unreal: a normal bias of 0.5/1000 x distance and SMRT's short screen-space ray first ("smart shadow bias") | reuse of the cascades' | **Reopened with SMRT:** its rays start off the surface, so the bias is part of 4d's research |
+| Readers without depth and the last fallback: the far map, no coarse pages | Unreal marks coarse levels for fog and translucency; Stratus draws its coarsest level whole | user's decision Nov 24 2026: a level is 1024 pages (a quarter of the pool) for blurry answers; the far map is already cached and holds movers apart | **Holds on merit** (cost grows with the pool); re-check at 4g with a failed page's look: the far map's 2.7 m texels against a coarse level's |
+| The clusters' cut: the camera's, in every level | Unreal: Nanite picks a cut for the shadow view by its own texels [M, to confirm] | a caster the same in every level (no seams, Epic's answer [S]); the camera's cut changes under a pixel, so it never dirties a page | **Holds on merit** for now; confirm Unreal's choice in 4e's research, since a cut that moves with the camera could dirty cached pages |
+| Clusters culled by a pyramid of dirty pages (Sakmary's HPB) | Unreal: a pyramid of page flags and an HZB of last frame's pages [M] | planned for 4e; 4c draws every page | **Holds:** 4e |
+| Levels 4096² (32² pages), the choice by distance, depth ranges per level | Unreal 16k² levels by distance with a bias; Sakmary, Frogfood 4096² | texels 0.5-1 pixel at 1440p, 8192² a setting for 4K | **Holds on merit:** cost grows with screen pixels either way |
+| Writing depth: atomics | Unreal: atomics | measured 24-39% faster than the depth test (4c-iv) | **Holds** (measured) |
+| Swaying trees: the moving slice, still past 0.1 of the screen | Unreal: WPO disable distance; bones for Nanite foliage (5.7) | cost bounded by the swaying ring | **Holds** |
+| Hard switch between levels | Unreal, Stratus: hard [M for Unreal] | texels near a pixel hide the switch | **Holds** |
+| GPUs without mesh shaders keep the cascades | Unreal draws non-Nanite meshes into its pages by the ordinary raster | the user's decision Nov 24 2026: every RTX 20+ and RX 6000+ has mesh shaders | **Holds** (a scope choice, not a scaling one) |
+| Leaves casting from their twigs (4f) | Unreal: Nanite foliage casts as drawn | as engines | **Holds** |
+
+## Soft shadows through the pages (researched Nov 25 2026, before 4d)
+
+4c-iii reads one texel of a point's page: hard edges. The cascades' soft edge (`softShadowFromTileLifted`, `sun-shadows.md`) is PCSS: 16 taps average the blockers' depth, the penumbra tan(sun's angular radius) x (receiver - blocker) in metres, clamped to 1-12 texels, 16 hardware-filtered comparisons over it. PCSS was first planned here too, then reopened ("the design's picks re-checked" above): Unreal ships shadow-map ray tracing (SMRT).
+
+### How others do it
+
+- **Unreal (UE 5.9 docs):** "shooting a number of rays towards the light source ... a number of samples along the ray are projected and tested against the virtual shadow map to achieve soft shadowing and contact hardening"; rays over the Source Angle; 8 rays (`SMRT.RayCountDirectional`; 0 "reverts to single-sample hard shadows"), 8 samples a ray (`SamplesPerRayDirectional`, "between 4 and 8 samples works well"); fewer rays "show visible noise in the penumbra"; PCF "would over-blur". The map holds only the first layer, so "light leaking artifacts can happen where the occluders overlap", fixed by "a gap-filling heuristic that extrapolates depths behind the first occluder based on depths seen before the point of occlusion", `ExtrapolateMaxSlopeDirectional` 5 (0 = none: "reduced penumbra quality"; higher "can introduce light leaks behind second occluders"). The penumbra is clamped (`MaxRayAngleFromLight`, `RayLengthScaleDirectional`) "to avoid sample divergence from the ray origin". An adaptive ray count makes softer shadows dearer; a forum post found it caused "pixel artefacts on moving shadows" ([VSM docs](https://dev.epicgames.com/documentation/en-us/unreal-engine/virtual-shadow-maps-in-unreal-engine); [cvar](https://unrealdirective.com/resources/console-variables/r-shadow-virtual-smrt-extrapolatemaxslopedirectional/); [forum](https://forums.unrealengine.com/t/virtual-shadow-maps-for-high-quality-rendering-cinematics/1922741)). Not public: how samples are spaced, the extrapolation's formula, the adaptive rule [M: a few rays first, the rest only where they disagree].
+- **Cinnabar (open source, Vulkan, merged Nov 2026):** rays on a Vogel disc turned by blue noise; marched out from the pixel to 20 m, steps "spaced by the square of their share" (nearer together near the pixel), jittered per pixel; the last step at the ray's end, so taller casters still cast with the penumbra capped (about 9 cm for the sun); a step "blocked when it is behind the map's depth by more than two of the level's texels and 2% of its distance"; behind the map counts as solid (a heightfield, no extrapolation); every step reads the point's level through the page table, a missing page the next coarser level's; marking widened by the light's size times the ray's length. High 4 x 6, Ultra 8 x 8: 0.21 / 0.57 ms more than hard shadows on an RTX 5090 at 1080p, a 2° sun over casters filling the view; blue noise and TAA, no denoiser ([PR #421](https://github.com/aszecsei/cinnabar/pull/421), [issue #257](https://github.com/aszecsei/cinnabar/issues/257)).
+- **MetalRenderer (open source, Metal):** "a shadow sample marches its jittered segment toward the light through the map"; a sample whose pages are missing traces the whole ray in hardware instead ([PR #31](https://github.com/IIMrFreemanII/MetalRenderer/pull/31)).
+- **Older work:** backprojection (Guennebaud et al. 2006) integrates the map's texels over the light seen from the point; same first-layer gaps and overlaps ([paper](https://www.labri.fr/perso/guenneba/docs/SoftShadowMapping-egsr06.pdf)).
+- **PCSS's own numbers** (graphics-programming.org, GPU Zen 3): 1/4/8/16 samples 61/195/321/572 µs over none at 1080p ([article](https://graphics-programming.org/blog/virtual-shadow-maps)).
+
+### The physics, and why rays beat PCSS here
+
+From a point, the sun is a disc of angular radius α (tan α = 0.00465). A ray towards a point u of the disc (|u| <= 1) climbs a height h along the light while moving h tan α u across it. In the light's frame a level is a straight map of (across, along), so a ray is a straight segment in a level's texels and depth: from the point's texel and depth, h tan α u / texel across and h x depth scale along. A sample is blocked when the stored surface there is sunward of the ray. The share of rays that get through is the share of the disc the point sees, each ray finding its own blocker: a canopy over a canopy, sun flecks through gaps, a twig over a leaf. PCSS's one averaged blocker height a pixel smears those.
+
+### What it means here
+
+- **Rays clamped to the marked pages, as Unreal clamps its penumbra:** a ray's sideways reach capped at `VIRTUAL_SHADOW_RAY_TEXELS` of the point's level (12, the cascades' widest penumbra: texels follow pixels, 0.5-1 a texel, so about 6-12 pixels), so its height H = 12 texels / tan α (the finest level 0.6 m, the 1 km level 1.3 km), and no higher than the caster reach (200 m) the levels' depth ranges hold sunwards: past it the far map's distant occluders as now. The last sample at the ray's end blocks for anything above it there, so taller casters cast, their penumbra capped (Cinnabar's rule). A wider cap marks more pages (by its square).
+- **Pages:** every sample within 12 texels of its point, so all of a point's samples lie on at most 2 x 2 pages: their four entries read once a point, a sample's by which side of the page edges it falls. One texel a sample (`texelFetch`, no filtering): no gathers, no page-edge special case. The marking needs 12 texels, not 24 (one texel a sample, no 2 x 2 filter).
+- **Samples along a ray:** spaced by the square of their share (more near the point, where contact shadows are sharp), jittered per pixel; rays on a Fibonacci (Vogel) disc turned per pixel by the interleaved gradient noise (`fibonacci.glsl`, the cascades' turn); TAA averages them.
+- **Blocked:** stored depth sunward of the sample by more than the bias. The ray starts from the point lifted by the cascades' bias along the light in the level's texels (4c-iii's `virtualShadowBiasDepth`, measured acne-free), the samples' tolerance growing with their height as Cinnabar's (two texels and a share of the distance). Unreal adds a screen-space ray ("smart shadow bias"); ours exists already as contact shadows (`contact_shadows.glsl`).
+- **Gap filling:** Unreal's extrapolation behind an occluder, slope capped (5), a setting with 0 the plain heightfield; its formula ours (not public), tested on two overlapping blockers.
+- **Missing pages:** the point's own page missing, the next coarser drawn level's (levels share the light's axes: texels halve, depth by the level's scale and offset), then the cascades until 4g; a sample's page missing, the same chain for that sample. Coarser pages are drawn only where some pixel marked them; the far map stands behind (decided Nov 24 2026, point 3).
+- **Overflow (owed since 4b):** a pool past `virtualShadows.poolLoad` (0.85, Unreal 5.4's) coarsens every level's choice one step next frame, back when it falls under; F4 shows the bias.
+- **Distant occluders:** the far map's soft lookup as now.
+- **Not in 4d:** glass's coloured shadows and impostor cards stay the cascades' (4g).
+
+### Picks
+
+| | SMRT (picked) | PCSS |
+|---|---|---|
+| Cost grows with | screen pixels on pages x rays x samples (64 reads at 8 x 8; fewer with the adaptive count) | screen pixels on pages (16 reads + 16 gathers) |
+| Current engines | Unreal 5 (8 x 8, adaptive), Cinnabar | cascaded engines, Frogfood |
+| Reason | each ray finds its own blocker: layered canopy right; no page-edge cases | none left: its reasons were reuse and an old note |
+
+| | Clamp the ray in the point's level (picked) | Climb into coarser levels as the ray rises |
+|---|---|---|
+| Cost grows with | pages marked as today | pages marked: several coarser levels a pixel |
+| Current engines | Unreal (`MaxRayAngleFromLight`, `RayLengthScaleDirectional`), Cinnabar (20 m) | none found |
+| Reason | engines clamp; penumbrae as wide as today's | wider true penumbrae, unproven |
+
+| | Extrapolation behind occluders, a setting (picked) | Heightfield only |
+|---|---|---|
+| Cost grows with | samples (a few operations each) | samples |
+| Current engines | Unreal (max slope 5) | Cinnabar |
+| Reason | fixes leaks where blockers overlap, common in a canopy | simpler |
+
+### 4d in three steps
+
+| Step | What | Cost grows with |
+|---|---|---|
+| 4d-i | SMRT through the page table: rays (`virtualShadows.rays` 8, 0 = one hard comparison), samples (`samplesPerRay` 8), the clamp, the bias, extrapolation (`extrapolateSlope` 5, 0 off); marking down to 12 texels | pixels on pages x rays x samples |
+| 4d-ii | Missing pages and overflow: a point or sample on no drawn page takes the next coarser drawn level, then the cascades; the pool's load coarsens levels; F4 counts both | pixels on missing pages; a table read a level tried |
+| 4d-iii | The adaptive ray count (a few rays first, the rest where they disagree), measured for its gain and checked for crawling on moving shadows | pixels in penumbrae |
+
+- **Mirrored maths** (`virtual_shadows.glsl`, `render/gpu/virtual_shadows`): a ray's disc point, a sample's share, its texel and depth in the level, the clamp, the footprint's page for a sample, the blocked test with extrapolation, a point in a coarser level, the load's bias. Reads stay in `scene_surface.glsl`.
+- **Tests:** a straight edge h metres up: the visible share across it against the disc's exact segment area (many rays, every level); contact hardening (a blocker at the receiver hard, higher softer, width h tan α until the cap); two overlapping blockers leak without extrapolation and not with it; samples within 12 texels, on the four pages; a coarser level's texel and depth the same world point; settings and F4.
+- **Expected:** the penumbra as wide as the cascades' where both are unclamped, right under layered leaves; noise left to TAA. Cost: about 1 ms at 1440p with 8 x 8 where casters fill the view (Cinnabar's 0.57 ms at 1080p on a faster GPU), less with 4d-iii; measured at the four spots.
+- **The command line:** `--set engine.render.virtualShadows.rays=N`, `samplesPerRay`, `extrapolateSlope`, `poolLoad`, all in `VirtualShadowSettings::visit` (F5, `settings.cfg`).
 
 ## Decided (the user, Nov 24 2026)
 

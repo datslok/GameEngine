@@ -525,7 +525,10 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [x] 4c-vi. Swaying clusters culled by their own spheres grown by the wind's reach, not kept whole (`vsm-sway-bounds`)
     - [x] 4c-vii. Lianas culled by bounds of their own clusters as bent, not their tree's (`vsm-liana-bounds`)
     - [x] 4c-viii. Terrain patches' clusters culled by their own heights from a min/max pyramid on the GPU (`vsm-terrain-bounds`)
-  - [ ] 4d. Soft shadows through the page table, a coarser page or the far map where one is missing
+  - [ ] 4d. Soft shadows through the page table (SMRT), a coarser page or the far map where one is missing
+    - [ ] 4d-i. Rays over the sun's disc marched through the pages, clamped to 12 texels; gaps behind occluders filled (`vsm-soft-shadows`)
+    - [ ] 4d-ii. A missing page read from a coarser level, then the cascades; a pool near full coarsens the levels
+    - [ ] 4d-iii. Fewer rays where the first agree (adaptive count), measured and checked for crawling
   - [ ] 4e. Pages cached until something in them moves; still and moving slices; swaying trees
   - [ ] 4f. Leaves casting from their twigs and far records; the shadow stand-ins retired
   - [ ] 4g. Mirror, probe, cards and fog moved over; cascades kept only for GPUs without mesh shaders

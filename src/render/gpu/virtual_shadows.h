@@ -41,6 +41,10 @@ inline constexpr int maxVirtualShadowLevels = VIRTUAL_SHADOW_MAX_LEVELS;
 inline constexpr int virtualShadowMarginPages = VIRTUAL_SHADOW_MARGIN_PAGES;
 inline constexpr int virtualShadowNoLevel = VIRTUAL_SHADOW_NO_LEVEL;
 
+// The most soft shadow rays a point and samples a ray the settings take (the main pass's loops are bounded by them).
+inline constexpr int maxVirtualShadowRays = 64;
+inline constexpr int maxVirtualShadowRaySamples = 32;
+
 // How many pages a level has a side: 32 (4096 texels, about a texel a pixel at 1440p) or 64 (8192, for 4K screens).
 enum class VirtualShadowResolution {
     Pages32,
@@ -96,6 +100,15 @@ struct VirtualShadowSettings {
     // F4's costs of drawing into the pages (4c-v): pairs and triangles by level, casters seen by the camera or not, those
     // kept whole. A few atomics more a cluster and level, so off but to measure.
     bool countCosts = false;
+
+    // The sun's soft shadows in the pages (4d-i, render/gpu/virtual_shadow_rays.h): rays a point over the sun's disc
+    // (Unreal's 8 at Epic scalability; 0 is one hard comparison, 4c-iii's), samples along each, the last at its end
+    // (Unreal's 8: "between 4 and 8 samples works well"), and how steep (metres along the light a metre across) a
+    // surface hidden behind a higher one may be carried on so a ray still meets it (Unreal's 5; 0 carries nothing on,
+    // and light leaks where blockers overlap).
+    int rays = 8;
+    int samplesPerRay = 8;
+    float extrapolateSlope = 5.0f;
 
     bool operator==(const VirtualShadowSettings&) const = default;
 };
@@ -424,11 +437,12 @@ struct GpuVirtualShadowFrame {
     std::int32_t counts[4];           // x the levels, y the pages a level's side, z the pool's pages, w the frame
     std::int32_t pool[4];             // x the pool's pages a row, y the pairs' room, z, w the pool's width and height in texels
     float shading[4];                 // x 1 the main pass reads the pages (mainPass), y the bias's base in a level's texels, z 1 costs counted
+    float soft[4];                    // the soft shadows' rays (4d-i): x rays a point, y samples a ray, z the extrapolated slope
     float cameraPlanes[6][4];         // the camera's culling frustum (GpuFrustum), for the costs' casters seen or not (4c-v)
     GpuVirtualShadowLevel levels[maxVirtualShadowLevels];
 };
 
-static_assert(sizeof(GpuVirtualShadowFrame) == 1328, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
+static_assert(sizeof(GpuVirtualShadowFrame) == 1344, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
 
 // The frame's record: the clipmap placed for this camera (its settings' debug view and main pass switch), each level's
 // generation, the main pass's bias in texels, the frame's counter, the pairs' room.

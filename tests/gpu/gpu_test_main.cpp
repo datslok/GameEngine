@@ -63,6 +63,7 @@ int main() {
             gpuTestClusters(runner, report);
             gpuTestCascades(runner, report);
             gpuTestVirtualShadows(runner, report);
+            gpuTestVirtualShadowRays(runner, report);
             gpuTestDdgiSampling(runner, report);
             gpuTestProbeRelocation(runner, report);
             gpuTestAtmosphere(device, runner, report);

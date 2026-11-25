@@ -1,0 +1,37 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs virtual_shadow_rays.glsl's functions on the cases virtual_shadow_rays_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "virtual_shadow_rays.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_VIRTUAL_SHADOW_RAY_DISC) {
+        testOutput(0, vec4(virtualShadowRayDisc(int(a.x), int(a.y), a.z), 0.0, 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_RAY_SAMPLE) {
+        // a: sample, samples, jitter, tan; b: inverse texel, depth scale, start depth, disc x; c: disc y, start x, y.
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        float share = virtualShadowSampleShare(int(a.x), int(a.y), a.z);
+        float height = virtualShadowRayHeight(a.w, b.x, b.y, b.z);
+        testOutput(0, vec4(share, height, 0.0, 0.0));
+        testOutput(1, vec4(virtualShadowRaySample(vec3(c.yz, b.z), vec2(b.w, c.x), a.w, b.x, b.y, share * height), 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_FOOTPRINT) {
+        ivec2 first = virtualShadowFootprintFirst(a.xy);
+        testOutput(0, vec4(vec2(first), float(virtualShadowFootprintIndex(virtualShadowPageOf(a.zw), first)), 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_MARCH) {
+        // a: under, hit, the surface's depth and ray depth; b: its slope, the ray depth, stored, tolerance; c: slope cap.
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        VirtualShadowMarch march = VirtualShadowMarch(a.x > 0.5, a.y > 0.5, a.z, a.w, b.x);
+        VirtualShadowMarch next = virtualShadowMarchStep(march, b.y, b.z, b.w, c.x);
+        testOutput(0, vec4(next.under ? 1.0 : 0.0, next.hit ? 1.0 : 0.0, next.surfaceDepth, next.surfaceRayDepth));
+        testOutput(1, vec4(next.surfaceSlope, virtualShadowRayBlocked(next) ? 1.0 : 0.0, 0.0, 0.0));
+    }
+}

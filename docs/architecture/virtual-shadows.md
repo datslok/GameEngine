@@ -12,7 +12,7 @@ The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by
 
 | Function | What |
 |---|---|
-| `virtualShadowUsableHalfWidth` | a level's half-width less `VIRTUAL_SHADOW_MARGIN_PAGES` (1) page: half a page for the camera's snapping, half for a soft shadow's filter |
+| `virtualShadowUsableHalfWidth` | a level's half-width less `VIRTUAL_SHADOW_MARGIN_PAGES` (1) page: half a page for the camera's snapping, half for a soft shadow's rays |
 | `virtualShadowLevelFor` | the finest level whose usable half-width holds a distance from the camera; `VIRTUAL_SHADOW_NO_LEVEL` (-1) past the last (the far map's) |
 | `virtualShadowPageOf` | a level's texel to its page |
 | `virtualShadowSlot` | a page's table slot: plus the level's origin slot, wrapped |
@@ -35,14 +35,14 @@ The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by
 
 `VirtualShadowSettings` (F5 Virtual shadows, `engine.render.virtualShadows.*`): `enabled` (off until 4c draws), `showPages`, `mainPass` (off, 4c-iii), `drawing` (atomics by default, or the depth test, 4c-iv), `poolPages` (4096, up to `VIRTUAL_SHADOW_MAX_POOL_PAGES` 16384), and the clipmap's.
 
-- **`prepare`** (before the scene set): the clipmap moved (`updateVirtualShadowClipmap`); each dropped level's generation bumped; this frame's `GpuVirtualShadowFrame` (std430, 1328 B: light rotation, inverse view-projection, screen, options, counts, pool, shading, the camera's culling planes, a `GpuVirtualShadowLevel` a level) written by `packVirtualShadowFrame`. Runs with the prepass and a shadowed sun; else the record holds no levels.
+- **`prepare`** (before the scene set): the clipmap moved (`updateVirtualShadowClipmap`); each dropped level's generation bumped; this frame's `GpuVirtualShadowFrame` (std430, 1344 B: light rotation, inverse view-projection, screen, options, counts, pool, shading, soft shadows' rays, the camera's culling planes, a `GpuVirtualShadowLevel` a level) written by `packVirtualShadowFrame`. Runs with the prepass and a shadowed sun; else the record holds no levels.
 - **Entries** (`uint`): `ALLOCATED`, `REQUESTED`, `DIRTY`, `FAILED` in the top bits, the physical page in the low 16. Each has a key (`VirtualShadowKey`: the world page across the light, low 32 bits, and the level's generation): a key that no longer matches its slot's is stale.
 - **On the GPU from frame to frame:** the table (sized for 16 levels of 64²), keys, counters (`VIRTUAL_SHADOW_COUNT_*`), the free list and its top. Other levels, resolution or pool start everything again (`options.z`: all empty, all free).
 
 | Pass | One invocation | Does |
 |---|---|---|
 | `virtual_shadow_clear.comp` | an entry (or pool page) | asks, dirt, failures cleared; counters to 0 but the free top |
-| `virtual_shadow_mark.comp` | a pixel (8 × 8) | the point from the prepass's depth, its level by distance; its page and those within `VIRTUAL_SHADOW_FILTER_TEXELS` (24) asked for (`virtualShadowMarkedPages`, 1-4); skipped if already asked, one write for a wave on one page |
+| `virtual_shadow_mark.comp` | a pixel (8 × 8) | the point from the prepass's depth, its level by distance; its page and those within `VIRTUAL_SHADOW_FILTER_TEXELS` (the soft shadows' rays' reach, 12) asked for (`virtualShadowMarkedPages`, 1-4); skipped if already asked, one write for a wave on one page |
 | `virtual_shadow_resolve.comp` | an entry | stale: freed (`virtualShadowEntryStale`); asked with a place: kept; asked without: listed needing (`virtualShadowEntryNeeds`); a place not asked for: listed cached |
 | `virtual_shadow_allocate.comp` | one group of 256 | the k-th needing entry takes `virtualShadowAllocationSource`: the k-th free page from the top, else the (k - free)-th cached one's place (emptied), else `FAILED`; new places `DIRTY`; the free top lowered behind a barrier |
 
@@ -97,7 +97,7 @@ While `mainPass` (the record's `shading.x`) and the pool is drawn, `sunShadow` (
 
 1. **Where:** `virtualShadowPointLookup` (shared with the debug view): the sun's shadow point's level by distance, its texel and depth, its page's entry. Not drawn (`virtualShadowEntryDrawn`), past the last level, or a capture (points from another eye): the cascades as before.
 2. **Bias:** `virtualShadowBiasDepth`: the cascades' `sunShadowBias` with the level's texel times `ShadowSettings::normalOffsetTexels` (2.5, the record's `shading.y`) as its base; along the light only the depth moves, by that times the depth scale.
-3. **Compare:** `virtualShadowLit` against the pool's texel (`virtualShadowStoredDepth`): 0 where the pool holds more than the bias sunward. One texel, hard edges until 4d.
+3. **Soft shadow:** rays over the sun's disc marched through the level (`virtualShadowRayShadow`, `virtual-shadow-rays.md`); with `rays` 0, `virtualShadowLit` against the pool's texel (`virtualShadowStoredDepth`): 0 where the pool holds more than the bias sunward.
 4. **Distant occluders:** the far map's, as a cascade takes them (`withDistantOccluders`).
 
 - Not yet: glass's coloured shadows (the cascades' only), impostor cards (`sunShadowOverPlant` reads the cascades), leaves (not drawn until 4f).

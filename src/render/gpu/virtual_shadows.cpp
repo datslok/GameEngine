@@ -63,6 +63,9 @@ void visit(VirtualShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Depth slack", settings.depthSlack, {.min = 2.0f, .max = 1000.0f, .sliderMax = 64.0f, .unit = "half-widths"});
     visitor.choice("Drawing", settings.drawing, virtualShadowDrawingNames);
     visitor.field("Count costs", settings.countCosts);
+    visitor.field("Rays", settings.rays, {.min = 0, .max = maxVirtualShadowRays});
+    visitor.field("Samples per ray", settings.samplesPerRay, {.min = 1, .max = maxVirtualShadowRaySamples});
+    visitor.field("Extrapolate slope", settings.extrapolateSlope, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f});
 }
 
 void validateVirtualShadows(const VirtualShadowSettings& settings) {
@@ -76,6 +79,11 @@ void validateVirtualShadows(const VirtualShadowSettings& settings) {
 
     if (settings.poolPages < 1 || settings.poolPages > maxVirtualShadowPoolPages) {
         throw std::invalid_argument("Virtual shadow maps' pool takes 1 to VIRTUAL_SHADOW_MAX_POOL_PAGES pages");
+    }
+
+    if (settings.rays < 0 || settings.rays > maxVirtualShadowRays || settings.samplesPerRay < 1 ||
+        settings.samplesPerRay > maxVirtualShadowRaySamples || !(settings.extrapolateSlope >= 0.0f)) {
+        throw std::invalid_argument("Virtual shadow maps' soft shadows take 0 to 64 rays of 1 to 32 samples and a slope of 0 or more");
     }
 
     // Below 1 the range would not hold the level's own points; at 1 it would be re-centred at every step.
@@ -359,6 +367,9 @@ GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap
     packed.shading[0] = settings.mainPass ? 1.0f : 0.0f;
     packed.shading[1] = biasTexels;
     packed.shading[2] = settings.countCosts ? 1.0f : 0.0f;
+    packed.soft[0] = static_cast<float>(settings.rays);
+    packed.soft[1] = static_cast<float>(settings.samplesPerRay);
+    packed.soft[2] = settings.extrapolateSlope;
     packed.counts[0] = settings.levelCount;
     packed.counts[1] = pagesPerSide;
     packed.counts[2] = settings.poolPages;
