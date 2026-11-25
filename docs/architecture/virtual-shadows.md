@@ -33,7 +33,7 @@ The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by
 
 ## The pages (`VulkanVirtualShadows`, Passes VSMPAGES)
 
-`VirtualShadowSettings` (F5 Virtual shadows, `engine.render.virtualShadows.*`): `enabled` (off until 4c draws), `showPages`, `mainPass` (off, 4c-iii), `drawing` (atomics by default, or the depth test, 4c-iv), `poolPages` (4096, up to `VIRTUAL_SHADOW_MAX_POOL_PAGES` 16384), and the clipmap's.
+`VirtualShadowSettings` (F5 Virtual shadows, `engine.render.virtualShadows.*`): `enabled` (off until 4c draws), `showPages`, `mainPass` (off, 4c-iii), `drawing` (atomics by default, or the depth test, 4c-iv), `poolPages` (4096, up to `VIRTUAL_SHADOW_MAX_POOL_PAGES` 16384), `poolLoad` (0.85, below), the soft shadows' (`virtual-shadow-rays.md`), and the clipmap's.
 
 - **`prepare`** (before the scene set): the clipmap moved (`updateVirtualShadowClipmap`); each dropped level's generation bumped; this frame's `GpuVirtualShadowFrame` (std430, 1344 B: light rotation, inverse view-projection, screen, options, counts, pool, shading, soft shadows' rays, the camera's culling planes, a `GpuVirtualShadowLevel` a level) written by `packVirtualShadowFrame`. Runs with the prepass and a shadowed sun; else the record holds no levels.
 - **Entries** (`uint`): `ALLOCATED`, `REQUESTED`, `DIRTY`, `FAILED` in the top bits, the physical page in the low 16. Each has a key (`VirtualShadowKey`: the world page across the light, low 32 bits, and the level's generation): a key that no longer matches its slot's is stale.
@@ -42,12 +42,13 @@ The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by
 | Pass | One invocation | Does |
 |---|---|---|
 | `virtual_shadow_clear.comp` | an entry (or pool page) | asks, dirt, failures cleared; counters to 0 but the free top |
-| `virtual_shadow_mark.comp` | a pixel (8 × 8) | the point from the prepass's depth, its level by distance; its page and those within `VIRTUAL_SHADOW_FILTER_TEXELS` (the soft shadows' rays' reach, 12) asked for (`virtualShadowMarkedPages`, 1-4); skipped if already asked, one write for a wave on one page |
+| `virtual_shadow_mark.comp` | a pixel (8 × 8) | the point from the prepass's depth, its level by distance; its page and those within `VIRTUAL_SHADOW_FILTER_TEXELS` (the soft shadows' rays' reach, 12) asked for (`virtualShadowMarkedPages`, 1-4), there and in the rays' `rayLevels` coarser levels (the record's `soft.w`, 0 without rays; about a third more pages); skipped if already asked, one write for a wave on one page |
 | `virtual_shadow_resolve.comp` | an entry | stale: freed (`virtualShadowEntryStale`); asked with a place: kept; asked without: listed needing (`virtualShadowEntryNeeds`); a place not asked for: listed cached |
 | `virtual_shadow_allocate.comp` | one group of 256 | the k-th needing entry takes `virtualShadowAllocationSource`: the k-th free page from the top, else the (k - free)-th cached one's place (emptied), else `FAILED`; new places `DIRTY`; the free top lowered behind a barrier |
 
 - Memory barriers between the passes (`memoryBarrier`, `buffer_barrier.h`, shared with cloth, the mesh pool and ray tracing); the counters copied back per frame in flight.
-- **Eviction order** is the GPU's (as Sakmary's), not least recently used: changed if pages flicker in and out.
+- **Eviction order** is the GPU's (as Sakmary's), not least recently used: to change in 4e (the oldest first, Unreal's and EEVEE's).
+- **A full pool coarsens the levels** (4d-ii, Unreal 5.4's `MaxPagePoolLoadFactor`): `collect` reads the pages asked for back and `virtualShadowLevelBias` steps every level's choice one coarser while they pass `poolLoad` of the pool, one finer once four times as many fit (a step is about a quarter of the pages; between the two it holds). The record's `shading.w`; the mark pass, the main pass's lookup (`virtualShadowBiasedLevel`: none past the last level) and the casters' levels (`virtualShadowCasterLevels`) all take it; F4's pages line ends `COARSER n` while it is above 0.
 - **F4:** `VSM PAGES` asked, `KEPT`, `NEW` (`EVICTED` of them), `FAILED`, `STALE`, `FREE`, under the tiles' line.
 - **Debug view** (`showPages`, main pass, `virtualShadowPageView` in `scene_surface.glsl`, set 1 bindings 59-60): each pixel its level's colour (`virtualShadowLevelColour`), its page's edges dark (`virtualShadowNearPageEdge`, 2 texels), new pages white, failed red, unasked black.
 
@@ -93,11 +94,11 @@ After the pages are given room, with the casters culled; every drawn page (`virt
 
 ## The main pass reading the pages (4c-iii)
 
-While `mainPass` (the record's `shading.x`) and the pool is drawn, `sunShadow` (`scene_surface.glsl`) asks `virtualShadowSun` first; cost a page-table read and a pool read a pixel.
+While `mainPass` (the record's `shading.x`) and the pool is drawn, `sunShadow` (`scene_surface.glsl`) asks `virtualShadowSun` first; cost: the soft shadow's rays (`virtual-shadow-rays.md`).
 
-1. **Where:** `virtualShadowPointLookup` (shared with the debug view): the sun's shadow point's level by distance, its texel and depth, its page's entry. Not drawn (`virtualShadowEntryDrawn`), past the last level, or a capture (points from another eye): the cascades as before.
+1. **Where:** `virtualShadowPointLookup` (shared with the debug view): the sun's shadow point's level by distance, its texel and depth, its page's entry. Not drawn (`virtualShadowEntryDrawn`): the first coarser level drawn there; none, past the last level, or a capture (points from another eye): the cascades as before.
 2. **Bias:** `virtualShadowBiasDepth`: the cascades' `sunShadowBias` with the level's texel times `ShadowSettings::normalOffsetTexels` (2.5, the record's `shading.y`) as its base; along the light only the depth moves, by that times the depth scale.
-3. **Soft shadow:** rays over the sun's disc marched through the level (`virtualShadowRayShadow`, `virtual-shadow-rays.md`); with `rays` 0, `virtualShadowLit` against the pool's texel (`virtualShadowStoredDepth`): 0 where the pool holds more than the bias sunward.
+3. **Soft shadow:** rays over the sun's disc marched through the level and coarser ones (`virtualShadowRayShadow`, `virtual-shadow-rays.md`); with `rays` 0, `virtualShadowLit` against the pool's texel (`virtualShadowPoolDepth`): 0 where the pool holds more than the bias sunward.
 4. **Distant occluders:** the far map's, as a cascade takes them (`withDistantOccluders`).
 
 - Not yet: glass's coloured shadows (the cascades' only), impostor cards (`sunShadowOverPlant` reads the cascades), leaves (not drawn until 4f).

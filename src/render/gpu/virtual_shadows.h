@@ -44,6 +44,7 @@ inline constexpr int virtualShadowNoLevel = VIRTUAL_SHADOW_NO_LEVEL;
 // The most soft shadow rays a point and samples a ray the settings take (the main pass's loops are bounded by them).
 inline constexpr int maxVirtualShadowRays = 64;
 inline constexpr int maxVirtualShadowRaySamples = 32;
+inline constexpr int maxVirtualShadowRayLevels = 8;
 
 // How many pages a level has a side: 32 (4096 texels, about a texel a pixel at 1440p) or 64 (8192, for 4K screens).
 enum class VirtualShadowResolution {
@@ -110,6 +111,16 @@ struct VirtualShadowSettings {
     int samplesPerRay = 8;
     float extrapolateSlope = 5.0f;
 
+    // How many levels coarser than a point's its rays may read (4d-ii), each pixel marking its pages there too: the
+    // widest penumbra is 12 x 2^rayLevels of the point's level's texels (4: about 0.8 m a few metres from the camera, a
+    // caster 170 m up), for about a third more pages; 0 keeps rays to 12 texels of their own level (4d-i).
+    int rayLevels = 4;
+
+    // The pool's share past which every level's choice coarsens one step the next frame (Unreal 5.4's
+    // DynamicRes.MaxPagePoolLoadFactor, 0.85), so a full pool degrades evenly instead of leaving pages undrawn; a step
+    // finer again once a quarter as many pages (about what the finer choice asks) fit under it. 1 never coarsens.
+    float poolLoad = 0.85f;
+
     bool operator==(const VirtualShadowSettings&) const = default;
 };
 
@@ -133,6 +144,17 @@ float virtualShadowUsableHalfWidth(float halfWidth, int pagesPerSide);
 * (whose log2 is not) choose alike to the last bit, and the marking and sampling passes can never disagree.
 */
 int virtualShadowLevelFor(float distance, float firstUsableHalfWidth, int levelCount);
+
+// The level chosen with every choice coarsened by bias steps (the pool's load, virtualShadowLevelBias): none past the
+// last level, as past the clipmap.
+int virtualShadowBiasedLevel(int level, int bias, int levelCount);
+
+/*
+* The coarsening for the next frame, from this frame's (bias) and the pages it asked for: one step coarser while they
+* pass poolLoad of the pool, one finer once four times as many would still fit (each step a quarter of the pages), at
+* most levelCount - 1. Read back a frame or two late, as F4's counts are.
+*/
+int virtualShadowLevelBias(int bias, std::uint32_t requested, int poolPages, float poolLoad, int levelCount);
 
 // A page of a level (in pages from its corner), or a slot of its page table.
 struct VirtualShadowPage {
@@ -207,7 +229,8 @@ Vec3 virtualShadowLevelPoint(const Vec3& lightPoint, const VirtualShadowPlacemen
 * camera's culling. The levels: up to the finest holding the farthest surface seen (a point that far along the view at
 * the screen's corner, where it is farthest from the camera), every level when none holds it.
 */
-int virtualShadowCasterLevels(const VirtualShadowSettings& settings, float farthestAlongView, float verticalFov, float aspectRatio);
+int virtualShadowCasterLevels(const VirtualShadowSettings& settings, float farthestAlongView, float verticalFov, float aspectRatio,
+                              int levelBias = 0);
 
 /*
 * The box those levels' casters lie in, as a shadow tile's world-space clip matrix (reversed depth; x, y across the
@@ -304,6 +327,7 @@ struct VirtualShadowCounts {
     std::uint32_t failed = 0;
     std::uint32_t stale = 0;
     std::uint32_t free = 0;
+    int coarser = 0; // the levels' coarsening for a full pool (virtualShadowLevelBias), F4's COARSER
 };
 
 VirtualShadowCounts virtualShadowCountsFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_COUNTERS>& counters);
@@ -436,8 +460,8 @@ struct GpuVirtualShadowFrame {
     float options[4];                 // x the first level's usable half-width, y 1 shows the pages' debug view, z 1 starts the pages again, w 1 the pool is drawn this frame
     std::int32_t counts[4];           // x the levels, y the pages a level's side, z the pool's pages, w the frame
     std::int32_t pool[4];             // x the pool's pages a row, y the pairs' room, z, w the pool's width and height in texels
-    float shading[4];                 // x 1 the main pass reads the pages (mainPass), y the bias's base in a level's texels, z 1 costs counted
-    float soft[4];                    // the soft shadows' rays (4d-i): x rays a point, y samples a ray, z the extrapolated slope
+    float shading[4];                 // x 1 the main pass reads the pages (mainPass), y the bias's base in a level's texels, z 1 costs counted, w the levels' coarsening
+    float soft[4];                    // the soft shadows' rays (4d): x rays a point, y samples a ray, z the extrapolated slope, w levels up (0 without rays)
     float cameraPlanes[6][4];         // the camera's culling frustum (GpuFrustum), for the costs' casters seen or not (4c-v)
     GpuVirtualShadowLevel levels[maxVirtualShadowLevels];
 };
@@ -449,7 +473,7 @@ static_assert(sizeof(GpuVirtualShadowFrame) == 1344, "GpuVirtualShadowFrame must
 GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap, const Vec3& camera,
                                              const std::array<std::uint32_t, maxVirtualShadowLevels>& generations,
                                              const Mat4& inverseViewProjection, float width, float height, float biasTexels,
-                                             std::uint32_t frame, std::uint32_t pairRoom = virtualShadowFirstPairRoom);
+                                             std::uint32_t frame, std::uint32_t pairRoom = virtualShadowFirstPairRoom, int levelBias = 0);
 
 /*
 * The page pairs of a caster's sphere (centre measured from the camera, in the light's axes; radius) in one level of a

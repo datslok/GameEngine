@@ -14,6 +14,8 @@ void main() {
 
     if (function == GPU_TEST_VIRTUAL_SHADOW_LEVEL) {
         testOutput(0, vec4(float(virtualShadowLevelFor(a.x, a.y, int(a.z)))));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_BIASED_LEVEL) {
+        testOutput(0, vec4(float(virtualShadowBiasedLevel(int(a.x), int(a.y), int(a.z)))));
     } else if (function == GPU_TEST_VIRTUAL_SHADOW_PAGE) {
         vec4 b = testInput(1);
         int pagesPerSide = int(b.x);

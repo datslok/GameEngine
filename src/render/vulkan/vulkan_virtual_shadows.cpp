@@ -123,6 +123,7 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
         if (!builtFor || !sameLayout(*builtFor, settings)) {
             startAgain = true;
             clipmap.reset();
+            levelBias = 0;
         }
 
         // The pool for these pages: a new one only between frames, the GPU idle (a change of settings, rare).
@@ -177,7 +178,7 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
 
         ++frameNumber;
         packed = packVirtualShadowFrame(*clipmap, camera, generations, inverseViewProjection, width, height, biasTexels, frameNumber,
-                                        readback.pairRoom);
+                                        readback.pairRoom, levelBias);
         packed.options[2] = startAgain ? 1.0f : 0.0f;
     }
 
@@ -261,7 +262,19 @@ std::optional<VirtualShadowCounts> VulkanVirtualShadows::collect(std::uint32_t f
     readback.counters.invalidate();
     std::array<std::uint32_t, VIRTUAL_SHADOW_COUNTERS> values{};
     std::memcpy(values.data(), readback.counters.getMapped(), sizeof(values));
-    return virtualShadowCountsFrom(values);
+    VirtualShadowCounts counts = virtualShadowCountsFrom(values);
+
+    // The pool's load sets the next frames' coarsening (4d-ii).
+    if (builtFor) {
+        levelBias = virtualShadowLevelBias(levelBias, counts.requested, builtFor->poolPages, builtFor->poolLoad, builtFor->levelCount);
+    }
+
+    counts.coarser = levelBias;
+    return counts;
+}
+
+int VulkanVirtualShadows::getLevelBias() const {
+    return levelBias;
 }
 
 VkDescriptorBufferInfo VulkanVirtualShadows::frameRecord(std::uint32_t frameIndex) const {

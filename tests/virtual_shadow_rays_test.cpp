@@ -17,68 +17,108 @@
 #include <string>
 #include <vector>
 
+
 namespace {
     constexpr float tanSun = 0.00465f; // the sun's angular radius, DirectionalLight's
 
     /*
-    * A level and a scene of thin flat plates over flat ground, for marching rays over: texels of 1 mm (a level near
-    * the camera), a depth range of 500 m, the receiver at texel (1000, 1000) and depth 0.5. A plate covers the texels
-    * its test says at its height; the pool stores the highest surface at each texel's centre, as texelFetch reads it.
+    * Levels and a scene of thin flat plates over ground, for marching rays through: the point's own level with texels
+    * of a millimetre by default (a level near the camera), each next one twice as coarse with a depth range twice as
+    * deep, its own texel for the scene's origin and its own ground depth, so a sample read in the wrong level, or
+    * measured in the wrong one's units, lands somewhere else entirely. The pool stores the highest surface at each
+    * texel's centre, as texelFetch reads it.
     */
-    constexpr float inverseTexel = 1000.0f;
     constexpr float depthScale = 1.0f / 500.0f;
-    constexpr float groundDepth = 0.5f;
-    const Vec3 receiver{1000.0f, 1000.0f, groundDepth};
+    constexpr int levelCount = 6;
 
-    struct Plate {
-        float height = 0.0f;
-        std::function<bool(float, float)> covers; // metres across from the receiver
+    struct TestLevel {
+        float inverseTexel = 0.0f;
+        float depthScale = 0.0f;
+        Vec2 origin; // the scene's origin's texel
+        float groundDepth = 0.0f;
     };
 
-    std::function<std::optional<float>(float, float)> sceneOf(const std::vector<Plate>& plates) {
-        return [plates](float texelX, float texelY) -> std::optional<float> {
-            const float acrossX = (std::floor(texelX) + 0.5f - receiver.x) / inverseTexel;
-            const float acrossY = (std::floor(texelY) + 0.5f - receiver.y) / inverseTexel;
-            float stored = groundDepth;
+    TestLevel testLevel(int level, float baseInverseTexel) {
+        const float coarsening = std::ldexp(1.0f, level);
+        return TestLevel{baseInverseTexel / coarsening, depthScale / coarsening,
+                         Vec2{1000.0f + 37.0f * static_cast<float>(level), 1000.0f - 11.0f * static_cast<float>(level)},
+                         0.5f - 0.01f * static_cast<float>(level)};
+    }
 
-            for (const Plate& plate : plates) {
-                if (plate.covers(acrossX, acrossY)) {
-                    stored = std::max(stored, groundDepth + plate.height * depthScale);
-                }
+    // The point (metres across from the origin, standing height metres above the ground) in every level.
+    std::vector<VirtualShadowRayLevel> levelsAt(float acrossX, float acrossY, float height = 0.0f, float baseInverseTexel = 1000.0f,
+                                                float nDotL = 1.0f) {
+        std::vector<VirtualShadowRayLevel> levels;
+
+        for (int level = 0; level < levelCount; ++level) {
+            const TestLevel in = testLevel(level, baseInverseTexel);
+            const Vec3 point{in.origin.x + acrossX * in.inverseTexel, in.origin.y + acrossY * in.inverseTexel, in.groundDepth + height * in.depthScale};
+            levels.push_back(VirtualShadowRayLevel{point, in.inverseTexel, in.depthScale, virtualShadowBiasDepth(2.5f, in.inverseTexel, in.depthScale, nDotL)});
+        }
+
+        return levels;
+    }
+
+    using HeightAt = std::function<float(float, float)>; // metres above the ground, at metres across from the origin
+    using StoredAt = std::function<std::optional<float>(int, float, float)>;
+
+    // The pool over a scene: levels listed in missing have no pages drawn.
+    StoredAt storedOver(const HeightAt& heightAt, float baseInverseTexel = 1000.0f, std::vector<int> missing = {}) {
+        return [heightAt, baseInverseTexel, missing](int level, float texelX, float texelY) -> std::optional<float> {
+            if (std::find(missing.begin(), missing.end(), level) != missing.end()) {
+                return std::nullopt;
             }
 
-            return stored;
+            const TestLevel in = testLevel(level, baseInverseTexel);
+            const float acrossX = (std::floor(texelX) + 0.5f - in.origin.x) / in.inverseTexel;
+            const float acrossY = (std::floor(texelY) + 0.5f - in.origin.y) / in.inverseTexel;
+            return in.groundDepth + heightAt(acrossX, acrossY) * in.depthScale;
         };
     }
 
-    float flatBias() {
-        return virtualShadowBiasDepth(2.5f, inverseTexel, depthScale, 1.0f);
+    struct Plate {
+        float height = 0.0f;
+        std::function<bool(float, float)> covers; // metres across from the origin
+    };
+
+    HeightAt plates(std::vector<Plate> list) {
+        return [list](float x, float y) {
+            float height = 0.0f;
+
+            for (const Plate& plate : list) {
+                if (plate.covers(x, y)) {
+                    height = std::max(height, plate.height);
+                }
+            }
+
+            return height;
+        };
     }
 
     // Many rays and samples, so the march's answer is the disc's share to about a hundredth.
-    VirtualShadowSettings fineRays() {
+    VirtualShadowSettings fineRays(int rayLevels = 4) {
         VirtualShadowSettings settings;
         settings.rays = 64;
         settings.samplesPerRay = 32;
+        settings.rayLevels = rayLevels;
         return settings;
     }
 
     // A point's visibility averaged over several pixels' noise, as the temporal pass averages it.
-    float averagedVisibility(const Vec3& point, const VirtualShadowSettings& settings, const std::function<std::optional<float>(float, float)>& scene,
-                             float bias = flatBias()) {
+    float averagedVisibility(const std::vector<VirtualShadowRayLevel>& levels, const VirtualShadowSettings& settings, const StoredAt& stored) {
         float sum = 0.0f;
         constexpr int pixels = 16;
 
         for (int pixel = 0; pixel < pixels; ++pixel) {
             const float turn = std::fmod(static_cast<float>(pixel) * 0.7548777f, 1.0f);
             const float jitter = std::fmod(static_cast<float>(pixel) * 0.5698403f + 0.25f, 1.0f);
-            sum += virtualShadowRayVisibility(point, bias, tanSun, inverseTexel, depthScale, settings, turn, jitter, scene);
+            sum += virtualShadowRayVisibility(levels, tanSun, settings, turn, jitter, stored);
         }
 
         return sum / static_cast<float>(pixels);
     }
 
-    // The share of a disc of radius 1 beyond a line c from its centre (the lit side past c), exactly.
+    // The share of a disc of radius 1 beyond a line c from its centre, exactly.
     float discShareBeyond(float c) {
         if (c >= 1.0f) {
             return 0.0f;
@@ -91,8 +131,16 @@ namespace {
         return (std::acos(c) - c * std::sqrt(1.0f - c * c)) / std::numbers::pi_v<float>;
     }
 
-    Vec3 receiverAcross(float metresX) {
-        return Vec3{receiver.x + metresX * inverseTexel, receiver.y, groundDepth};
+    // Across a half-plane plate's edge (covering x < 0, height metres up): the march against the disc's exact share at
+    // c penumbra radii from the edge (rays reaching the plate past its edge get through).
+    void checkEdge(float height, const VirtualShadowSettings& settings, float baseInverseTexel, std::vector<int> missing, float tolerance) {
+        const float radius = height * tanSun;
+        const StoredAt scene = storedOver(plates({Plate{height, [](float x, float) { return x < 0.0f; }}}), baseInverseTexel, missing);
+
+        for (float c : {-1.5f, -0.8f, -0.4f, 0.0f, 0.4f, 0.8f, 1.5f}) {
+            const float visibility = averagedVisibility(levelsAt(c * radius, 0.0f, 0.0f, baseInverseTexel), settings, scene);
+            assert(std::abs(visibility - (1.0f - discShareBeyond(c))) < tolerance);
+        }
     }
 }
 
@@ -136,7 +184,7 @@ namespace {
                 float last = -1.0f;
 
                 for (int sample = 0; sample < samples; ++sample) {
-                    const float share = virtualShadowSampleShare(sample, samples, jitter);
+                    const float share = virtualShadowSampleShare(sample, samples, jitter, 0);
                     assert(share >= 0.0f && share <= 1.0f && share > last);
                     last = share;
                 }
@@ -146,54 +194,93 @@ namespace {
         }
 
         // Squared: the first step is shorter than the one before the end.
-        const float first = virtualShadowSampleShare(1, 8, 0.0f) - virtualShadowSampleShare(0, 8, 0.0f);
-        const float late = virtualShadowSampleShare(6, 8, 0.0f) - virtualShadowSampleShare(5, 8, 0.0f);
+        const float first = virtualShadowSampleShare(1, 8, 0.0f, 0) - virtualShadowSampleShare(0, 8, 0.0f, 0);
+        const float late = virtualShadowSampleShare(6, 8, 0.0f, 0) - virtualShadowSampleShare(5, 8, 0.0f, 0);
         assert(first * 5.0f < late);
+
+        // Rays four levels long: half the samples within the point's own level's reach, a sixteenth of the ray.
+        assert(std::abs(virtualShadowSampleShare(4, 8, 0.0f, 4) - 1.0f / 16.0f) < 1e-7f);
+        assert(virtualShadowSampleShare(3, 8, 0.5f, 4) < 1.0f / 16.0f && virtualShadowSampleShare(4, 8, 0.5f, 4) > 1.0f / 16.0f);
+        assert(virtualShadowSampleShare(4, 8, 0.0f, 1) == virtualShadowSampleShare(4, 8, 0.0f, 0));
     }
 
-    // A ray at the rim reaches exactly the reach's texels across at its end, unless the depth range ends first.
+    // A ray at the rim reaches exactly the reach's texels across at its end (12 x 2^levelsUp of its level's), unless
+    // the depth range ends first.
     void testRayHeightKeepsToTheReach() {
-        for (float inverse : {4096.0f, 1000.0f, 10.0f, 0.5f}) {
-            const float height = virtualShadowRayHeight(tanSun, inverse, 1e-5f, 0.5f);
-            const Vec3 end = virtualShadowRaySample(receiver, Vec2{1.0f, 0.0f}, tanSun, inverse, 1e-5f, height);
-            assert(std::abs(end.x - receiver.x - virtualShadowRayTexels) < 1e-3f);
-            assert(std::abs(end.y - receiver.y) < 1e-6f);
+        const Vec3 start{1000.0f, 1000.0f, 0.5f};
+
+        for (int levelsUp : {0, 1, 4}) {
+            for (float inverse : {4096.0f, 1000.0f, 10.0f, 0.5f}) {
+                const float height = virtualShadowRayHeight(tanSun, inverse, 1e-6f, 0.5f, levelsUp);
+                const Vec3 end = virtualShadowRaySample(start, Vec2{1.0f, 0.0f}, tanSun, inverse, 1e-6f, height);
+                assert(std::abs(end.x - start.x - std::ldexp(virtualShadowRayTexels, levelsUp)) < 2e-3f * std::ldexp(1.0f, levelsUp));
+                assert(std::abs(end.y - start.y) < 1e-6f);
+            }
         }
 
         // A coarse level whose range ends a metre up: the ray stops there, at depth 1.
-        const float capped = virtualShadowRayHeight(tanSun, 0.5f, 0.01f, 0.99f);
+        const float capped = virtualShadowRayHeight(tanSun, 0.5f, 0.01f, 0.99f, 4);
         assert(std::abs(capped - 1.0f) < 1e-4f);
         const Vec3 end = virtualShadowRaySample(Vec3{0.0f, 0.0f, 0.99f}, Vec2{1.0f, 0.0f}, tanSun, 0.5f, 0.01f, capped);
         assert(std::abs(end.z - 1.0f) < 1e-5f);
 
         // No sun size: straight up to the range's end.
-        assert(std::abs(virtualShadowRayHeight(0.0f, 1000.0f, depthScale, 0.5f) - 250.0f) < 1e-3f);
+        assert(std::abs(virtualShadowRayHeight(0.0f, 1000.0f, depthScale, 0.5f, 0) - 250.0f) < 1e-3f);
     }
 
-    // Every sample of every ray lies on one of the point's four footprint pages, which are pages the point marked.
+    // A sample's level: the first where its offset is within 12 texels, by doubling, at most levelsUp; a stored depth
+    // as a height above the point in its level's own scale.
+    void testSampleLevels() {
+        assert(virtualShadowSampleLevel(0.0f, 4) == 0);
+        assert(virtualShadowSampleLevel(12.0f, 4) == 0);
+        assert(virtualShadowSampleLevel(std::nextafter(12.0f, 13.0f), 4) == 1);
+        assert(virtualShadowSampleLevel(24.0f, 4) == 1);
+        assert(virtualShadowSampleLevel(48.0f, 4) == 2);
+        assert(virtualShadowSampleLevel(49.0f, 4) == 3);
+        assert(virtualShadowSampleLevel(96.0f, 4) == 3);
+        assert(virtualShadowSampleLevel(100.0f, 4) == 4);
+        assert(virtualShadowSampleLevel(1e6f, 4) == 4);
+        assert(virtualShadowSampleLevel(1e6f, 0) == 0);
+
+        assert(std::abs(virtualShadowStoredHeight(0.6f, 0.5f, 0.01f) - 10.0f) < 1e-4f);
+        assert(std::abs(virtualShadowStoredHeight(0.45f, 0.5f, 0.02f) + 2.5f) < 1e-4f);
+    }
+
+    /*
+    * Every sample of every ray lies within 12 texels of its point in the level it reads, so on pages the point marked
+    * there; in the point's own level, on one of its four footprint pages.
+    */
     void testSamplesStayOnTheMarkedPages() {
         std::mt19937 random{7};
         std::uniform_real_distribution<float> texel(130.0f, 3960.0f);
         std::uniform_real_distribution<float> unit(0.0f, 1.0f);
 
         for (int point = 0; point < 2000; ++point) {
+            const int levelsUp = point % 3 == 0 ? 0 : 4;
             const Vec3 start{texel(random), texel(random), 0.4f};
             const float inverse = point % 2 == 0 ? 4096.0f : 3.0f;
-            const float height = virtualShadowRayHeight(tanSun, inverse, 1e-4f, start.z);
+            const float height = virtualShadowRayHeight(tanSun, inverse, 1e-5f, start.z, levelsUp);
             const VirtualShadowPage first = virtualShadowFootprintFirst(start.x, start.y);
             const VirtualShadowPageSpan marked = virtualShadowMarkedPages(start.x, start.y, static_cast<float>(virtualShadowFilterTexels), 32);
 
             for (int ray = 0; ray < 8; ++ray) {
                 const Vec2 disc = virtualShadowRayDisc(ray, 8, unit(random));
+                const float discReach = std::sqrt(disc.x * disc.x + disc.y * disc.y);
 
                 for (int sample = 0; sample < 8; ++sample) {
-                    const float up = height * virtualShadowSampleShare(sample, 8, unit(random));
-                    const Vec3 at = virtualShadowRaySample(start, disc, tanSun, inverse, 1e-4f, up);
-                    const VirtualShadowPage page = virtualShadowPageOf(at.x, at.y);
-                    const int index = virtualShadowFootprintIndex(page, first);
-                    assert(index >= 0 && index <= 3);
-                    assert(page.x - first.x <= 1 && page.y - first.y <= 1 && page.x >= first.x && page.y >= first.y);
-                    assert(page.x >= marked.first.x && page.x <= marked.last.x && page.y >= marked.first.y && page.y <= marked.last.y);
+                    const float up = height * virtualShadowSampleShare(sample, 8, unit(random), levelsUp);
+                    const float offset = discReach * up * tanSun * inverse;
+                    const int level = virtualShadowSampleLevel(offset, levelsUp);
+                    assert(offset <= std::ldexp(virtualShadowRayTexels, level) * 1.0001f);
+
+                    if (level == 0) {
+                        const Vec3 at = virtualShadowRaySample(start, disc, tanSun, inverse, 1e-5f, up);
+                        const VirtualShadowPage page = virtualShadowPageOf(at.x, at.y);
+                        const int index = virtualShadowFootprintIndex(page, first);
+                        assert(index >= 0 && index <= 3);
+                        assert(page.x - first.x <= 1 && page.y - first.y <= 1 && page.x >= first.x && page.y >= first.y);
+                        assert(page.x >= marked.first.x && page.x <= marked.last.x && page.y >= marked.first.y && page.y <= marked.last.y);
+                    }
                 }
             }
         }
@@ -217,9 +304,25 @@ namespace {
         march = virtualShadowMarchStep(march, 0.51f, 0.60f, tolerance, cap);
         assert(march.under && !march.hit && march.surfaceDepth == 0.60f);
 
-        // Rising through it: blocked.
-        VirtualShadowMarch through = virtualShadowMarchStep(march, 0.61f, 0.60f, tolerance, cap);
-        assert(through.hit);
+        // Out above its height: the crossing is read. The plate there: blocked (through it); the ground there: not
+        // (out beside it before rising to its height); no page there: blocked (the guess).
+        const VirtualShadowMarch rising = virtualShadowMarchStep(march, 0.61f, 0.50f, tolerance, cap);
+        assert(rising.checking && rising.checkDepth == 0.60f && !rising.hit && !rising.under);
+        assert(virtualShadowCrossingDepth(rising, 0.51f, 0.61f) == 0.60f);
+        assert(virtualShadowCrossingDepth(rising, 0.40f, 0.55f) == 0.55f);
+        const VirtualShadowMarch through = virtualShadowMarchCheck(rising, 0.60f, tolerance);
+        assert(through.hit && !through.checking);
+        assert(!virtualShadowMarchCheck(rising, 0.50f, tolerance).hit);
+        assert(virtualShadowMarchCheck(rising, std::nullopt, tolerance).hit);
+
+        // Out in the open past a plate higher than the ray was at the last sample: the crossing is read too.
+        VirtualShadowMarch open;
+        open.lastRayDepth = 0.495f; // above the ground at the last sample too
+        open = virtualShadowMarchStep(open, 0.50f, 0.49f, tolerance, cap);
+        assert(!open.checking);
+        const VirtualShadowMarch past = virtualShadowMarchStep(open, 0.70f, 0.60f, tolerance, cap);
+        assert(past.checking && past.checkDepth == 0.60f && past.lastRayDepth == 0.70f);
+        assert(!virtualShadowMarchStep(open, 0.70f, 0.50f, tolerance, cap).checking);
 
         // Slipping out sideways beneath it to the ground: not blocked, out in the open again.
         VirtualShadowMarch beside = virtualShadowMarchStep(march, 0.52f, 0.50f, tolerance, cap);
@@ -246,6 +349,11 @@ namespace {
         VirtualShadowMarch sloping = virtualShadowMarchStep(march, 0.58f, 0.602f, tolerance, cap);
         assert(sloping.under && !sloping.hit && sloping.surfaceDepth == 0.602f && sloping.surfaceSlope == cap);
 
+        // A step clears a crossing asked for before (the march reads each at once).
+        VirtualShadowMarch stale = rising;
+        stale.lastRayDepth = 0.62f;
+        assert(!virtualShadowMarchStep(stale, 0.63f, 0.50f, tolerance, cap).checking);
+
         // A hit stays a hit.
         assert(virtualShadowMarchStep(through, 0.9f, 0.1f, tolerance, cap).hit);
     }
@@ -253,25 +361,58 @@ namespace {
     // A plate's edge h metres up: across the edge the march sees the share of the disc the plate leaves, h tan(a) its
     // radius there, exactly as a real half-plane would; the edge sharp at the plate's foot (contact hardening).
     void testEdgePenumbraIsTheDisc() {
-        const VirtualShadowSettings settings = fineRays();
-
         for (float height : {0.25f, 1.0f, 2.0f}) {
-            const float radius = height * tanSun;
-            const auto scene = sceneOf({Plate{height, [](float x, float) { return x < 0.0f; }}});
-
-            for (float c : {-1.5f, -0.8f, -0.4f, 0.0f, 0.4f, 0.8f, 1.5f}) {
-                const float visibility = averagedVisibility(receiverAcross(c * radius), settings, scene);
-                const float expected = discShareBeyond(c); // rays reaching the plate past its edge get through
-                assert(std::abs(visibility - (1.0f - expected)) < 0.04f);
-            }
+            checkEdge(height, fineRays(), 1000.0f, {}, 0.02f);
         }
 
         // Narrower nearer the foot: just outside the low plate's penumbra, the high plate's still darkens the point.
-        const auto low = sceneOf({Plate{0.25f, [](float x, float) { return x < 0.0f; }}});
-        const auto high = sceneOf({Plate{2.0f, [](float x, float) { return x < 0.0f; }}});
+        const StoredAt low = storedOver(plates({Plate{0.25f, [](float x, float) { return x < 0.0f; }}}));
+        const StoredAt high = storedOver(plates({Plate{2.0f, [](float x, float) { return x < 0.0f; }}}));
         const float outside = 2.0f * 0.25f * tanSun;
-        assert(averagedVisibility(receiverAcross(outside), settings, low) > 0.98f);
-        assert(averagedVisibility(receiverAcross(outside), settings, high) < 0.9f);
+        assert(averagedVisibility(levelsAt(outside, 0.0f), fineRays(), low) > 0.98f);
+        assert(averagedVisibility(levelsAt(outside, 0.0f), fineRays(), high) < 0.9f);
+    }
+
+    /*
+    * A caster 100 m up near the camera (4 mm texels): its 47 cm penumbra is 116 of the point's texels, past one level's
+    * 12, so the rays read coarser levels and still see the disc; kept to the point's level (rayLevels 0) the edge is
+    * sharp, a ray never reaching the plate's height there.
+    */
+    void testWidePenumbraReadsCoarserLevels() {
+        checkEdge(100.0f, fineRays(4), 250.0f, {}, 0.02f);
+
+        const float radius = 100.0f * tanSun;
+        const StoredAt scene = storedOver(plates({Plate{100.0f, [](float x, float) { return x < 0.0f; }}}), 250.0f);
+        assert(averagedVisibility(levelsAt(0.4f * radius, 0.0f, 0.0f, 250.0f), fineRays(0), scene) > 0.95f);
+        assert(averagedVisibility(levelsAt(-0.4f * radius, 0.0f, 0.0f, 250.0f), fineRays(0), scene) < 0.05f);
+    }
+
+    /*
+    * Every read a wide ray makes lies within 12 texels of the point in the level it reads (where the point marked its
+    * pages): its samples, the crossings, and the coarser levels read for missing pages.
+    */
+    void testReadsStayOnMarkedPages() {
+        const float radius = 100.0f * tanSun;
+        const StoredAt scene = storedOver(plates({Plate{100.0f, [](float x, float) { return x < 0.0f; }}}), 250.0f, {1});
+
+        for (float c : {-0.6f, 0.0f, 0.7f}) {
+            const std::vector<VirtualShadowRayLevel> levels = levelsAt(c * radius, 0.0f, 0.0f, 250.0f);
+            int reads = 0;
+            const StoredAt watched = [&](int level, float x, float y) {
+                const Vec3& point = levels[static_cast<std::size_t>(level)].point;
+                assert(std::max(std::abs(x - point.x), std::abs(y - point.y)) <= virtualShadowRayTexels * 1.001f);
+                ++reads;
+                return scene(level, x, y);
+            };
+            averagedVisibility(levels, fineRays(4), watched);
+            assert(reads > 0);
+        }
+    }
+
+    // A level with no pages drawn: its samples read the next coarser level instead, and the penumbra is the same.
+    void testMissingPagesReadCoarserLevels() {
+        checkEdge(2.0f, fineRays(), 1000.0f, {0}, 0.02f);
+        checkEdge(100.0f, fineRays(4), 250.0f, {2, 3}, 0.02f);
     }
 
     // A leaf smaller than the sun's disc seen from below: the point under it sees the disc less the leaf, not a hard
@@ -280,8 +421,8 @@ namespace {
         const float height = 2.0f;
         const float radius = height * tanSun;
         const float leaf = 0.4f * radius;
-        const auto scene = sceneOf({Plate{height, [leaf](float x, float y) { return x * x + y * y < leaf * leaf; }}});
-        const float visibility = averagedVisibility(receiver, fineRays(), scene);
+        const StoredAt scene = storedOver(plates({Plate{height, [leaf](float x, float y) { return x * x + y * y < leaf * leaf; }}}));
+        const float visibility = averagedVisibility(levelsAt(0.0f, 0.0f), fineRays(), scene);
         assert(std::abs(visibility - (1.0f - 0.16f)) < 0.06f);
     }
 
@@ -293,66 +434,67 @@ namespace {
     void testHiddenPlateIsCarriedOn() {
         const float strip0 = 0.5e-3f;
         const float strip1 = 6.0e-3f;
-        const auto scene = sceneOf({Plate{1.0f, [](float, float) { return true; }},
-                                    Plate{2.0f, [strip0, strip1](float x, float) { return x > strip0 && x < strip1; }}});
-        VirtualShadowSettings carried = fineRays();
-        VirtualShadowSettings forgot = fineRays();
+        const StoredAt scene = storedOver(plates({Plate{1.0f, [](float, float) { return true; }},
+                                                  Plate{2.0f, [strip0, strip1](float x, float) { return x > strip0 && x < strip1; }}}));
+        VirtualShadowSettings carried = fineRays(0);
+        VirtualShadowSettings forgot = fineRays(0);
         forgot.extrapolateSlope = 0.0f;
-        assert(averagedVisibility(receiver, carried, scene) < 0.02f);
-        assert(averagedVisibility(receiver, forgot, scene) > 0.1f);
+        assert(averagedVisibility(levelsAt(0.0f, 0.0f), carried, scene) < 0.02f);
+        assert(averagedVisibility(levelsAt(0.0f, 0.0f), forgot, scene) > 0.1f);
     }
 
     // Open ground, flat or sloping as far as the bias's cap, sees the whole sun: no acne from its own texels.
     void testOpenGroundIsLit() {
-        assert(averagedVisibility(receiver, VirtualShadowSettings{}, sceneOf({})) == 1.0f);
+        assert(averagedVisibility(levelsAt(0.0f, 0.0f), VirtualShadowSettings{}, storedOver(plates({}))) == 1.0f);
 
         for (float degrees : {10.0f, 30.0f, 45.0f, 60.0f}) {
             const float rise = std::tan(degrees * std::numbers::pi_v<float> / 180.0f);
             const float nDotL = std::cos(degrees * std::numbers::pi_v<float> / 180.0f);
-            const auto slope = [rise](float texelX, float texelY) -> std::optional<float> {
-                const float across = (std::floor(texelX) + 0.5f - receiver.x + 0.3f * (std::floor(texelY) + 0.5f - receiver.y)) / inverseTexel;
-                return groundDepth + rise * across * depthScale;
-            };
+            const StoredAt slope = storedOver([rise](float x, float y) { return rise * (x + 0.3f * y); });
 
-            for (float offset : {0.0f, 0.37f, 0.81f}) {
-                const Vec3 point{receiver.x + offset, receiver.y + 0.5f * offset, groundDepth + rise * (offset + 0.15f * offset) / inverseTexel * depthScale};
-                const float bias = virtualShadowBiasDepth(2.5f, inverseTexel, depthScale, nDotL);
-                assert(averagedVisibility(point, VirtualShadowSettings{}, slope, bias) == 1.0f);
+            for (float offset : {0.0f, 0.37e-3f, 0.81e-3f}) {
+                const float x = offset;
+                const float y = 0.5f * offset;
+                assert(averagedVisibility(levelsAt(x, y, rise * (x + 0.3f * y), 1000.0f, nDotL), VirtualShadowSettings{}, slope) == 1.0f);
             }
         }
     }
 
-    // No rays: one hard comparison, 4c-iii's; a sample with no page is skipped.
+    // No rays: one hard comparison, 4c-iii's; a sample with no page anywhere is skipped.
     void testHardAndMissingPages() {
         VirtualShadowSettings hard;
         hard.rays = 0;
-        const auto plate = sceneOf({Plate{1.0f, [](float x, float) { return x < 0.0f; }}});
-        const float bias = flatBias();
-        assert(virtualShadowRayVisibility(receiverAcross(-1e-3f), bias, tanSun, inverseTexel, depthScale, hard, 0.0f, 0.0f, plate) == 0.0f);
-        assert(virtualShadowRayVisibility(receiverAcross(1e-3f), bias, tanSun, inverseTexel, depthScale, hard, 0.0f, 0.0f, plate) == 1.0f);
+        const StoredAt plate = storedOver(plates({Plate{1.0f, [](float x, float) { return x < 0.0f; }}}));
+        assert(virtualShadowRayVisibility(levelsAt(-1e-3f, 0.0f), tanSun, hard, 0.0f, 0.0f, plate) == 0.0f);
+        assert(virtualShadowRayVisibility(levelsAt(1e-3f, 0.0f), tanSun, hard, 0.0f, 0.0f, plate) == 1.0f);
 
-        const auto nothing = [](float, float) -> std::optional<float> { return std::nullopt; };
-        assert(virtualShadowRayVisibility(receiver, bias, tanSun, inverseTexel, depthScale, VirtualShadowSettings{}, 0.3f, 0.6f, nothing) == 1.0f);
+        const StoredAt nothing = [](int, float, float) -> std::optional<float> { return std::nullopt; };
+        assert(virtualShadowRayVisibility(levelsAt(0.0f, 0.0f), tanSun, VirtualShadowSettings{}, 0.3f, 0.6f, nothing) == 1.0f);
     }
 
     // The settings: defaults (Unreal's), their keys, the record's row, and what validation refuses.
     void testRaySettings() {
         const VirtualShadowSettings defaults;
-        assert(defaults.rays == 8 && defaults.samplesPerRay == 8 && defaults.extrapolateSlope == 5.0f);
+        assert(defaults.rays == 8 && defaults.samplesPerRay == 8 && defaults.extrapolateSlope == 5.0f && defaults.rayLevels == 4);
 
         VirtualShadowSettings settings;
         const SettingsWalk walk = [&settings](SettingsVisitor& visitor) {
             visit(settings, visitor);
         };
         const std::vector<std::string> warnings =
-            applySettings({{"rays", "5"}, {"samplesPerRay", "3"}, {"extrapolateSlope", "2.5"}}, walk, StartupFields::Keep);
+            applySettings({{"rays", "5"}, {"samplesPerRay", "3"}, {"extrapolateSlope", "2.5"}, {"rayLevels", "2"}}, walk, StartupFields::Keep);
         assert(warnings.empty());
-        assert(settings.rays == 5 && settings.samplesPerRay == 3 && settings.extrapolateSlope == 2.5f);
+        assert(settings.rays == 5 && settings.samplesPerRay == 3 && settings.extrapolateSlope == 2.5f && settings.rayLevels == 2);
 
         const VirtualShadowClipmap clipmap = updateVirtualShadowClipmap(std::nullopt, Vec3{}, Vec3{0.0f, -1.0f, 0.0f}, settings, 200.0f).clipmap;
         std::array<std::uint32_t, maxVirtualShadowLevels> generations{};
         const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, Vec3{}, generations, Mat4::identity(), 100.0f, 100.0f, 2.5f, 1);
-        assert(frame.soft[0] == 5.0f && frame.soft[1] == 3.0f && frame.soft[2] == 2.5f);
+        assert(frame.soft[0] == 5.0f && frame.soft[1] == 3.0f && frame.soft[2] == 2.5f && frame.soft[3] == 2.0f);
+
+        // Without rays no coarser levels are read, so none are marked.
+        settings.rays = 0;
+        const VirtualShadowClipmap hard = updateVirtualShadowClipmap(std::nullopt, Vec3{}, Vec3{0.0f, -1.0f, 0.0f}, settings, 200.0f).clipmap;
+        assert(packVirtualShadowFrame(hard, Vec3{}, generations, Mat4::identity(), 100.0f, 100.0f, 2.5f, 1).soft[3] == 0.0f);
 
         VirtualShadowSettings bad;
         bad.rays = -1;
@@ -366,6 +508,9 @@ namespace {
         bad = {};
         bad.extrapolateSlope = -1.0f;
         assert(throwsInvalid([&] { validateVirtualShadows(bad); }));
+        bad = {};
+        bad.rayLevels = maxVirtualShadowRayLevels + 1;
+        assert(throwsInvalid([&] { validateVirtualShadows(bad); }));
     }
 }
 
@@ -373,9 +518,13 @@ void testVirtualShadowRays() {
     testRayDiscCoversTheDisc();
     testSampleShares();
     testRayHeightKeepsToTheReach();
+    testSampleLevels();
     testSamplesStayOnTheMarkedPages();
     testMarchSteps();
     testEdgePenumbraIsTheDisc();
+    testWidePenumbraReadsCoarserLevels();
+    testMissingPagesReadCoarserLevels();
+    testReadsStayOnMarkedPages();
     testSmallLeafLeavesThePointUnderItLit();
     testHiddenPlateIsCarriedOn();
     testOpenGroundIsLit();

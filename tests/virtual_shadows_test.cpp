@@ -1201,7 +1201,79 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A full pool (4d-ii): every level's choice coarsened one step while the pages asked for pass the pool's load, one
+    * step finer once four times as many fit; a choice coarsened past the last level is none; the record, the casters'
+    * levels and F4 carry it.
+    */
+    void testPoolLoadCoarsens() {
+        assert(virtualShadowBiasedLevel(virtualShadowNoLevel, 1, 15) == virtualShadowNoLevel);
+        assert(virtualShadowBiasedLevel(3, 0, 15) == 3);
+        assert(virtualShadowBiasedLevel(3, 2, 15) == 5);
+        assert(virtualShadowBiasedLevel(12, 2, 15) == 14);
+        assert(virtualShadowBiasedLevel(13, 2, 15) == virtualShadowNoLevel);
+
+        // 0.85 of 4096 pages is 3481.6.
+        assert(virtualShadowLevelBias(0, 3400, 4096, 0.85f, 15) == 0);
+        assert(virtualShadowLevelBias(0, 3500, 4096, 0.85f, 15) == 1);
+        assert(virtualShadowLevelBias(1, 3500, 4096, 0.85f, 15) == 2);
+        assert(virtualShadowLevelBias(1, 900, 4096, 0.85f, 15) == 1);
+        assert(virtualShadowLevelBias(1, 800, 4096, 0.85f, 15) == 0);
+        assert(virtualShadowLevelBias(0, 0, 4096, 0.85f, 15) == 0);
+        assert(virtualShadowLevelBias(14, 4096, 4096, 0.85f, 15) == 14);
+        assert(virtualShadowLevelBias(0, 4096, 4096, 1.0f, 15) == 0);
+
+        // Settled: asking for a quarter as many at each step coarser, it holds where the load fits.
+        int bias = 0;
+        const float finest = 20000.0f;
+
+        for (int frame = 0; frame < 10; ++frame) {
+            const auto asked = static_cast<std::uint32_t>(finest / std::ldexp(1.0f, 2 * bias));
+            bias = virtualShadowLevelBias(bias, asked, 4096, 0.85f, 15);
+        }
+
+        assert(bias == 2);
+        assert(virtualShadowLevelBias(bias, static_cast<std::uint32_t>(finest / 16.0f), 4096, 0.85f, 15) == 2);
+
+        // The record, the casters' levels.
+        VirtualShadowSettings settings;
+        const VirtualShadowClipmap clipmap = updateVirtualShadowClipmap(std::nullopt, Vec3{}, Vec3{0.0f, -1.0f, 0.0f}, settings, 200.0f).clipmap;
+        std::array<std::uint32_t, maxVirtualShadowLevels> generations{};
+        assert(packVirtualShadowFrame(clipmap, Vec3{}, generations, Mat4::identity(), 100.0f, 100.0f, 2.5f, 1).shading[3] == 0.0f);
+        assert(packVirtualShadowFrame(clipmap, Vec3{}, generations, Mat4::identity(), 100.0f, 100.0f, 2.5f, 1, virtualShadowFirstPairRoom, 2).shading[3] ==
+               2.0f);
+        const float fov = 1.2f;
+        const int plain = virtualShadowCasterLevels(settings, 40.0f, fov, 1.5f);
+        assert(virtualShadowCasterLevels(settings, 40.0f, fov, 1.5f, 2) == plain + 2);
+        assert(virtualShadowCasterLevels(settings, 40.0f, fov, 1.5f, 14) == settings.levelCount);
+
+        // F4: COARSER only while coarsened.
+        RenderStats stats;
+        stats.virtualShadowPages = VirtualShadowCounts{.requested = 3600, .free = 10, .coarser = 1};
+        const std::vector<std::string> lines = renderStatsLines(stats);
+        assert(std::any_of(lines.begin(), lines.end(), [](const std::string& line) { return line.starts_with("VSM PAGES") && line.ends_with("  COARSER 1"); }));
+        stats.virtualShadowPages->coarser = 0;
+        const std::vector<std::string> plainLines = renderStatsLines(stats);
+        assert(std::none_of(plainLines.begin(), plainLines.end(), [](const std::string& line) { return line.find("COARSER") != std::string::npos; }));
+
+        // The setting: Unreal's 0.85, its key, refused outside (0, 1].
+        assert(VirtualShadowSettings{}.poolLoad == 0.85f);
+        const SettingsWalk walk = [&settings](SettingsVisitor& visitor) {
+            visit(settings, visitor);
+        };
+        const std::vector<std::string> warnings = applySettings({{"poolLoad", "0.7"}}, walk, StartupFields::Keep);
+        assert(warnings.empty() && settings.poolLoad == 0.7f);
+        VirtualShadowSettings bad;
+        bad.poolLoad = 0.0f;
+        assert(throwsInvalid([&] { validateVirtualShadows(bad); }));
+        bad.poolLoad = 1.5f;
+        assert(throwsInvalid([&] { validateVirtualShadows(bad); }));
+    }
+}
+
 void testVirtualShadows() {
+    testPoolLoadCoarsens();
     testMainPassBias();
     testMainPassComparison();
     testMainPassNoAcne();

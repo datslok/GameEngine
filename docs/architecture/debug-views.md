@@ -37,7 +37,7 @@ Then, independently, `drawWindField` while `WindSettings::showField` is on (wind
 | `SHADOW DRAWN  CULLED  CALLS` | Over drawn shadow views |
 | `LIGHTS  IN VIEW  LIT  SHADOWED  IN MIRRORS` | Point lights; image lights only when any |
 | `TILES DRAWN  CACHED  SKIPPED  SUN TO` | Shadow tiles; `sunShadowDistance` when a sun is shadowed |
-| `VSM PAGES  KEPT  NEW (EVICTED)  FAILED  STALE  FREE` | The sun's virtual shadow pages while on (`virtualShadowPages`; `virtual-shadows.md`) |
+| `VSM PAGES  KEPT  NEW (EVICTED)  FAILED  STALE  FREE  [COARSER]` | The sun's virtual shadow pages while on (`virtualShadowPages`; `virtual-shadows.md`); COARSER the levels' coarsening while the pool runs full |
 | `VSM CASTERS n DRAWS  CLUSTERS kept/tested  TRIS nK` | Their casters, with mesh shaders (`virtualShadowCasters`) |
 | `VSM DRAWN n PAIRS (n CUT-OUT)  ROOM n  TRIS nK  FULL  ATOMICS` | What was drawn into the pages (`virtualShadowDrawn`); FULL: a list past its room; ATOMICS: drawn by atomics (`virtualShadows.drawing`) |
 | `VSM LEVELS (CLUSTERS:PAIRS:TRIS)  Ln c:p:t ...`, `VSM SEEN ... UNSEEN ... WHOLE ... (SWAYING ...)`, `VSM SHAPES (CLUSTERS:PAIRS:TRIS)  TERRAIN ... THINNED ...` | With `virtualShadows.countCosts`: each level's clusters, pairs and their triangles; the casters in the camera's frustum or not, those kept whole and their pairs, those kept whole for swaying; those kept whole for their shape, by kind |

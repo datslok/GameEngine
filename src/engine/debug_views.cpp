@@ -153,7 +153,7 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
         lines.insert(tilesLine + 1, "VSM PAGES " + std::to_string(pages.requested) + "  KEPT " + std::to_string(pages.kept) + "  NEW " +
                                         std::to_string(pages.allocated) + " (EVICTED " + std::to_string(pages.evicted) + ")  FAILED " +
                                         std::to_string(pages.failed) + "  STALE " + std::to_string(pages.stale) + "  FREE " +
-                                        std::to_string(pages.free));
+                                        std::to_string(pages.free) + (pages.coarser > 0 ? "  COARSER " + std::to_string(pages.coarser) : ""));
 
         // Its casters (stage 4c-i), on the line after: the draws the sun's view took, clusters kept of those tested, their
         // triangles in thousands.

@@ -2162,7 +2162,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (virtualShadows->runs() && drawsClusters && virtualShadows->getClipmap()) {
         const float farthest = std::min(camera.getFarPlane(), fittedSunDistance);
-        const int casterLevels = virtualShadowCasterLevels(pageSettings, farthest, camera.getVerticalFov(), camera.getAspectRatio());
+        const int casterLevels =
+            virtualShadowCasterLevels(pageSettings, farthest, camera.getVerticalFov(), camera.getAspectRatio(), virtualShadows->getLevelBias());
         virtualShadowView = packVirtualShadowCull(virtualShadowCasterBox(*virtualShadows->getClipmap(), casterLevels), cameraLevels);
         virtualShadowView->mainBase = drawList.reserve(listEntries);
         virtualShadowView->motionBase = virtualShadowView->mainBase;

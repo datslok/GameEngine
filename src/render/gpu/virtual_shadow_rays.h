@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 /*
 * Soft shadows through the sun's virtual shadow pages by shadow-map ray tracing (SMRT, Unreal's; ROADMAP phase 21 4d-i;
@@ -23,9 +24,13 @@
 * is carried on behind it (gap filling: Unreal's extrapolation behind occluders), its slope capped, so the ray still
 * meets it. A ray that ends still under a surface is blocked: taller casters cast, their penumbra capped.
 *
-* Rays are clamped to VIRTUAL_SHADOW_RAY_TEXELS of the point's level across, as Unreal clamps its penumbra, so every
-* sample lies on the pages the point marked (at most 2 x 2) and the penumbra is at most that wide. This file is the
-* maths, mirrored by assets/shaders/virtual_shadow_rays.glsl; the main pass's march reads the pool
+* A sample reads the first level, from the point's own, where it lies within VIRTUAL_SHADOW_RAY_TEXELS of the point
+* across (4d-ii): the point and the pixel's coarser levels (VirtualShadowSettings::rayLevels of them) each marked that
+* far round it, so every sample lies on a marked page and a ray climbing to a caster far above reads coarse texels as
+* wide as its spread (a pillar's edge 100 m up: a 47 cm penumbra). A ray's end reaches at most 12 x 2^rayLevels of the
+* point's level's texels, as Unreal clamps its penumbra. A sample whose page is not drawn reads the next coarser drawn
+* level. Each level has its own depth scale, so the march works in metres along the light from the point. This file
+* is the maths, mirrored by assets/shaders/virtual_shadow_rays.glsl; the main pass's march reads the pool
 * (scene_surface.glsl, virtualShadowSun) as virtualShadowRayVisibility does here.
 */
 
@@ -38,16 +43,30 @@ inline constexpr float virtualShadowRayTexels = static_cast<float>(VIRTUAL_SHADO
 */
 Vec2 virtualShadowRayDisc(int ray, int rays, float turn);
 
-// How far up its ray a sample lies, as a share of the ray's height: the last at its end (1), the rest by the square of
-// (sample + jitter) / samples, nearer together near the point, where contact shadows are sharp. jitter in [0, 1).
-float virtualShadowSampleShare(int sample, int samples, float jitter);
+/*
+* How far up its ray a sample lies, as a share of the ray's height: the last at its end (1), the rest by
+* ((sample + jitter) / samples)^p, nearer together near the point, where contact shadows are sharp. p is 2, or levelsUp
+* when more: a ray reaching levelsUp levels coarser is 2^levelsUp times longer, and half its samples stay within the
+* point's own level's reach (0.5^p = 2^-levelsUp), so contact shadows keep their samples. jitter in [0, 1).
+*/
+float virtualShadowSampleShare(int sample, int samples, float jitter, int levelsUp);
 
 /*
-* A ray's height along the light (metres) from a point at startDepth of a level: as high as its widest sideways reach
-* (a disc point at the rim) stays within VIRTUAL_SHADOW_RAY_TEXELS, and no higher than the level's depth range holds
-* sunwards (depth 1, the caster reach included). inverseTexel and depthScale as VirtualShadowPlacement's.
+* A ray's height along the light (metres) from a point at startDepth of its level: as high as its widest sideways reach
+* (a disc point at the rim) stays within VIRTUAL_SHADOW_RAY_TEXELS of the level levelsUp coarser (12 x 2^levelsUp of
+* this one's texels), and no higher than this level's depth range holds sunwards (depth 1, the caster reach included).
+* inverseTexel and depthScale as VirtualShadowPlacement's.
 */
-float virtualShadowRayHeight(float tanAngularRadius, float inverseTexel, float depthScale, float startDepth);
+float virtualShadowRayHeight(float tanAngularRadius, float inverseTexel, float depthScale, float startDepth, int levelsUp);
+
+// How many levels coarser than the point's a sample offset this many of the point's level's texels reads: the first
+// where it lies within VIRTUAL_SHADOW_RAY_TEXELS (each level's texels twice the last's; by doubling, exact), at most
+// levelsUp.
+int virtualShadowSampleLevel(float offsetTexels, int levelsUp);
+
+// A stored depth of a level as a height along the light above the point (metres; the point's depth and the level's
+// scale there), so samples of different levels march together.
+float virtualShadowStoredHeight(float stored, float pointDepth, float depthScale);
 
 // A sample height metres up a ray towards disc point disc, from start (the point's texel x, y and biased depth z).
 Vec3 virtualShadowRaySample(const Vec3& start, const Vec2& disc, float tanAngularRadius, float inverseTexel, float depthScale, float height);
@@ -61,8 +80,9 @@ VirtualShadowPage virtualShadowFootprintFirst(float texelX, float texelY);
 int virtualShadowFootprintIndex(const VirtualShadowPage& page, const VirtualShadowPage& first);
 
 /*
-* A ray's march so far, in the level's reversed depths (larger is sunwards). under: the last sample was behind a stored
-* surface; that surface's depth at the ray depth it was seen at, and its slope (stored depth per ray depth).
+* A ray's march so far, in heights along the light (metres above the point, larger is sunwards; the march's rules hold
+* in any such unit). under: the last sample was behind a stored surface; that surface's height at the ray height it was
+* seen at, and its slope (surface height per ray height).
 */
 struct VirtualShadowMarch {
     bool under = false;
@@ -70,30 +90,51 @@ struct VirtualShadowMarch {
     float surfaceDepth = 0.0f;
     float surfaceRayDepth = 0.0f;
     float surfaceSlope = 0.0f;
+    float lastRayDepth = 0.0f; // the ray's height at the last sample (0: the point)
+    bool checking = false;     // the ray crossed checkDepth between the last two samples: read the surface there
+    float checkDepth = 0.0f;
 
     bool operator==(const VirtualShadowMarch&) const = default;
 };
 
 /*
-* One sample: the ray at rayDepth, the pool storing stored there. tolerance (a reversed depth step, the point's bias)
-* allows for texels sampled beside the ray; slopeCap (VirtualShadowSettings::extrapolateSlope times tan(a): stored
-* depth per ray depth) bounds how a surface may continue between samples and behind a higher one.
+* One sample: the ray at rayDepth, the stored surface at stored there. tolerance (the sample's level's bias) allows for
+* texels sampled beside the ray; slopeCap (VirtualShadowSettings::extrapolateSlope times tan(a): surface height per ray
+* height) bounds how a surface may continue between samples and behind a higher one.
 * - Under a stored surface: the first time, it becomes the surface; if it is the same surface carried on (within the
 *   tolerance and the slope), its slope is updated; if a higher one hides it, it is carried on behind (with a cap above
 *   0; else forgotten), and the ray rising to it is blocked; a lower one: the old surface ended, the lower one taken.
-* - Out from under a surface: blocked if the ray rose to that surface carried on here (it went through it, or through
-*   the gap between two samples); not if it slipped out sideways beneath it.
+* - Out from under a surface, having risen to its height carried on here: through it, or out beside it first? Out in
+*   the open past a surface higher than the ray was at the last sample: through it, or past its edge? Either way the
+*   ray crossed that height between the two samples; the march asks (checking) for the surface where it did.
 */
 VirtualShadowMarch virtualShadowMarchStep(const VirtualShadowMarch& march, float rayDepth, float stored, float tolerance, float slopeCap);
+
+/*
+* The refinement read (as screen-space ray marches refine a hit): where the ray crossed the asked height, clamped
+* between the last two samples' ray heights; there, blocked if the surface reaches that height (within its level's
+* tolerance), or if no page holds it (the step's guess). One extra read a crossing, not a sample.
+*/
+float virtualShadowCrossingDepth(const VirtualShadowMarch& march, float previousRayDepth, float rayDepth);
+VirtualShadowMarch virtualShadowMarchCheck(const VirtualShadowMarch& march, std::optional<float> storedAtCrossing, float tolerance);
 
 // After the last sample: blocked if it hit, or if it ends still under a surface (a taller caster).
 bool virtualShadowRayBlocked(const VirtualShadowMarch& march);
 
+// The point in one of the levels a ray reads: its texel and (unbiased) depth there, the level's inverse texel and depth
+// scale, and its bias in that level's depth (virtualShadowBiasDepth).
+struct VirtualShadowRayLevel {
+    Vec3 point;
+    float inverseTexel = 0.0f;
+    float depthScale = 0.0f;
+    float biasDepth = 0.0f;
+};
+
 /*
-* The share of the sun's disc a point sees: the main pass's march (virtualShadowSun) over depths given by storedAt (a
-* level's texel to its stored reversed depth; nullopt where no page is drawn, which the sample skips). start: the
-* point's texel and its depth lifted by the bias (which is also the tolerance); turn and jitter the pixel's noise.
+* The share of the sun's disc a point sees: the main pass's march (virtualShadowSun) through levels, the point's own
+* first and each next one coarser, over depths given by storedAt (a level's index in levels and its texel to the stored
+* reversed depth; nullopt where no page is drawn: the next coarser level is read, past all the sample is skipped). The
+* ray starts the point's own level's bias above it. turn and jitter: the pixel's noise.
 */
-float virtualShadowRayVisibility(const Vec3& start, float biasDepth, float tanAngularRadius, float inverseTexel, float depthScale,
-                                 const VirtualShadowSettings& settings, float turn, float jitter,
-                                 const std::function<std::optional<float>(float, float)>& storedAt);
+float virtualShadowRayVisibility(const std::vector<VirtualShadowRayLevel>& levels, float tanAngularRadius, const VirtualShadowSettings& settings,
+                                 float turn, float jitter, const std::function<std::optional<float>(int, float, float)>& storedAt);

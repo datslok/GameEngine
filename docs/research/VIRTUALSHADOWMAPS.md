@@ -254,13 +254,37 @@ From a point, the sun is a disc of angular radius α (tan α = 0.00465). A ray t
 | Step | What | Cost grows with |
 |---|---|---|
 | 4d-i | SMRT through the page table: rays (`virtualShadows.rays` 8, 0 = one hard comparison), samples (`samplesPerRay` 8), the clamp, the bias, extrapolation (`extrapolateSlope` 5, 0 off); marking down to 12 texels | pixels on pages x rays x samples |
-| 4d-ii | Missing pages and overflow: a point or sample on no drawn page takes the next coarser drawn level, then the cascades; the pool's load coarsens levels; F4 counts both | pixels on missing pages; a table read a level tried |
+| 4d-ii | Wide penumbrae and missing pages: a sample past 12 texels of its point's level, or on no drawn page, reads a coarser level (`rayLevels` 4 marked under each pixel); then the cascades; the pool's load coarsens levels; F4 counts them | pixels on missing pages; a table read a level tried |
 | 4d-iii | The adaptive ray count (a few rays first, the rest where they disagree), measured for its gain and checked for crawling on moving shadows | pixels in penumbrae |
 
 - **Mirrored maths** (`virtual_shadows.glsl`, `render/gpu/virtual_shadows`): a ray's disc point, a sample's share, its texel and depth in the level, the clamp, the footprint's page for a sample, the blocked test with extrapolation, a point in a coarser level, the load's bias. Reads stay in `scene_surface.glsl`.
 - **Tests:** a straight edge h metres up: the visible share across it against the disc's exact segment area (many rays, every level); contact hardening (a blocker at the receiver hard, higher softer, width h tan α until the cap); two overlapping blockers leak without extrapolation and not with it; samples within 12 texels, on the four pages; a coarser level's texel and depth the same world point; settings and F4.
 - **Expected:** the penumbra as wide as the cascades' where both are unclamped, right under layered leaves; noise left to TAA. Cost: about 1 ms at 1440p with 8 x 8 where casters fill the view (Cinnabar's 0.57 ms at 1080p on a faster GPU), less with 4d-iii; measured at the four spots.
 - **The command line:** `--set engine.render.virtualShadows.rays=N`, `samplesPerRay`, `extrapolateSlope`, `poolLoad`, all in `VirtualShadowSettings::visit` (F5, `settings.cfg`).
+
+### Wide penumbrae: rays into coarser levels (researched Nov 25 2026, after 4d-i)
+
+4d-i clamps a ray to 12 texels of its point's level. Near the camera that is about 5 cm, so a caster 100 m up (a rock pillar's edge, a real penumbra of 47 cm) casts about ten times too sharp; the cascades' PCSS was capped the same (3-8 cm near the camera). The user saw it on the first look.
+
+- **Unreal (UE 5.9 docs):** "Fewer shadow map samples ... limit the amount of penumbra softness that can be achieved", so the softness is bounded by the samples along a ray, not by a texel count; the penumbra is clamped "to avoid sample divergence from the ray origin that can become increasingly 'bent'", and too large a Source Angle can "cause shadow penumbrae to visually warp as the camera gets near to them" (`SMRT.MaxRayAngleFromLight`, `RayLengthScaleDirectional`; no defaults given). Directional lights "mark a series of pages at various low detail levels to form some coarse clipmaps" (`MarkCoarsePagesDirectional`, `FirstCoarseLevel`, `LastCoarseLevel`), and "coarse pages can create performance issues" ([VSM docs](https://dev.epicgames.com/documentation/en-us/unreal-engine/virtual-shadow-maps-in-unreal-engine)).
+- **Inferred, not confirmed** (the source is not public, the two write-ups quoting it were deleted): bending and warping near the camera are what samples read from coarser clipmap levels look like, each level snapped and scaled differently; the docs' coarse pages give those samples something to read. [I]
+- **Cinnabar:** one level a point, rays 20 m long, the marking widened by the light's size times the ray's length ([PR #421](https://github.com/aszecsei/cinnabar/pull/421)): one level carries the whole penumbra, so its marked square grows with it.
+
+#### What it means here
+
+- **A sample's level by the ray's spread:** level L + k, the first where the sample's sideways offset is within 12 of that level's texels (by doubling, exact); a ray's end at most `rayLevels` (K) levels coarser, so the widest penumbra is 12 x 2^K texels of the point's level (K 4: 192 texels, about 0.8 m a few metres from the camera, the pillar's 47 cm whole).
+- **Marking:** each pixel also asks for the pages round its point (12 texels) in its K coarser levels. A level k coarser has pages 2^k times wider, so the pixels of one level mark about 1/4 + 1/16 + 1/64 + 1/256 (a third) as many pages again; F4 measures it against today's (898 at the screenshot's spot, a pool of 4096).
+- **The march in metres:** each level has its own depth scale and offset, so the march keeps heights along the light in metres from the point (stored depth less the point's depth in that level, over its scale); the tolerance is that level's bias. Slopes are metres a metre as before.
+- **The same lookup as missing pages (4d-ii):** a sample in a level not drawn there reads the next coarser drawn level; past all, skipped.
+- **Seams:** where samples change level the penumbra steps a little (Unreal's "bent"); the noise and the temporal pass hide most of it, a test bounds it against the disc.
+
+#### Picks
+
+| | Rays into coarser levels (picked) | A wider cap in one level | Coarse clipmaps marked whole (Unreal's coarse pages) |
+|---|---|---|---|
+| Cost grows with | pages: about a third more at K 4; rays x samples unchanged | pages: the reach squared (48 texels: each pixel near more page edges), 4x wider at most (the margin caps it below 64) | pages: whole coarse levels round the camera, hundreds a level |
+| Current engines | Unreal's coarse levels and bent samples [I] | Cinnabar (20 m rays in one level) | Unreal (for fog and translucency [S]) |
+| Reason | full widths near the camera for a third more pages | cannot reach the pillar's width | pays for every column, not those pixels sample |
 
 ## Decided (the user, Nov 24 2026)
 

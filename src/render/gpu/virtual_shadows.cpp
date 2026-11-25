@@ -66,6 +66,8 @@ void visit(VirtualShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Rays", settings.rays, {.min = 0, .max = maxVirtualShadowRays});
     visitor.field("Samples per ray", settings.samplesPerRay, {.min = 1, .max = maxVirtualShadowRaySamples});
     visitor.field("Extrapolate slope", settings.extrapolateSlope, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f});
+    visitor.field("Ray levels", settings.rayLevels, {.min = 0, .max = maxVirtualShadowRayLevels});
+    visitor.field("Pool load", settings.poolLoad, {.min = 0.1f, .max = 1.0f});
 }
 
 void validateVirtualShadows(const VirtualShadowSettings& settings) {
@@ -82,8 +84,13 @@ void validateVirtualShadows(const VirtualShadowSettings& settings) {
     }
 
     if (settings.rays < 0 || settings.rays > maxVirtualShadowRays || settings.samplesPerRay < 1 ||
-        settings.samplesPerRay > maxVirtualShadowRaySamples || !(settings.extrapolateSlope >= 0.0f)) {
-        throw std::invalid_argument("Virtual shadow maps' soft shadows take 0 to 64 rays of 1 to 32 samples and a slope of 0 or more");
+        settings.samplesPerRay > maxVirtualShadowRaySamples || !(settings.extrapolateSlope >= 0.0f) || settings.rayLevels < 0 ||
+        settings.rayLevels > maxVirtualShadowRayLevels) {
+        throw std::invalid_argument("Virtual shadow maps' soft shadows take 0 to 64 rays of 1 to 32 samples, a slope of 0 or more, 0 to 8 levels up");
+    }
+
+    if (!(settings.poolLoad > 0.0f && settings.poolLoad <= 1.0f)) {
+        throw std::invalid_argument("Virtual shadow maps' pool load is a share above 0, at most 1");
     }
 
     // Below 1 the range would not hold the level's own points; at 1 it would be re-centred at every step.
@@ -220,12 +227,14 @@ Vec3 virtualShadowLevelPoint(const Vec3& lightPoint, const VirtualShadowPlacemen
 * A point at distance d along the view lies d * sqrt(1 + t^2) from the camera at the screen's corner, t the length of
 * (tan of half the width, tan of half the height), as cascadeSphere has it; the levels are chosen by that distance.
 */
-int virtualShadowCasterLevels(const VirtualShadowSettings& settings, float farthestAlongView, float verticalFov, float aspectRatio) {
+int virtualShadowCasterLevels(const VirtualShadowSettings& settings, float farthestAlongView, float verticalFov, float aspectRatio,
+                              int levelBias) {
     const float tanHalfHeight = std::tan(verticalFov * 0.5f);
     const float tanHalfWidth = tanHalfHeight * aspectRatio;
     const float farthest = farthestAlongView * std::sqrt(1.0f + tanHalfWidth * tanHalfWidth + tanHalfHeight * tanHalfHeight);
     const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
-    const int level = virtualShadowLevelFor(farthest, virtualShadowUsableHalfWidth(settings.firstHalfWidth, pagesPerSide), settings.levelCount);
+    const int chosen = virtualShadowLevelFor(farthest, virtualShadowUsableHalfWidth(settings.firstHalfWidth, pagesPerSide), settings.levelCount);
+    const int level = virtualShadowBiasedLevel(chosen, levelBias, settings.levelCount);
     return level == virtualShadowNoLevel ? settings.levelCount : level + 1;
 }
 
@@ -324,6 +333,30 @@ bool virtualShadowNearPageEdge(float texelX, float texelY, float width) {
     return near(texelX) || near(texelY);
 }
 
+int virtualShadowBiasedLevel(int level, int bias, int levelCount) {
+    if (level == virtualShadowNoLevel || level + bias >= levelCount) {
+        return virtualShadowNoLevel;
+    }
+
+    return level + bias;
+}
+
+// Up past the load, down only once four times the pages fit: between the two it holds, so it never flickers.
+int virtualShadowLevelBias(int bias, std::uint32_t requested, int poolPages, float poolLoad, int levelCount) {
+    const float limit = poolLoad * static_cast<float>(poolPages);
+    const float asked = static_cast<float>(requested);
+
+    if (asked > limit) {
+        return std::min(bias + 1, std::max(levelCount - 1, 0));
+    }
+
+    if (bias > 0 && 4.0f * asked < limit) {
+        return bias - 1;
+    }
+
+    return bias;
+}
+
 VirtualShadowCounts virtualShadowCountsFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_COUNTERS>& counters) {
     VirtualShadowCounts counts;
     counts.requested = counters[VIRTUAL_SHADOW_COUNT_REQUESTED];
@@ -352,7 +385,7 @@ float virtualShadowLit(float stored, float depth, float biasDepth) {
 GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap, const Vec3& camera,
                                              const std::array<std::uint32_t, maxVirtualShadowLevels>& generations,
                                              const Mat4& inverseViewProjection, float width, float height, float biasTexels,
-                                             std::uint32_t frame, std::uint32_t pairRoom) {
+                                             std::uint32_t frame, std::uint32_t pairRoom, int levelBias) {
     const VirtualShadowSettings& settings = clipmap.settings;
     const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
     GpuVirtualShadowFrame packed{};
@@ -367,9 +400,11 @@ GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap
     packed.shading[0] = settings.mainPass ? 1.0f : 0.0f;
     packed.shading[1] = biasTexels;
     packed.shading[2] = settings.countCosts ? 1.0f : 0.0f;
+    packed.shading[3] = static_cast<float>(levelBias);
     packed.soft[0] = static_cast<float>(settings.rays);
     packed.soft[1] = static_cast<float>(settings.samplesPerRay);
     packed.soft[2] = settings.extrapolateSlope;
+    packed.soft[3] = settings.rays > 0 ? static_cast<float>(settings.rayLevels) : 0.0f;
     packed.counts[0] = settings.levelCount;
     packed.counts[1] = pagesPerSide;
     packed.counts[2] = settings.poolPages;

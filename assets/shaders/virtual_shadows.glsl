@@ -23,6 +23,11 @@ int virtualShadowLevelFor(float distance, float firstUsableHalfWidth, int levelC
     return VIRTUAL_SHADOW_NO_LEVEL;
 }
 
+// The level chosen with every choice coarsened by bias steps (a full pool's): none past the last level.
+int virtualShadowBiasedLevel(int level, int bias, int levelCount) {
+    return level == VIRTUAL_SHADOW_NO_LEVEL || level + bias >= levelCount ? VIRTUAL_SHADOW_NO_LEVEL : level + bias;
+}
+
 // The page a point at these texels of a level lands on.
 ivec2 virtualShadowPageOf(vec2 texel) {
     return ivec2(floor(texel / float(VIRTUAL_SHADOW_PAGE_TEXELS)));

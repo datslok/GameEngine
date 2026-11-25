@@ -386,8 +386,30 @@ namespace {
     }
 }
 
+namespace {
+    // Levels coarsened by every bias up to past the last, and none: (level, bias, levels).
+    void checkBiasedLevels(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        std::vector<GpuVec4> inputs;
+
+        for (int level = -1; level < 16; ++level) {
+            for (int bias = 0; bias < 4; ++bias) {
+                inputs.push_back(gpuVec4(static_cast<float>(level), static_cast<float>(bias), 15.0f));
+            }
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_BIASED_LEVEL, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const GpuVec4& in = inputs[i];
+            const int expected = virtualShadowBiasedLevel(static_cast<int>(in[0]), static_cast<int>(in[1]), static_cast<int>(in[2]));
+            report.check("virtualShadowBiasedLevel", exactTolerance, static_cast<float>(expected), outputs[i][0]);
+        }
+    }
+}
+
 void gpuTestVirtualShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkLevelChoice(runner, report);
+    checkBiasedLevels(runner, report);
     checkPagesAndSlots(runner, report);
     checkLevelPoint(runner, report);
     checkMarkedPages(runner, report);

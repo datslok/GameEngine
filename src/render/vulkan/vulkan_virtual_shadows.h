@@ -52,6 +52,9 @@ public:
     // The clipmap prepare moved to the camera (none before the first frame that ran).
     const std::optional<VirtualShadowClipmap>& getClipmap() const;
 
+    // How many steps every level's choice is coarsened while the pool runs full (4d-ii), for the casters' levels.
+    int getLevelBias() const;
+
     // After the depth prepass (the depth left readable by compute): the four passes, the table left for fragment reads.
     void mark(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth);
 
@@ -147,5 +150,6 @@ private:
 
     // The settings the GPU's state was built for; others (levels, resolution, pool) start it again.
     std::optional<VirtualShadowSettings> builtFor;
+    int levelBias = 0; // the levels' coarsening for a full pool (virtualShadowLevelBias), from the pages read back
     bool startAgain = true;
 };

@@ -15,23 +15,33 @@ void main() {
     if (function == GPU_TEST_VIRTUAL_SHADOW_RAY_DISC) {
         testOutput(0, vec4(virtualShadowRayDisc(int(a.x), int(a.y), a.z), 0.0, 0.0));
     } else if (function == GPU_TEST_VIRTUAL_SHADOW_RAY_SAMPLE) {
-        // a: sample, samples, jitter, tan; b: inverse texel, depth scale, start depth, disc x; c: disc y, start x, y.
+        // a: sample, samples, jitter, tan; b: inverse texel, depth scale, start depth, disc x; c: disc y, start x, y,
+        // levels up.
         vec4 b = testInput(1);
         vec4 c = testInput(2);
-        float share = virtualShadowSampleShare(int(a.x), int(a.y), a.z);
-        float height = virtualShadowRayHeight(a.w, b.x, b.y, b.z);
+        int levelsUp = int(c.w);
+        float share = virtualShadowSampleShare(int(a.x), int(a.y), a.z, levelsUp);
+        float height = virtualShadowRayHeight(a.w, b.x, b.y, b.z, levelsUp);
         testOutput(0, vec4(share, height, 0.0, 0.0));
         testOutput(1, vec4(virtualShadowRaySample(vec3(c.yz, b.z), vec2(b.w, c.x), a.w, b.x, b.y, share * height), 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_SAMPLE_LEVEL) {
+        // a: the offset in texels, levels up, a stored depth, the point's depth; b: the depth scale.
+        vec4 b = testInput(1);
+        testOutput(0, vec4(float(virtualShadowSampleLevel(a.x, int(a.y))), virtualShadowStoredHeight(a.z, a.w, b.x), 0.0, 0.0));
     } else if (function == GPU_TEST_VIRTUAL_SHADOW_FOOTPRINT) {
         ivec2 first = virtualShadowFootprintFirst(a.xy);
         testOutput(0, vec4(vec2(first), float(virtualShadowFootprintIndex(virtualShadowPageOf(a.zw), first)), 0.0));
     } else if (function == GPU_TEST_VIRTUAL_SHADOW_MARCH) {
-        // a: under, hit, the surface's depth and ray depth; b: its slope, the ray depth, stored, tolerance; c: slope cap.
+        // a: under, hit, the surface's height and ray height; b: its slope, the ray height, stored, tolerance; c: slope
+        // cap, the last ray height, the surface at the crossing, found.
         vec4 b = testInput(1);
         vec4 c = testInput(2);
-        VirtualShadowMarch march = VirtualShadowMarch(a.x > 0.5, a.y > 0.5, a.z, a.w, b.x);
+        VirtualShadowMarch march = VirtualShadowMarch(a.x > 0.5, a.y > 0.5, a.z, a.w, b.x, c.y, false, 0.0);
         VirtualShadowMarch next = virtualShadowMarchStep(march, b.y, b.z, b.w, c.x);
+        float crossing = next.checking ? virtualShadowCrossingDepth(next, c.y, b.y) : 0.0;
+        VirtualShadowMarch checked = next.checking ? virtualShadowMarchCheck(next, c.w > 0.5, c.z, b.w) : next;
         testOutput(0, vec4(next.under ? 1.0 : 0.0, next.hit ? 1.0 : 0.0, next.surfaceDepth, next.surfaceRayDepth));
-        testOutput(1, vec4(next.surfaceSlope, virtualShadowRayBlocked(next) ? 1.0 : 0.0, 0.0, 0.0));
+        testOutput(1, vec4(next.surfaceSlope, virtualShadowRayBlocked(next) ? 1.0 : 0.0, next.lastRayDepth, next.checking ? 1.0 : 0.0));
+        testOutput(2, vec4(next.checkDepth, crossing, checked.hit ? 1.0 : 0.0, 0.0));
     }
 }

@@ -14,6 +14,7 @@ namespace {
 
     VirtualShadowMarch onSurface(VirtualShadowMarch march, float stored, float rayDepth, float slope) {
         march.under = true;
+        march.lastRayDepth = rayDepth;
         march.surfaceDepth = stored;
         march.surfaceRayDepth = rayDepth;
         march.surfaceSlope = slope;
@@ -28,20 +29,44 @@ Vec2 virtualShadowRayDisc(int ray, int rays, float turn) {
     return Vec2{radius * std::cos(angle), radius * std::sin(angle)};
 }
 
-float virtualShadowSampleShare(int sample, int samples, float jitter) {
+// The power by multiplying, not pow, so the CPU and the GPU agree to rounding.
+float virtualShadowSampleShare(int sample, int samples, float jitter, int levelsUp) {
     if (sample >= samples - 1) {
         return 1.0f;
     }
 
     const float share = (static_cast<float>(sample) + jitter) / static_cast<float>(samples);
-    return share * share;
+    float powered = share * share;
+
+    for (int power = 2; power < levelsUp; ++power) {
+        powered *= share;
+    }
+
+    return powered;
 }
 
 // At the rim the ray moves tan(a) a metre up, which is tan(a) * inverseTexel texels: the reach's texels over that.
-float virtualShadowRayHeight(float tanAngularRadius, float inverseTexel, float depthScale, float startDepth) {
+float virtualShadowRayHeight(float tanAngularRadius, float inverseTexel, float depthScale, float startDepth, int levelsUp) {
     const float toRangeEnd = std::max(1.0f - startDepth, 0.0f) / depthScale;
     const float acrossPerMetre = tanAngularRadius * inverseTexel;
-    return acrossPerMetre > 0.0f ? std::min(virtualShadowRayTexels / acrossPerMetre, toRangeEnd) : toRangeEnd;
+    const float reach = std::ldexp(virtualShadowRayTexels, levelsUp);
+    return acrossPerMetre > 0.0f ? std::min(reach / acrossPerMetre, toRangeEnd) : toRangeEnd;
+}
+
+int virtualShadowSampleLevel(float offsetTexels, int levelsUp) {
+    float reach = virtualShadowRayTexels;
+    int level = 0;
+
+    while (level < levelsUp && offsetTexels > reach) {
+        reach *= 2.0f;
+        ++level;
+    }
+
+    return level;
+}
+
+float virtualShadowStoredHeight(float stored, float pointDepth, float depthScale) {
+    return (stored - pointDepth) / depthScale;
 }
 
 Vec3 virtualShadowRaySample(const Vec3& start, const Vec2& disc, float tanAngularRadius, float inverseTexel, float depthScale, float height) {
@@ -63,6 +88,7 @@ VirtualShadowMarch virtualShadowMarchStep(const VirtualShadowMarch& march, float
     }
 
     VirtualShadowMarch next = march;
+    next.checking = false;
     const float risen = rayDepth - march.surfaceRayDepth;
     const float carried = march.surfaceDepth + march.surfaceSlope * risen;
 
@@ -79,17 +105,36 @@ VirtualShadowMarch virtualShadowMarchStep(const VirtualShadowMarch& march, float
         if (stored > carried && slopeCap > 0.0f) {
             // A higher surface hides the one the ray is under: that one carried on behind it, and met when risen to.
             next.hit = rayDepth + tolerance >= carried;
+            next.lastRayDepth = rayDepth;
             return next;
         }
 
         return onSurface(next, stored, rayDepth, 0.0f);
     }
 
-    if (march.under) {
-        next.hit = rayDepth + tolerance >= carried;
-        next.under = false;
+    if (march.under && rayDepth + tolerance >= carried) {
+        // Out from under, risen to the surface's height: through it, or out beside it first? The crossing tells.
+        next.checking = true;
+        next.checkDepth = carried;
+    } else if (!march.under && stored > march.lastRayDepth + tolerance) {
+        // Risen past a surface the ray was below at the last sample: through it, or past its edge? The crossing tells.
+        next.checking = true;
+        next.checkDepth = stored;
     }
 
+    next.under = false;
+    next.lastRayDepth = rayDepth;
+    return next;
+}
+
+float virtualShadowCrossingDepth(const VirtualShadowMarch& march, float previousRayDepth, float rayDepth) {
+    return std::clamp(march.checkDepth, previousRayDepth, rayDepth);
+}
+
+VirtualShadowMarch virtualShadowMarchCheck(const VirtualShadowMarch& march, std::optional<float> storedAtCrossing, float tolerance) {
+    VirtualShadowMarch next = march;
+    next.hit = !storedAtCrossing.has_value() || *storedAtCrossing + tolerance >= march.checkDepth;
+    next.checking = false;
     return next;
 }
 
@@ -97,33 +142,66 @@ bool virtualShadowRayBlocked(const VirtualShadowMarch& march) {
     return march.hit || march.under;
 }
 
-float virtualShadowRayVisibility(const Vec3& start, float biasDepth, float tanAngularRadius, float inverseTexel, float depthScale,
-                                 const VirtualShadowSettings& settings, float turn, float jitter,
-                                 const std::function<std::optional<float>(float, float)>& storedAt) {
-    const Vec3 lifted{start.x, start.y, start.z + biasDepth};
+/*
+* Each sample's level by its spread across the point's own level's texels; its depth there turned into a height above
+* the point, the ray's own height starting at the point's level's bias, the tolerance the sample's level's bias.
+*/
+float virtualShadowRayVisibility(const std::vector<VirtualShadowRayLevel>& levels, float tanAngularRadius, const VirtualShadowSettings& settings,
+                                 float turn, float jitter, const std::function<std::optional<float>(int, float, float)>& storedAt) {
+    const VirtualShadowRayLevel& own = levels.front();
 
     if (settings.rays <= 0) {
-        const std::optional<float> stored = storedAt(start.x, start.y);
-        return stored.has_value() ? virtualShadowLit(*stored, start.z, biasDepth) : 1.0f;
+        const std::optional<float> stored = storedAt(0, own.point.x, own.point.y);
+        return stored.has_value() ? virtualShadowLit(*stored, own.point.z, own.biasDepth) : 1.0f;
     }
 
-    const float height = virtualShadowRayHeight(tanAngularRadius, inverseTexel, depthScale, lifted.z);
+    const int levelsUp = std::min(settings.rayLevels, static_cast<int>(levels.size()) - 1);
+    const float startHeight = own.biasDepth / own.depthScale;
+    const float height = virtualShadowRayHeight(tanAngularRadius, own.inverseTexel, own.depthScale, own.point.z + own.biasDepth, levelsUp);
     const float slopeCap = settings.extrapolateSlope * tanAngularRadius;
     int blocked = 0;
 
     for (int ray = 0; ray < settings.rays; ++ray) {
         const Vec2 disc = virtualShadowRayDisc(ray, settings.rays, turn);
+        const float discReach = std::sqrt(disc.x * disc.x + disc.y * disc.y);
         const float rayJitter = fraction(jitter + static_cast<float>(ray) * goldenFraction);
+
+        // The surface's height (and its level's tolerance) up the ray, from the first level holding it.
+        const auto surfaceAt = [&](float up, float& tolerance) -> std::optional<float> {
+            const int first = virtualShadowSampleLevel(discReach * up * tanAngularRadius * own.inverseTexel, levelsUp);
+
+            for (int level = first; level < static_cast<int>(levels.size()); ++level) {
+                const VirtualShadowRayLevel& in = levels[static_cast<std::size_t>(level)];
+                const Vec3 at = virtualShadowRaySample(in.point, disc, tanAngularRadius, in.inverseTexel, in.depthScale, up);
+
+                if (const std::optional<float> stored = storedAt(level, at.x, at.y)) {
+                    tolerance = in.biasDepth / in.depthScale;
+                    return virtualShadowStoredHeight(*stored, in.point.z, in.depthScale);
+                }
+            }
+
+            return std::nullopt;
+        };
+
         VirtualShadowMarch march;
+        float previous = 0.0f;
 
         for (int sample = 0; sample < settings.samplesPerRay && !march.hit; ++sample) {
-            const float up = height * virtualShadowSampleShare(sample, settings.samplesPerRay, rayJitter);
-            const Vec3 point = virtualShadowRaySample(lifted, disc, tanAngularRadius, inverseTexel, depthScale, up);
-            const std::optional<float> stored = storedAt(point.x, point.y);
+            const float up = height * virtualShadowSampleShare(sample, settings.samplesPerRay, rayJitter, levelsUp);
+            float tolerance = 0.0f;
 
-            if (stored.has_value()) {
-                march = virtualShadowMarchStep(march, point.z, *stored, biasDepth, slopeCap);
+            if (const std::optional<float> surface = surfaceAt(up, tolerance)) {
+                march = virtualShadowMarchStep(march, startHeight + up, *surface, tolerance, slopeCap);
+
+                if (march.checking) {
+                    const float crossing = virtualShadowCrossingDepth(march, startHeight + previous, startHeight + up) - startHeight;
+                    float crossingTolerance = tolerance;
+                    const std::optional<float> there = surfaceAt(crossing, crossingTolerance);
+                    march = virtualShadowMarchCheck(march, there, crossingTolerance);
+                }
             }
+
+            previous = up;
         }
 
         blocked += virtualShadowRayBlocked(march) ? 1 : 0;

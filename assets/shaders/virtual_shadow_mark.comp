@@ -5,10 +5,10 @@
 
 /*
 * Marking (render/vulkan/vulkan_virtual_shadows.h): every pixel with a surface asks for the page its point lands on in
-* its level, and the pages round it a soft shadow's filter may read (VIRTUAL_SHADOW_FILTER_TEXELS each way, so one to
-* four pages). The point comes back from the prepass's depth, measured from the camera; its level from its distance.
-* Neighbouring pixels mostly ask for the same pages, so an entry already asked for is not written again, and a wave
-* whose pixels all ask for one entry sends one write.
+* its level, and the pages round it a soft shadow's rays may read (VIRTUAL_SHADOW_FILTER_TEXELS each way, so one to
+* four pages), there and in the rays' coarser levels. The point comes back from the prepass's depth, measured from the
+* camera; its level from its distance. Neighbouring pixels mostly ask for the same pages, so an entry already asked
+* for is not written again, and a wave whose pixels all ask for one entry sends one write.
 */
 #include "virtual_shadow_pages.glsl"
 #include "screen_reflections.glsl"
@@ -23,33 +23,19 @@ void ask(int index) {
     }
 }
 
-void main() {
-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    int index = -1;
+// Asks for the pages within the rays' reach round a placed point in a level: the whole wave's one write when it all
+// asks for one entry away from its page's edges (the common case), else each page of the span.
+void askAround(int level, vec3 placed, bool marking) {
     ivec4 span = ivec4(0, 0, -1, -1);
-    int level = VIRTUAL_SHADOW_NO_LEVEL;
+    int index = -1;
+    VirtualShadowLevelData data = frame.levels[max(level, 0)];
 
-    if (all(lessThan(pixel, ivec2(frame.screen.xy)))) {
-        float depth = texelFetch(sceneDepth, pixel, 0).r;
-        vec3 point = vec3(0.0);
-
-        if (depth > GPU_FAR_DEPTH) {
-            point = positionAtPixel(frame.inverseViewProjection, vec2(pixel) + 0.5, depth, frame.screen.xy);
-            level = virtualShadowLevelFor(length(point), frame.options.x, frame.counts.x);
-        }
-
-        if (level != VIRTUAL_SHADOW_NO_LEVEL) {
-            VirtualShadowLevelData data = frame.levels[level];
-            vec3 lightPoint = mat3(frame.lightRotation) * point;
-            vec3 placed = virtualShadowLevelPoint(lightPoint, data.placement.xyz, vec2(data.placement.w, data.depth.x));
-            span = virtualShadowMarkedPages(placed.xy, float(VIRTUAL_SHADOW_FILTER_TEXELS), frame.counts.y);
-
-            ivec2 slot = virtualShadowSlot(virtualShadowPageOf(placed.xy), data.pages.xy, frame.counts.y);
-            index = virtualShadowTableIndex(level, slot, frame.counts.y);
-        }
+    if (marking) {
+        span = virtualShadowMarkedPages(placed.xy, float(VIRTUAL_SHADOW_FILTER_TEXELS), frame.counts.y);
+        ivec2 slot = virtualShadowSlot(virtualShadowPageOf(placed.xy), data.pages.xy, frame.counts.y);
+        index = virtualShadowTableIndex(level, slot, frame.counts.y);
     }
 
-    // The common case: a whole wave on one page, nowhere near its edges.
     bool onePage = span.x == span.z && span.y == span.w;
 
     if (subgroupAll(onePage && index >= 0) && subgroupAllEqual(index)) {
@@ -60,16 +46,51 @@ void main() {
         return;
     }
 
-    if (level == VIRTUAL_SHADOW_NO_LEVEL) {
+    if (!marking) {
         return;
     }
-
-    VirtualShadowLevelData data = frame.levels[level];
 
     for (int y = span.y; y <= span.w; ++y) {
         for (int x = span.x; x <= span.z; ++x) {
             ivec2 slot = virtualShadowSlot(ivec2(x, y), data.pages.xy, frame.counts.y);
             ask(virtualShadowTableIndex(level, slot, frame.counts.y));
         }
+    }
+}
+
+/*
+* A pixel asks round its point in its own level, and (4d-ii) in the soft shadows' coarser levels (frame.soft.w of them,
+* while there are levels), where its rays' far samples read; a coarser level's page is wider, so neighbouring pixels
+* mostly ask for the same one and the wave sends one write.
+*/
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    int level = VIRTUAL_SHADOW_NO_LEVEL;
+    vec3 lightPoint = vec3(0.0);
+
+    if (all(lessThan(pixel, ivec2(frame.screen.xy)))) {
+        float depth = texelFetch(sceneDepth, pixel, 0).r;
+
+        if (depth > GPU_FAR_DEPTH) {
+            vec3 point = positionAtPixel(frame.inverseViewProjection, vec2(pixel) + 0.5, depth, frame.screen.xy);
+            level = virtualShadowBiasedLevel(virtualShadowLevelFor(length(point), frame.options.x, frame.counts.x), int(frame.shading.w),
+                                             frame.counts.x);
+            lightPoint = mat3(frame.lightRotation) * point;
+        }
+    }
+
+    int levelsUp = int(frame.soft.w);
+
+    for (int up = 0; up <= levelsUp; ++up) {
+        int marked = level == VIRTUAL_SHADOW_NO_LEVEL ? VIRTUAL_SHADOW_NO_LEVEL : level + up;
+        bool marking = marked != VIRTUAL_SHADOW_NO_LEVEL && marked < frame.counts.x;
+
+        if (subgroupAll(!marking)) {
+            return;
+        }
+
+        VirtualShadowLevelData data = frame.levels[marking ? marked : 0];
+        vec3 placed = virtualShadowLevelPoint(lightPoint, data.placement.xyz, vec2(data.placement.w, data.depth.x));
+        askAround(marked, placed, marking);
     }
 }
