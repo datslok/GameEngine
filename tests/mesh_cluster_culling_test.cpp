@@ -486,7 +486,7 @@ namespace {
             instance.sway[1] = sway.y;
             instance.sway[2] = sway.z;
             instance.sway[3] = sway.w;
-            GpuCullRecord record = stillRecord(place, 4.0f * scale);
+            GpuCullRecord record = stillRecord(place, 100.0f * scale); // bounds larger than any grown cluster
             record.flags |= CULL_SWAYS;
 
             for (const GpuMeshCluster& cluster : packed.clusters) {
@@ -527,8 +527,9 @@ namespace {
 
     /*
     * The sway's reach culls a swaying draw's clusters one by one: a bush behind the eye is hidden, where without the
-    * reach (CAMERA_CULL_SWAY_REACH) its draw is kept whole. A pose bound to bones, a draw not of its mesh's shape, one not
-    * swaying or a view without the sway keep their pose; a still sway reaches nowhere; meshClusterPoseIn grows a pair's.
+    * reach (CAMERA_CULL_SWAY_REACH) its draw is kept whole, as it is when its bounds are no larger than the grown
+    * cluster's (a small plant's). A pose bound to bones, a draw not of its mesh's shape, one not swaying or a view
+    * without the sway keep their pose; a still sway reaches nowhere; meshClusterPoseIn grows a pair's.
     */
     void testTheSwayReachCullsEachCluster() {
         const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(testBush(), ClusterLevels::One), 0, 0, 0);
@@ -540,7 +541,7 @@ namespace {
         instance.handedness[1] = 1.0f;
         const float sway[4] = {static_cast<float>(WIND_CATEGORY_PLANTS), 3.0f, 1.0f, 0.2f};
         std::copy(std::begin(sway), std::end(sway), std::begin(instance.sway));
-        GpuCullRecord record = stillRecord(behind + Vec3{0.0f, 1.5f, 0.0f}, 1.5f);
+        GpuCullRecord record = stillRecord(behind + Vec3{0.0f, 1.5f, 0.0f}, 12.0f);
         record.flags |= CULL_SWAYS;
         GpuInstance liana = instance;
         liana.hanging[3] = 1;
@@ -556,6 +557,15 @@ namespace {
             assert(meshClusterSwayReach(cluster, instance) > 0.0f);
             const MeshClusterPose pose = meshClusterSwayingPose(cluster, instance, 0u, record, view, MeshClusterPose{});
             assert(!meshClusterKept(cluster, instance, 0u, record, view, pose));
+
+            GpuCullRecord tight = record;
+            tight.bounds[3] = pose.sphere[3];
+            assert(!meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{}).posed);
+            assert(meshClusterKept(cluster, instance, 0u, tight, view, meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{})));
+            tight.bounds[3] = pose.sphere[3] * 1.01f;
+            assert(meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{}).posed);
+            tight.bounds[3] = -1.0f;
+            assert(meshClusterSwayingPose(cluster, instance, 0u, tight, view, MeshClusterPose{}).posed);
             assert(meshClusterKept(cluster, instance, 0u, record, without, meshClusterSwayingPose(cluster, instance, 0u, record, without, MeshClusterPose{})));
 
             assert(meshClusterSwayingPose(cluster, instance, 0u, record, view, bound).sphere == bound.sphere);

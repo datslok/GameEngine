@@ -182,8 +182,9 @@ float meshClusterSwayReach(const GpuMeshCluster& cluster, const GpuInstance& ins
 /*
 * Where the view grows swaying clusters (CAMERA_CULL_SWAY_REACH, RenderSettings::meshClusterSwayReach), a cluster not
 * bound to bones of a draw of its mesh's shape swaying per vertex: posed unbound on its sphere in the world grown by
-* meshClusterSwayReach, so the view culls it alone rather than keeping the draw whole (ROADMAP phase 21 4c-vi). Else
-* the pose given.
+* meshClusterSwayReach, so the view culls it alone rather than keeping the draw whole (ROADMAP phase 21 4c-vi). Else,
+* or when the grown sphere is no smaller than the draw's bounds (a small plant's: kept whole, it costs less), the pose
+* given.
 */
 MeshClusterPose meshClusterSwayingPose(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                                        const GpuCameraCull& view, const MeshClusterPose& pose);

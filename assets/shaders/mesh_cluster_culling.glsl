@@ -166,7 +166,8 @@ float meshClusterSwayReach(MeshCluster cluster, InstanceData instance) {
 }
 
 // Where the view grows swaying clusters, an unbound cluster of a draw of its mesh's shape swaying per vertex: posed
-// unbound on its sphere grown by its sway's reach; else the pose given (meshClusterSwayingPose).
+// unbound on its sphere grown by its sway's reach, when that is smaller than its draw's bounds; else the pose given
+// (meshClusterSwayingPose).
 MeshClusterPose meshClusterSwayingPose(MeshCluster cluster, InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
     if (pose.bound || (view.flags & CAMERA_CULL_SWAY_REACH) == 0u || !meshClusterShapeFixed(instance, entry) || !meshClusterSways(record, view)) {
         return pose;
@@ -174,6 +175,12 @@ MeshClusterPose meshClusterSwayingPose(MeshCluster cluster, InstanceData instanc
 
     vec4 sphere = meshClusterWorldSphere(cluster, instance.model);
     sphere.w += meshClusterSwayReach(cluster, instance);
+
+    // A small plant's grown cluster can outgrow the plant: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds.w >= 0.0 && record.bounds.w <= sphere.w) {
+        return pose;
+    }
+
     return MeshClusterPose(false, true, sphere);
 }
 

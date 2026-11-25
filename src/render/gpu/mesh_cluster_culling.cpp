@@ -335,6 +335,12 @@ MeshClusterPose meshClusterSwayingPose(const GpuMeshCluster& cluster, const GpuI
 
     std::array<float, 4> sphere = meshClusterWorldSphere(cluster, instance);
     sphere[3] += meshClusterSwayReach(cluster, instance);
+
+    // A small plant's grown cluster can outgrow the plant: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds[3] >= 0.0f && record.bounds[3] <= sphere[3]) {
+        return pose;
+    }
+
     return MeshClusterPose{.bound = false, .posed = true, .sphere = sphere};
 }
 
