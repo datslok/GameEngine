@@ -8,7 +8,7 @@ Land drawn as a quadtree of grid patches round the camera (CDLOD, Strugar 2010),
 
 Every function here is mirrored in `terrain.glsl` / `terrain_heights.glsl` / `terrain_data.glsl`, so the patches the GPU draws are tested on the CPU. The heights' reads (`terrain_heights.glsl`, the scene set's binding 35 unless the includer names another) multiply by each grid's reciprocal spacing made on the CPU (`GpuTerrainGrid::inverseSpacing`) and are `precise`, so `terrainSurfaceHeight` is the CPU's bit for bit (the planting cells stand plants on it).
 
-- `TerrainHeightGrid`: corner (least x, z), spacing, `size` points a side, heights row by row along x. `makeTerrainHeightGrid(centre, halfSize, spacing, height, jobs)` samples a function, a row a job.
+- `TerrainHeightGrid`: corner (least x, z), spacing, `size` points a side, heights row by row along x, and its **min/max pyramid**: level 1 the lowest and highest of each 2 x 2 of points, each level above of the 2 x 2 below (an odd side's last texel takes what is left), up to one texel, levels one after another (`terrainPyramidLevels`, `terrainPyramidLevelSize`, `terrainPyramidLevelStart`, `terrainPyramidTexel`). `makeTerrainHeightGrid(centre, halfSize, spacing, height, jobs)` samples a function, a row a job, then builds the pyramid (`terrainHeightPyramid`, a level's rows over the jobs; about two thirds of the heights' memory).
 - `TerrainHeights`: up to `TERRAIN_MOST_GRIDS` (4) grids, finest first; a place reads the finest holding it, past all of them the coarsest's nearest edge. A place's grid coordinate is times the spacing's reciprocal (`plantingCoordinate`), so the planting reads the ground the same on the GPU (`planting.md`).
 
 | Function | Gives |
@@ -16,7 +16,9 @@ Every function here is mirrored in `terrain.glsl` / `terrain_heights.glsl` / `te
 | `terrainHeight` | Bilinear height (`terrainBilinear`) |
 | `terrainNormal(heights, x, z, step)` | Unit normal from the slope over `step` either way |
 | `terrainSurfaceHeight` | The height as the finest patches draw it: each grid square two flat triangles split from its near right corner to its far left (`terrainTriangleHeight`), as `terrainGridMesh` splits it |
-| `terrainHeightRange(heights, west, east, north, south)` | Every height either read gives in a box: the grid points round its squares, finest grid up to the first holding the whole box, a hair wider for rounding (CPU only; the placed plants' cell boxes) |
+| `terrainHeightRange(heights, west, east, north, south)` | Every height either read gives in a box: the grid points round its squares, one wider each way, finest grid up to the first holding the whole box, read as four pyramid texels a grid (the level where they span at most two each way), a hair wider for rounding; cost four reads a grid whatever the box (the placed plants' cell boxes; the culling's terrain clusters). Throws for a grid without its pyramid |
+| `terrainClusterBox(patch, footprint)` | Where a cluster of a patch's grid can stand (west, north, east, south): its footprint as grid points rounded out, one more towards the corner (the morph slides odd points down only), on the patch |
+| `terrainBoxSphere(box, heights)` | The sphere round that box between two heights, a hair larger for rounding at its distance from the origin |
 | `terrainMorph(distance, start, end)` | 0 before start, 1 from end, linear between |
 | `morphGridCoordinate(grid, morph)` | Odd grid coordinates slide towards their even neighbour below; at 1 the patch is the next coarser grid |
 | `terrainVertex(heights, patch, meshPoint, eye)` | A patch vertex: below |
@@ -61,12 +63,22 @@ A game places one on an entity without a `Transform` (heights are where they are
   4. Tangent along x (u grows with x), bitangent sign -1 (v grows with z); UVs across the region's square.
 - The morph is always from the **camera**, also in shadow tiles, so shadows fall from the surface seen.
 
+## Culled cluster by cluster (phase 21 4c-viii)
+
+A patch's mesh is flat, so its clusters' own spheres say nothing of the land; without more, every cluster of a patch is kept whole and laid into the sun's pages by the patch's sphere. With `engine.render.passes.meshClusterTerrainBounds` (on; the view's `CAMERA_CULL_TERRAIN_BOUNDS`, set once the heights are uploaded and patches drawn), each cluster is culled alone (`meshClusterTerrainPose`, [mesh-clusters.md](mesh-clusters.md)), in the camera's passes and the sun's casters:
+
+1. Its footprint: its vertices' box across the mesh's x and z (`MeshCluster::footprintLow`, `footprintHigh`), packed as halves rounded outward (`floatToHalfBelow`, `floatToHalfAbove`, `core/half_float`) in `GpuMeshCluster::footprint` (`meshClusterFootprint`); exact for the grids' k/32 points.
+2. `terrainClusterBox` on its patch (the cluster passes' binding `MESH_CLUSTER_TERRAIN_BINDING`, the frame's patches), `terrainHeightRange` from the heights' pyramids (the next binding), `terrainBoxSphere`.
+3. Posed unbound on that sphere, unless it is no smaller than the patch's bounds (then the patch is kept whole as before).
+
+Every vertex `terrainVertex` makes of the cluster lies in the sphere for any eye and morph (tested over full and half grids, eyes near and far). A patch's 16 or more clusters each land in their own few pages instead of all the patch's. Cost grows with the terrain clusters culled: four texel reads a grid and a sphere each, a view. cluster-compare takes the frame's patches and heights.
+
 ## GPU records (`render/gpu/terrain_gpu`)
 
 | Record | Binding (scene set 1) | Size | Written |
 |---|---|---|---|
 | `GpuTerrainPatch` (placement, morph, uv) | 36 | 48 | Each frame (`packTerrainPatch`), at least one record |
-| `GpuTerrainHeightsHeader` (count, `GpuTerrainGrid` x 4) then every grid's heights | 35 | 144 + heights | `packTerrainHeights` (throws past 4 grids) |
+| `GpuTerrainHeightsHeader` (count, `GpuTerrainGrid` x 4: corner, spacing, size, heights' offset, reciprocal spacing, pyramid's offset) then every grid's heights, then every grid's pyramid | 35 | 144 + heights + pyramids | `packTerrainHeights` (throws past 4 grids) |
 
 - `VulkanRenderer::updateTerrainHeights`: re-uploads through a staging buffer only when the frame's heights pointer or `terrainHeightsVersion` changes. Without a terrain a header-only stand-in is bound (no grids, so nothing is lifted).
 - Bindings and their stages: [gpu-scene.md](gpu-scene.md).

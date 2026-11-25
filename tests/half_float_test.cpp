@@ -58,6 +58,36 @@ namespace {
         assert(floatToHalf(std::ldexp(1.0f, -26)) == 0x0000 && floatToHalf(std::ldexp(3.0f, -25)) == 0x0002);
         assert((floatToHalf(std::nanf("")) & 0x7FFFu) > 0x7C00u);
     }
+
+    /*
+    * Rounded outward, for bounds kept as halves: the half below a float is at most it and the half above at least it,
+    * neighbours (or the same half, when the float is one), of either sign and past the halves' range.
+    */
+    void testFloatToHalfOutward() {
+        for (std::uint32_t bits = 0; bits <= 0xFFFFu; ++bits) {
+            const std::uint16_t half = static_cast<std::uint16_t>(bits);
+            if ((half & 0x7FFFu) < 0x7C00u) {
+                assert(floatToHalfBelow(halfToFloat(half)) == floatToHalf(halfToFloat(half)));
+                assert(floatToHalfAbove(halfToFloat(half)) == floatToHalf(halfToFloat(half)));
+            }
+        }
+
+        std::uint32_t state = 3;
+
+        for (int sample = 0; sample < 20000; ++sample) {
+            state = state * 1664525u + 1013904223u;
+            const float value = std::ldexp(static_cast<float>(state >> 8) / 16777216.0f - 0.5f, static_cast<int>(state % 40u) - 24);
+            const std::uint16_t below = floatToHalfBelow(value);
+            const std::uint16_t above = floatToHalfAbove(value);
+            assert(halfToFloat(below) <= value && halfToFloat(above) >= value);
+            assert(halfStepDistance(below, above) <= 1u);
+        }
+
+        assert(halfToFloat(floatToHalfBelow(1.0f / 3.0f)) < 1.0f / 3.0f && halfToFloat(floatToHalfAbove(1.0f / 3.0f)) > 1.0f / 3.0f);
+        assert(floatToHalfAbove(1e9f) == 0x7C00 && floatToHalfBelow(1e9f) == 0x7BFF);
+        assert(floatToHalfBelow(-1e9f) == 0xFC00 && floatToHalfAbove(-1e9f) == 0xFBFF);
+        assert(halfToFloat(floatToHalfBelow(-1e-9f)) < 0.0f && halfToFloat(floatToHalfAbove(1e-9f)) > 0.0f);
+    }
 }
 
 void testHalfFloat() {
@@ -65,4 +95,5 @@ void testHalfFloat() {
     testStepDistance();
     testNanIsNeverClose();
     testFloatToHalf();
+    testFloatToHalfOutward();
 }

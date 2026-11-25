@@ -51,6 +51,15 @@ namespace {
         cluster.coneApex = Vec3{bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]};
         cluster.coneAxis = Vec3{bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]};
         cluster.coneCutoff = bounds.cone_cutoff;
+        cluster.footprintLow = Vec2{FLT_MAX, FLT_MAX};
+        cluster.footprintHigh = Vec2{-FLT_MAX, -FLT_MAX};
+
+        for (std::size_t vertex = 0; vertex < vertexCount; ++vertex) {
+            const Vec3& position = mesh.vertices[vertices[vertex]].position;
+            cluster.footprintLow = Vec2{std::min(cluster.footprintLow.x, position.x), std::min(cluster.footprintLow.y, position.z)};
+            cluster.footprintHigh = Vec2{std::max(cluster.footprintHigh.x, position.x), std::max(cluster.footprintHigh.y, position.z)};
+        }
+
         cluster.firstVertex = static_cast<std::uint32_t>(built.vertices.size());
         cluster.vertexCount = static_cast<std::uint32_t>(vertexCount);
         cluster.firstTriangle = static_cast<std::uint32_t>(built.triangles.size() / 3);

@@ -5,6 +5,11 @@
 #define MESH_CLUSTER_PASS_GLSL
 
 #include "mesh_cluster_culling.glsl"
+
+// The land's heights and their pyramids (terrain_heights.glsl's terrainHeightRange), at the passes' own binding.
+#define TERRAIN_HEIGHTS_SET 0
+#define TERRAIN_HEIGHTS_BINDING (MESH_CLUSTER_TERRAIN_BINDING + 1)
+#include "terrain_heights.glsl"
 #include "mesh_cluster_pyramid.glsl"
 #include "placed_drawing.glsl"
 #include "twig_drawing.glsl"
@@ -132,6 +137,12 @@ layout(std430, set = 0, binding = MESH_CLUSTER_LIANA_BINDING) readonly buffer Li
 
 layout(std430, set = 0, binding = MESH_CLUSTER_LIANA_BINDING + 1) readonly buffer LianaMotions {
     vec4 lianaMotions[];
+};
+
+// The frame's terrain patches (one unused without; the heights follow at MESH_CLUSTER_TERRAIN_BINDING + 1): what the
+// culling bounds a patch's clusters by (meshClusterTerrainPose).
+layout(std430, set = 0, binding = MESH_CLUSTER_TERRAIN_BINDING) readonly buffer MeshClusterTerrainPatches {
+    TerrainPatch meshClusterTerrainPatches[];
 };
 
 // The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands; and the
@@ -288,9 +299,22 @@ vec3 meshClusterLianaMotion(uint anchor) {
 }
 
 // How a pair's cluster stands in the view (meshClusterPoseIn): meshClusterPoseAt's, or posed by its sway's reach, or a
-// liana's by its span's bound (its record and anchors from the tables; a record past them keeps the pose).
+// liana's by its span's bound (its record and anchors from the tables; a record past them keeps the pose), or a terrain
+// patch's cluster by its box on the land (its heights read only where the view bounds terrain clusters; a patch past
+// the table keeps the pose).
 MeshClusterPose meshClusterPoseIn(MeshClusterDrawn drawn, MeshCluster cluster, CameraCull view) {
     MeshClusterPose pose = meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(drawn, cluster));
+    uint patchNumber = drawn.instance.material.z;
+
+    if (patchNumber != 0u) {
+        if ((view.flags & CAMERA_CULL_TERRAIN_BOUNDS) == 0u || patchNumber > uint(meshClusterTerrainPatches.length())) {
+            return pose;
+        }
+
+        vec4 box = terrainClusterBox(meshClusterTerrainPatches[patchNumber - 1u], meshClusterFootprint(cluster));
+        return meshClusterTerrainPose(drawn.instance, drawn.record, view, terrainBoxSphere(box, terrainHeightRange(box.xy, box.zw)), pose);
+    }
+
     uint named = drawn.instance.hanging.w;
     uint record = (named & ~LIANA_IVY_BIT) - 1u;
 

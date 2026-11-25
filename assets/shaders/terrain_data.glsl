@@ -7,13 +7,6 @@
 #include "terrain_heights.glsl"
 #include "render/gpu/instance_shared.h"
 
-// Must match GpuTerrainPatch.
-struct TerrainPatch {
-    vec4 placement; // corner x, corner z, size, quads
-    vec4 morph;     // start, end, spacing
-    vec4 uv;        // corner x, corner z, per metre
-};
-
 layout(std430, set = 1, binding = 36) readonly buffer TerrainPatches {
     TerrainPatch terrainPatches[];
 };

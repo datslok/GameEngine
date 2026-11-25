@@ -21,15 +21,17 @@ struct GpuTerrainPatch {
 
 static_assert(sizeof(GpuTerrainPatch) == 48, "GpuTerrainPatch must match terrain.glsl's TerrainPatch");
 
-// One grid: its corner, spacing, points a side, where its heights start among all the grids' heights, and one over
-// its spacing as the CPU makes it (scene/terrain_heights.cpp multiplies by it), so both read the same squares.
+// One grid: its corner, spacing, points a side, where its heights start among all the grids' heights, one over its
+// spacing as the CPU makes it (scene/terrain_heights.cpp multiplies by it), so both read the same squares, and where its
+// pyramid's (lowest, highest) pairs start, after every grid's heights (TerrainHeightGrid::pyramid).
 struct GpuTerrainGrid {
     float corner[2];
     float spacing;
     std::uint32_t size;
     std::uint32_t offset;
     float inverseSpacing;
-    std::uint32_t unused[2];
+    std::uint32_t pyramidOffset;
+    std::uint32_t unused;
 };
 
 static_assert(sizeof(GpuTerrainGrid) == 32, "GpuTerrainGrid must match terrain.glsl's TerrainGrid");
@@ -45,6 +47,6 @@ static_assert(sizeof(GpuTerrainHeightsHeader) == 16 + 32 * TERRAIN_MOST_GRIDS, "
 
 GpuTerrainPatch packTerrainPatch(const TerrainPatch& patch);
 
-// The heights buffer's words: its header, then each grid's heights' bits in order. Throws std::invalid_argument for more
-// than TERRAIN_MOST_GRIDS grids.
+// The heights buffer's words: its header, then each grid's heights' bits in order, then each grid's pyramid. Throws
+// std::invalid_argument for more than TERRAIN_MOST_GRIDS grids.
 std::vector<std::uint32_t> packTerrainHeights(const TerrainHeights& heights);

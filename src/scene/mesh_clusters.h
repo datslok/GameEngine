@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/job_system.h"
+#include "math/vec2.h"
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
 #include "scene/mesh_clusters_shared.h"
@@ -25,6 +26,11 @@ struct MeshCluster {
     Vec3 coneApex{};
     float coneCutoff = 1.0f;
     Vec3 coneAxis{};
+
+    // Its vertices' box across the mesh's x and z (x, then z): where a terrain patch's cluster stands on the land, whose
+    // heights its flat grid takes in the vertex shader (scene/terrain.h).
+    Vec2 footprintLow{};
+    Vec2 footprintHigh{};
 
     std::uint32_t firstVertex = 0;
     std::uint32_t vertexCount = 0;

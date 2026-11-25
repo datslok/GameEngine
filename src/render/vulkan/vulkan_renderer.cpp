@@ -1355,6 +1355,8 @@ void VulkanRenderer::takeMeshClusterCull(const VulkanMeshClusterCulling::Collect
     compare->lianaMotions = lianaTrees->collectMotions(frameIndex);
     tables.lianas = compare->lianas;
     tables.lianaMotions = compare->lianaMotions;
+    tables.terrainPatches = compare->terrainPatches;
+    tables.terrainHeights = compare->terrainHeights.get();
 
     // The placed plants' pairs from the same frame's placed drawing, read back (the camera's commands first).
     if (compare->placed) {
@@ -2378,11 +2380,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // sway's reach, culls each by its grown sphere (meshClusterSwayingPose), and the cut's pixel error. The camera's, and the
     // sun's virtual shadow casters' (whose levels are the camera's). Lianas' clusters by their spans' bounds
     // (meshClusterLianaPose) where their anchors' motions are known: worked out this frame, or still without bones.
+    // Terrain patches' clusters by their boxes on the land (meshClusterTerrainPose) once the heights are uploaded.
     const auto clusterViewOf = [&](std::uint32_t view) {
         GpuCameraCull placed = cameraCulling->placedView(frame.frameIndex, view);
         placed.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
         placed.flags |= settings.meshClusterSwayReach ? CAMERA_CULL_SWAY_REACH : 0u;
         placed.flags |= settings.meshClusterLianaBounds && lianaAnchors > 0 && (lianasMoved || !frameBones) ? CAMERA_CULL_LIANA_BOUNDS : 0u;
+        placed.flags |= settings.meshClusterTerrainBounds && !description.terrainPatches.empty() && uploadedTerrain != nullptr ? CAMERA_CULL_TERRAIN_BOUNDS : 0u;
         placed.swayFadeEnd = settings.wind.swayFadeEnd;
         placed.levels.pixelError = settings.meshClusterErrorPixels;
         return placed;
@@ -2455,6 +2459,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         inputs.bones = cullBones;
         inputs.lianas = lianaAnchors > 0 ? lianaShapeRecords->get() : VK_NULL_HANDLE;
         inputs.lianaMotions = lianasMoved ? lianaTrees->getMotions() : VK_NULL_HANDLE;
+
+        if (uploadedTerrain != nullptr && !description.terrainPatches.empty()) {
+            inputs.terrainPatches = frames[frame.frameIndex].scene->terrainPatches.describe();
+            inputs.terrainHeights = terrainHeights.get();
+        }
+
         inputs.pairBound = meshClusterPairBound(cullFrame) + (placed ? placed->pairBound : 0);
         inputs.viewProjection = relativeViewProjection;
         inputs.origin = cameraOrigin;
@@ -2485,7 +2495,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                                       std::move(clusterCompareInstances), std::move(clusterComparePlacedParts),
                                                                       placedClusters, cullBones.stamp,
                                                                       std::vector<std::uint32_t>(twigBindings.begin(), twigBindings.end()),
-                                                                      lianaRecords(description.lianaShapes), {}};
+                                                                      lianaRecords(description.lianaShapes), {}, description.terrainPatches,
+                                                                      description.terrainHeights};
         }
     }
 
