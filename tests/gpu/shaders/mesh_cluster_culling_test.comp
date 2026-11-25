@@ -45,6 +45,35 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_MESH_CLUSTER_LIANA_POSE) {
+        // Inputs: the cluster's sphere, the liana's record (seven rows, no anchors), (the draw's liana name as bits, the
+        // view's flags), the sway, the record's bounds, the two anchors' motions. Outputs: (the pose's bound, posed), its
+        // sphere.
+        MeshCluster cluster;
+        cluster.sphere = testInput(0);
+        LianaShape shape;
+        shape.from = testInput(1);
+        shape.to = testInput(2);
+        shape.curve = testInput(3);
+        shape.firstTree = testInput(4);
+        shape.secondTree = testInput(5);
+        shape.leaves = testInput(6);
+        shape.leafLook = testInput(7);
+        shape.anchors = uvec4(0u);
+        vec4 names = testInput(8);
+        InstanceData instance;
+        instance.hanging = uvec4(0u, 0u, 0u, floatBitsToUint(names.x));
+        instance.sway = testInput(9);
+        CullRecord record;
+        record.bounds = testInput(10);
+        CameraCull view;
+        view.flags = uint(names.y);
+        MeshClusterPose pose = meshClusterLianaPose(cluster, instance, record, view, shape, testInput(11).xyz, testInput(12).xyz, meshClusterUnposed(false));
+        testOutput(0, vec4(pose.bound ? 1.0 : 0.0, pose.posed ? 1.0 : 0.0, 0.0, 0.0));
+        testOutput(1, pose.sphere);
+        return;
+    }
+
     if (function == GPU_TEST_MESH_CLUSTER_KEPT) {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the

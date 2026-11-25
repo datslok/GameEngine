@@ -113,7 +113,7 @@ After `renderer.render`, `giveBackStillDraws` returns the list. Golden captures 
 
 - `Frustum::fromClipMatrix(viewProjection, ClipDepth)` (`math/frustum`): six inward unit planes from the matrix rows; `NegativeOneToOne` for `Mat4::perspective`'s clip space, `OneToZero` for the renderer's reversed-Z matrices.
 - `intersectsSphere` and `mayIntersect` may say true for a near miss past a corner, never false for an overlap; `corners` gives the eight.
-- `boundingSphere(localBox, model)`: the box's centre through the matrix, half-diagonal times the largest axis scale. Radius below 0 = unknown, never culled.
+- `boundingSphere(localBox, model)`: the box's centre through the matrix, the radius its farthest corner placed (the turned half-extents summed with each sign; exact for uneven scale and shear, where the half-diagonal times the largest scale grew a liana's stretched template to hundreds of metres, phase 21 4c-vii). Radius below 0 = unknown, never culled.
 
 | Function | Gives |
 |---|---|

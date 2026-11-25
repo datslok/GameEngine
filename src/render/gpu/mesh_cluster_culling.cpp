@@ -344,9 +344,43 @@ MeshClusterPose meshClusterSwayingPose(const GpuMeshCluster& cluster, const GpuI
     return MeshClusterPose{.bound = false, .posed = true, .sphere = sphere};
 }
 
+/*
+* Every vertex is the span's centre line, grown, plus its anchors' blend at its share (on the segment between the span's
+* ends' blends) plus its swing (within the reach at its arm, at most the span's).
+*/
+MeshClusterPose meshClusterLianaPose(const GpuMeshCluster& cluster, const GpuInstance& instance, const GpuCullRecord& record, const GpuCameraCull& view,
+                                     const LianaShape& shape, const Vec3& firstMotion, const Vec3& secondMotion, const MeshClusterPose& pose) {
+    if ((view.flags & CAMERA_CULL_LIANA_BOUNDS) == 0u || instance.hanging[3] == 0u) {
+        return pose;
+    }
+
+    const bool ivy = lianaDrawsIvy(instance.hanging[3]);
+    const LianaSpan span = lianaClusterSpan(shape, cluster.sphere, ivy);
+    const LianaSpanBound bound = lianaSpanBound(shape, span, ivy);
+    std::array<float, 4> sphere = bound.sphere;
+
+    if (instance.sway[0] >= 0.0f) {
+        const Vec3 first = firstMotion + (secondMotion - firstMotion) * span.first;
+        const Vec3 last = firstMotion + (secondMotion - firstMotion) * span.last;
+        const Vec3 middle = (first + last) * 0.5f;
+        sphere[0] += middle.x;
+        sphere[1] += middle.y;
+        sphere[2] += middle.z;
+        sphere[3] += 0.5f * (last - first).length() + windSwingReach(bound.arm, instance.sway[3]);
+    }
+
+    // A short liana's span can outgrow its draw: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds[3] >= 0.0f && record.bounds[3] <= sphere[3]) {
+        return pose;
+    }
+
+    return MeshClusterPose{.bound = false, .posed = true, .sphere = sphere};
+}
+
 bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
                           const MeshClusterPose& pose) {
-    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
+    const bool lianaPosed = instance.hanging[3] != 0u && pose.posed;
+    return (!meshClusterShapeFixed(instance, entry) && !lianaPosed) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
 }
 
 bool meshClusterBound(const GpuMeshCluster& cluster) {
@@ -712,8 +746,21 @@ MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClu
     return meshClusterPosed(sphere, drawn.instance, drawn.instance.sway[3], Vec2{tree.lean[0], tree.lean[1]});
 }
 
+// A liana's anchors' motions from the table, still where it has none for them.
 MeshClusterPose meshClusterPoseIn(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster, const GpuCameraCull& view) {
-    return meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(tables, drawn, cluster));
+    const MeshClusterPose pose = meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(tables, drawn, cluster));
+    const std::uint32_t named = drawn.instance.hanging[3];
+
+    if (named == 0u || lianaRecordOf(named) >= tables.lianas.size()) {
+        return pose;
+    }
+
+    const std::uint32_t record = lianaRecordOf(named);
+    const auto motionOf = [&](std::uint32_t anchor) {
+        const std::array<float, 4> motion = anchor < tables.lianaMotions.size() ? tables.lianaMotions[anchor] : std::array<float, 4>{};
+        return Vec3{motion[0], motion[1], motion[2]};
+    };
+    return meshClusterLianaPose(cluster, drawn.instance, drawn.record, view, tables.lianas[record], motionOf(2 * record), motionOf(2 * record + 1), pose);
 }
 
 // Own and group spheres the far cluster's, so the cut's two tests take the same one; its counts as a mesh cluster's.

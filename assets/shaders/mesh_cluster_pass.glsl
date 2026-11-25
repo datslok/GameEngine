@@ -124,6 +124,16 @@ layout(std430, set = 0, binding = MESH_CLUSTER_FAR_BINDING) readonly buffer Twig
     TwigFarCluster twigFarClusters[];
 };
 
+// The frame's lianas' records (one unused without) and each anchor's motion this frame, two a record
+// (liana_motion.comp; one unused without): what the culling bounds a liana's clusters by (meshClusterLianaPose).
+layout(std430, set = 0, binding = MESH_CLUSTER_LIANA_BINDING) readonly buffer LianaRecords {
+    LianaShape lianaRecords[];
+};
+
+layout(std430, set = 0, binding = MESH_CLUSTER_LIANA_BINDING + 1) readonly buffer LianaMotions {
+    vec4 lianaMotions[];
+};
+
 // The list this dispatch makes (MESH_CLUSTER_EARLY or MESH_CLUSTER_LATE): its totals, items and task commands; and the
 // frame's bones stamp (GpuWindField::flags[1]: 0 when the bones pass did not run). A pass over one style's run of a
 // made list (virtual_shadow_expand.comp) defines MESH_CLUSTER_PASS_STYLE and takes the style too.
@@ -272,9 +282,24 @@ MeshClusterPose meshClusterPoseAt(MeshClusterDrawn drawn, MeshCluster cluster) {
     return meshClusterPosed(meshClusterBonesSphere(cluster, tree), drawn.instance.model, drawn.instance.sway.w, tree.leans.xy);
 }
 
-// How a pair's cluster stands in the view (meshClusterPoseIn): meshClusterPoseAt's, or posed by its sway's reach.
+// An anchor's motion this frame, still past the table.
+vec3 meshClusterLianaMotion(uint anchor) {
+    return anchor < uint(lianaMotions.length()) ? lianaMotions[anchor].xyz : vec3(0.0);
+}
+
+// How a pair's cluster stands in the view (meshClusterPoseIn): meshClusterPoseAt's, or posed by its sway's reach, or a
+// liana's by its span's bound (its record and anchors from the tables; a record past them keeps the pose).
 MeshClusterPose meshClusterPoseIn(MeshClusterDrawn drawn, MeshCluster cluster, CameraCull view) {
-    return meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(drawn, cluster));
+    MeshClusterPose pose = meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(drawn, cluster));
+    uint named = drawn.instance.hanging.w;
+    uint record = (named & ~LIANA_IVY_BIT) - 1u;
+
+    if (named == 0u || record >= uint(lianaRecords.length())) {
+        return pose;
+    }
+
+    return meshClusterLianaPose(cluster, drawn.instance, drawn.record, view, lianaRecords[record], meshClusterLianaMotion(2u * record),
+                                meshClusterLianaMotion(2u * record + 1u), pose);
 }
 
 // The first of the list's totals.

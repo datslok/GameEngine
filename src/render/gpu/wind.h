@@ -290,5 +290,13 @@ Vec3 windChainShares(float swingLength, const Vec3& bands);
 */
 Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, const Vec2& spring, float fade, const Vec2& flutterRate, float seconds);
 
+/*
+* The farthest windSwingOffset moves a hanging vertex of arm at most arm, its leaves fluttering by flutter, at any
+* spring, swing, fade and time (metres; ROADMAP phase 21 4c-vii). The lean lambda is softly held under WIND_MOST_LEAN;
+* swung out by lambda a and risen to keep its distance, the vertex moves a sqrt(2 - 2 sqrt(1 - lambda^2)), 0.52 a at
+* 0.5; its flutter windFlutterReach's at that lean.
+*/
+float windSwingReach(float arm, float flutter);
+
 // A hanging vertex's whole motion: its anchors' motions blended by its share along, plus its swing.
 Vec3 windHangingOffset(const Vec3& first, const Vec3& second, float along, const Vec3& swing);

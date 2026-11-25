@@ -2,7 +2,8 @@
 #extension GL_GOOGLE_include_directive : require
 
 // Runs liana.glsl's functions on the cases liana_gpu_test.cpp sends: a liana's record (eight inputs), then share, u
-// round, cos and sin round (an ivy card: card, across, up), then the eye (an ivy card's).
+// round, cos and sin round (an ivy card: card, across, up; a span: a template cluster's sphere), then the eye (an ivy
+// card's; a span's x 1 for the ivy).
 #include "gpu_test.glsl"
 #include "liana.glsl"
 
@@ -42,5 +43,12 @@ void main() {
         testOutput(2, vec4(leaf.normal, leaf.along));
         testOutput(3, vec4(leaf.tangent, leaf.arm));
         testOutput(4, vec4(leaf.uv, lianaLeafPlace(shape, place.x, 0.25), 0.0));
+    } else if (function == GPU_TEST_LIANA_SPAN) {
+        bool ivy = eye.x != 0.0;
+        LianaSpan span = lianaClusterSpan(shape, place, ivy);
+        LianaSpanBound bound = lianaSpanBound(shape, span, ivy);
+        testOutput(0, vec4(span.first, span.last, float(lianaLeafTemplateCardsOf(shape)), lianaLeafReach(shape)));
+        testOutput(1, bound.sphere);
+        testOutput(2, vec4(bound.arm, 0.0, 0.0, 0.0));
     }
 }

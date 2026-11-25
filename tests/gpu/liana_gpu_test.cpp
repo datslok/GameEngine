@@ -168,8 +168,61 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Every liana with ivy, template clusters' spheres along the tube (rings' slabs, one off its axis, one wider than the
+    * tube) and along the ivy's cards: the span, the bound and the ivy's numbers alike, shares and lengths to rounding.
+    */
+    void checkSpans(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        struct SpanCase {
+            LianaShape shape;
+            float sphere[4] = {};
+            bool ivy = false;
+        };
+
+        std::vector<GpuVec4> inputs;
+        std::vector<SpanCase> cases;
+
+        for (LianaShape shape : lianas()) {
+            setLianaLeaves(shape, LianaLeaves{.firstCrownMetres = 5.0f, .lastCrownMetres = 3.0f, .spacing = 0.35f, .sparseSpacing = 1.2f, .size = 0.3f,
+                                              .thinFrom = 80.0f, .goneBy = 150.0f, .seed = 0x2468aceu});
+
+            for (const auto& [sphere, ivy] : {std::pair{GpuVec4{4.4f, 0.25f, -0.4f, 4.7f}, false}, std::pair{GpuVec4{29.0f, 0.0f, 0.0f, 5.1f}, false},
+                                              std::pair{GpuVec4{60.0f, 0.0f, 0.0f, 4.1f}, false}, std::pair{GpuVec4{20.0f, 0.8f, 0.3f, 6.0f}, false},
+                                              std::pair{GpuVec4{12.0f, 1.5f, 0.0f, 0.4f}, false}, std::pair{GpuVec4{0.12f, 0.0f, 0.0f, 1.419f}, true},
+                                              std::pair{GpuVec4{0.373f, 0.0f, 0.0f, 1.419f}, true}, std::pair{GpuVec4{0.881f, 0.1f, 0.0f, 1.5f}, true}}) {
+                appendRecord(inputs, shape);
+                inputs.push_back(sphere);
+                inputs.push_back(gpuVec4(ivy ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f));
+                cases.push_back(SpanCase{shape, {sphere[0], sphere[1], sphere[2], sphere[3]}, ivy});
+            }
+        }
+
+        const FloatTolerance place{.absolute = 1e-4f, .relative = 1e-5f};
+        const std::vector<GpuVec4> spans = runner.run(shader, GPU_TEST_LIANA_SPAN, inputs, 10, 3);
+
+        for (std::size_t index = 0; index < cases.size(); ++index) {
+            const SpanCase& spanCase = cases[index];
+            const LianaSpan span = lianaClusterSpan(spanCase.shape, spanCase.sphere, spanCase.ivy);
+            const LianaSpanBound bound = lianaSpanBound(spanCase.shape, span, spanCase.ivy);
+            const GpuVec4* gpu = &spans[index * 3];
+            report.check("lianaClusterSpan first", place, span.first, gpu[0][0]);
+            report.check("lianaClusterSpan last", place, span.last, gpu[0][1]);
+            report.check("lianaLeafTemplateCardsOf", exactTolerance, static_cast<float>(lianaLeafTemplateCardsOf(spanCase.shape)), gpu[0][2]);
+            report.check("lianaLeafReach", place, lianaLeafReach(spanCase.shape), gpu[0][3]);
+
+            for (int axis = 0; axis < 4; ++axis) {
+                report.check("lianaSpanBound sphere", place, bound.sphere[static_cast<std::size_t>(axis)], gpu[1][axis]);
+            }
+
+            report.check("lianaSpanBound arm", place, bound.arm, gpu[2][0]);
+        }
+    }
+}
+
 void gpuTestLiana(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("liana.glsl");
     checkLianas(runner, report);
     checkLeaves(runner, report);
+    checkSpans(runner, report);
 }

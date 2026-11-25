@@ -188,6 +188,13 @@ vec3 windSwingOffset(float arm, vec3 place, float swing, float flutter, vec2 spr
     return vec3(outwards.x, rise, outwards.y) + windFlutterOffset(place, flutter * length(lean), flutterRate, seconds);
 }
 
+// The farthest windSwingOffset moves a hanging vertex of arm at most arm, at any spring, fade and time (windSwingReach).
+float windSwingReach(float arm, float flutter) {
+    float lean = min(float(WIND_MOST_LEAN), 1.0);
+    float swung = max(arm, 0.0) * sqrt(max(2.0 - 2.0 * sqrt(1.0 - lean * lean), 0.0));
+    return swung + windFlutterReach(flutter, vec2(lean, 0.0));
+}
+
 // A hanging chain of a length's slowest swing, Hz (windChainHertz).
 float windChainHertz(float swingLength) {
     return sqrt(float(WIND_GRAVITY) / max(swingLength, float(WIND_SHORTEST_SWING))) / float(WIND_CHAIN_PERIOD);

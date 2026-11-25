@@ -107,13 +107,14 @@ LianaVertex lianaVertex(const LianaShape& shape, float share, float around, floa
 Vec3 lianaRun(const LianaShape& shape);
 
 /*
-* The template tube: rings + 1 rings of sides + 1 vertices (the seam's twice), each vertex's position (share, cos, sin)
-* and its u, triangles facing out of the tube in its own frame (x along, y and z round): the tube lianaVertex bends.
+* The template tube: rings + 1 rings of sides + 1 vertices (the seam's twice), each vertex's position (share times
+* LIANA_TUBE_TEMPLATE_LENGTH, cos, sin) and its u, triangles facing out of the tube in its own frame (x along, y and z
+* round): the tube lianaVertex bends.
 */
 IndexedMesh lianaTemplateMesh(int rings, int sides);
 
 /*
-* Where a liana's template stands, as an entity's Transform: the template's box ([0, 1] along, [-1, 1] round) mapped
+* Where a liana's template stands, as an entity's Transform: the template's box ([0, LIANA_TUBE_TEMPLATE_LENGTH] along, [-1, 1] round) mapped
 * onto a box holding the whole liana and its tube, turned to the run, so its bounds, culling and level are its own.
 */
 Transform lianaPose(const LianaShape& shape);
@@ -186,7 +187,45 @@ IndexedMesh lianaLeafTemplateMesh(int cards);
 
 // The ivy templates' sizes, and the smallest holding count cards (the largest when none does).
 inline constexpr std::array<int, 5> lianaLeafTemplateCards{16, 32, 64, 128, 256};
+static_assert(lianaLeafTemplateCards.front() == LIANA_LEAF_FEWEST_CARDS && lianaLeafTemplateCards.back() == LIANA_LEAF_MOST_CARDS,
+              "liana.glsl's lianaLeafTemplateCardsOf walks the same sizes");
 std::size_t lianaLeafTemplate(float count);
+
+// The cards of the ivy template a liana's draw uses: the smallest holding its leaves (lianaLeafTemplateCardsOf in liana.glsl).
+int lianaLeafTemplateCardsOf(const LianaShape& shape);
+
+// The farthest a grown ivy card's corner reaches from the centre line: the tube's radius out to its stem, then its
+// grown length (sqrt 2 leaves) along and half its width across (lianaLeafPose's reach, lianaLeafReach in liana.glsl).
+float lianaLeafReach(const LianaShape& shape);
+
+/*
+* The shares along a liana that a cluster of its draw's template holds (ROADMAP phase 21 4c-vii; docs/research/
+* VIRTUALSHADOWMAPS.md, Lianas' bounds; lianaClusterSpan in liana.glsl). A template vertex's x is its share along (the
+* ivy's, its card over the template's last card), and every vertex lies LIANA_TUBE_TEMPLATE_RADIUS from the x axis (the
+* ivy's corners LIANA_IVY_TEMPLATE_RADIUS), so a vertex in the cluster's sphere (c, r) has its x within
+* sqrt(r^2 - (radius - |c.yz|)^2) of c.x (within r when the centre is that far out). The ivy's span runs from its first
+* card's stem at its least stray to its last's at its most, lianaLeafPlace rising with both.
+*/
+struct LianaSpan {
+    float first = 0.0f;
+    float last = 0.0f;
+};
+
+LianaSpan lianaClusterSpan(const LianaShape& shape, const float sphere[4], bool ivy);
+
+/*
+* A span's bound before its sway (lianaSpanBound in liana.glsl): a sphere in the world holding every vertex the span's
+* centre line carries, and the most any of its centre points hangs below the chord (its arm). An arc of length l has
+* every point within l / 2 of its ends' midpoint (the ellipsoid of foci its ends holds it), grown by the tube's radius
+* (the ivy's lianaLeafReach) and LIANA_SPAN_SLACK of the length; an arm changes no faster than the point moves along
+* the line, so it is at most the ends' larger arm plus l / 2.
+*/
+struct LianaSpanBound {
+    std::array<float, 4> sphere{};
+    float arm = 0.0f;
+};
+
+LianaSpanBound lianaSpanBound(const LianaShape& shape, const LianaSpan& span, bool ivy);
 
 // Where a liana's ivy template stands: lianaPose's box grown by the farthest a grown card reaches out from the tube.
 Transform lianaLeafPose(const LianaShape& shape);
@@ -204,3 +243,6 @@ struct LianaShapes {
     std::vector<std::shared_ptr<const std::vector<LianaShape>>> slots;
     std::uint32_t perSlot = 0;
 };
+
+// The records as the GPU holds them (VulkanRenderer's liana records): slot by slot, perSlot a slot, unused ones zero.
+std::vector<LianaShape> lianaRecords(const LianaShapes& shapes);

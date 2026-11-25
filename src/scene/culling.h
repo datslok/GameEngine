@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <vector>
 
-// The sphere around a mesh's bounding box, placed and scaled by its model matrix.
+// The sphere around a mesh's bounding box, placed and scaled by its model matrix: its farthest corner's distance.
 BoundingSphere boundingSphere(const Aabb& localBounds, const Mat4& model);
 
 // Give each draw the sphere around its mesh, from bounds indexed like MeshHandle. Draws whose mesh has no known bounds keep

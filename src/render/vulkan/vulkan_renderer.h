@@ -628,6 +628,8 @@ private:
         bool placed = false;
         std::uint32_t boneStamp = 0;
         std::vector<std::uint32_t> twigBindings;
+        std::vector<LianaShape> lianas;                   // the frame's lianas, slot by slot (lianaRecords)
+        std::vector<std::array<float, 4>> lianaMotions; // their anchors' motions, read back when collected
     };
 
     // The trees and poses of the frame being collected, read back for its cluster-compare (takeBonePoses keeps them).

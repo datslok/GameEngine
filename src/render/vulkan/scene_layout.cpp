@@ -61,19 +61,19 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex | compute},    // the wind's springs (compute for the bones pass)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, vertex | compute},    // and last frame's (the velocity pass, the bones pass)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the hanging vertices' anchors and arms
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the lianas' records (scene/liana_shape.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // the lianas' records (scene/liana_shape.h; compute for their anchors' motions)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the thinned meshes' cards
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the planting cells' slots' plants (render/gpu/placed_drawing.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // the planting cells' slots' plants (render/gpu/placed_drawing.h; the lianas' motions)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each placed part's instance in its plant's frame
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the camera's placed entries
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the camera's twig entries (render/gpu/twig_records.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the twigs
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // every pool vertex's binding to its bones (render/gpu/bone_records.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each twig's binding
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the posed trees (render/gpu/bone_poses.h)
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each plant's tree this frame
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the bones' poses
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // each liana anchor's tree's plant (render/gpu/liana_trees.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // the posed trees (render/gpu/bone_poses.h; the lianas' motions)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // each plant's tree this frame (the lianas' motions)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // the bones' poses (the lianas' motions)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | compute},            // each liana anchor's tree's plant (render/gpu/liana_trees.h; their motions)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaf clusters (render/gpu/twig_records.h)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // the far leaves' cells' shapes

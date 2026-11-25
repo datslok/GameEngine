@@ -13,6 +13,7 @@
 #include "render/gpu/placed_drawing.h"
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/twig_records.h"
+#include "scene/liana_shape.h"
 #include "scene/mesh_clusters.h"
 #include "scene/sway_bones.h"
 
@@ -189,8 +190,19 @@ float meshClusterSwayReach(const GpuMeshCluster& cluster, const GpuInstance& ins
 MeshClusterPose meshClusterSwayingPose(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
                                        const GpuCameraCull& view, const MeshClusterPose& pose);
 
-// Whether the view keeps every cluster of the draw: its shape not its mesh's, or swaying per vertex, not bound to bones
-// and not posed by its sway's reach (meshClusterSwayingPose).
+/*
+* Where the view bounds lianas' clusters (CAMERA_CULL_LIANA_BOUNDS, RenderSettings::meshClusterLianaBounds), a cluster of
+* a liana's draw (its instance's hanging.w names shape; ROADMAP phase 21 4c-vii): posed unbound on its span's bound
+* (lianaClusterSpan, lianaSpanBound) so the view culls it alone rather than keeping the draw whole. While the draw
+* sways, its anchors' motions this frame (firstMotion, secondMotion: lianaAnchorMotion's) blended over the span (a
+* segment, in the sphere at its middle half its length) and its swing's reach at the span's arm (windSwingReach of its
+* flutter) added. Else, or when the bound is no smaller than the draw's bounds, the pose given.
+*/
+MeshClusterPose meshClusterLianaPose(const GpuMeshCluster& cluster, const GpuInstance& instance, const GpuCullRecord& record, const GpuCameraCull& view,
+                                     const LianaShape& shape, const Vec3& firstMotion, const Vec3& secondMotion, const MeshClusterPose& pose);
+
+// Whether the view keeps every cluster of the draw: its shape not its mesh's (a liana's unless posed by its span,
+// meshClusterLianaPose), or swaying per vertex, not bound to bones and not posed by its sway's reach (meshClusterSwayingPose).
 bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
                           const MeshClusterPose& pose);
 
@@ -386,6 +398,8 @@ struct MeshClusterTables {
     MeshClusterPlacedTables placed{};
     MeshClusterTwigTables twigs{};
     BoneCullTables bones{};
+    std::span<const LianaShape> lianas{};                 // the frame's lianas' records (FrameDescription::lianaShapes, in order)
+    std::span<const std::array<float, 4>> lianaMotions{}; // each anchor's motion this frame, two a record (none: still)
 };
 
 /*

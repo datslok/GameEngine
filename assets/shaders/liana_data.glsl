@@ -36,7 +36,8 @@ struct LianaDrawnVertex {
 
 /*
 * A draw's template vertex placed from the liana it names (the instance's hanging.w: one past its record, with
-* LIANA_IVY_BIT for its ivy): the tube's (position: share along, cos and sin round; u round) bent onto its curve, or an
+* LIANA_IVY_BIT for its ivy): the tube's (position: share along times LIANA_TUBE_TEMPLATE_LENGTH, cos and sin round; u
+* round) bent onto its curve, or an
 * ivy card's corner (lianaLeafTemplateVertex) grown for its distance from eye, the camera in every view so all agree.
 */
 LianaDrawnVertex lianaDrawnVertex(uint named, vec3 position, vec2 uv, vec3 eye) {
@@ -56,7 +57,7 @@ LianaDrawnVertex lianaDrawnVertex(uint named, vec3 position, vec2 uv, vec3 eye) 
         return drawn;
     }
 
-    LianaVertex tube = lianaVertex(drawn.shape, position.x, uv.x, position.y, position.z);
+    LianaVertex tube = lianaVertex(drawn.shape, position.x * (1.0 / float(LIANA_TUBE_TEMPLATE_LENGTH)), uv.x, position.y, position.z);
     drawn.offset = tube.offset;
     drawn.swaysAt = tube.offset;
     drawn.normal = tube.normal;

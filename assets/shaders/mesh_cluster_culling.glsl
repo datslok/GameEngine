@@ -1,7 +1,7 @@
 // Mesh clusters culled a view, included with #include "mesh_cluster_culling.glsl": mirrors render/gpu/mesh_cluster_culling.h
 // (meshClusterLargestScale, meshClusterPlacedSphere, meshClusterWorldSphere, meshClusterErrorPixels, meshClusterInCut,
 // meshClusterEyeInMesh, meshClusterFacesAway, meshClusterShapeFixed, meshClusterSways, meshClusterPosed, meshClusterSwayReach,
-// meshClusterSwayingPose, meshClusterSeenWhole,
+// meshClusterSwayingPose, meshClusterLianaPose, meshClusterSeenWhole,
 // meshClusterBound, meshClusterCullSphere, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterEmptyBox,
 // meshClusterBoxTake, farLeafScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure functions: the pyramid's and
 // the bones' reads are the passes' (mesh_cluster_pyramid.glsl, meshClusterBoxHidden; bone_cull_data.glsl).
@@ -17,8 +17,11 @@
 // pyramidCell, fartherDepth, ndcToPixel.
 #include "screen_reflections.glsl"
 
-// windFlutterReach.
+// windFlutterReach, windSwingReach.
 #include "wind.glsl"
+
+// A liana's record and its clusters' spans (lianaClusterSpan, lianaSpanBound).
+#include "liana.glsl"
 
 // A cluster of a mesh in the pools (scene/mesh_clusters.h). Must match GpuMeshCluster.
 struct MeshCluster {
@@ -184,10 +187,40 @@ MeshClusterPose meshClusterSwayingPose(MeshCluster cluster, InstanceData instanc
     return MeshClusterPose(false, true, sphere);
 }
 
-// Whether the view keeps every cluster of the draw (meshClusterSeenWhole): its shape not its mesh's, or swaying unbound
-// and not posed by its sway's reach.
+// Where the view bounds lianas' clusters, a liana's cluster posed unbound on its span's bound, its anchors' motions
+// blended over the span and its swing's reach added while it sways; else, or when no smaller than the draw's bounds, the
+// pose given (meshClusterLianaPose).
+MeshClusterPose meshClusterLianaPose(MeshCluster cluster, InstanceData instance, CullRecord record, CameraCull view, LianaShape shape, vec3 firstMotion,
+                                     vec3 secondMotion, MeshClusterPose pose) {
+    if ((view.flags & CAMERA_CULL_LIANA_BOUNDS) == 0u || instance.hanging.w == 0u) {
+        return pose;
+    }
+
+    bool ivy = (instance.hanging.w & LIANA_IVY_BIT) != 0u;
+    LianaSpan span = lianaClusterSpan(shape, cluster.sphere, ivy);
+    LianaSpanBound bound = lianaSpanBound(shape, span, ivy);
+    vec4 sphere = bound.sphere;
+
+    if (instance.sway.x >= 0.0) {
+        vec3 first = mix(firstMotion, secondMotion, span.first);
+        vec3 last = mix(firstMotion, secondMotion, span.last);
+        sphere.xyz += (first + last) * 0.5;
+        sphere.w += 0.5 * length(last - first) + windSwingReach(bound.arm, instance.sway.w);
+    }
+
+    // A short liana's span can outgrow its draw: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds.w >= 0.0 && record.bounds.w <= sphere.w) {
+        return pose;
+    }
+
+    return MeshClusterPose(false, true, sphere);
+}
+
+// Whether the view keeps every cluster of the draw (meshClusterSeenWhole): its shape not its mesh's (a liana's unless
+// posed by its span), or swaying unbound and not posed by its sway's reach.
 bool meshClusterSeenWhole(InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
-    return !meshClusterShapeFixed(instance, entry) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
+    bool lianaPosed = instance.hanging.w != 0u && pose.posed;
+    return (!meshClusterShapeFixed(instance, entry) && !lianaPosed) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
 }
 
 // Whether a cluster's vertices are bound to bones: its first slot not empty (meshClusterBound).

@@ -108,6 +108,11 @@ struct RenderSettings {
     // every cluster of such a draw near the camera, for comparing.
     bool meshClusterSwayReach = true;
 
+    // Lianas' mesh clusters culled one by one by the bounds of their spans as bent, their anchors moved and their swing's
+    // reach (meshClusterLianaPose, ROADMAP phase 21 4c-vii), in the camera's and the sun's virtual shadow views; off keeps
+    // every cluster of a liana's draw, for comparing.
+    bool meshClusterLianaBounds = true;
+
     // With mesh clusters drawn and the depth prepass on: two-pass occlusion (docs/research/OCCLUSION.md), the early list
     // tested against last frame's depth, the late list against this frame's, F4's LATE and HIDDEN.
     bool meshClusterOcclusion = true;

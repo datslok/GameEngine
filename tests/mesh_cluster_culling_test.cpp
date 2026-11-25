@@ -586,6 +586,147 @@ namespace {
         assert(meshClusterSwayReach(packed.clusters.front(), stillSway) == 0.0f);
     }
 
+    // A liana 32 m long sagging between crowns 24 m apart, the forest's ivy on it, and its draw (record 0's tube, or ivy).
+    LianaShape testLiana(const Vec3& from) {
+        const LianaTree tree{.foot = Vec3{0.0f, 0.0f, 0.0f}};
+        LianaShape shape = makeLianaShape(from, from + Vec3{24.0f, 1.0f, -6.0f}, 32.0f, 0.04f, 2.0f, tree, &tree);
+        setLianaLeaves(shape, LianaLeaves{.firstCrownMetres = 5.0f, .lastCrownMetres = 4.0f, .spacing = 0.35f, .sparseSpacing = 1.2f, .size = 0.3f,
+                                          .thinFrom = 80.0f, .goneBy = 150.0f, .seed = 0x1234u});
+        return shape;
+    }
+
+    GpuInstance lianaInstance(const LianaShape& shape, bool ivy) {
+        GpuInstance instance = placedInstance((ivy ? lianaLeafPose(shape) : lianaPose(shape)).getMatrix());
+        instance.hanging[3] = ivy ? 1u | LIANA_IVY_BIT : 1u;
+        const float sway[4] = {static_cast<float>(WIND_CATEGORY_HANGING), 1.0f, 1.0f, 0.15f};
+        std::copy(std::begin(sway), std::end(sway), std::begin(instance.sway));
+        return instance;
+    }
+
+    /*
+    * A liana's clusters, where the view bounds them (CAMERA_CULL_LIANA_BOUNDS, ROADMAP phase 21 4c-vii): each posed
+    * unbound, not kept whole, on a sphere holding every vertex of its tube or ivy as drawn: bent onto the catenary, its
+    * anchors moved (any motions) and blended by its share, swung by any spring, swing, fade and time, flutter included;
+    * a tube cluster's sphere under 0.3 of the liana's length (the worst lean's swing at its middle most of it).
+    */
+    void testTheLianaBoundsHoldEveryVertex() {
+        std::mt19937 random(23);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        GpuCameraCull view = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, true, 1000.0f);
+        view.flags |= CAMERA_CULL_LIANA_BOUNDS;
+        const LianaShape shape = testLiana(Vec3{-10.0f, 22.0f, 4.0f});
+        const IndexedMesh tube = lianaTemplateMesh(64, 6);
+        const IndexedMesh cards = lianaLeafTemplateMesh(lianaLeafTemplateCardsOf(shape));
+        const Vec2 flutterRate{4.0f, 1.0f};
+        const Vec3 eye{0.0f, 2.0f, 0.0f};
+        const Vec3 from{shape.from[0], shape.from[1], shape.from[2]};
+        std::size_t tested = 0;
+
+        for (const bool ivy : {false, true}) {
+            const IndexedMesh& mesh = ivy ? cards : tube;
+            const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(mesh, ClusterLevels::One), 0, 0, 0);
+            const GpuInstance instance = lianaInstance(shape, ivy);
+            const GpuCullRecord record = stillRecord(from, 1000.0f);
+
+            for (int round = 0; round < 6; ++round) {
+                const Vec3 first{(unit(random) - 0.5f) * 0.6f, (unit(random) - 0.5f) * 0.2f, (unit(random) - 0.5f) * 0.6f};
+                const Vec3 second = round == 0 ? Vec3{} : Vec3{(unit(random) - 0.5f) * 0.6f, 0.0f, (unit(random) - 0.5f) * 0.6f};
+
+                for (const GpuMeshCluster& cluster : packed.clusters) {
+                    const MeshClusterPose pose = meshClusterLianaPose(cluster, instance, record, view, shape, first, second, MeshClusterPose{});
+                    assert(pose.posed && !pose.bound && !meshClusterSeenWhole(instance, 0u, record, view, pose));
+                    const Vec3 centre{pose.sphere[0], pose.sphere[1], pose.sphere[2]};
+
+                    if (!ivy) {
+                        assert(pose.sphere[3] < 0.3f * shape.to[3]);
+                    }
+
+                    for (std::uint32_t corner = 0; corner < (cluster.counts & 0xFFu); ++corner) {
+                        const MeshVertex& vertex = mesh.vertices[packed.vertices[cluster.firstVertex + corner] - cluster.meshFirstVertex];
+                        const float card = std::floor(vertex.uv.x * 0.5f);
+                        const LianaLeafVertex leaf = lianaLeafVertex(shape, card, vertex.uv.x - 2.0f * card, vertex.uv.y, eye);
+                        const LianaVertex bent = lianaVertex(shape, vertex.position.x / static_cast<float>(LIANA_TUBE_TEMPLATE_LENGTH), vertex.uv.x,
+                                                             vertex.position.y, vertex.position.z);
+                        const Vec3 placed = from + (ivy ? leaf.offset : bent.offset);
+                        const Vec3 swaysAt = from + (ivy ? leaf.stem : bent.offset);
+                        const float along = ivy ? leaf.along : bent.along;
+                        const float arm = ivy ? leaf.arm : bent.arm;
+
+                        for (int sample = 0; sample < 3; ++sample) {
+                            const Vec2 spring{(unit(random) - 0.5f) * 20.0f, (unit(random) - 0.5f) * 20.0f};
+                            const float fade = sample == 0 ? 1.0f : unit(random);
+                            const Vec3 swing = windSwingOffset(arm, swaysAt, 0.5f + 3.0f * unit(random), instance.sway[3], spring, fade, flutterRate, 20.0f * unit(random));
+                            const Vec3 drawn = placed + windHangingOffset(first, second, along, swing);
+                            assert((drawn - centre).length() <= pose.sphere[3] * (1.0f + 1e-5f) + 1e-4f);
+                            ++tested;
+                        }
+                    }
+                }
+            }
+        }
+
+        assert(tested > 1000);
+    }
+
+    /*
+    * The liana bounds cull a liana's clusters one by one: one behind the eye is hidden, where without them its draw is
+    * kept whole, as it is when its bounds are no larger than a cluster's. Other draws keep their pose; meshClusterPoseIn
+    * takes a pair's liana and anchors from the tables, and leaves a draw naming a record past them as it was.
+    */
+    void testTheLianaBoundsCullEachCluster() {
+        const GpuCameraCull without = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, true, 1000.0f);
+        GpuCameraCull view = without;
+        view.flags |= CAMERA_CULL_LIANA_BOUNDS;
+        const LianaShape shape = testLiana(Vec3{-60.0f, 20.0f, 0.0f});
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(lianaTemplateMesh(64, 6), ClusterLevels::One), 0, 0, 0);
+        const GpuInstance instance = lianaInstance(shape, false);
+        const GpuCullRecord record = stillRecord(Vec3{shape.from[0] + 12.0f, shape.from[1], shape.from[2]}, 20.0f);
+        const std::vector<LianaShape> lianas{shape};
+        const std::vector<std::array<float, 4>> motions{{0.1f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.2f, 0.0f}};
+        GpuInstance plain = instance;
+        plain.hanging[3] = 0u;
+
+        for (const GpuMeshCluster& cluster : packed.clusters) {
+            const MeshClusterPose pose = meshClusterLianaPose(cluster, instance, record, view, shape, Vec3{}, Vec3{}, MeshClusterPose{});
+            assert(!meshClusterKept(cluster, instance, 0u, record, view, pose));
+            const MeshClusterPose unbounded = meshClusterLianaPose(cluster, instance, record, without, shape, Vec3{}, Vec3{}, MeshClusterPose{});
+            assert(!unbounded.posed && meshClusterKept(cluster, instance, 0u, record, without, unbounded));
+
+            GpuCullRecord tight = record;
+            tight.bounds[3] = pose.sphere[3];
+            assert(!meshClusterLianaPose(cluster, instance, tight, view, shape, Vec3{}, Vec3{}, MeshClusterPose{}).posed);
+            assert(!meshClusterLianaPose(cluster, plain, record, view, shape, Vec3{}, Vec3{}, MeshClusterPose{}).posed);
+
+            MeshClusterDrawn drawn;
+            drawn.instance = instance;
+            drawn.record = record;
+            MeshClusterTables tables;
+            tables.lianas = lianas;
+            tables.lianaMotions = motions;
+            const MeshClusterPose expected =
+                meshClusterLianaPose(cluster, instance, record, view, shape, Vec3{0.1f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.2f}, MeshClusterPose{});
+            assert(meshClusterPoseIn(tables, drawn, cluster, view).sphere == expected.sphere);
+            drawn.instance.hanging[3] = 2u;
+            assert(!meshClusterPoseIn(tables, drawn, cluster, view).posed);
+
+            // Swaying, the still bound moved by the anchors' blend at the span's middle and grown by half its spread
+            // and the swing's reach at the span's arm.
+            const Vec3 firstMotion{1.5f, -0.5f, 2.0f};
+            const Vec3 secondMotion{-2.0f, 0.0f, 0.5f};
+            const LianaSpan span = lianaClusterSpan(shape, cluster.sphere, false);
+            const LianaSpanBound bound = lianaSpanBound(shape, span, false);
+            const Vec3 atFirst = firstMotion + (secondMotion - firstMotion) * span.first;
+            const Vec3 atLast = firstMotion + (secondMotion - firstMotion) * span.last;
+            const Vec3 middle = (atFirst + atLast) * 0.5f;
+            GpuCullRecord loose = record;
+            loose.bounds[3] = 1000.0f;
+            const MeshClusterPose moved = meshClusterLianaPose(cluster, instance, loose, view, shape, firstMotion, secondMotion, MeshClusterPose{});
+            const float radius = bound.sphere[3] + 0.5f * (atLast - atFirst).length() + windSwingReach(bound.arm, instance.sway[3]);
+            assert(moved.posed && std::abs(moved.sphere[3] - radius) < 1e-4f);
+            assert((Vec3{moved.sphere[0], moved.sphere[1], moved.sphere[2]} - Vec3{bound.sphere[0], bound.sphere[1], bound.sphere[2]} - middle).length() < 1e-4f);
+        }
+    }
+
     // The clusters the cut draws, by number.
     std::vector<std::uint32_t> cutClusters(const PackedMeshClusters& packed, const GpuInstance& instance, const GpuCameraCull& view) {
         std::vector<std::uint32_t> drawn;
@@ -1579,6 +1720,8 @@ void testMeshClusterCulling() {
     testADrawNotRigidKeepsEverything();
     testTheSwayReachHoldsEveryVertex();
     testTheSwayReachCullsEachCluster();
+    testTheLianaBoundsHoldEveryVertex();
+    testTheLianaBoundsCullEachCluster();
     testAPosedClusterHidesNothing();
     testThePoseOfAPair();
     testPackingKeepsTheCut();

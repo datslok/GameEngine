@@ -21,12 +21,13 @@ namespace {
     // The dispatch's three words: x the blocks (written by the count pass), y and z 1.
     constexpr std::uint32_t dispatchWords = 3;
 
-    // The shared storage buffers (mesh_cluster_pass.glsl's: the camera's tables, then the placed plants').
+    // The shared storage buffers (mesh_cluster_pass.glsl's: the camera's tables, the placed plants', the twigs', the bones',
+    // the lianas').
     constexpr std::uint32_t sharedBuffers = MESH_CLUSTER_PASS_BINDINGS;
 
-    // The unused record bound for each placed buffer without placed plants: as large as the largest record read.
+    // The unused record bound for each placed (or liana) buffer without its records: as large as the largest record read.
     constexpr VkDeviceSize noPlacedBytes = std::max({sizeof(GpuDrawCommand), sizeof(GpuPlacedGroup), sizeof(GpuPlacedEntry), sizeof(GpuInstance),
-                                                     sizeof(GpuPlacedPart), sizeof(GpuPlacedPlant)});
+                                                     sizeof(GpuPlacedPart), sizeof(GpuPlacedPlant), sizeof(LianaShape)});
 
     // Every pass pushes the list it makes and the frame's bones stamp (mesh_cluster_pass.glsl's MeshClusterList); those
     // testing pairs read the two pyramids after their storage buffers.
@@ -168,6 +169,7 @@ std::vector<ComputeBinding> VulkanMeshClusterCulling::passBindings(const PerFram
         placedOr(frame.inputs.twigs.regions),        placedOr(frame.inputs.twigs.entries),       placedOr(frame.inputs.twigs.twigs),
         placedOr(frame.inputs.bones.plantTrees),     placedOr(frame.inputs.bones.trees),         placedOr(frame.inputs.bones.poses),
         placedOr(frame.inputs.bones.twigBindings),     placedOr(frame.inputs.twigs.farClusters),
+        placedOr(frame.inputs.lianas),               placedOr(frame.inputs.lianaMotions),
     };
     all[7].buffer = frame.inputs.instances;
 

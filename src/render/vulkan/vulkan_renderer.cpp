@@ -171,7 +171,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     placedDrawing = std::make_unique<VulkanPlacedDrawing>(device, framesInFlight);
     twigDrawing = std::make_unique<VulkanTwigDrawing>(device, framesInFlight);
     bonePosing = std::make_unique<VulkanBonePosing>(device, bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), framesInFlight);
-    lianaTrees = std::make_unique<VulkanLianaTrees>(device, framesInFlight);
+    lianaTrees = std::make_unique<VulkanLianaTrees>(device, bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), framesInFlight);
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -1352,6 +1352,9 @@ void VulkanRenderer::takeMeshClusterCull(const VulkanMeshClusterCulling::Collect
 
     MeshClusterTables tables{cameraCulled->mainCommands[0], compare->order, compare->groups, cameraCulled->mainEntries[0],
                              compare->instances, compare->records, meshPool->getClusterRecords()};
+    compare->lianaMotions = lianaTrees->collectMotions(frameIndex);
+    tables.lianas = compare->lianas;
+    tables.lianaMotions = compare->lianaMotions;
 
     // The placed plants' pairs from the same frame's placed drawing, read back (the camera's commands first).
     if (compare->placed) {
@@ -1961,6 +1964,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (posesBones && lianaAnchors > 0) {
         lianaTrees->prepare(lianaAnchors);
     }
+
+    // Whether the anchors' motions were worked out this frame (after the bones), for the cluster passes' liana bounds.
+    bool lianasMoved = false;
     ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, drawList, colouredShadows, settings.levelOfDetail, sway, cullFrame,
                                                  placedDrawing->getShadowChanges());
     stats.shadowDrawn += lastCameraCull.shadowDrawn;
@@ -2352,6 +2358,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         }
 
         bonePosing->record(frame.commands, frame.descriptors, inputs, frame.frameIndex);
+
+        // Then the anchors' motions, as the bones just posed move them (ROADMAP phase 21 4c-vii).
+        if (lianaAnchors > 0 && planting->getField()) {
+            lianaTrees->recordMotions(frame.commands, frame.descriptors, inputs.textures, inputs.scene, lianaAnchors, frame.frameIndex, clusterComparing);
+            lianasMoved = true;
+        }
+
         endGpuPass(frame, GpuPass::Bones);
 
         if (bonesComparing) {
@@ -2362,11 +2375,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // A view as its mesh clusters (and the camera's twigs) are culled: as the camera's culling placed it, given the wind's
     // sway (the culling runs without it), so a draw swaying near the camera keeps every cluster (and twig) or, with the
-    // sway's reach, culls each by its grown sphere (meshClusterSwayingPose), and the cut's pixel error. The camera's, and the sun's virtual shadow casters' (whose levels are the camera's).
+    // sway's reach, culls each by its grown sphere (meshClusterSwayingPose), and the cut's pixel error. The camera's, and the
+    // sun's virtual shadow casters' (whose levels are the camera's). Lianas' clusters by their spans' bounds
+    // (meshClusterLianaPose) where their anchors' motions are known: worked out this frame, or still without bones.
     const auto clusterViewOf = [&](std::uint32_t view) {
         GpuCameraCull placed = cameraCulling->placedView(frame.frameIndex, view);
         placed.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
         placed.flags |= settings.meshClusterSwayReach ? CAMERA_CULL_SWAY_REACH : 0u;
+        placed.flags |= settings.meshClusterLianaBounds && lianaAnchors > 0 && (lianasMoved || !frameBones) ? CAMERA_CULL_LIANA_BOUNDS : 0u;
         placed.swayFadeEnd = settings.wind.swayFadeEnd;
         placed.levels.pixelError = settings.meshClusterErrorPixels;
         return placed;
@@ -2437,6 +2453,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         }
 
         inputs.bones = cullBones;
+        inputs.lianas = lianaAnchors > 0 ? lianaShapeRecords->get() : VK_NULL_HANDLE;
+        inputs.lianaMotions = lianasMoved ? lianaTrees->getMotions() : VK_NULL_HANDLE;
         inputs.pairBound = meshClusterPairBound(cullFrame) + (placed ? placed->pairBound : 0);
         inputs.viewProjection = relativeViewProjection;
         inputs.origin = cameraOrigin;
@@ -2466,7 +2484,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             meshClusterCompares[frame.frameIndex] = MeshClusterCompare{inputs.view, cullFrame.groups, inputs.order, cullFrame.join().records,
                                                                       std::move(clusterCompareInstances), std::move(clusterComparePlacedParts),
                                                                       placedClusters, cullBones.stamp,
-                                                                      std::vector<std::uint32_t>(twigBindings.begin(), twigBindings.end())};
+                                                                      std::vector<std::uint32_t>(twigBindings.begin(), twigBindings.end()),
+                                                                      lianaRecords(description.lianaShapes), {}};
         }
     }
 
