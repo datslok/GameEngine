@@ -167,4 +167,10 @@ void main() {
         testOutput(2, vec4(made.uv, 0.0, 0.0));
         testOutput(3, made.tangent);
     }
+
+    if (function == GPU_TEST_TWIG_FADE) {
+        // Inputs: (the plant's bits, the twig, the fade field, a rank). Outputs: (the rank, the presence at the given rank).
+        vec4 a = testInput(0);
+        testOutput(0, vec4(twigFadeRank(floatBitsToUint(a.x), floatBitsToUint(a.y)), twigFadePresence(floatBitsToUint(a.z), a.w), 0.0, 0.0));
+    }
 }

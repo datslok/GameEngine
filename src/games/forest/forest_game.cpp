@@ -1270,8 +1270,12 @@ std::vector<NearTreeVariant> ForestGame::plantTrees(AssetManager& assets, Forest
         assets.setMeshLevels(barkMeshes.back(), levelsUntilCard(barkLevels, impostorError));
         assets.setMeshLevels(leafMeshes.back(), levelsUntilCard(leafLevels, impostorError));
         assets.setMeshLevelOptions(barkMeshes.back(), sharedBox);
-        assets.setMeshLevelOptions(leafMeshes.back(), sharedBox);
-        assets.setMeshLevelOptions(cardMeshes.back(), MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = treeBox});
+
+        // The crown hands over to its card across the camera's fade band (ROADMAP phase 21 stage 3g): the card dithers in
+        // while the leaves (and the twigs' part, which takes their options) shrink away twig by twig
+        // (render/gpu/twig_records.h, twigFadePresence). The bark, drawn by its cluster levels at every distance, never swaps.
+        assets.setMeshLevelOptions(leafMeshes.back(), MeshLevelOptions{.hiddenBelowError = 0.0f, .chooseBounds = treeBox, .fadesLevels = true});
+        assets.setMeshLevelOptions(cardMeshes.back(), MeshLevelOptions{.hiddenBelowError = impostorError, .chooseBounds = treeBox, .fadesLevels = true});
 
         // The climbers drawn until the card takes over, chosen by the tree's box as its parts are.
         if (climbed) {

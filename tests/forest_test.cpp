@@ -988,6 +988,9 @@ namespace {
             const std::vector<MeshLevel>& leafLevels = forest.assets.getMeshLevels().at(leaves.parts.front().mesh.index);
             assert(standLevels.size() == 1 && !standLevels.front().mesh.isValid() && standLevels.front().errorMetres == leafLevels.back().errorMetres);
 
+            // The crown fades into its card (stage 3g): the twigs' part fades as the leaves and card do.
+            assert(forest.assets.getMeshLevelOptions().at(twigModel.parts.front().mesh.index).fadesLevels);
+
             /*
             * Moved by bones (ROADMAP phase 21 stage 3c-iii): every part but the still impostor card (and the twig part's
             * stand-in) carries the look's one skeleton, and each mesh it or its levels draw is bound one a vertex to

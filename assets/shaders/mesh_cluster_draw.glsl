@@ -108,6 +108,8 @@ void drawFarCluster(MeshClusterItem item) {
     uint triangleCount = leaves * uint(FAR_LEAF_TRIANGLES);
     SetMeshOutputsEXT(vertexCount, triangleCount);
     uint plantEntry = scenePlacedEntries[sceneTwigEntries[item.entry - TWIG_INSTANCE_BASE].x].x;
+    uint plantPick = floatBitsToUint(scenePlacedPlants[drawnInstance(plantEntry)].pick);
+    uint fade = drawListFade(plantEntry);
 
     for (uint leaf = gl_LocalInvocationIndex; leaf < leaves; leaf += MESH_CLUSTER_MESH_THREADS) {
         farLeafPoses[leaf] = farLeafPose(plantEntry, sceneFarLeaves[run.x + leaf].twig);
@@ -120,6 +122,13 @@ void drawFarCluster(MeshClusterItem item) {
         FarLeaf record = sceneFarLeaves[run.x + leaf];
         FarLeafShape shape = sceneFarShapes[run.z + ((record.sideCellNumber >> 16) & 0xffu)];
         FarLeafVertex made = farLeafVertex(record, shape, slot % uint(FAR_LEAF_VERTICES));
+
+        // A crown fading into its card: the leaf shrinks about its foot at its own twig's rank, so it goes with its twig.
+        if (fade != 0u) {
+            made.position = thinnedPosition(made.position, vec3(record.foot[0], record.foot[1], record.foot[2]),
+                                            twigFadePresence(fade, twigFadeRank(plantPick, record.twig)));
+        }
+
         vec3 relative = shadeVertex(slot, made.position, made.normal, made.uv, made.tangent, made.position, item.entry, item.entry, 0, 0u, farLeafPoses[leaf]);
         farLeafClips[slot] = relativeViewProjection * vec4(relative, 1.0);
     }

@@ -31,6 +31,10 @@
 // The coarsest twig level a set with far levels draws (scene/twig_set.h's twigBrickLevel): past it its bricks take over.
 #define TWIG_BRICK_LEVEL 2
 
+// A crown fading into its card (ROADMAP phase 21 stage 3g, twigFadeRank): the hash's own use, so a twig's rank is
+// not its leaves' tones.
+#define TWIG_FADE_HASH_USE 0xfadeu
+
 // No far node: a set without far levels (its record's first node), the root's parent.
 #define TWIG_FAR_NO_NODE 0xffffffffu
 

@@ -1,8 +1,11 @@
-// A twig's record and matrix, and a far leaf's record and vertices (render/gpu/twig_records.h), included by
-// twig_drawing.glsl and, for the mesh shaders' twig instances, drawn_objects.glsl.
+// A twig's record and matrix, a far leaf's record and vertices, and a twig's share while its crown fades into its card
+// (render/gpu/twig_records.h), included by twig_drawing.glsl and, for the mesh shaders' twig instances, drawn_objects.glsl.
 #ifndef TWIG_RECORD_GLSL
 #define TWIG_RECORD_GLSL
 
+#include "card_thinning.glsl"
+#include "hash.glsl"
+#include "level_fade.glsl"
 #include "quat.glsl"
 #include "render/gpu/twig_drawing_shared.h"
 #include "scene/twig_far_levels_shared.h"
@@ -17,6 +20,25 @@ struct Twig {
 // The twig's matrix (its rows, then 0 0 0 1), column by column as GLSL holds it.
 mat4 twigMatrix(Twig twig) {
     return transpose(mat4(twig.rows[0], twig.rows[1], twig.rows[2], vec4(0.0, 0.0, 0.0, 1.0)));
+}
+
+// A crown fading into its card (ROADMAP phase 21 stage 3g): the least rank leaves every twig gone by the fade's last step.
+const float TWIG_FADE_LEAST_RANK = float(CARD_THINNING_BAND) + 1.0 / float(DRAW_LIST_FADE_STEPS);
+
+// A twig's rank, fixed by its plant (its pick's bits) and its number: the hash's top 24 bits, TWIG_FADE_LEAST_RANK to 1.
+float twigFadeRank(uint plant, uint twig) {
+    uint hashed = pcg3d(uvec3(plant, twig, TWIG_FADE_HASH_USE)).x >> 8u;
+    return TWIG_FADE_LEAST_RANK + (1.0 - TWIG_FADE_LEAST_RANK) * float(hashed) * (1.0 / 16777216.0);
+}
+
+// How whole a twig of this rank is while its part's entry fades: 1 when not fading or for the coarser level; else its
+// presence at the kept share, 1 less the fade's share. Opaque twigs shrink away instead of taking the dither's discard.
+float twigFadePresence(uint fadeField, float rank) {
+    if (fadeField == 0u || (fadeField & DRAW_LIST_FADE_COARSE) != 0u) {
+        return 1.0;
+    }
+
+    return cardPresence(rank, 1.0 - levelFadeThreshold(fadeField));
 }
 
 // A far leaf (ROADMAP phase 21 stage 3e-ii): its foot, its frame's quaternion (four snorm16), its side (half), cell and
