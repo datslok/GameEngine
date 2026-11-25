@@ -492,6 +492,15 @@ VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUA
         costs.wholeClusters = caster(VIRTUAL_SHADOW_CASTER_WHOLE);
         costs.wholePairs = caster(VIRTUAL_SHADOW_CASTER_WHOLE + 1);
         costs.wholePairTriangles = caster(VIRTUAL_SHADOW_CASTER_WHOLE + 2);
+        costs.swayingClusters = caster(VIRTUAL_SHADOW_CASTER_SWAYING);
+        costs.swayingPairs = caster(VIRTUAL_SHADOW_CASTER_SWAYING + 1);
+        costs.swayingPairTriangles = caster(VIRTUAL_SHADOW_CASTER_SWAYING + 2);
+
+        for (std::size_t shape = 0; shape < costs.shapes.size(); ++shape) {
+            const std::size_t first = VIRTUAL_SHADOW_HEADER_SHAPES + VIRTUAL_SHADOW_LEVEL_WORDS * shape;
+            costs.shapes[shape] = {header[first + VIRTUAL_SHADOW_LEVEL_CLUSTERS], header[first + VIRTUAL_SHADOW_LEVEL_PAIRS],
+                                   header[first + VIRTUAL_SHADOW_LEVEL_TRIANGLES]};
+        }
         drawn.costs = costs;
     }
 

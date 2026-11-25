@@ -84,11 +84,12 @@
 #define VIRTUAL_SHADOW_HEADER_PAIRS 0
 #define VIRTUAL_SHADOW_HEADER_TRIANGLES 2
 #define VIRTUAL_SHADOW_HEADER_TASKS 4
-#define VIRTUAL_SHADOW_HEADER_WORDS 80
+#define VIRTUAL_SHADOW_HEADER_WORDS 96
 
 // The costs: from word 16 three words a level (the clusters reaching it, their pairs, the pairs' triangles, all found
 // past the room too); from 64 the casters' words: those seen by the camera (clusters, their triangles), those out of its
-// frustum (clusters, triangles, their pairs, the pairs' triangles), those kept whole (clusters, pairs, the pairs' triangles).
+// frustum (clusters, triangles, their pairs, the pairs' triangles), those kept whole (clusters, pairs, the pairs' triangles),
+// and of those, the ones kept whole for swaying without bones (clusters, pairs, the pairs' triangles; 4c-vi).
 #define VIRTUAL_SHADOW_HEADER_LEVELS 16
 #define VIRTUAL_SHADOW_LEVEL_WORDS 3
 #define VIRTUAL_SHADOW_LEVEL_CLUSTERS 0
@@ -98,7 +99,18 @@
 #define VIRTUAL_SHADOW_CASTER_SEEN 0
 #define VIRTUAL_SHADOW_CASTER_UNSEEN 2
 #define VIRTUAL_SHADOW_CASTER_WHOLE 6
-#define VIRTUAL_SHADOW_CASTER_WORDS 9
+#define VIRTUAL_SHADOW_CASTER_SWAYING 9
+#define VIRTUAL_SHADOW_CASTER_WORDS 12
+
+// From 80, the draws kept whole for their shape, by its first kind (clusters, pairs, the pairs' triangles each): a terrain
+// patch, a liana, an impostor's card, following the ground, cards thinned in this view.
+#define VIRTUAL_SHADOW_HEADER_SHAPES 80
+#define VIRTUAL_SHADOW_SHAPE_TERRAIN 0
+#define VIRTUAL_SHADOW_SHAPE_LIANA 1
+#define VIRTUAL_SHADOW_SHAPE_CARD 2
+#define VIRTUAL_SHADOW_SHAPE_GROUND 3
+#define VIRTUAL_SHADOW_SHAPE_THINNED 4
+#define VIRTUAL_SHADOW_SHAPES 5
 
 // The expanding pass: a workgroup a surviving cluster, a thread a level.
 #define VIRTUAL_SHADOW_EXPAND_GROUP 16

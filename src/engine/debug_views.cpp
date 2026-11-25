@@ -194,7 +194,18 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                                     shortCount(costs.unseenClusters) + " " + shortCount(costs.unseenTriangles) + " TRIS, " +
                                                     shortCount(costs.unseenPairs) + " PAIRS " + shortCount(costs.unseenPairTriangles) + "  WHOLE " +
                                                     shortCount(costs.wholeClusters) + ", " + shortCount(costs.wholePairs) + " PAIRS " +
-                                                    shortCount(costs.wholePairTriangles));
+                                                    shortCount(costs.wholePairTriangles) + " (SWAYING " + shortCount(costs.swayingClusters) + ", " +
+                                                    shortCount(costs.swayingPairs) + " PAIRS " + shortCount(costs.swayingPairTriangles) + ")");
+                    const std::array<const char*, VIRTUAL_SHADOW_SHAPES> shapeNames = {"TERRAIN", "LIANAS", "CARDS", "GROUND", "THINNED"};
+                    std::string shapes = "VSM SHAPES (CLUSTERS:PAIRS:TRIS)";
+
+                    for (std::size_t shape = 0; shape < shapeNames.size(); ++shape) {
+                        const VirtualShadowLevelCost& cost = costs.shapes[shape];
+                        shapes += std::string("  ") + shapeNames[shape] + " " + shortCount(cost.clusters) + ":" + shortCount(cost.pairs) + ":" +
+                                  shortCount(cost.triangles);
+                    }
+
+                    lines.insert(pagesLine + 5, shapes);
                 }
             }
         }

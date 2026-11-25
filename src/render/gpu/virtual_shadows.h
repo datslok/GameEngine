@@ -365,7 +365,8 @@ std::uint32_t virtualShadowAtomicDepth(float depth);
 
 // What the drawing found this frame, for F4's VSM DRAWN line: each list's pairs (past the room too), the room, triangles.
 // What drawing into the pages cost (4c-v, VIRTUAL_SHADOW_HEADER_LEVELS and _CASTERS): each level's clusters reaching
-// it, their pairs and the pairs' triangles; the casters seen by the camera's frustum or not, and those kept whole.
+// it, their pairs and the pairs' triangles; the casters seen by the camera's frustum or not, those kept whole, and of
+// them those kept whole only for swaying without bones.
 struct VirtualShadowLevelCost {
     std::uint32_t clusters = 0;
     std::uint32_t pairs = 0;
@@ -383,6 +384,10 @@ struct VirtualShadowCosts {
     std::uint32_t wholeClusters = 0;
     std::uint32_t wholePairs = 0;
     std::uint32_t wholePairTriangles = 0;
+    std::uint32_t swayingClusters = 0; // of the whole ones, kept whole for swaying without bones
+    std::uint32_t swayingPairs = 0;
+    std::uint32_t swayingPairTriangles = 0;
+    std::array<VirtualShadowLevelCost, VIRTUAL_SHADOW_SHAPES> shapes{}; // kept whole for their shape, by kind (VIRTUAL_SHADOW_SHAPE_*)
 };
 
 struct VirtualShadowDrawn {

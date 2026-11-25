@@ -60,6 +60,18 @@ void main() {
     vec4 sphere = whole ? drawn.record.bounds : meshClusterCullSphere(cluster, drawn.instance.model, pose);
     uint triangles = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
     bool counting = frame.shading.z > 0.5;
+    bool swayingWhole = whole && meshClusterShapeFixed(drawn.instance, drawn.entry);
+
+    // Kept whole for its shape: its first kind (VIRTUAL_SHADOW_SHAPE_*), or none.
+    int shape = -1;
+
+    if (whole && !swayingWhole) {
+        shape = drawn.instance.material.z != 0u ? VIRTUAL_SHADOW_SHAPE_TERRAIN
+              : drawn.instance.hanging.w != 0u ? VIRTUAL_SHADOW_SHAPE_LIANA
+              : drawn.instance.material.w == uint(INSTANCE_KIND_IMPOSTOR) ? VIRTUAL_SHADOW_SHAPE_CARD
+              : drawn.instance.material.w == uint(INSTANCE_KIND_FOLLOWS_GROUND) ? VIRTUAL_SHADOW_SHAPE_GROUND
+                                                                                  : VIRTUAL_SHADOW_SHAPE_THINNED;
+    }
     CullFrustum camera;
     camera.planes = frame.cameraPlanes;
     bool seen = sphereInFrustum(camera, sphere);
@@ -71,6 +83,14 @@ void main() {
 
         if (whole) {
             atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_WHOLE], 1u);
+        }
+
+        if (swayingWhole) {
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_SWAYING], 1u);
+        }
+
+        if (shape >= 0) {
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_SHAPES + VIRTUAL_SHADOW_LEVEL_WORDS * shape + VIRTUAL_SHADOW_LEVEL_CLUSTERS], 1u);
         }
     }
 
@@ -128,6 +148,17 @@ void main() {
         if (whole) {
             atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_WHOLE + 1], found);
             atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_WHOLE + 2], found * triangles);
+        }
+
+        if (swayingWhole) {
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_SWAYING + 1], found);
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_SWAYING + 2], found * triangles);
+        }
+
+        if (shape >= 0) {
+            uint first = uint(VIRTUAL_SHADOW_HEADER_SHAPES + VIRTUAL_SHADOW_LEVEL_WORDS * shape);
+            atomicAdd(pairWords[first + VIRTUAL_SHADOW_LEVEL_PAIRS], found);
+            atomicAdd(pairWords[first + VIRTUAL_SHADOW_LEVEL_TRIANGLES], found * triangles);
         }
     }
 }

@@ -8,3 +8,7 @@
   - **The rest, about a triangle a texel:** the other clusters take 1.0-1.7 pairs each a level; 16.7-31.8 M triangles in 1033-1272 pages of 16 K texels.
   - **Gotcha:** the page passes had no shader dependency files (lost in a branch switch), so a record change left them reading old offsets (13 pages marked); their `.spv` deleted and rebuilt. The 4c-iv timings came before any record change.
   - **8 planted bugs caught** (the level words swapped, not strided, the unseen pairs a word off, costs read uncounted, the switch not in the record or not visited, levels without pairs shown, millions rounded).
+- `vsm-sway-bounds` (Nov 25 2026, in progress): 4c-vi, first the whole draws' costs split by why they are kept whole (`VSM SEEN`'s SWAYING, `VSM SHAPES`).
+  - **Lianas are the most at the wall and among the trees:** 42.2 M of the pages' 101.6 M triangles at the wall, 27.4 of 66.0 M among the trees, from 4-6 K clusters (100-180 pairs each); 3.7-6.7 M at the rim and ring.
+  - **Swaying without bones:** 10.2-22.6 M everywhere, from 233-535 K clusters at under one pair each; terrain patches 5.6-7.6 M; cards, ground-following and thinned draws none.
+  - **3 planted bugs caught** (the swaying words read from the whole ones, the kinds not strided, their names swapped).
