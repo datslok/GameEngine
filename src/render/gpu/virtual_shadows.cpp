@@ -62,6 +62,7 @@ void visit(VirtualShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.choice("Level resolution", settings.resolution, virtualShadowResolutionNames);
     visitor.field("Depth slack", settings.depthSlack, {.min = 2.0f, .max = 1000.0f, .sliderMax = 64.0f, .unit = "half-widths"});
     visitor.choice("Drawing", settings.drawing, virtualShadowDrawingNames);
+    visitor.field("Count costs", settings.countCosts);
 }
 
 void validateVirtualShadows(const VirtualShadowSettings& settings) {
@@ -357,6 +358,7 @@ GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap
     packed.options[1] = settings.showPages ? 1.0f : 0.0f;
     packed.shading[0] = settings.mainPass ? 1.0f : 0.0f;
     packed.shading[1] = biasTexels;
+    packed.shading[2] = settings.countCosts ? 1.0f : 0.0f;
     packed.counts[0] = settings.levelCount;
     packed.counts[1] = pagesPerSide;
     packed.counts[2] = settings.poolPages;
@@ -462,12 +464,37 @@ std::uint32_t virtualShadowAtomicDepth(float depth) {
     return std::bit_cast<std::uint32_t>(std::clamp(depth, 0.0f, 1.0f)) & 0x7FFFFFFFu;
 }
 
-VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room) {
+VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room, bool counted) {
     VirtualShadowDrawn drawn;
     drawn.pairs[VIRTUAL_SHADOW_PAIRS_PLAIN] = header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_PLAIN];
     drawn.pairs[VIRTUAL_SHADOW_PAIRS_CUT_OUT] = header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_CUT_OUT];
     drawn.room = room;
     drawn.triangles = header[VIRTUAL_SHADOW_HEADER_TRIANGLES];
+
+    if (counted) {
+        VirtualShadowCosts costs;
+
+        for (int level = 0; level < maxVirtualShadowLevels; ++level) {
+            const std::size_t first = VIRTUAL_SHADOW_HEADER_LEVELS + VIRTUAL_SHADOW_LEVEL_WORDS * static_cast<std::size_t>(level);
+            VirtualShadowLevelCost& cost = costs.levels[static_cast<std::size_t>(level)];
+            cost.clusters = header[first + VIRTUAL_SHADOW_LEVEL_CLUSTERS];
+            cost.pairs = header[first + VIRTUAL_SHADOW_LEVEL_PAIRS];
+            cost.triangles = header[first + VIRTUAL_SHADOW_LEVEL_TRIANGLES];
+        }
+
+        const auto caster = [&header](int word) { return header[VIRTUAL_SHADOW_HEADER_CASTERS + word]; };
+        costs.seenClusters = caster(VIRTUAL_SHADOW_CASTER_SEEN);
+        costs.seenTriangles = caster(VIRTUAL_SHADOW_CASTER_SEEN + 1);
+        costs.unseenClusters = caster(VIRTUAL_SHADOW_CASTER_UNSEEN);
+        costs.unseenTriangles = caster(VIRTUAL_SHADOW_CASTER_UNSEEN + 1);
+        costs.unseenPairs = caster(VIRTUAL_SHADOW_CASTER_UNSEEN + 2);
+        costs.unseenPairTriangles = caster(VIRTUAL_SHADOW_CASTER_UNSEEN + 3);
+        costs.wholeClusters = caster(VIRTUAL_SHADOW_CASTER_WHOLE);
+        costs.wholePairs = caster(VIRTUAL_SHADOW_CASTER_WHOLE + 1);
+        costs.wholePairTriangles = caster(VIRTUAL_SHADOW_CASTER_WHOLE + 2);
+        drawn.costs = costs;
+    }
+
     return drawn;
 }
 

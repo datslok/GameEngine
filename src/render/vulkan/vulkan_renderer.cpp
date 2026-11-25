@@ -2373,6 +2373,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     const GpuCameraCull clusterView = cullsClusters ? clusterViewOf(0) : GpuCameraCull{};
 
+    // The camera's frustum for the virtual shadow costs' casters seen or not (4c-v; the casters' own view is their box).
+    if (virtualShadowView) {
+        virtualShadows->setCameraFrustum(frame.frameIndex, cameraCulling->placedView(frame.frameIndex, 0).frustum);
+    }
+
     // The bones the camera's twigs and clusters are culled by (ROADMAP phase 21 stage 3c-iv-b): this frame's trees and
     // poses, claimed with the frame's stamp (0, nothing posed, before the bones' buffers are made).
     const bool bonesMade = bonePosing->getTrees() != VK_NULL_HANDLE && bonePosing->getPlantTrees() != VK_NULL_HANDLE && bonePosing->getPoses() != VK_NULL_HANDLE;

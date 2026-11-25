@@ -458,7 +458,7 @@ A fourth game (`--game forest`): a jungle valley kilometres across with mist, sa
 
 ## Phase 21: Virtual geometry and virtual shadow maps
 
-Shadows and levels without popping, at a cost that grows with the screen, not the valley (hard rule 11). Research and stage 4: `docs/research/VIRTUALGEOMETRY.md`; choices and outcomes: `docs/buildlog/phase-21-1.md` and `phase-21-2.md`.
+Shadows and levels without popping, at a cost that grows with the screen, not the valley (hard rule 11). Research and stage 4: `docs/research/VIRTUALGEOMETRY.md`; choices and outcomes: `docs/buildlog/phase-21-1.md`, `phase-21-2.md` and `phase-21-3.md`.
 
 - [x] 1. Clusters culled a view on the GPU and drawn by mesh shaders in the prepass and main pass
   - [x] 1a. Clusters built from a render mesh: up to 64 vertices and 124 triangles, a sphere and a cone each (`clusters`)
@@ -521,6 +521,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [x] 4c-ii. Clusters sent to each page they touch, drawn by mesh shaders clipped to the page; the pool cleared each frame
     - [x] 4c-iii. The main pass reading a page's depth (hard edges, the cascades' bias), cascades where none; a switch
     - [x] 4c-iv. Fragment atomics into an R32 pool behind a switch; both measured at the four spots
+    - [x] 4c-v. The pages' cost broken down in F4 (by level, seen or not, kept whole), measured, before a lever (`vsm-breakdown`)
   - [ ] 4d. Soft shadows through the page table, a coarser page or the far map where one is missing
   - [ ] 4e. Pages cached until something in them moves; still and moving slices; swaying trees
   - [ ] 4f. Leaves casting from their twigs and far records; the shadow stand-ins retired

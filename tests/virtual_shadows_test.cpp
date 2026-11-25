@@ -98,11 +98,12 @@ namespace {
         };
         const std::vector<std::string> warnings = applySettings(
             {{"enabled", "true"}, {"showPages", "true"}, {"mainPass", "true"}, {"poolPages", "2048"}, {"firstLevelHalfWidth", "1"},
-             {"levels", "12"}, {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}, {"drawing", "Depth test"}},
+             {"levels", "12"}, {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}, {"drawing", "Depth test"}, {"countCosts", "true"}},
             walk, StartupFields::Keep);
         assert(warnings.empty());
         assert(!VirtualShadowSettings{}.mainPass);
         assert(VirtualShadowSettings{}.drawing == VirtualShadowDrawing::Atomics && settings.drawing == VirtualShadowDrawing::DepthTest);
+        assert(!VirtualShadowSettings{}.countCosts && settings.countCosts);
         assert(settings.enabled && settings.showPages && settings.mainPass && settings.poolPages == 2048);
         assert(settings.firstHalfWidth == 1.0f && settings.levelCount == 12);
         assert(settings.resolution == VirtualShadowResolution::Pages64 && settings.depthSlack == 32.0f);
@@ -620,6 +621,7 @@ namespace {
         settings.poolPages = 512;
         settings.showPages = true;
         settings.mainPass = true;
+        settings.countCosts = true;
         const Vec3 camera{-4000.5f, 30.0f, 2500.25f};
         const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{0.1f, -1.0f, 0.2f}.normalized(), settings);
         std::array<std::uint32_t, maxVirtualShadowLevels> generations{};
@@ -631,7 +633,7 @@ namespace {
         const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, camera, generations, Mat4::identity(), 1920.0f, 1080.0f, 2.5f, 77);
         assert(frame.counts[0] == 6 && frame.counts[1] == 32 && frame.counts[2] == 512 && frame.counts[3] == 77);
         assert(frame.options[0] == virtualShadowUsableHalfWidth(0.5f, 32) && frame.options[1] == 1.0f);
-        assert(frame.shading[0] == 1.0f && frame.shading[1] == 2.5f);
+        assert(frame.shading[0] == 1.0f && frame.shading[1] == 2.5f && frame.shading[2] == 1.0f);
         assert(frame.screen[0] == 1920.0f && frame.screen[3] == 1.0f / 1080.0f);
 
         for (int level = 0; level < 6; ++level) {
@@ -978,8 +980,9 @@ namespace {
         header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_PLAIN] = 12000;
         header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_CUT_OUT] = 3000;
         header[VIRTUAL_SHADOW_HEADER_TRIANGLES] = 900000;
-        const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, 262144);
+        const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, 262144, false);
         assert(drawn.pairs[0] == 12000 && drawn.pairs[1] == 3000 && drawn.triangles == 900000 && drawn.room == 262144);
+        assert(!drawn.costs);
 
         RenderStats stats;
         stats.virtualShadowPages = VirtualShadowCounts{};
@@ -1006,6 +1009,53 @@ namespace {
         stats.virtualShadowDrawn->pairs[1] = 3000;
         lines = renderStatsLines(stats);
         assert(*drawnLine(lines) == "VSM DRAWN 15000 PAIRS (3000 CUT-OUT)  ROOM 262144  TRIS 900K  ATOMICS");
+    }
+
+    /*
+    * The pages' costs (4c-v, while countCosts): from the header, each level's clusters reaching it, their pairs and the
+    * pairs' triangles; the casters seen by the camera or not (clusters, triangles; the unseen ones' pairs too) and those
+    * kept whole. On F4 after the DRAWN line: levels with pairs only, thousands and millions.
+    */
+    void testCostLines() {
+        std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS> header{};
+        header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_PLAIN] = 15000;
+        const auto levelWord = [](int level, int word) { return VIRTUAL_SHADOW_HEADER_LEVELS + VIRTUAL_SHADOW_LEVEL_WORDS * level + word; };
+        header[levelWord(0, VIRTUAL_SHADOW_LEVEL_CLUSTERS)] = 4000;
+        header[levelWord(0, VIRTUAL_SHADOW_LEVEL_PAIRS)] = 12000;
+        header[levelWord(0, VIRTUAL_SHADOW_LEVEL_TRIANGLES)] = 1250000;
+        header[levelWord(14, VIRTUAL_SHADOW_LEVEL_CLUSTERS)] = 900;
+        header[levelWord(14, VIRTUAL_SHADOW_LEVEL_PAIRS)] = 3000;
+        header[levelWord(14, VIRTUAL_SHADOW_LEVEL_TRIANGLES)] = 30000000;
+        header[levelWord(15, VIRTUAL_SHADOW_LEVEL_CLUSTERS)] = 7;
+        const std::uint32_t casters[VIRTUAL_SHADOW_CASTER_WORDS] = {120000, 5100000, 300000, 30200000, 400000, 20100000, 2000, 50000, 3000000};
+
+        for (int word = 0; word < VIRTUAL_SHADOW_CASTER_WORDS; ++word) {
+            header[VIRTUAL_SHADOW_HEADER_CASTERS + word] = casters[word];
+        }
+
+        const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, 262144, true);
+        assert(drawn.costs);
+        const VirtualShadowCosts& costs = *drawn.costs;
+        assert(costs.levels[0].clusters == 4000 && costs.levels[0].pairs == 12000 && costs.levels[0].triangles == 1250000);
+        assert(costs.levels[14].clusters == 900 && costs.levels[14].pairs == 3000 && costs.levels[14].triangles == 30000000);
+        assert(costs.levels[15].clusters == 7 && costs.levels[3].pairs == 0);
+        assert(costs.seenClusters == 120000 && costs.seenTriangles == 5100000 && costs.unseenClusters == 300000);
+        assert(costs.unseenTriangles == 30200000 && costs.unseenPairs == 400000 && costs.unseenPairTriangles == 20100000);
+        assert(costs.wholeClusters == 2000 && costs.wholePairs == 50000 && costs.wholePairTriangles == 3000000);
+
+        RenderStats stats;
+        stats.virtualShadowPages = VirtualShadowCounts{};
+        stats.virtualShadowCasters = VirtualShadowCasters{};
+        stats.virtualShadowDrawn = drawn;
+        const std::vector<std::string> lines = renderStatsLines(stats);
+        const auto drawnLine = std::find_if(lines.begin(), lines.end(), [](const std::string& line) { return line.starts_with("VSM DRAWN"); });
+        assert(drawnLine != lines.end() && drawnLine + 2 < lines.end());
+        assert(*(drawnLine + 1) == "VSM LEVELS (CLUSTERS:PAIRS:TRIS)  L0 4K:12K:1.2M  L14 900:3K:30.0M");
+        assert(*(drawnLine + 2) == "VSM SEEN 120K 5.1M TRIS  UNSEEN 300K 30.2M TRIS, 400K PAIRS 20.1M  WHOLE 2K, 50K PAIRS 3.0M");
+
+        stats.virtualShadowDrawn->costs.reset();
+        const std::vector<std::string> plain = renderStatsLines(stats);
+        assert(std::none_of(plain.begin(), plain.end(), [](const std::string& line) { return line.starts_with("VSM LEVELS") || line.starts_with("VSM SEEN"); }));
     }
 
     /*
@@ -1153,6 +1203,7 @@ void testVirtualShadows() {
     testPoolInTheRecordAndRoom();
     testDrawnLine();
     testAtomicDepth();
+    testCostLines();
     testCasterLevels();
     testCasterBoxHoldsItsLevels();
     testMarkedPages();

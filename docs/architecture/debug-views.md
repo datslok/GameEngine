@@ -40,6 +40,7 @@ Then, independently, `drawWindField` while `WindSettings::showField` is on (wind
 | `VSM PAGES  KEPT  NEW (EVICTED)  FAILED  STALE  FREE` | The sun's virtual shadow pages while on (`virtualShadowPages`; `virtual-shadows.md`) |
 | `VSM CASTERS n DRAWS  CLUSTERS kept/tested  TRIS nK` | Their casters, with mesh shaders (`virtualShadowCasters`) |
 | `VSM DRAWN n PAIRS (n CUT-OUT)  ROOM n  TRIS nK  FULL  ATOMICS` | What was drawn into the pages (`virtualShadowDrawn`); FULL: a list past its room; ATOMICS: drawn by atomics (`virtualShadows.drawing`) |
+| `VSM LEVELS (CLUSTERS:PAIRS:TRIS)  Ln c:p:t ...`, `VSM SEEN ... UNSEEN ... WHOLE ...` | With `virtualShadows.countCosts`: each level's clusters, pairs and their triangles; the casters in the camera's frustum or not, those kept whole and their pairs |
 | Probes | `probeStatsText`, or `PROBES -` |
 | `VRAM` | `videoMemoryText` |
 | `EXPOSURE ... EV  SCENE ... EV` + upscaler | `exposureText` (or `EXPOSURE FIXED`), `upscalerText` and render scale |

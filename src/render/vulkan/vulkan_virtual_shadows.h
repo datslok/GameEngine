@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/cull_records.h"
 #include "render/gpu/virtual_shadows.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
@@ -67,6 +68,9 @@ public:
     // After prepare: this frame draws into the pool (its casters culled), so the main pass may read it (the record's options.w).
     void markPoolDrawn(std::uint32_t frameIndex);
 
+    // After prepare: the camera's culling frustum, for the costs' casters seen or not (countCosts, 4c-v).
+    void setCameraFrustum(std::uint32_t frameIndex, const GpuFrustum& frustum);
+
     /*
     * After mark, the casters' clusters culled (VulkanMeshClusterCulling::listPassBindings and its task commands): each
     * style's survivors expanded into page pairs, a workgroup a survivor dispatched by the list's own draw of that style,
@@ -107,6 +111,7 @@ private:
         VulkanBuffer header;
         bool headerPending = false;
         bool atomics = false; // drawn by atomics, for F4
+        bool counted = false; // its costs counted (VirtualShadowSettings::countCosts)
     };
 
     const VulkanDevice& device;

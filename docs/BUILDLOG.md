@@ -37,7 +37,8 @@ Split into files of about 28 KB at entry boundaries, the text unchanged. New ent
 | `docs/buildlog/phase-18-3.md` | Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 3 of 4) |
 | `docs/buildlog/phase-18-4.md` | Phase 18: A jungle valley showcase (Nov 13 2026 onwards) (part 4 of 4) |
 | `docs/buildlog/phase-19.md` | Phase 19: Documentation refactor (Nov 17 2026 onwards) |
-| `docs/buildlog/phase-21-1.md` | Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 1 of 2) |
-| `docs/buildlog/phase-21-2.md` | Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 2) |
+| `docs/buildlog/phase-21-1.md` | Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 1 of 3) |
+| `docs/buildlog/phase-21-2.md` | Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 3) |
+| `docs/buildlog/phase-21-3.md` | Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 3 of 3) |
 | `docs/buildlog/tools-1.md` | Tools outside the phases (part 1 of 3) |
 | `docs/buildlog/tools-2.md` | Tools outside the phases (part 2 of 3) |
