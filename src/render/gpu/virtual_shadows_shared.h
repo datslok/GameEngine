@@ -80,11 +80,25 @@
 
 // The pairs' buffer: a header, then each list's room of pairs. The header: each list's pairs found (words 0 and 1, past
 // the room too), the pairs' triangles (2), each list's mesh shader draw (VkDrawMeshTasksIndirectCommandEXT, three words
-// each from 4).
+// each from 4); then the costs, counted only while VirtualShadowSettings::countCosts (4c-v).
 #define VIRTUAL_SHADOW_HEADER_PAIRS 0
 #define VIRTUAL_SHADOW_HEADER_TRIANGLES 2
 #define VIRTUAL_SHADOW_HEADER_TASKS 4
-#define VIRTUAL_SHADOW_HEADER_WORDS 16
+#define VIRTUAL_SHADOW_HEADER_WORDS 80
+
+// The costs: from word 16 three words a level (the clusters reaching it, their pairs, the pairs' triangles, all found
+// past the room too); from 64 the casters' words: those seen by the camera (clusters, their triangles), those out of its
+// frustum (clusters, triangles, their pairs, the pairs' triangles), those kept whole (clusters, pairs, the pairs' triangles).
+#define VIRTUAL_SHADOW_HEADER_LEVELS 16
+#define VIRTUAL_SHADOW_LEVEL_WORDS 3
+#define VIRTUAL_SHADOW_LEVEL_CLUSTERS 0
+#define VIRTUAL_SHADOW_LEVEL_PAIRS 1
+#define VIRTUAL_SHADOW_LEVEL_TRIANGLES 2
+#define VIRTUAL_SHADOW_HEADER_CASTERS 64
+#define VIRTUAL_SHADOW_CASTER_SEEN 0
+#define VIRTUAL_SHADOW_CASTER_UNSEEN 2
+#define VIRTUAL_SHADOW_CASTER_WHOLE 6
+#define VIRTUAL_SHADOW_CASTER_WORDS 9
 
 // The expanding pass: a workgroup a surviving cluster, a thread a level.
 #define VIRTUAL_SHADOW_EXPAND_GROUP 16

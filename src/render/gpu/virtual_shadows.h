@@ -93,6 +93,10 @@ struct VirtualShadowSettings {
     // stores (VulkanDevice::supportsFragmentAtomics), else the depth test draws.
     VirtualShadowDrawing drawing = VirtualShadowDrawing::Atomics;
 
+    // F4's costs of drawing into the pages (4c-v): pairs and triangles by level, casters seen by the camera or not, those
+    // kept whole. A few atomics more a cluster and level, so off but to measure.
+    bool countCosts = false;
+
     bool operator==(const VirtualShadowSettings&) const = default;
 };
 
@@ -360,14 +364,37 @@ Vec4 virtualShadowPoolClip(float poolX, float poolY, float depth, int poolWidth,
 std::uint32_t virtualShadowAtomicDepth(float depth);
 
 // What the drawing found this frame, for F4's VSM DRAWN line: each list's pairs (past the room too), the room, triangles.
+// What drawing into the pages cost (4c-v, VIRTUAL_SHADOW_HEADER_LEVELS and _CASTERS): each level's clusters reaching
+// it, their pairs and the pairs' triangles; the casters seen by the camera's frustum or not, and those kept whole.
+struct VirtualShadowLevelCost {
+    std::uint32_t clusters = 0;
+    std::uint32_t pairs = 0;
+    std::uint32_t triangles = 0;
+};
+
+struct VirtualShadowCosts {
+    std::array<VirtualShadowLevelCost, maxVirtualShadowLevels> levels{};
+    std::uint32_t seenClusters = 0;
+    std::uint32_t seenTriangles = 0;
+    std::uint32_t unseenClusters = 0;
+    std::uint32_t unseenTriangles = 0;
+    std::uint32_t unseenPairs = 0;
+    std::uint32_t unseenPairTriangles = 0;
+    std::uint32_t wholeClusters = 0;
+    std::uint32_t wholePairs = 0;
+    std::uint32_t wholePairTriangles = 0;
+};
+
 struct VirtualShadowDrawn {
     std::array<std::uint32_t, VIRTUAL_SHADOW_PAIR_LISTS> pairs{};
     std::uint32_t room = 0;
     std::uint32_t triangles = 0;
     bool atomics = false; // drawn by atomics (4c-iv), F4 says so
+    std::optional<VirtualShadowCosts> costs; // counted (countCosts)
 };
 
-VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room);
+// The header's words to what was drawn; counted: the costs were counted that frame.
+VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room, bool counted);
 
 // The room the pairs need after a frame found this many in a list: unchanged while they fit, else the next power of two.
 std::uint32_t virtualShadowPairRoomFor(std::uint32_t room, std::uint32_t mostFound);
@@ -391,11 +418,12 @@ struct GpuVirtualShadowFrame {
     float options[4];                 // x the first level's usable half-width, y 1 shows the pages' debug view, z 1 starts the pages again, w 1 the pool is drawn this frame
     std::int32_t counts[4];           // x the levels, y the pages a level's side, z the pool's pages, w the frame
     std::int32_t pool[4];             // x the pool's pages a row, y the pairs' room, z, w the pool's width and height in texels
-    float shading[4];                 // x 1 the main pass reads the pages (mainPass), y the bias's base in a level's texels
+    float shading[4];                 // x 1 the main pass reads the pages (mainPass), y the bias's base in a level's texels, z 1 costs counted
+    float cameraPlanes[6][4];         // the camera's culling frustum (GpuFrustum), for the costs' casters seen or not (4c-v)
     GpuVirtualShadowLevel levels[maxVirtualShadowLevels];
 };
 
-static_assert(sizeof(GpuVirtualShadowFrame) == 1232, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
+static_assert(sizeof(GpuVirtualShadowFrame) == 1328, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
 
 // The frame's record: the clipmap placed for this camera (its settings' debug view and main pass switch), each level's
 // generation, the main pass's bias in texels, the frame's counter, the pairs' room.

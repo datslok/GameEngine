@@ -163,6 +163,7 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
                      BufferMemory::Gpu);
         readback.pairRoom = pairRoom;
         readback.atomics = atomics;
+        readback.counted = settings.countCosts;
 
         builtFor = settings;
         const VirtualShadowClipmapUpdate update = updateVirtualShadowClipmap(clipmap, camera, sunDirection, settings, casterReach);
@@ -326,6 +327,13 @@ void VulkanVirtualShadows::markPoolDrawn(std::uint32_t frameIndex) {
     record.flush();
 }
 
+void VulkanVirtualShadows::setCameraFrustum(std::uint32_t frameIndex, const GpuFrustum& frustum) {
+    VulkanBuffer& record = frameRecords.at(frameIndex);
+    GpuVirtualShadowFrame* packed = static_cast<GpuVirtualShadowFrame*>(record.getMapped());
+    std::memcpy(packed->cameraPlanes, frustum.planes, sizeof(packed->cameraPlanes));
+    record.flush();
+}
+
 VulkanImage* VulkanVirtualShadows::getPool() {
     return pool.get();
 }
@@ -353,7 +361,7 @@ std::optional<VirtualShadowDrawn> VulkanVirtualShadows::collectDrawn(std::uint32
     readback.header.invalidate();
     std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS> header{};
     std::memcpy(header.data(), readback.header.getMapped(), sizeof(header));
-    VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, readback.pairRoom);
+    VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, readback.pairRoom, readback.counted);
     drawn.atomics = readback.atomics;
     pairRoom = virtualShadowPairRoomFor(pairRoom, *std::max_element(drawn.pairs.begin(), drawn.pairs.end()));
     return drawn;

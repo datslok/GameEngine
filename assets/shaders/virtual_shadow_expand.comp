@@ -8,6 +8,8 @@
 * draw's bounds when the draw is kept whole) into its level and lists a pair for each page it touches that is drawn this
 * frame, in the plain or the cut-out list by the style. Mirrored by appendVirtualShadowPagePairs. Pairs are appended by
 * atomics, so their order changes from frame to frame; the depths they draw do not (the nearest depth wins in any order).
+* While the record's shading.z (countCosts, 4c-v), each thread adds its level's costs once, and the first thread the
+* survivor's: seen by the camera's frustum or not (the record's: views[0] is the casters' own box), kept whole.
 */
 #define MESH_CLUSTER_PASS_STYLE
 #include "mesh_cluster_pass.glsl"
@@ -56,6 +58,22 @@ void main() {
     // A draw kept whole (its shape not its mesh's, or swaying unbound) may leave its clusters' spheres: its own bounds.
     bool whole = meshClusterSeenWhole(drawn.instance, drawn.entry, drawn.record, views[0], pose);
     vec4 sphere = whole ? drawn.record.bounds : meshClusterCullSphere(cluster, drawn.instance.model, pose);
+    uint triangles = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
+    bool counting = frame.shading.z > 0.5;
+    CullFrustum camera;
+    camera.planes = frame.cameraPlanes;
+    bool seen = sphereInFrustum(camera, sphere);
+
+    if (counting && level == 0) {
+        uint at = uint(VIRTUAL_SHADOW_HEADER_CASTERS) + (seen ? uint(VIRTUAL_SHADOW_CASTER_SEEN) : uint(VIRTUAL_SHADOW_CASTER_UNSEEN));
+        atomicAdd(pairWords[at], 1u);
+        atomicAdd(pairWords[at + 1u], triangles);
+
+        if (whole) {
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_WHOLE], 1u);
+        }
+    }
+
     int pagesPerSide = frame.counts.y;
     VirtualShadowLevelData data = frame.levels[level];
     ivec4 span = ivec4(0, 0, pagesPerSide - 1, pagesPerSide - 1);
@@ -72,7 +90,7 @@ void main() {
 
     uint list = (pass.style & 2u) != 0u ? uint(VIRTUAL_SHADOW_PAIRS_CUT_OUT) : uint(VIRTUAL_SHADOW_PAIRS_PLAIN);
     uint room = uint(frame.pool.y);
-    uint triangles = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
+    uint found = 0u;
 
     for (int y = span.y; y <= span.w; ++y) {
         for (int x = span.x; x <= span.z; ++x) {
@@ -84,6 +102,7 @@ void main() {
             }
 
             uint k = atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_PAIRS + list], 1u);
+            ++found;
 
             if (k < room) {
                 uvec2 pair = virtualShadowPackPair(place, level, page, virtualShadowPhysicalPage(entry));
@@ -92,6 +111,23 @@ void main() {
                 pairWords[at + 1u] = pair.y;
                 atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_TRIANGLES], triangles);
             }
+        }
+    }
+
+    if (counting && found > 0u) {
+        uint at = uint(VIRTUAL_SHADOW_HEADER_LEVELS) + uint(VIRTUAL_SHADOW_LEVEL_WORDS) * uint(level);
+        atomicAdd(pairWords[at + VIRTUAL_SHADOW_LEVEL_CLUSTERS], 1u);
+        atomicAdd(pairWords[at + VIRTUAL_SHADOW_LEVEL_PAIRS], found);
+        atomicAdd(pairWords[at + VIRTUAL_SHADOW_LEVEL_TRIANGLES], found * triangles);
+
+        if (!seen) {
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_UNSEEN + 2], found);
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_UNSEEN + 3], found * triangles);
+        }
+
+        if (whole) {
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_WHOLE + 1], found);
+            atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_CASTERS + VIRTUAL_SHADOW_CASTER_WHOLE + 2], found * triangles);
         }
     }
 }

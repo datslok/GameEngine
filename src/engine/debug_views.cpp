@@ -46,6 +46,20 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 * exposure with the upscaler.
 */
 namespace {
+    // A count for F4's virtual shadow costs: exact under a thousand, thousands under a million, else millions to a tenth
+    // (cut, not rounded).
+    std::string shortCount(std::uint32_t count) {
+        if (count < 1000) {
+            return std::to_string(count);
+        }
+
+        if (count < 1000000) {
+            return std::to_string(count / 1000) + "K";
+        }
+
+        return std::to_string(count / 1000000) + "." + std::to_string(count / 100000 % 10) + "M";
+    }
+
     /*
     * The twigs' line (ROADMAP phase 21 stage 5-0: where the twig triangles come from): kept of tested, those kept for
     * sway, then each level's twigs and thousands of triangles, up to the coarsest level any twig drew.
@@ -160,6 +174,28 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                                 std::to_string(cutOuts) + " CUT-OUT)  ROOM " + std::to_string(drawn.room) + "  TRIS " +
                                                 std::to_string(drawn.triangles / 1000) + "K" + (full ? "  FULL" : "") +
                                                 (drawn.atomics ? "  ATOMICS" : ""));
+
+                // Their costs (4c-v, while counted), after: each level with pairs, then the casters by sight.
+                if (drawn.costs) {
+                    const VirtualShadowCosts& costs = *drawn.costs;
+                    std::string levels = "VSM LEVELS (CLUSTERS:PAIRS:TRIS)";
+
+                    for (std::size_t level = 0; level < costs.levels.size(); ++level) {
+                        const VirtualShadowLevelCost& cost = costs.levels[level];
+
+                        if (cost.pairs > 0) {
+                            levels += "  L" + std::to_string(level) + " " + shortCount(cost.clusters) + ":" + shortCount(cost.pairs) + ":" +
+                                      shortCount(cost.triangles);
+                        }
+                    }
+
+                    lines.insert(pagesLine + 3, levels);
+                    lines.insert(pagesLine + 4, "VSM SEEN " + shortCount(costs.seenClusters) + " " + shortCount(costs.seenTriangles) + " TRIS  UNSEEN " +
+                                                    shortCount(costs.unseenClusters) + " " + shortCount(costs.unseenTriangles) + " TRIS, " +
+                                                    shortCount(costs.unseenPairs) + " PAIRS " + shortCount(costs.unseenPairTriangles) + "  WHOLE " +
+                                                    shortCount(costs.wholeClusters) + ", " + shortCount(costs.wholePairs) + " PAIRS " +
+                                                    shortCount(costs.wholePairTriangles));
+                }
             }
         }
     }

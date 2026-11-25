@@ -1,6 +1,6 @@
-# Build log: Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 2)
+# Build log: Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 3)
 
-## Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 2)
+## Phase 21: Virtual geometry and virtual shadow maps (Nov 21 2026 onwards) (part 2 of 3)
 
 - `tree-bones-3c-i` (Nov 22 2026): trees' bones built from the skeleton (`scene/sway_bones`, `treeBones`), each bark vertex's and twig's binding; nothing moves by them yet.
   - **Rigid twigs on today's bend, measured and dropped:** a 1 m twig moved as one piece (its pivot's offset plus the best turn from the bend's central differences) missed today's per-vertex offset by 8-14 cm at 7 m/s, 15-25 cm at 10 m/s, 37-64 cm in a storm (mid and emergent trees): mostly the branch bob's 4 m wave across the twig; the bend's own shear 1.5-6 cm. Padding culling for it instead was the easy fix, not the scalable one (the user); bones were the research's answer all along (Nanite skinning, GPU Gems 3 ch. 6).
