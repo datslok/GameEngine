@@ -78,7 +78,7 @@ Seven passes (`VulkanCameraCulling`, timed as CULL), after the scene's buffers a
 
 ## Shadow tiles (`gpu-cull-shadows`)
 
-Each shadow tile drawn is a view (`packShadowCull`): its frustum, levels by its own texels (`tileLevelView`), `CAMERA_CULL_SHADOW`, reach, smallest caster and cascade (`GpuCameraCull` 240 B). `shadowTakes` (mirrored, `camera_culling.glsl`) equals the CPU's `castersInReach`, `shadowCasters`, `castersAtLeast`, `castersForCascade` (`shadowTileCasters`); its draws' cascade limit is `GpuCullRecord::shadowCascades`. Its entries carry no thinned bit; a tile keeping its movers apart (the far map) has `CAMERA_CULL_MOTION`: casters that moved go to its second list, drawn over the patches. The sun's virtual shadow casters are one more shadow view (`packVirtualShadowCull`, `virtual-shadows.md`).
+Each shadow tile drawn is a view (`packShadowCull`): its frustum, levels by its own texels (`tileLevelView`), `CAMERA_CULL_SHADOW`, reach, smallest caster and cascade (`GpuCameraCull` 256 B). `shadowTakes` (mirrored, `camera_culling.glsl`) equals the CPU's `castersInReach`, `shadowCasters`, `castersAtLeast`, `castersForCascade` (`shadowTileCasters`); its draws' cascade limit is `GpuCullRecord::shadowCascades`. Its entries carry no thinned bit; a tile keeping its movers apart (the far map) has `CAMERA_CULL_MOTION`: casters that moved go to its second list, drawn over the patches. The sun's virtual shadow casters are one more shadow view (`packVirtualShadowCull`, `virtual-shadows.md`).
 
 **Which tiles are drawn** (`prepareShadowDraws`, `shadowTileNeeds`): the CPU decides from what the scene announces, never walking every draw:
 
