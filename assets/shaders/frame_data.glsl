@@ -32,6 +32,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 motionOptions;          // x: 1 while the motion is worked out, else every pixel has none; yz: this frame's jitter (pixels)
     uvec4 meshClusterBuffers[3]; // the mesh shaders' buffers by address (low, high words): the list, its totals; the clusters, their vertex numbers; their triangle words, the vertex pool
     vec4 leafOptions;            // x: the twigs' leaf normal blend (foliage_shading.glsl, blendedFoliageNormal)
+    uvec4 virtualShadowBuffers;  // the mesh shaders drawing into the sun's virtual shadow pages, by address (low, high words): xy the page pairs, zw the casters' clusters' list
 };
 
 #endif

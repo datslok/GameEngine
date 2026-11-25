@@ -140,6 +140,28 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                         std::to_string(pages.allocated) + " (EVICTED " + std::to_string(pages.evicted) + ")  FAILED " +
                                         std::to_string(pages.failed) + "  STALE " + std::to_string(pages.stale) + "  FREE " +
                                         std::to_string(pages.free));
+
+        // Its casters (stage 4c-i), on the line after: the draws the sun's view took, clusters kept of those tested, their
+        // triangles in thousands.
+        if (stats.virtualShadowCasters) {
+            const VirtualShadowCasters& casters = *stats.virtualShadowCasters;
+            const auto pagesLine = std::find(lines.begin(), lines.end(), tiles) + 1;
+            lines.insert(pagesLine + 1, "VSM CASTERS " + std::to_string(casters.draws) + " DRAWS  CLUSTERS " + std::to_string(casters.kept) + "/" +
+                                            std::to_string(casters.tested) + "  TRIS " + std::to_string(casters.triangles / 1000) + "K");
+
+            // What was drawn into the pages (stage 4c-ii), after: page pairs (cut-outs of them), the room a list has,
+            // triangles in thousands; FULL when a list found more pairs than its room (the rest went undrawn); ATOMICS when
+            // drawn by atomics (4c-iv).
+            if (stats.virtualShadowDrawn) {
+                const VirtualShadowDrawn& drawn = *stats.virtualShadowDrawn;
+                const std::uint32_t cutOuts = drawn.pairs[VIRTUAL_SHADOW_PAIRS_CUT_OUT];
+                const bool full = std::any_of(drawn.pairs.begin(), drawn.pairs.end(), [&](std::uint32_t pairs) { return pairs > drawn.room; });
+                lines.insert(pagesLine + 2, "VSM DRAWN " + std::to_string(drawn.pairs[VIRTUAL_SHADOW_PAIRS_PLAIN] + cutOuts) + " PAIRS (" +
+                                                std::to_string(cutOuts) + " CUT-OUT)  ROOM " + std::to_string(drawn.room) + "  TRIS " +
+                                                std::to_string(drawn.triangles / 1000) + "K" + (full ? "  FULL" : "") +
+                                                (drawn.atomics ? "  ATOMICS" : ""));
+            }
+        }
     }
 
     // The bones pass's (ROADMAP phase 21 stage 3c-iii-b): trees posed, those still for want of room, bones asked of the pool.

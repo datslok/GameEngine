@@ -2,12 +2,16 @@
 
 #include "core/settings_visitor.h"
 #include "math/mat4.h"
+#include "math/vec2.h"
 #include "math/vec3.h"
+#include "math/vec4.h"
 #include "render/gpu/virtual_shadows_shared.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 /*
 * Virtual shadow maps for the sun (phase 21 stage 4; research and plan: docs/research/VIRTUALSHADOWMAPS.md). Instead of
@@ -45,6 +49,15 @@ enum class VirtualShadowResolution {
 
 inline constexpr std::array<const char*, 2> virtualShadowResolutionNames = {"32 pages (4096)", "64 pages (8192)"};
 
+// How depth reaches the pool (stage 4c-iv): the hardware's depth test into a depth image, or imageAtomicMax into a
+// 32-bit whole number image from fragment shaders with no depth target (Unreal's way, and a compute rasteriser's later).
+enum class VirtualShadowDrawing {
+    DepthTest,
+    Atomics,
+};
+
+inline constexpr std::array<const char*, 2> virtualShadowDrawingNames = {"Depth test", "Atomics"};
+
 int virtualShadowPagesPerSide(VirtualShadowResolution resolution);
 
 struct VirtualShadowSettings {
@@ -55,6 +68,10 @@ struct VirtualShadowSettings {
     // A debug view: each pixel tinted by its level, its page's edges outlined, pages given room this frame white, pages
     // the pool had no room for red.
     bool showPages = false;
+
+    // The main pass reads the pages for the sun's shadow (stage 4c-iii), the cascades where a point has no drawn page.
+    // Off until the pages are measured against the cascades (4c-iv): with it off the cascades shade every point.
+    bool mainPass = false;
 
     // The pool's pages, shared by every level (Unreal's default 4096: 256 MB of 32-bit depth once drawn into, 4c).
     int poolPages = 4096;
@@ -71,6 +88,10 @@ struct VirtualShadowSettings {
     // (all its pages dropped) once the camera has moved slack - 1 half-widths along the light: at 16, the finest level
     // every 7.5 m, a 128 m one every 1.9 km. Depth steps grow with the range, but stay far below a texel up to 1000.
     float depthSlack = 16.0f;
+
+    // Atomics by default: 24-39% faster than the depth test at the four spots (4c-iv). They need fragment shaders'
+    // stores (VulkanDevice::supportsFragmentAtomics), else the depth test draws.
+    VirtualShadowDrawing drawing = VirtualShadowDrawing::Atomics;
 
     bool operator==(const VirtualShadowSettings&) const = default;
 };
@@ -165,6 +186,21 @@ VirtualShadowPlacement virtualShadowPlacement(const VirtualShadowClipmap& clipma
 Vec3 virtualShadowLevelPoint(const Vec3& lightPoint, const VirtualShadowPlacement& placement);
 
 /*
+* The sun's casters (stage 4c-i), culled once for every level the screen may mark, as one more shadow view of the
+* camera's culling. The levels: up to the finest holding the farthest surface seen (a point that far along the view at
+* the screen's corner, where it is farthest from the camera), every level when none holds it.
+*/
+int virtualShadowCasterLevels(const VirtualShadowSettings& settings, float farthestAlongView, float verticalFov, float aspectRatio);
+
+/*
+* The box those levels' casters lie in, as a shadow tile's world-space clip matrix (reversed depth; x, y across the
+* light): every level's pages across, and along the light every level's whole depth range, the caster reach sunwards
+* included, so a page drawn holds every caster its depths can (and, once pages are cached, still holds them while the
+* camera moves within the range).
+*/
+Mat4 virtualShadowCasterBox(const VirtualShadowClipmap& clipmap, int levels);
+
+/*
 * The pages (stage 4b). Each frame the marking pass flags the page under every pixel on screen, and the pages round it
 * a soft shadow's filter may read (VIRTUAL_SHADOW_FILTER_TEXELS); the resolving pass then decides each table entry's
 * fate, and the allocating pass gives the pages that need one a place in the pool: a free one, else one only cached.
@@ -233,6 +269,15 @@ std::uint32_t virtualShadowEntryWith(std::uint32_t physicalPage, std::uint32_t f
 Vec3 virtualShadowLevelColour(int level);
 bool virtualShadowNearPageEdge(float texelX, float texelY, float width);
 
+/*
+* The main pass's lookup (stage 4c-iii). A point is moved towards the sun by the cascades' bias (sunShadowBias) with its
+* level's texel times biasTexels (ShadowSettings::normalOffsetTexels) as the base, more on slopes the sun grazes; along
+* the light that changes only its depth, by this step in the level's depth. It is in shadow where the pool holds a depth
+* more than that sunward of it (reversed: larger): 0 shadowed, 1 lit.
+*/
+float virtualShadowBiasDepth(float biasTexels, float inverseTexel, float depthScale, float nDotL);
+float virtualShadowLit(float stored, float depth, float biasDepth);
+
 // What the resolving and allocating passes counted this frame (VIRTUAL_SHADOW_COUNT_*), for F4's VSM line.
 struct VirtualShadowCounts {
     std::uint32_t requested = 0;
@@ -245,6 +290,87 @@ struct VirtualShadowCounts {
 };
 
 VirtualShadowCounts virtualShadowCountsFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_COUNTERS>& counters);
+
+// The sun's casters (stage 4c-i), for F4's VSM CASTERS line: the draws its view took, the clusters tested and kept of
+// them, and the kept ones' triangles.
+struct VirtualShadowCasters {
+    std::size_t draws = 0;
+    std::size_t tested = 0;
+    std::size_t kept = 0;
+    std::size_t triangles = 0;
+};
+
+/*
+* Drawing into the pages (stage 4c-ii). Each surviving caster cluster's sphere is laid into every level; each page it
+* touches that is drawn this frame (virtualShadowEntryDrawn: given a place and asked for) becomes a page pair, and a
+* mesh shader draws each pair's cluster into its page's place in the pool, clipped to the page by four clip distances.
+* The pool is one depth image of pages in rows (virtualShadowPoolColumns a row).
+*/
+inline constexpr int virtualShadowPairLists = VIRTUAL_SHADOW_PAIR_LISTS;
+inline constexpr std::uint32_t virtualShadowFirstPairRoom = VIRTUAL_SHADOW_FIRST_PAIR_ROOM;
+
+static_assert(maxVirtualShadowLevels - 1 <= static_cast<int>(VIRTUAL_SHADOW_PAIR_LEVEL_MASK), "A pair's level fits its bits");
+static_assert(64 - 1 <= static_cast<int>(VIRTUAL_SHADOW_PAIR_PAGE_MASK), "A pair's page fits its bits at 64 pages a side");
+static_assert(VIRTUAL_SHADOW_EXPAND_GROUP >= VIRTUAL_SHADOW_MAX_LEVELS, "The expanding pass has a thread for every level");
+
+// An entry whose page is drawn this frame: it has a place in the pool and a pixel asked for it.
+bool virtualShadowEntryDrawn(std::uint32_t entry);
+
+/*
+* The pages a caster's sphere touches in a level: its centre's texel and depth there (virtualShadowLevelPoint), its
+* radius in texels and in depth (the radius times the inverse texel and times the depth scale's size). None when it
+* misses the level across the light, or lies wholly past the depth range's far end (depth 0; a caster sunward of the
+* range is clamped to its sunward end, so still drawn).
+*/
+std::optional<VirtualShadowPageSpan> virtualShadowSpherePages(const Vec3& levelPoint, float radiusTexels, float radiusDepth, int pagesPerSide);
+
+// A page pair: the caster's place in its clusters' list, its level, its page of the level and that page's place in the pool.
+struct VirtualShadowPagePair {
+    std::uint32_t place = 0;
+    int level = 0;
+    VirtualShadowPage page;
+    std::uint32_t physical = 0;
+
+    bool operator==(const VirtualShadowPagePair&) const = default;
+};
+
+std::array<std::uint32_t, 2> packVirtualShadowPagePair(const VirtualShadowPagePair& pair);
+VirtualShadowPagePair unpackVirtualShadowPagePair(const std::array<std::uint32_t, 2>& words);
+
+// The pool's pages a row (the square root rounded up) and its rows: every physical page has a place.
+int virtualShadowPoolColumns(int poolPages);
+int virtualShadowPoolRows(int poolPages);
+
+// A level's texel on one of its pages to its texel in the pool, at that page's physical place.
+Vec2 virtualShadowPoolTexel(float texelX, float texelY, const VirtualShadowPage& page, std::uint32_t physical, int poolColumns);
+
+// The four clip distances keeping a page's triangles on it: the texel's distance in from its left, right, top and bottom
+// edges (negative outside).
+Vec4 virtualShadowPageClip(float texelX, float texelY, const VirtualShadowPage& page);
+
+// A pool texel and depth in clip space, for the viewport every pass sets (setViewport: flipped, its top at y = 0), so the
+// texel lands on its own pixel of the pool.
+Vec4 virtualShadowPoolClip(float poolX, float poolY, float depth, int poolWidth, int poolHeight);
+
+/*
+* The atomics' pool word (4c-iv): a reversed depth's float bits, clamped to 0-1 as the depth target clamps and -0 made 0
+* (its sign bit would make it the largest). Bits of floats from 0 up order as the floats do, so imageAtomicMax keeps what
+* the depth test GREATER keeps; the far depth (0) is the cleared word, and the pool's float view reads the depth back.
+*/
+std::uint32_t virtualShadowAtomicDepth(float depth);
+
+// What the drawing found this frame, for F4's VSM DRAWN line: each list's pairs (past the room too), the room, triangles.
+struct VirtualShadowDrawn {
+    std::array<std::uint32_t, VIRTUAL_SHADOW_PAIR_LISTS> pairs{};
+    std::uint32_t room = 0;
+    std::uint32_t triangles = 0;
+    bool atomics = false; // drawn by atomics (4c-iv), F4 says so
+};
+
+VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room);
+
+// The room the pairs need after a frame found this many in a list: unchanged while they fit, else the next power of two.
+std::uint32_t virtualShadowPairRoomFor(std::uint32_t room, std::uint32_t mostFound);
 
 // One level for the shader (std430): virtualShadowPlacement's numbers, the level's first page (low 32 bits) and
 // generation for the keys.
@@ -262,15 +388,26 @@ struct GpuVirtualShadowFrame {
     float lightRotation[16];          // sunLightRotation, column-major: camera-relative points to the light's axes
     float inverseViewProjection[16];  // the camera's, camera-relative and jittered: pixels back to points
     float screen[4];                  // the render size in pixels, and its inverse
-    float options[4];                 // x the first level's usable half-width, y 1 shows the pages' debug view, z 1 starts the pages again
+    float options[4];                 // x the first level's usable half-width, y 1 shows the pages' debug view, z 1 starts the pages again, w 1 the pool is drawn this frame
     std::int32_t counts[4];           // x the levels, y the pages a level's side, z the pool's pages, w the frame
+    std::int32_t pool[4];             // x the pool's pages a row, y the pairs' room, z, w the pool's width and height in texels
+    float shading[4];                 // x 1 the main pass reads the pages (mainPass), y the bias's base in a level's texels
     GpuVirtualShadowLevel levels[maxVirtualShadowLevels];
 };
 
-static_assert(sizeof(GpuVirtualShadowFrame) == 1200, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
+static_assert(sizeof(GpuVirtualShadowFrame) == 1232, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
 
-// The frame's record: the clipmap placed for this camera, each level's generation, the frame's counter.
+// The frame's record: the clipmap placed for this camera (its settings' debug view and main pass switch), each level's
+// generation, the main pass's bias in texels, the frame's counter, the pairs' room.
 GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap, const Vec3& camera,
                                              const std::array<std::uint32_t, maxVirtualShadowLevels>& generations,
-                                             const Mat4& inverseViewProjection, float width, float height, bool showPages,
-                                             std::uint32_t frame);
+                                             const Mat4& inverseViewProjection, float width, float height, float biasTexels,
+                                             std::uint32_t frame, std::uint32_t pairRoom = virtualShadowFirstPairRoom);
+
+/*
+* The page pairs of a caster's sphere (centre measured from the camera, in the light's axes; radius) in one level of a
+* frame's record, against the page table: each page it touches whose entry is drawn, in rows. The expanding pass's
+* thread for that level does the same (virtual_shadow_expand.comp).
+*/
+void appendVirtualShadowPagePairs(std::uint32_t place, const Vec3& lightCentre, float radius, int level, const GpuVirtualShadowFrame& frame,
+                                  const std::vector<std::uint32_t>& entries, std::vector<VirtualShadowPagePair>& pairs);

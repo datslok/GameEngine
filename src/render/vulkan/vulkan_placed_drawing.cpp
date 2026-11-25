@@ -330,12 +330,13 @@ VulkanPlacedDrawing::Draws VulkanPlacedDrawing::draws(std::uint32_t frameIndex, 
     return Draws{frame.commands.get(), static_cast<VkDeviceSize>(view) * frame.table.groups.size() * sizeof(GpuDrawCommand), &frame.table.order};
 }
 
-VulkanPlacedDrawing::ClusterInputs VulkanPlacedDrawing::clusterInputs(std::uint32_t frameIndex) const {
+VulkanPlacedDrawing::ClusterInputs VulkanPlacedDrawing::clusterInputs(std::uint32_t frameIndex, std::uint32_t view) const {
     const PerFrame& frame = frames.at(frameIndex);
-    ClusterInputs inputs{frame.commands.get(), frame.groups.get(), frame.entries.get(), frame.parts.get(), &frame.table.order, 0};
+    const auto commandFirst = static_cast<std::uint32_t>(view * frame.table.groups.size());
+    ClusterInputs inputs{frame.commands.get(), frame.groups.get(), frame.entries.get(), frame.parts.get(), &frame.table.order, 0, commandFirst};
 
-    if (!frame.views.views.empty()) {
-        inputs.pairBound = placedMeshClusterPairBound(frame.table, frame.blocks, frame.views.items, frame.views.views.front());
+    if (view < frame.views.views.size()) {
+        inputs.pairBound = placedMeshClusterPairBound(frame.table, frame.blocks, frame.views.items, frame.views.views[view]);
     }
 
     return inputs;

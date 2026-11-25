@@ -12,6 +12,8 @@ const char* gpuPassName(GpuPass pass) {
         return "CULL";
     case GpuPass::MeshCull:
         return "MESHCULL";
+    case GpuPass::VirtualShadowCull:
+        return "VSMCULL";
     case GpuPass::RayScene:
         return "TLAS";
     case GpuPass::Atmosphere:
@@ -56,6 +58,8 @@ const char* gpuPassName(GpuPass pass) {
         return "CONTACT";
     case GpuPass::VirtualShadowPages:
         return "VSMPAGES";
+    case GpuPass::VirtualShadowDraw:
+        return "VSMDRAW";
     case GpuPass::MirroredLights:
         return "MIRROR";
     case GpuPass::Main:

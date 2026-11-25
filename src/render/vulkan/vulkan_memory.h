@@ -77,6 +77,10 @@ struct ImageDescription {
     std::uint32_t depth = 1;
     VkImageUsageFlags usage = 0;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    // Views in other formats of the same size may look into it (VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT): the virtual shadow
+    // pool's whole numbers, written by atomics, sampled as the floats they hold.
+    bool mutableFormat = false;
     const char* name = nullptr; // for RenderDoc, Nsight and validation messages (a string literal: it is kept)
 };
 

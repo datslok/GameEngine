@@ -1,8 +1,8 @@
 # Virtual shadow maps
 
-Covers: `src/render/gpu/virtual_shadows`, `src/render/vulkan/vulkan_virtual_shadows`, `assets/shaders/virtual_shadows.glsl`, `assets/shaders/virtual_shadow_data.glsl`, `assets/shaders/virtual_shadow_pages.glsl`, `assets/shaders/virtual_shadow_clear.comp`, `assets/shaders/virtual_shadow_mark.comp`, `assets/shaders/virtual_shadow_resolve.comp`, `assets/shaders/virtual_shadow_allocate.comp`
+Covers: `src/render/gpu/virtual_shadows`, `src/render/vulkan/vulkan_virtual_shadows`, `assets/shaders/virtual_shadows.glsl`, `assets/shaders/virtual_shadow_data.glsl`, `assets/shaders/virtual_shadow_pages.glsl`, `assets/shaders/virtual_shadow_clear.comp`, `assets/shaders/virtual_shadow_mark.comp`, `assets/shaders/virtual_shadow_resolve.comp`, `assets/shaders/virtual_shadow_allocate.comp`, `assets/shaders/virtual_shadow_expand.comp`, `assets/shaders/virtual_shadow_tasks.comp`, `assets/shaders/virtual_shadow_draw.mesh`, `assets/shaders/virtual_shadow_cut_out.frag`, `assets/shaders/virtual_shadow_atomic.frag`
 
-The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by step; research, choices and the steps: `docs/research/VIRTUALSHADOWMAPS.md`. Built so far: the clipmap's maths (4a), the pages marked and given room on the GPU (4b). The cascades (`sun-shadows.md`) still draw every shadow.
+The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by step; research, choices and the steps: `docs/research/VIRTUALSHADOWMAPS.md`. Built so far: the clipmap's maths (4a), the pages marked and given room on the GPU (4b), the casters culled (4c-i), drawn into the pages (4c-ii), by the depth test or by atomics (4c-iv), and read by the main pass behind a switch (4c-iii). The cascades (`sun-shadows.md`) still draw every frame and shade every point without a drawn page.
 
 ## The clipmap (`render/gpu/virtual_shadows`, mirrored by `virtual_shadows.glsl`)
 
@@ -33,7 +33,7 @@ The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by
 
 ## The pages (`VulkanVirtualShadows`, Passes VSMPAGES)
 
-`VirtualShadowSettings` (F5 Virtual shadows, `engine.render.virtualShadows.*`): `enabled` (off until 4c draws), `showPages`, `poolPages` (4096, up to `VIRTUAL_SHADOW_MAX_POOL_PAGES` 16384), and the clipmap's.
+`VirtualShadowSettings` (F5 Virtual shadows, `engine.render.virtualShadows.*`): `enabled` (off until 4c draws), `showPages`, `mainPass` (off, 4c-iii), `drawing` (atomics by default, or the depth test, 4c-iv), `poolPages` (4096, up to `VIRTUAL_SHADOW_MAX_POOL_PAGES` 16384), and the clipmap's.
 
 - **`prepare`** (before the scene set): the clipmap moved (`updateVirtualShadowClipmap`); each dropped level's generation bumped; this frame's `GpuVirtualShadowFrame` (std430, 1200 B: light rotation, inverse view-projection, screen, options, counts, a `GpuVirtualShadowLevel` a level) written by `packVirtualShadowFrame`. Runs with the prepass and a shadowed sun; else the record holds no levels.
 - **Entries** (`uint`): `ALLOCATED`, `REQUESTED`, `DIRTY`, `FAILED` in the top bits, the physical page in the low 16. Each has a key (`VirtualShadowKey`: the world page across the light, low 32 bits, and the level's generation): a key that no longer matches its slot's is stale.
@@ -51,6 +51,56 @@ The sun's virtual shadow maps (phase 21 stage 4), replacing the cascades step by
 - **F4:** `VSM PAGES` asked, `KEPT`, `NEW` (`EVICTED` of them), `FAILED`, `STALE`, `FREE`, under the tiles' line.
 - **Debug view** (`showPages`, main pass, `virtualShadowPageView` in `scene_surface.glsl`, set 1 bindings 59-60): each pixel its level's colour (`virtualShadowLevelColour`), its page's edges dark (`virtualShadowNearPageEdge`, 2 texels), new pages white, failed red, unasked black.
 
+## The casters (4c-i, Passes VSMCULL)
+
+With the pages on and mesh shaders, the sun gets one more shadow view in the camera's culling (`gpu-driven.md`), its clusters culled after the camera's by passes of their own.
+
+- **Levels:** `virtualShadowCasterLevels`: up to the finest holding the farthest surface seen (the cascades' fitted distance, else the far plane, at the screen's corner: times sqrt(1 + t^2)); every level past the last.
+- **Box:** `virtualShadowCasterBox`: those levels' pages across and their whole depth ranges along, caster reach sunwards, as a world clip matrix (a level's every caster for a page drawn now or cached later).
+- **View:** `packVirtualShadowCull` (`shadow_culling`): `CAMERA_CULL_SHADOW`, any caster size, no reach or cascade; its levels the camera's, so its old levels and its clusters' cut are what the camera draws (a caster the same in every level, and as seen). Its list a draw list region; a placed view (`setPlacedViews`), and a swaying one (an off-screen tree sways in its shadow).
+- **Clusters:** a second `VulkanMeshClusterCulling` (`virtualShadowClusters`; pyramids one texel, no occlusion, no twigs), inputs shared with the camera's (`meshClusterInputs`); the placed commands from the view's first (`ClusterInputs::commandFirst`, `placedSetup.x`). A shadow view never culls by facing.
+- **F4:** `VSM CASTERS` draws taken, clusters kept/tested, triangles, after the pages' line.
+- Leaves (twigs, far leaves) not before 4f.
+
+## Drawing into the pages (4c-ii, Passes VSMDRAW)
+
+After the pages are given room, with the casters culled; every drawn page (`virtualShadowEntryDrawn`: a place and asked for) is drawn each frame until 4e caches them.
+
+| Step | What |
+|---|---|
+| Expand (`virtual_shadow_expand.comp`) | a workgroup a survivor of one style's run (dispatched by the casters' list's own task command for that style; `listPassBindings` gives it the cluster passes' buffers), a thread a level: the cluster's sphere (posed; a draw kept whole, `meshClusterSeenWhole`, its draw's bounds; unknown bounds the whole level) laid into the level (`virtualShadowSpherePages`: none off the level or wholly past its far end), each drawn page a pair; mirrored by `appendVirtualShadowPagePairs` |
+| Tasks (`virtual_shadow_tasks.comp`) | one thread: each list's mesh shader draw (`meshClusterTaskGroups` of its pairs within the room) |
+| Draw (`virtual_shadow_draw.mesh`) | a workgroup a pair: its cluster placed by `drawPooledCluster` (the camera's mesh shaders' body: sway, bones), each vertex then into the light's axes, the level (`virtualShadowLevelPoint`), its page's place in the pool (`virtualShadowPoolTexel`) and clip space (`virtualShadowPoolClip`, for the flipped viewport); four clip distances at the page's edges (`virtualShadowPageClip`) |
+
+- **Pairs** (`VirtualShadowPagePair`, two words: the caster's place in its list; level 4 bits, page 6 + 6, physical page 16): two lists, plain (no fragment shader) and cut-outs (`virtual_shadow_cut_out.frag`, the prepass's test shared through `cut_out_prepass.glsl`: holes, impostors' cards, fading levels). The buffer, a frame in flight's own: a header (`VIRTUAL_SHADOW_HEADER_*`: each list's pairs found, triangles, each list's draw), then each list's room. Appended by atomics: their order changes, the depths do not (GREATER keeps the sunward depth whichever comes first).
+- **Room:** `VIRTUAL_SHADOW_FIRST_PAIR_ROOM` (262144) a list, grown to the next power of two after a frame finds more (`virtualShadowPairRoomFor`, at most a mesh shader draw's 2^22); a frame past it drops the rest (F4's FULL).
+- **Pool:** one `D32_SFLOAT` image, pages in rows of `virtualShadowPoolColumns` (the square root rounded up: 4096 pages, 64 × 64, 8192² texels, 256 MB), made when the pool's size changes (the GPU idle); cleared each frame, depth tested GREATER, both sides, clamped; then readable by fragment shaders.
+- **Frame data:** `virtualShadowBuffers` (the pairs' and the casters' list's addresses); the record's `pool` (pages a row, the room, the image's size) and `options.w` (drawn this frame, `markPoolDrawn`). Set 1 binding 61 the pool (a stand-in while not drawn).
+- **Debug view:** `showPages` darkens a drawn page where the pool holds a depth 3 of the level's texels sunward of the point (`VIRTUAL_SHADOW_VIEW_BIAS_TEXELS`): a rough look at the pages' shadows, not the main pass's (4c-iii).
+- **F4:** `VSM DRAWN` pairs (cut-outs of them), the room, triangles, FULL when a list overflowed.
+
+## Drawing by atomics (4c-iv)
+
+`drawing` = Atomics (the default: 24-39% faster than the depth test at the four spots), with the GPU's `fragmentStoresAndAtomics` (`VulkanDevice::supportsFragmentAtomics`; else the depth test draws): Unreal's way, and what a compute rasteriser (stage 5c) will need. The same expanding pass, pairs and mesh shader; only the target differs.
+
+- **Pool:** an `R32_SFLOAT` image made with a mutable format (`ImageDescription::mutableFormat`), the same size; an `R32_UINT` view of it at set 1 binding 62 (storage, fragment), its own view sampled at 61 as the depth pool is. Remade (the GPU idle) when the drawing changes.
+- **Each frame:** cleared by `vkCmdClearColorImage` to the far depth's word, then drawn with no attachments (the pool's size as the render area); `virtual_shadow_atomic.frag` runs `imageAtomicMax` of `virtualShadowAtomicDepth(gl_FragCoord.z)` at its texel, the cut-outs' test first behind its constant (`cut_out_prepass.glsl`). States: `TransferDestination`, `FragmentStorage`, `FragmentRead`.
+- **The word:** the reversed depth's float bits, clamped to 0-1 as the depth target clamps, -0 made 0. Bits of floats from 0 up order as the floats, so the largest word is the nearest surface, what GREATER keeps, whatever the order; read through the float view, the bits are the depth.
+- **Cost:** a memory atomic for every covered fragment, queued where fragments stack on a texel (crowns about 100); the depth test rejects behind the nearest early. Both timed as VSMDRAW; F4's `VSM DRAWN` line ends `ATOMICS` while drawn so.
+- **Measured (home PC, release, VSMDRAW ms, depth test / atomics):** rim 9.3 / 7.0, ring 15.8 / 12.0, wall 24.7-25.3 / 15.0-15.7, trees 17.6 / 11.6, for 36-103 M triangles in 0.6-1.7 M pairs: both far past the cascades' 3.8-5.4 ms.
+- A 1 x 1 `R32_UINT` stand-in fills binding 62 while the depth test draws: no shader that runs then reads it.
+
+## The main pass reading the pages (4c-iii)
+
+While `mainPass` (the record's `shading.x`) and the pool is drawn, `sunShadow` (`scene_surface.glsl`) asks `virtualShadowSun` first; cost a page-table read and a pool read a pixel.
+
+1. **Where:** `virtualShadowPointLookup` (shared with the debug view): the sun's shadow point's level by distance, its texel and depth, its page's entry. Not drawn (`virtualShadowEntryDrawn`), past the last level, or a capture (points from another eye): the cascades as before.
+2. **Bias:** `virtualShadowBiasDepth`: the cascades' `sunShadowBias` with the level's texel times `ShadowSettings::normalOffsetTexels` (2.5, the record's `shading.y`) as its base; along the light only the depth moves, by that times the depth scale.
+3. **Compare:** `virtualShadowLit` against the pool's texel (`virtualShadowStoredDepth`): 0 where the pool holds more than the bias sunward. One texel, hard edges until 4d.
+4. **Distant occluders:** the far map's, as a cascade takes them (`withDistantOccluders`).
+
+- Not yet: glass's coloured shadows (the cascades' only), impostor cards (`sunShadowOverPlant` reads the cascades), leaves (not drawn until 4f).
+
 ## Tests
 
-`virtual_shadows_test` (settings and their keys; sizes; the level choice at and a float step past every reach; texels within 0.5-1.1 pixels; points at every level landing half a page inside it, depth inside the range and a caster the reach sunwards too, the worst case straight across the light, cameras 6 km out; walking keeps a world point's slot, texel and depth; which levels drop; slots and table entries each once, negative pages wrapped; depth steps under a quarter texel; marked spans by edges and corners; slots back to pages; entries, sources; the four passes simulated over frames on the CPU with the shared functions: places kept while asked, none stale while walking, a dropped level freed, a full pool evicting then failing, no place held twice; the frame record; the counters and F4's line); GPU: `virtual_shadows_gpu_test` (level choice exact, pages, slots, entries, keys, sources, colours, edges, level points against the mirror).
+`virtual_shadows_test` (the casters' levels at the screen's corner, the casters' box holding every level's corners after walks and nothing a page past; settings and their keys; sizes; the level choice at and a float step past every reach; texels within 0.5-1.1 pixels; points at every level landing half a page inside it, depth inside the range and a caster the reach sunwards too, the worst case straight across the light, cameras 6 km out; walking keeps a world point's slot, texel and depth; which levels drop; slots and table entries each once, negative pages wrapped; depth steps under a quarter texel; marked spans by edges and corners; slots back to pages; entries, sources; the four passes simulated over frames on the CPU with the shared functions: places kept while asked, none stale while walking, a dropped level freed, a full pool evicting then failing, no place held twice; the frame record; the counters and F4's lines); the drawing (drawn entries; a sphere's pages exactly those its square meets, none past the far end; pairs' words at their extremes; the pool's pages each their own square, a texel at the same spot of its page's place; the page's clip distances; the pool's clip space through the flipped viewport; random spheres' pairs holding every drawn page their points land on and no other; the record's pool and the room's growth; F4's DRAWN line); the atomics' word (the far depth's word 0, -0 and negatives 0, past 1 as 1, the bits read back as the depth, order kept, texels struck by 1-100 fragments keeping what GREATER keeps; F4's ATOMICS); the main pass (the bias the cascades' in the level's texels, a point moved by it changing only its depth by exactly the step; the comparison at and past the bias; no acne on surfaces tilted up to the slope cap at every level, a blocker twice the bias sunward found, half the bias lost; the record's switch and bias); `shadow_culling_test` (the casters' view: the camera's levels, any caster in its box, none outside or not casting); GPU: `virtual_shadows_gpu_test` (level choice exact, pages, slots, entries, keys, sources, colours, edges, level points, spheres' pages, pairs, pool texels and clip spaces, the main pass's bias and comparison, the atomics' word against the mirror); `image_state_test` (the pool cleared, written in fragments, sampled).

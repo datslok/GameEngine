@@ -57,9 +57,10 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 |---|---|---|---|
 | 1 | Cloth [CLOTH] | GPU cloths ticked | `cloth-gpu.md` |
 | 2 | Debug UI [UI] | F5 open: the UI into its own overlay image | `settings-and-commands.md` |
-| 3 | Culling [CULL] | always: the camera's, probe faces', mirror's and drawn shadow tiles' lists and commands | `gpu-driven.md` |
+| 3 | Culling [CULL] | always: the camera's, probe faces', mirror's, drawn shadow tiles' and the sun's virtual shadow casters' lists and commands | `gpu-driven.md` |
 | 3b | Planting [PLANTING], placed [PLACED], wind [WIND], bones [BONES] | cells made, or read back (`placement-compare`); every view's placed plants' lists while a field's looks draw some; the wind field runs; trees sway | `planting.md`, `wind-bones.md` |
 | 3c | Mesh clusters [MESHCULL] | Passes "Mesh clusters" on: the camera's clusters, its list's and placed plants' | `mesh-clusters.md` |
+| 3d | Virtual shadow casters [VSMCULL] | the pages on, with mesh shaders: the sun's casters' clusters, its view's list's and placed plants' | `virtual-shadows.md` |
 | 4 | Ray scene [TLAS] | anything traces rays (probes, ray debug, probe capture, reflections, mirrored lights, glass shadows) | `ray-tracing.md` |
 | 5 | Atmosphere [SKY] | frame has an `Atmosphere` | `sky.md` |
 | 6 | Probes [PROBES] | probes traced (`tracesProbes`) | `ddgi.md` |
@@ -72,6 +73,7 @@ Each row is a `GpuPass` (F4 name in brackets); skipped passes cost two equal sta
 | 14-17 | AO, AOHISTORY, AODENOISE, AOUPSAMPLE | ambient occlusion on (needs the prepass) | `ambient-occlusion.md` |
 | 18 | Contact shadows [CONTACT] | sun or lamp contact shadows on (needs the prepass) | `sun-shadows.md` |
 | 18b | Virtual shadow pages [VSMPAGES] | `virtualShadows.enabled`, the prepass, a shadowed sun | `virtual-shadows.md` |
+| 18c | Virtual shadow drawing [VSMDRAW] | the pages on, their casters culled (mesh shaders) | `virtual-shadows.md` |
 | 19 | Mirrored lights [MIRROR] | rays, prepass, a fast light on a smooth surface | `mirrored-lights.md` |
 | 20 | Main [MAIN] | always; also writes the velocity image (`anti-aliasing.md`); sky and stars in a block of their own after | here |
 | 21 | Probe balls [BALLS], ray debug [RAYS] | debug views | `ddgi.md`, `ray-tracing.md` |
@@ -153,6 +155,7 @@ An `ImageState` names a use; `imageStateUse` gives its stages, accesses and layo
 | `VertexRead` | Sampled by vertex and compute (the wind's springs) |
 | `DepthFragmentRead`, `DepthComputeRead` | A depth image sampled |
 | `ComputeRead`, `ComputeStorage` | Sampled by compute; read and written in place (`GENERAL`) |
+| `FragmentStorage` | Read and written by fragment shaders as a storage image (`GENERAL`; the virtual shadow pool's atomics) |
 | `MeshComputeRead` | Sampled by compute and mesh shaders (the occlusion pyramids) |
 | `TransferSource`, `TransferDestination` | Copies and blits |
 

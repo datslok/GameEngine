@@ -1,0 +1,29 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* After expanding (render/vulkan/vulkan_virtual_shadows.h): each pair list's mesh shader draw, a workgroup a pair within
+* the room (meshClusterTaskGroups' rows), into the pairs' header. One thread.
+*/
+#include "mesh_cluster_culling.glsl"
+#include "virtual_shadow_data.glsl"
+
+layout(local_size_x = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer VirtualShadowFrame {
+    VIRTUAL_SHADOW_FRAME_FIELDS
+} frame;
+
+layout(std430, set = 0, binding = 1) buffer VirtualShadowPairs {
+    uint pairWords[];
+};
+
+void main() {
+    for (uint list = 0u; list < uint(VIRTUAL_SHADOW_PAIR_LISTS); ++list) {
+        uvec3 groups = meshClusterTaskGroups(min(pairWords[VIRTUAL_SHADOW_HEADER_PAIRS + list], uint(frame.pool.y)));
+
+        for (uint axis = 0u; axis < 3u; ++axis) {
+            pairWords[VIRTUAL_SHADOW_HEADER_TASKS + 3u * list + axis] = groups[axis];
+        }
+    }
+}

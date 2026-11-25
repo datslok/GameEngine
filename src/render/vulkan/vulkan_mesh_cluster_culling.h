@@ -47,9 +47,9 @@ public:
     void ensureSize(RenderSize render);
 
     /*
-    * The camera's placed plants (render/vulkan/vulkan_placed_drawing.h), each buffer the passes' own record when there
-    * are none: the commands with the camera's first, the placed groups, every view's entries, the parts' instances and
-    * records, the slots' plants.
+    * The view's placed plants (render/vulkan/vulkan_placed_drawing.h), each buffer the passes' own record when there
+    * are none: every view's commands, the camera's first, and the view's first among them, the placed groups, every
+    * view's entries, the parts' instances and records, the slots' plants.
     */
     struct PlacedInputs {
         VkBuffer commands = VK_NULL_HANDLE;
@@ -58,6 +58,7 @@ public:
         VkDescriptorBufferInfo partInstances{};
         VkBuffer parts = VK_NULL_HANDLE;
         VkBuffer plants = VK_NULL_HANDLE;
+        std::uint32_t commandFirst = 0;
     };
 
     /*
@@ -141,6 +142,14 @@ public:
 
     // The room for pairs, each list's.
     std::uint32_t getRoom() const;
+
+    /*
+    * For a pass of another system's over the frame's early list once cull made it (the sun's virtual shadow casters'
+    * expanding, render/vulkan/vulkan_virtual_shadows.h): the bindings every pass shares (mesh_cluster_pass.glsl, from
+    * what cull was given), then the list's items and totals. The list and its task commands are left for the mesh
+    * shaders and indirect reads; such a pass makes them visible to compute itself.
+    */
+    std::vector<ComputeBinding> listPassBindings(std::uint32_t frameIndex) const;
 
     // The occlusion pyramids for the mesh shaders' far leaves (stage 3e-v-b), made now if not yet; none before the render
     // size is known. This frame's early list's, and the whole frame's (the next frame's history). Readable by mesh shaders

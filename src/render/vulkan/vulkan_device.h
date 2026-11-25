@@ -78,6 +78,10 @@ public:
     // coloured shadow maps use: the tint multiplied, the glass depth's nearest kept. Without it they stay off.
     bool supportsIndependentBlending() const;
 
+    // Whether fragment shaders may store into storage images and run atomics on them (fragmentStoresAndAtomics, on when
+    // the GPU has it): the virtual shadow pool's atomics (VirtualShadowDrawing::Atomics). Without it the depth test draws.
+    bool supportsFragmentAtomics() const;
+
     // Whether textures may be BC block-compressed (textureCompressionBC, on when the GPU has it).
     bool supportsBlockCompression() const;
 
@@ -145,6 +149,7 @@ private:
     bool meshShaders = false;
     bool dualSourceBlending = false;
     bool independentBlending = false;
+    bool fragmentAtomics = false;
     bool blockCompression = false;
     bool fsrFeatures = false;
     bool optionalExtensions = false;

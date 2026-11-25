@@ -71,6 +71,12 @@ struct RenderStats {
     // room, taken from cached ones, failed for want of room, freed as stale, left free; none while off.
     std::optional<VirtualShadowCounts> virtualShadowPages;
 
+    // And its casters, while its clusters are culled (mesh shaders): draws taken, clusters tested and kept, triangles.
+    std::optional<VirtualShadowCasters> virtualShadowCasters;
+
+    // And what was drawn into the pages (stage 4c-ii), while they are: page pairs of each list, the room, triangles.
+    std::optional<VirtualShadowDrawn> virtualShadowDrawn;
+
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
 

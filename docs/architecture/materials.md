@@ -1,6 +1,6 @@
 # Materials
 
-Covers: `src/scene/material.h`, `src/core/coverage_mips`, `src/core/srgb`, `src/render/gpu/alpha_mask`, `src/render/gpu/facet_variation`, `assets/shaders/facet_variation.glsl`, `assets/shaders/alpha_mask.glsl`, `assets/shaders/cut_out_fragment.glsl`, `assets/shaders/cut_out.frag`, `assets/shaders/cut_out_prepass.frag`
+Covers: `src/scene/material.h`, `src/core/coverage_mips`, `src/core/srgb`, `src/render/gpu/alpha_mask`, `src/render/gpu/facet_variation`, `assets/shaders/facet_variation.glsl`, `assets/shaders/alpha_mask.glsl`, `assets/shaders/cut_out_fragment.glsl`, `assets/shaders/cut_out.frag`, `assets/shaders/cut_out_prepass.frag`, `assets/shaders/cut_out_prepass.glsl`
 
 What a surface is made of, from file to `Material`, and how cut-outs keep their holes. How materials are shaded: [shading.md](shading.md) (BRDF, normal maps, clear coat), [parallax-and-grounds.md](parallax-and-grounds.md) (height maps, ground layers). Glass and blended surfaces drawn: [glass.md](glass.md). Loading and texture caching: [assets.md](assets.md).
 
@@ -102,7 +102,7 @@ Plain averaging mixes a wire with the holes beside it, so a few levels down ever
 
 | Pass | Plain | Cut-out |
 |---|---|---|
-| Depth prepass | no fragment shader | `cut_out_prepass.frag` (`fragmentCutAway`, with the frame's mip bias; then a fading level's dither, level-of-detail.md) |
+| Depth prepass | no fragment shader | `cut_out_prepass.frag` (`fragmentCutAway`, with the frame's mip bias; then a fading level's dither, level-of-detail.md), its test `prepassCutAway` in `cut_out_prepass.glsl`, shared by the sun's virtual shadow pages (`virtual_shadow_cut_out.frag`) |
 | Main pass after the prepass | as usual | same pipeline: the holes have no depth for its `EQUAL` test to match |
 | Main pass without the prepass, probe capture | as usual | specialization constant `MATERIAL_CUT_OUT_CONSTANT` adds the discard |
 | Shadow pass | `shadow.vert` alone | `shadow_cut_out.vert` with UVs, `cut_out.frag` |

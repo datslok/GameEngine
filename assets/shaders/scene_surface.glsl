@@ -166,8 +166,8 @@ layout(set = 1, binding = 32) uniform sampler2D lightContactShadows;
 
 #include "render/gpu/contact_shadows_shared.h"
 
-// The sun's virtual shadow maps' record and page table (render/vulkan/vulkan_virtual_shadows.h): only their debug view
-// reads them so far (ROADMAP phase 21 stage 4b).
+// The sun's virtual shadow maps' record, page table and pool (render/vulkan/vulkan_virtual_shadows.h): only their debug
+// view reads them so far (ROADMAP phase 21 stages 4b, 4c-ii).
 #include "virtual_shadow_data.glsl"
 #include "virtual_shadows.glsl"
 
@@ -178,6 +178,13 @@ layout(std430, set = 1, binding = SCENE_VIRTUAL_SHADOW_FRAME_BINDING) readonly b
 layout(std430, set = 1, binding = SCENE_VIRTUAL_SHADOW_TABLE_BINDING) readonly buffer SceneVirtualShadowTable {
     uint virtualShadowEntries[];
 };
+
+// The pool's depth, exact texels; a stand-in while nothing is drawn there (the record's options.w 0).
+layout(set = 1, binding = SCENE_VIRTUAL_SHADOW_POOL_BINDING) uniform sampler2D virtualShadowPool;
+
+// The debug view's own bias: a point is in a page's shadow where the pool holds a depth this many of its level's texels
+// sunward of it (a rough look at what was drawn, not the main pass's shadow, 4c-iii).
+const float VIRTUAL_SHADOW_VIEW_BIAS_TEXELS = 3.0;
 
 #include "ambient_occlusion.glsl"
 
@@ -657,6 +664,65 @@ vec3 sunShadowOverPlant(int firstTile, int cascades, vec3 toLight, float tanAngu
                                                                   distantReach));
 }
 
+// Where a point measured from the camera lands in the sun's virtual shadow maps: its level (false past the last), its
+// texel and depth there, and its page's table entry.
+bool virtualShadowPointLookup(vec3 relative, out int level, out vec3 placed, out uint entry) {
+    level = virtualShadowLevelFor(length(relative), virtualShadowFrame.options.x, virtualShadowFrame.counts.x);
+    placed = vec3(0.0);
+    entry = 0u;
+
+    if (level == VIRTUAL_SHADOW_NO_LEVEL) {
+        return false;
+    }
+
+    int pagesPerSide = virtualShadowFrame.counts.y;
+    VirtualShadowLevelData data = virtualShadowFrame.levels[level];
+    placed = virtualShadowLevelPoint(mat3(virtualShadowFrame.lightRotation) * relative, data.placement.xyz, vec2(data.placement.w, data.depth.x));
+    ivec2 slot = virtualShadowSlot(virtualShadowPageOf(placed.xy), data.pages.xy, pagesPerSide);
+    entry = virtualShadowEntries[virtualShadowTableIndex(level, slot, pagesPerSide)];
+    return true;
+}
+
+// The depth the pool holds at a point's texel on its page (only a drawn page's: virtualShadowEntryDrawn).
+float virtualShadowStoredDepth(vec3 placed, uint entry) {
+    vec2 poolTexel = virtualShadowPoolTexel(placed.xy, virtualShadowPageOf(placed.xy), virtualShadowPhysicalPage(entry), virtualShadowFrame.pool.x);
+    return texelFetch(virtualShadowPool, ivec2(poolTexel), 0).r;
+}
+
+/*
+* The sun's shadow from its virtual shadow pages (ROADMAP phase 21 4c-iii, while virtualShadows.mainPass): the point's
+* level, page and texel, compared once (hard edges until 4d) with the cascades' bias along the light in the level's
+* texels, then the far map's distant occluders as a cascade takes them (sunTileShadow). False where the point's page was
+* not drawn this frame (none asked for, the pool full, past the last level): the cascades shade it as before. Never in
+* a capture, whose points are measured from another eye. Glass's coloured shadows are the cascades' alone so far.
+*/
+bool virtualShadowSun(vec3 normal, vec3 toLight, float tanAngularRadius, int farTile, float distantReach, out vec3 shadow) {
+    shadow = vec3(1.0);
+
+    if (captureView || virtualShadowFrame.shading.x < 0.5 || virtualShadowFrame.options.w < 0.5) {
+        return false;
+    }
+
+    int level;
+    vec3 placed;
+    uint entry;
+
+    if (!virtualShadowPointLookup(sunShadowPoint, level, placed, entry) || !virtualShadowEntryDrawn(entry)) {
+        return false;
+    }
+
+    VirtualShadowLevelData data = virtualShadowFrame.levels[level];
+    float biasDepth = virtualShadowBiasDepth(virtualShadowFrame.shading.y, data.placement.z, data.placement.w, dot(normal, toLight));
+    shadow = vec3(virtualShadowLit(virtualShadowStoredDepth(placed, entry), placed.z, biasDepth));
+
+    if (farTile >= 0 && shadow.x > 0.0) {
+        shadow = withDistantOccluders(shadow, softShadowFromTileLifted(farTile, distantOccluderPoint(sunShadowPoint, toLight, distantReach),
+                                                                       tanAngularRadius, distantReach));
+    }
+
+    return true;
+}
+
 // A row's shadow with plain sunlight past it, as mix(beyond, own, share) always gave it.
 vec3 sunRowOrLit(vec3 own, float ownShare, vec3 normal, vec3 toLight) {
     return ownShare >= 1.0 ? own : mix(vec3(sunBeyondCascades(normal, toLight)), own, ownShare);
@@ -666,10 +732,17 @@ vec3 sunRowOrLit(vec3 own, float ownShare, vec3 normal, vec3 toLight) {
 * The sun's shadow: from its own cascades, which hold what the camera sees, and past them from its cascades for a flat
 * mirror's picture (render/gpu/planar_reflection.h), which hold what the mirror shows behind the camera, so the camera's
 * last cascade fades into the mirror's rather than into a band of sunlight. Without a mirror, plain sunlight lies past
-* the camera's, as always.
+* the camera's, as always. A point on a virtual shadow page drawn this frame takes the page's shadow instead, while the
+* main pass reads them (virtualShadowSun).
 */
 vec3 sunShadow(int firstTile, int cascades, int mirrorFirstTile, int mirrorCascades, vec3 normal, vec3 toLight, float tanAngularRadius,
                int farTile, float distantReach) {
+    vec3 paged;
+
+    if (virtualShadowSun(normal, toLight, tanAngularRadius, farTile, distantReach, paged)) {
+        return paged;
+    }
+
     float ownShare;
     vec3 own = sunCascadeRow(firstTile, cascades, normal, toLight, tanAngularRadius, farTile, distantReach, ownShare);
 
@@ -886,17 +959,15 @@ vec4 surfaceTexture(uint slot, vec2 uv, bool shifted, vec2 gradientAcross, vec2 
 
 // The pages' debug view at a point measured from the camera: its colour and how much of the picture it covers.
 vec4 virtualShadowPageView(vec3 relative) {
-    int level = virtualShadowLevelFor(length(relative), virtualShadowFrame.options.x, virtualShadowFrame.counts.x);
+    int level;
+    vec3 placed;
+    uint entry;
 
-    if (level == VIRTUAL_SHADOW_NO_LEVEL) {
+    if (!virtualShadowPointLookup(relative, level, placed, entry)) {
         return vec4(0.0);
     }
 
-    int pagesPerSide = virtualShadowFrame.counts.y;
     VirtualShadowLevelData data = virtualShadowFrame.levels[level];
-    vec3 placed = virtualShadowLevelPoint(mat3(virtualShadowFrame.lightRotation) * relative, data.placement.xyz, vec2(data.placement.w, data.depth.x));
-    ivec2 slot = virtualShadowSlot(virtualShadowPageOf(placed.xy), data.pages.xy, pagesPerSide);
-    uint entry = virtualShadowEntries[virtualShadowTableIndex(level, slot, pagesPerSide)];
     vec3 colour = virtualShadowLevelColour(level);
 
     if ((entry & VIRTUAL_SHADOW_ENTRY_FAILED) != 0u) {
@@ -905,6 +976,12 @@ vec4 virtualShadowPageView(vec3 relative) {
         colour = vec3(0.0);
     } else if ((entry & VIRTUAL_SHADOW_ENTRY_DIRTY) != 0u) {
         colour = vec3(1.0);
+    }
+
+    // Once drawn (4c-ii): a page's shadow dark, where its depth is sunward of the point (reversed: larger).
+    if (virtualShadowFrame.options.w > 0.5 && virtualShadowEntryDrawn(entry)) {
+        float bias = VIRTUAL_SHADOW_VIEW_BIAS_TEXELS * abs(data.placement.w) / data.placement.z;
+        colour *= mix(0.2, 1.0, virtualShadowLit(virtualShadowStoredDepth(placed, entry), placed.z, bias));
     }
 
     if (virtualShadowNearPageEdge(placed.xy, 2.0)) {

@@ -243,6 +243,12 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     independent.independentBlend = VK_TRUE;
     independentBlending = physicalDevice.enable_features_if_present(independent);
 
+    // Optional: fragment shaders' storage writes and atomics (the virtual shadow pool drawn by atomics). Every desktop
+    // GPU has it; without it the pool is drawn by the depth test.
+    VkPhysicalDeviceFeatures fragmentStores{};
+    fragmentStores.fragmentStoresAndAtomics = VK_TRUE;
+    fragmentAtomics = physicalDevice.enable_features_if_present(fragmentStores);
+
     // Optional: BC block-compressed textures (docs/research/TEXTURECOMPRESSION.md), a quarter of RGBA8's memory. Every desktop
     // GPU has it; without it textures are uploaded uncompressed.
     VkPhysicalDeviceFeatures blockCompressed{};
@@ -478,6 +484,10 @@ bool VulkanDevice::supportsBlockCompression() const {
 
 bool VulkanDevice::supportsIndependentBlending() const {
     return independentBlending;
+}
+
+bool VulkanDevice::supportsFragmentAtomics() const {
+    return fragmentAtomics;
 }
 
 bool VulkanDevice::supportsFsrFeatures() const {

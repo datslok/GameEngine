@@ -1,0 +1,97 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Expanding the sun's casters into page pairs (render/vulkan/vulkan_virtual_shadows.h; ROADMAP phase 21 4c-ii), after
+* the pages are given room: a workgroup a surviving cluster of one style's run of the casters' list (dispatched by the
+* list's own mesh shader draw for that style), a thread a level. Each thread lays the cluster's sphere (posed, or its
+* draw's bounds when the draw is kept whole) into its level and lists a pair for each page it touches that is drawn this
+* frame, in the plain or the cut-out list by the style. Mirrored by appendVirtualShadowPagePairs. Pairs are appended by
+* atomics, so their order changes from frame to frame; the depths they draw do not (the nearest depth wins in any order).
+*/
+#define MESH_CLUSTER_PASS_STYLE
+#include "mesh_cluster_pass.glsl"
+#include "virtual_shadow_data.glsl"
+#include "virtual_shadows.glsl"
+
+layout(local_size_x = VIRTUAL_SHADOW_EXPAND_GROUP) in;
+
+// The casters' list and its totals (vulkan_mesh_cluster_culling.h), after the cluster passes' buffers.
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS) readonly buffer Items {
+    MeshClusterItem items[];
+};
+
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 1) readonly buffer Totals {
+    uint totals[];
+};
+
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 2) readonly buffer VirtualShadowFrame {
+    VIRTUAL_SHADOW_FRAME_FIELDS
+} frame;
+
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 3) readonly buffer VirtualShadowTable {
+    uint entries[];
+} table;
+
+// The header (VIRTUAL_SHADOW_HEADER_*), then each list's room of pairs, two words each.
+layout(std430, set = 0, binding = MESH_CLUSTER_PASS_BINDINGS + 4) buffer VirtualShadowPairs {
+    uint pairWords[];
+};
+
+void main() {
+    // The same for the whole workgroup: a survivor of the style's run, or none past it.
+    uint inRun = meshClusterTaskIndex(gl_WorkGroupID);
+    int level = int(gl_LocalInvocationIndex);
+
+    if (inRun >= totals[MESH_CLUSTER_TOTAL_RUN_COUNT + pass.style] || level >= frame.counts.x) {
+        return;
+    }
+
+    uint place = totals[MESH_CLUSTER_TOTAL_LIST_FIRST] + totals[MESH_CLUSTER_TOTAL_RUN_FIRST + pass.style] + inRun;
+    MeshClusterItem item = items[place];
+    MeshClusterDrawn drawn = meshClusterDrawnAt(item.entry);
+    MeshCluster cluster = meshClusterOfPair(item.cluster);
+    MeshClusterPose pose = meshClusterPoseAt(drawn, cluster);
+
+    // A draw kept whole (its shape not its mesh's, or swaying unbound) may leave its clusters' spheres: its own bounds.
+    bool whole = meshClusterSeenWhole(drawn.instance, drawn.entry, drawn.record, views[0], pose);
+    vec4 sphere = whole ? drawn.record.bounds : meshClusterCullSphere(cluster, drawn.instance.model, pose);
+    int pagesPerSide = frame.counts.y;
+    VirtualShadowLevelData data = frame.levels[level];
+    ivec4 span = ivec4(0, 0, pagesPerSide - 1, pagesPerSide - 1);
+
+    // Unknown bounds (below 0) touch the whole level.
+    if (sphere.w >= 0.0) {
+        vec3 light = mat3(frame.lightRotation) * (sphere.xyz - occlusion.origin.xyz);
+        vec3 at = virtualShadowLevelPoint(light, data.placement.xyz, vec2(data.placement.w, data.depth.x));
+
+        if (!virtualShadowSpherePages(at, sphere.w * data.placement.z, sphere.w * abs(data.placement.w), pagesPerSide, span)) {
+            return;
+        }
+    }
+
+    uint list = (pass.style & 2u) != 0u ? uint(VIRTUAL_SHADOW_PAIRS_CUT_OUT) : uint(VIRTUAL_SHADOW_PAIRS_PLAIN);
+    uint room = uint(frame.pool.y);
+    uint triangles = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;
+
+    for (int y = span.y; y <= span.w; ++y) {
+        for (int x = span.x; x <= span.z; ++x) {
+            ivec2 page = ivec2(x, y);
+            uint entry = table.entries[virtualShadowTableIndex(level, virtualShadowSlot(page, data.pages.xy, pagesPerSide), pagesPerSide)];
+
+            if (!virtualShadowEntryDrawn(entry)) {
+                continue;
+            }
+
+            uint k = atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_PAIRS + list], 1u);
+
+            if (k < room) {
+                uvec2 pair = virtualShadowPackPair(place, level, page, virtualShadowPhysicalPage(entry));
+                uint at = uint(VIRTUAL_SHADOW_HEADER_WORDS) + 2u * (list * room + k);
+                pairWords[at] = pair.x;
+                pairWords[at + 1u] = pair.y;
+                atomicAdd(pairWords[VIRTUAL_SHADOW_HEADER_TRIANGLES], triangles);
+            }
+        }
+    }
+}

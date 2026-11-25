@@ -348,6 +348,12 @@ private:
     std::array<std::unique_ptr<VulkanPipeline>, 32> mainMeshPipelines;
     std::unique_ptr<VulkanPipeline> depthPrepassMeshPipeline;
     std::unique_ptr<VulkanPipeline> depthPrepassCutOutMeshPipeline;
+
+    // The sun's virtual shadow pages' casters drawn by mesh shaders (stage 4c-ii), plain and cut-out.
+    std::unique_ptr<VulkanPipeline> virtualShadowPagePipeline;
+    std::unique_ptr<VulkanPipeline> virtualShadowCutOutPagePipeline;
+    std::unique_ptr<VulkanPipeline> virtualShadowAtomicPagePipeline; // drawn by atomics (4c-iv), with fragment atomics
+    std::unique_ptr<VulkanPipeline> virtualShadowAtomicCutOutPagePipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
     std::unique_ptr<VulkanPipeline> shadowCutOutPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;
@@ -396,6 +402,16 @@ private:
     // last frame's counts for F4.
     std::unique_ptr<VulkanVirtualShadows> virtualShadows;
     std::optional<VirtualShadowCounts> lastVirtualShadowCounts;
+
+    // Their casters' clusters (stage 4c-i): the sun's view in the camera's culling (packVirtualShadowCull), its clusters
+    // culled after the camera's by passes of their own (no occlusion, no twigs); the last counts for F4.
+    std::unique_ptr<VulkanMeshClusterCulling> virtualShadowClusters;
+    std::optional<VirtualShadowCasters> lastVirtualShadowCasters;
+
+    // What was drawn into the pages (stage 4c-ii), for F4; and this frame's page pairs and casters' list by address for
+    // the frame's uniform block (zero while nothing is drawn there).
+    std::optional<VirtualShadowDrawn> lastVirtualShadowDrawn;
+    std::array<std::uint64_t, 2> frameVirtualShadowBuffers{};
     std::unique_ptr<VulkanMotionBlur> motionBlur;
     std::unique_ptr<VulkanDepthOfField> depthOfField;
     bool depthOfFieldFresh = true;
@@ -445,6 +461,7 @@ private:
 
     struct PlacedViewNumbers {
         std::array<std::optional<std::uint32_t>, cubeFaceCount> faces{};
+        std::optional<std::uint32_t> virtualShadow;
     };
 
     PlacedViewNumbers placedViewNumbers;
@@ -563,14 +580,16 @@ private:
         std::size_t probeTriangles = 0;
         std::size_t shadowDrawn = 0;
         std::size_t shadowCulled = 0;
+        std::size_t virtualShadowDraws = 0;
     };
 
     // Each frame in flight's views after the camera, for its counts read back: a capture (a probe face, or cubeFaceCount
-    // the mirror), or a shadow tile (whether its still casters were drawn).
+    // the mirror), a shadow tile (whether its still casters were drawn), or the sun's virtual shadow casters.
     struct CullViewKind {
         int capture = -1;
         bool shadow = false;
         bool shadowStill = false;
+        bool virtualShadow = false;
     };
 
     std::vector<std::vector<CullViewKind>> cullFrameViews;
@@ -910,10 +929,10 @@ private:
                                    const LevelOfDetailSettings& levelSettings, const WindSettings* sway, const CameraCullFrame& table,
                                    const PlantedShadowChanges& planted);
 
-    // The placed plants' views this frame (camera, each probe face, each shadow tile drawing its
-    // casters), each one's number kept for the passes drawing it, and named for placement-compare.
+    // The placed plants' views this frame (camera, each probe face, each shadow tile drawing its casters, the sun's
+    // virtual shadow casters), each one's number kept for the passes drawing it, and named for placement-compare.
     void setPlacedViews(const GpuCameraCull& camera, const std::vector<GpuCameraCull>& faces, const std::vector<int>& faceNumbers,
-                        ShadowDraws& shadowDraws, std::uint32_t frameIndex);
+                        ShadowDraws& shadowDraws, const std::optional<GpuCameraCull>& virtualShadowView, std::uint32_t frameIndex);
 
     // A capture drawn this frame: which (a probe face, or cubeFaceCount the mirror) and its view.
     struct CaptureCull {

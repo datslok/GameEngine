@@ -1,0 +1,69 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_mesh_shader : require
+// The cluster records, the casters' list, the page pairs and the vertex pool by address.
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+/*
+* Drawing the sun's casters into their virtual shadow pages (render/vulkan/vulkan_virtual_shadows.h; ROADMAP phase 21
+* 4c-ii): a workgroup a page pair of the list pushed (drawnList: VIRTUAL_SHADOW_PAIRS_PLAIN or _CUT_OUT), its cluster
+* placed by the vertex shaders' body as the camera's passes place it (swaying, posed), then each vertex again into its
+* level (the light's axes, the level's texels and depth) and on to its page's place in the pool, with four clip
+* distances cutting its triangles at the page's edges.
+*/
+#define MESH_CLUSTER_OWN_MAIN
+#define MESH_CLUSTER_CLIP_DISTANCES 4
+#define MESH_CLUSTER_VERTEX_PLACED(slot, relative) placeInPage(slot, relative)
+
+void placeInPage(uint slot, vec3 relative);
+
+#include "mesh_cluster_draw.glsl"
+#include "virtual_shadow_data.glsl"
+#include "virtual_shadows.glsl"
+
+layout(std430, set = 1, binding = SCENE_VIRTUAL_SHADOW_FRAME_BINDING) readonly buffer VirtualShadowFrame {
+    VIRTUAL_SHADOW_FRAME_FIELDS
+} virtualShadowFrame;
+
+// The header (VIRTUAL_SHADOW_HEADER_*), then each list's room of pairs, two words each.
+layout(buffer_reference, std430) readonly buffer VirtualShadowPairWords {
+    uint words[];
+};
+
+// The workgroup's pair: its level, page and physical page, the same for every thread.
+int pairLevel;
+ivec2 pairPage;
+uint pairPhysical;
+
+void placeInPage(uint slot, vec3 relative) {
+    VirtualShadowLevelData data = virtualShadowFrame.levels[pairLevel];
+    vec3 light = mat3(virtualShadowFrame.lightRotation) * relative;
+    vec3 at = virtualShadowLevelPoint(light, data.placement.xyz, vec2(data.placement.w, data.depth.x));
+    vec2 pool = virtualShadowPoolTexel(at.xy, pairPage, pairPhysical, virtualShadowFrame.pool.x);
+    vec4 clip = virtualShadowPageClip(at.xy, pairPage);
+    gl_MeshVerticesEXT[slot].gl_Position = virtualShadowPoolClip(pool, at.z, virtualShadowFrame.pool.zw);
+
+    for (int edge = 0; edge < 4; ++edge) {
+        gl_MeshVerticesEXT[slot].gl_ClipDistance[edge] = clip[edge];
+    }
+}
+
+void main() {
+    VirtualShadowPairWords pairs = VirtualShadowPairWords(virtualShadowBuffers.xy);
+    uint room = uint(virtualShadowFrame.pool.y);
+    uint index = meshClusterTaskIndex(gl_WorkGroupID);
+
+    // The same for the whole workgroup: none past the list's pairs (within the room).
+    if (index >= min(pairs.words[VIRTUAL_SHADOW_HEADER_PAIRS + drawnList], room)) {
+        SetMeshOutputsEXT(0u, 0u);
+        return;
+    }
+
+    uint at = uint(VIRTUAL_SHADOW_HEADER_WORDS) + 2u * (drawnList * room + index);
+    uvec2 pair = uvec2(pairs.words[at], pairs.words[at + 1u]);
+    pairLevel = virtualShadowPairLevel(pair);
+    pairPage = virtualShadowPairPage(pair);
+    pairPhysical = virtualShadowPairPhysical(pair);
+    drawPooledCluster(MeshClusterItems(virtualShadowBuffers.zw).items[pair.x]);
+}

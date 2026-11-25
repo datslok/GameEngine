@@ -152,9 +152,9 @@ namespace {
     }
 
     /*
-    * Random views of rigid instances (turned, scaled unevenly, some mirrored, some double-sided): a cluster culled has no
-    * triangle the view could see, each having all its corners outside one plane or (single-sided, not mirrored) its back to
-    * the eye. And the test is of use: a good share culled.
+    * Random views of rigid instances (turned, scaled unevenly, some mirrored, some double-sided, some shadow views): a
+    * cluster culled has no triangle the view could see, each having all its corners outside one plane or (single-sided,
+    * not mirrored, not a shadow view) its back to the eye. And the test is of use: a good share culled.
     */
     void testACulledClusterHidesNothing() {
         std::mt19937 random(7);
@@ -168,9 +168,14 @@ namespace {
             const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(mesh, ClusterLevels::One), 0, 0, 0);
             const Vec3 eye{(unit(random) - 0.5f) * 100.0f, 2.0f + unit(random) * 10.0f, (unit(random) - 0.5f) * 100.0f};
             const float yaw = unit(random) * 2.0f * std::numbers::pi_v<float>;
-            const GpuCameraCull view = testView(eye, yaw, false, 0.0f);
+            GpuCameraCull view = testView(eye, yaw, false, 0.0f);
             const bool mirrored = round % 7 == 3;
             const bool doubleSided = round % 5 == 2;
+
+            // A shadow view (the sun's virtual shadow maps' casters, ROADMAP phase 21 4c-i) never culls by facing: the
+            // light sees the sides the eye does not.
+            const bool shadow = round % 4 == 1;
+            view.flags |= shadow ? CAMERA_CULL_SHADOW : 0u;
 
             for (int copy = 0; copy < 8; ++copy) {
                 const Vec3 place = eye + Vec3{(unit(random) - 0.5f) * 30.0f, (unit(random) - 0.5f) * 8.0f, (unit(random) - 0.5f) * 30.0f};
@@ -179,7 +184,7 @@ namespace {
                 const GpuInstance instance = placedInstance(model);
                 GpuCullRecord record = stillRecord(place, 10.0f);
                 record.flags |= doubleSided ? CULL_DOUBLE_SIDED : 0u;
-                const bool faces = !doubleSided && meshClusterDeterminant(instance) > 0.0f;
+                const bool faces = !doubleSided && !shadow && meshClusterDeterminant(instance) > 0.0f;
 
                 for (const GpuMeshCluster& cluster : packed.clusters) {
                     ++tested;

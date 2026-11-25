@@ -1,17 +1,21 @@
 #include "engine/debug_views.h"
 #include "engine/settings_file.h"
+#include "math/frustum.h"
 #include "math/mat4.h"
 #include "render/gpu/cascades.h"
+#include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/virtual_shadows.h"
 #include "render/render_stats.h"
 #include "test_levels.h"
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <random>
 #include <string>
@@ -47,6 +51,23 @@ namespace {
         return updateVirtualShadowClipmap(std::nullopt, camera, lightDirection, settings, casterReach).clipmap;
     }
 
+    // A level's texel and depth (0 its range's far end, 1 its sunward end with the caster reach) back in the world: the
+    // placement undone, then the light's rotation (its transpose) turned back.
+    Vec3 levelPointInWorld(const VirtualShadowClipmap& clipmap, int level, const Vec3& camera, const Vec3& texelAndDepth) {
+        const VirtualShadowPlacement placement = virtualShadowPlacement(clipmap, level, camera);
+        const Vec3 light{(texelAndDepth.x - placement.cameraTexelX) / placement.inverseTexel, (texelAndDepth.y - placement.cameraTexelY) / placement.inverseTexel,
+                         (texelAndDepth.z - placement.depthOffset) / placement.depthScale};
+        const Mat4 rotation = sunLightRotation(clipmap.lightDirection);
+        Vec3 world = camera;
+
+        for (int row = 0; row < 3; ++row) {
+            const float along = row == 0 ? light.x : row == 1 ? light.y : light.z;
+            world = world + Vec3{rotation.values[row][0], rotation.values[row][1], rotation.values[row][2]} * along;
+        }
+
+        return world;
+    }
+
     std::uint32_t allLevels(int count) {
         return (1u << count) - 1u;
     }
@@ -76,11 +97,13 @@ namespace {
             visit(settings, visitor);
         };
         const std::vector<std::string> warnings = applySettings(
-            {{"enabled", "true"}, {"showPages", "true"}, {"poolPages", "2048"}, {"firstLevelHalfWidth", "1"}, {"levels", "12"},
-             {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}},
+            {{"enabled", "true"}, {"showPages", "true"}, {"mainPass", "true"}, {"poolPages", "2048"}, {"firstLevelHalfWidth", "1"},
+             {"levels", "12"}, {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}, {"drawing", "Depth test"}},
             walk, StartupFields::Keep);
         assert(warnings.empty());
-        assert(settings.enabled && settings.showPages && settings.poolPages == 2048);
+        assert(!VirtualShadowSettings{}.mainPass);
+        assert(VirtualShadowSettings{}.drawing == VirtualShadowDrawing::Atomics && settings.drawing == VirtualShadowDrawing::DepthTest);
+        assert(settings.enabled && settings.showPages && settings.mainPass && settings.poolPages == 2048);
         assert(settings.firstHalfWidth == 1.0f && settings.levelCount == 12);
         assert(settings.resolution == VirtualShadowResolution::Pages64 && settings.depthSlack == 32.0f);
         assert(virtualShadowPagesPerSide(VirtualShadowResolution::Pages32) == 32);
@@ -551,7 +574,7 @@ namespace {
             points.push_back(camera + across * (0.06f * static_cast<float>(i)) + Vec3{0.0f, -0.5f, 0.0f});
         }
 
-        GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 1);
+        GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, 2.5f, 1);
         std::vector<int> asked = askedFor(frame, *clipmap, camera, points, 2);
         VirtualShadowCounts counts = pages.frame(frame, asked);
         assert(counts.requested == asked.size() && counts.allocated == asked.size() && counts.kept == 0 && counts.failed == 0);
@@ -566,7 +589,7 @@ namespace {
             const VirtualShadowClipmapUpdate update = updateVirtualShadowClipmap(clipmap, camera, sun, settings, casterReach);
             assert(update.droppedLevels == 0);
             clipmap = update.clipmap;
-            frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 2);
+            frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, 2.5f, 2);
             asked = askedFor(frame, *clipmap, camera, points, 2);
             counts = pages.frame(frame, asked);
             assert(counts.stale == 0 && counts.kept == asked.size() && counts.allocated == 0 && pages.consistent());
@@ -574,7 +597,7 @@ namespace {
 
         // A dropped level: every page of it stale, then given room again.
         ++generations[2];
-        frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 3);
+        frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, 2.5f, 3);
         counts = pages.frame(frame, asked);
         assert(counts.stale == asked.size() && counts.allocated == asked.size() && counts.kept == 0 && pages.consistent());
 
@@ -595,6 +618,8 @@ namespace {
         VirtualShadowSettings settings;
         settings.levelCount = 6;
         settings.poolPages = 512;
+        settings.showPages = true;
+        settings.mainPass = true;
         const Vec3 camera{-4000.5f, 30.0f, 2500.25f};
         const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{0.1f, -1.0f, 0.2f}.normalized(), settings);
         std::array<std::uint32_t, maxVirtualShadowLevels> generations{};
@@ -603,9 +628,10 @@ namespace {
             generations[level] = static_cast<std::uint32_t>(10 + level);
         }
 
-        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, camera, generations, Mat4::identity(), 1920.0f, 1080.0f, true, 77);
+        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, camera, generations, Mat4::identity(), 1920.0f, 1080.0f, 2.5f, 77);
         assert(frame.counts[0] == 6 && frame.counts[1] == 32 && frame.counts[2] == 512 && frame.counts[3] == 77);
         assert(frame.options[0] == virtualShadowUsableHalfWidth(0.5f, 32) && frame.options[1] == 1.0f);
+        assert(frame.shading[0] == 1.0f && frame.shading[1] == 2.5f);
         assert(frame.screen[0] == 1920.0f && frame.screen[3] == 1.0f / 1080.0f);
 
         for (int level = 0; level < 6; ++level) {
@@ -646,10 +672,489 @@ namespace {
         const auto line = pagesLine(lines);
         assert(line != lines.end() && *line == "VSM PAGES 900  KEPT 850  NEW 50 (EVICTED 7)  FAILED 2  STALE 12  FREE 3100");
         assert(line != lines.begin() && (line - 1)->starts_with("TILES"));
+
+        // The sun's casters (stage 4c-i) on the line after: the draws its view took, clusters kept of those tested, their
+        // triangles; no line without them.
+        assert(std::none_of(lines.begin(), lines.end(), [](const std::string& text) { return text.starts_with("VSM CASTERS"); }));
+        stats.virtualShadowCasters = VirtualShadowCasters{.draws = 1200, .tested = 500000, .kept = 80000, .triangles = 6400000};
+        lines = renderStatsLines(stats);
+        const auto casters = pagesLine(lines) + 1;
+        assert(casters != lines.end() && *casters == "VSM CASTERS 1200 DRAWS  CLUSTERS 80000/500000  TRIS 6400K");
+    }
+}
+
+namespace {
+    /*
+    * The casters' levels (stage 4c-i): up to the finest holding a surface that far along the view at the screen's
+    * corner, which is farther from the camera than the same distance on the view's axis; every level past the last.
+    */
+    void testCasterLevels() {
+        const VirtualShadowSettings settings;
+        const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
+        const float firstUsable = virtualShadowUsableHalfWidth(settings.firstHalfWidth, pagesPerSide);
+        const float fov = 70.0f * std::numbers::pi_v<float> / 180.0f;
+        const float aspect = 16.0f / 9.0f;
+        const float tanHalfHeight = std::tan(fov * 0.5f);
+        const float stretch = std::sqrt(1.0f + tanHalfHeight * tanHalfHeight * (1.0f + aspect * aspect));
+
+        assert(virtualShadowCasterLevels(settings, 0.0f, fov, aspect) == 1);
+        assert(virtualShadowCasterLevels(settings, 1.0e6f, fov, aspect) == settings.levelCount);
+
+        for (float along : {0.1f, 1.0f, 3.0f, 9.0f, 36.0f, 200.0f, 1000.0f, 3000.0f}) {
+            const int levels = virtualShadowCasterLevels(settings, along, fov, aspect);
+            const int corner = virtualShadowLevelFor(along * stretch * 0.9999f, firstUsable, settings.levelCount);
+            assert(corner != virtualShadowNoLevel && levels > corner);
+            assert(levels == virtualShadowLevelFor(along * stretch, firstUsable, settings.levelCount) + 1);
+        }
+    }
+
+    /*
+    * The casters' box holds every corner of every level it serves: each level's whole square across the light, from
+    * its depth range's far end to its sunward end with the caster reach, after walks that leave the levels' depth
+    * centres apart. Rounding allows a few floats of the box's own size. A page past the last level's side is outside.
+    */
+    void testCasterBoxHoldsItsLevels() {
+        std::mt19937 random{11};
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const VirtualShadowSettings settings;
+        const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
+        const float side = static_cast<float>(pagesPerSide * virtualShadowPageTexels);
+
+        for (int trial = 0; trial < 300; ++trial) {
+            Vec3 camera{(unit(random) - 0.5f) * 4000.0f, unit(random) * 300.0f, (unit(random) - 0.5f) * 4000.0f};
+            const Vec3 sun = randomDirection(random);
+            std::optional<VirtualShadowClipmap> clipmap;
+
+            for (int step = 0; step < 4; ++step) {
+                camera = camera + randomDirection(random) * (unit(random) * 40.0f);
+                clipmap = updateVirtualShadowClipmap(clipmap, camera, sun, settings, casterReach).clipmap;
+            }
+
+            const int levels = 1 + trial % settings.levelCount;
+            const Frustum box = Frustum::fromClipMatrix(virtualShadowCasterBox(*clipmap, levels), ClipDepth::OneToZero);
+            const float extent = camera.length() + 2.0f * settings.depthSlack * virtualShadowHalfWidth(settings.firstHalfWidth, levels - 1) + casterReach;
+            const float allowed = 8.0f * extent * std::numeric_limits<float>::epsilon();
+
+            for (int level = 0; level < levels; ++level) {
+                for (int corner = 0; corner < 8; ++corner) {
+                    const Vec3 texelAndDepth{(corner & 1) != 0 ? side : 0.0f, (corner & 2) != 0 ? side : 0.0f, (corner & 4) != 0 ? 1.0f : 0.0f};
+                    const Vec3 point = levelPointInWorld(*clipmap, level, camera, texelAndDepth);
+
+                    for (const Plane& plane : box.planes) {
+                        assert(plane.signedDistance(point) >= -allowed);
+                    }
+                }
+            }
+
+            const float page = static_cast<float>(virtualShadowPageTexels);
+            const Vec3 beyond = levelPointInWorld(*clipmap, levels - 1, camera, Vec3{side + page, 0.5f * side, 0.5f});
+            assert(!box.intersectsSphere(beyond, 0.0f));
+        }
+    }
+}
+
+namespace {
+    // Drawn: a place in the pool and asked for this frame; failed or only cached is not.
+    void testDrawnEntries() {
+        assert(virtualShadowEntryDrawn(virtualShadowEntryWith(7, virtualShadowEntryAllocated | virtualShadowEntryRequested)));
+        assert(virtualShadowEntryDrawn(virtualShadowEntryWith(7, virtualShadowEntryAllocated | virtualShadowEntryRequested | virtualShadowEntryDirty)));
+        assert(!virtualShadowEntryDrawn(virtualShadowEntryWith(7, virtualShadowEntryAllocated)));
+        assert(!virtualShadowEntryDrawn(virtualShadowEntryWith(0, virtualShadowEntryRequested | virtualShadowEntryFailed)));
+        assert(!virtualShadowEntryDrawn(0));
+    }
+
+    /*
+    * A sphere's pages are exactly those whose square meets its square of texels (tested page by page), none when that
+    * misses the level or the sphere lies wholly past the depth range's far end; sunward of the range it is still drawn.
+    */
+    void testSpherePages() {
+        std::mt19937 random{21};
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const float page = static_cast<float>(virtualShadowPageTexels);
+
+        for (int trial = 0; trial < 4000; ++trial) {
+            const int pagesPerSide = trial % 2 == 0 ? 32 : 64;
+            const float side = page * static_cast<float>(pagesPerSide);
+            const Vec3 centre{(unit(random) * 1.4f - 0.2f) * side, (unit(random) * 1.4f - 0.2f) * side, unit(random) * 1.4f - 0.2f};
+            const float radius = trial % 5 == 0 ? unit(random) * side : unit(random) * 2.0f * page;
+            const float radiusDepth = unit(random) * 0.1f;
+            const std::optional<VirtualShadowPageSpan> span = virtualShadowSpherePages(centre, radius, radiusDepth, pagesPerSide);
+            const bool pastFarEnd = centre.z + radiusDepth < 0.0f;
+
+            for (int y = 0; y < pagesPerSide; ++y) {
+                for (int x = 0; x < pagesPerSide; ++x) {
+                    const bool meets = static_cast<float>(x) * page <= centre.x + radius && static_cast<float>(x + 1) * page > centre.x - radius &&
+                                       static_cast<float>(y) * page <= centre.y + radius && static_cast<float>(y + 1) * page > centre.y - radius;
+                    const bool listed = span && x >= span->first.x && x <= span->last.x && y >= span->first.y && y <= span->last.y;
+                    assert(listed == (meets && !pastFarEnd));
+                }
+            }
+
+            if (span) {
+                assert(span->first.x <= span->last.x && span->first.y <= span->last.y);
+            }
+        }
+
+        // Sunward of the range (depth past 1) still draws; a sliver past the far end does not.
+        assert(virtualShadowSpherePages(Vec3{100.0f, 100.0f, 3.0f}, 1.0f, 0.01f, 32).has_value());
+        assert(!virtualShadowSpherePages(Vec3{100.0f, 100.0f, -0.02f}, 1.0f, 0.01f, 32).has_value());
+        assert(virtualShadowSpherePages(Vec3{100.0f, 100.0f, -0.01f}, 1.0f, 0.01f, 32).has_value());
+    }
+
+    // A pair's words keep every field at its extremes.
+    void testPagePairs() {
+        for (const VirtualShadowPagePair pair : {VirtualShadowPagePair{0, 0, {0, 0}, 0}, VirtualShadowPagePair{0xFFFFFFFFu, 15, {63, 63}, 0xFFFFu},
+                                                 VirtualShadowPagePair{123456, 7, {5, 60}, 4095}, VirtualShadowPagePair{9, 15, {0, 63}, 1}}) {
+            assert(unpackVirtualShadowPagePair(packVirtualShadowPagePair(pair)) == pair);
+        }
+
+        assert(packVirtualShadowPagePair(VirtualShadowPagePair{1, 2, {3, 4}, 5})[0] == 1u);
+    }
+
+    // The pool's pages each their own square of the image; a level's texel lands at the same spot of its page's place.
+    void testPoolPlacement() {
+        assert(virtualShadowPoolColumns(4096) == 64 && virtualShadowPoolRows(4096) == 64);
+        assert(virtualShadowPoolColumns(16384) == 128 && virtualShadowPoolRows(16384) == 128);
+        assert(virtualShadowPoolColumns(1) == 1 && virtualShadowPoolRows(1) == 1);
+
+        for (int pages : {1, 2, 64, 100, 512, 4095, 4097, 16383}) {
+            const int columns = virtualShadowPoolColumns(pages);
+            const int rows = virtualShadowPoolRows(pages);
+            assert(columns * rows >= pages && columns * (rows - 1) < pages && rows <= columns);
+            assert(columns <= 128 && rows <= 128);
+        }
+
+        std::mt19937 random{5};
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        const float page = static_cast<float>(virtualShadowPageTexels);
+        const int columns = virtualShadowPoolColumns(4097);
+        std::vector<bool> taken(static_cast<std::size_t>(columns * virtualShadowPoolRows(4097)) * 16384u, false);
+
+        for (std::uint32_t physical = 0; physical < 4097; ++physical) {
+            const VirtualShadowPage onLevel{static_cast<int>(physical % 32), static_cast<int>((physical / 32) % 32)};
+            const float withinX = unit(random) * (page - 1.0f);
+            const float withinY = unit(random) * (page - 1.0f);
+            const Vec2 corner = virtualShadowPoolTexel(static_cast<float>(onLevel.x) * page, static_cast<float>(onLevel.y) * page, onLevel, physical, columns);
+            const Vec2 inside = virtualShadowPoolTexel(static_cast<float>(onLevel.x) * page + withinX, static_cast<float>(onLevel.y) * page + withinY,
+                                                       onLevel, physical, columns);
+            assert(corner.x == static_cast<float>(physical % static_cast<std::uint32_t>(columns)) * page);
+            assert(corner.y == static_cast<float>(physical / static_cast<std::uint32_t>(columns)) * page);
+            assert(std::abs(inside.x - corner.x - withinX) < 1e-3f && std::abs(inside.y - corner.y - withinY) < 1e-3f);
+
+            const std::size_t first = static_cast<std::size_t>(corner.y) * static_cast<std::size_t>(columns) * 128u + static_cast<std::size_t>(corner.x);
+            assert(!taken[first]);
+            taken[first] = true;
+        }
+    }
+
+    // The clip distances: each a texel's distance in from one edge, all at least 0 exactly on the page.
+    void testPageClip() {
+        std::mt19937 random{8};
+        std::uniform_real_distribution<float> unit(-0.5f, 1.5f);
+        const float page = static_cast<float>(virtualShadowPageTexels);
+        const VirtualShadowPage onLevel{3, 17};
+
+        for (int trial = 0; trial < 2000; ++trial) {
+            const float x = (3.0f + unit(random)) * page;
+            const float y = (17.0f + unit(random)) * page;
+            const Vec4 clip = virtualShadowPageClip(x, y, onLevel);
+            assert(clip.x == x - 3.0f * page && clip.y == 4.0f * page - x && clip.z == y - 17.0f * page && clip.w == 18.0f * page - y);
+            const bool on = x >= 3.0f * page && x <= 4.0f * page && y >= 17.0f * page && y <= 18.0f * page;
+            assert(on == (clip.x >= 0.0f && clip.y >= 0.0f && clip.z >= 0.0f && clip.w >= 0.0f));
+        }
+    }
+
+    // Through the viewport setViewport sets (its y flipped: from y + height, -height tall), a pool texel lands on itself.
+    void testPoolClip() {
+        const int width = 8192;
+        const int height = 4096;
+
+        for (const Vec3 point : {Vec3{0.0f, 0.0f, 0.0f}, Vec3{8192.0f, 4096.0f, 1.0f}, Vec3{1000.5f, 77.25f, 0.3f}, Vec3{128.0f, 4000.0f, 0.75f}}) {
+            const Vec4 clip = virtualShadowPoolClip(point.x, point.y, point.z, width, height);
+            assert(clip.w == 1.0f && clip.z == point.z);
+            const float viewportY = static_cast<float>(height);
+            const float viewportHeight = -static_cast<float>(height);
+            const float framebufferX = static_cast<float>(width) * 0.5f + static_cast<float>(width) * 0.5f * clip.x;
+            const float framebufferY = viewportY + viewportHeight * 0.5f + viewportHeight * 0.5f * clip.y;
+            assert(std::abs(framebufferX - point.x) < 1e-3f && std::abs(framebufferY - point.y) < 1e-3f);
+        }
+    }
+
+    /*
+    * The pairs of spheres round a camera: every point of a sphere landing on a drawn page of a level (inside it, not past
+    * its far end) has that page's pair, with its entry's physical page; no pair is for a page not drawn or out of the
+    * sphere's reach. Each level's table entries drawn or not at random.
+    */
+    void testPagePairsOfSpheres() {
+        std::mt19937 random{31};
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        VirtualShadowSettings settings;
+        settings.levelCount = 8;
+        const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
+        const float side = static_cast<float>(pagesPerSide * virtualShadowPageTexels);
+
+        for (int trial = 0; trial < 60; ++trial) {
+            const Vec3 camera{(unit(random) - 0.5f) * 3000.0f, unit(random) * 100.0f, (unit(random) - 0.5f) * 3000.0f};
+            const Vec3 sun = randomDirection(random);
+            std::optional<VirtualShadowClipmap> clipmap;
+
+            for (int step = 0; step < 3; ++step) {
+                clipmap = updateVirtualShadowClipmap(clipmap, camera + randomDirection(random) * (unit(random) * 30.0f), sun, settings, casterReach).clipmap;
+            }
+
+            const GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, {}, Mat4::identity(), 1920.0f, 1080.0f, 2.5f, 1);
+            std::vector<std::uint32_t> entries(static_cast<std::size_t>(settings.levelCount * pagesPerSide * pagesPerSide));
+
+            for (std::size_t index = 0; index < entries.size(); ++index) {
+                const float pick = unit(random);
+                const std::uint32_t flags = pick < 0.5f ? virtualShadowEntryAllocated | virtualShadowEntryRequested
+                                            : pick < 0.7f ? virtualShadowEntryAllocated
+                                            : pick < 0.8f ? virtualShadowEntryRequested | virtualShadowEntryFailed
+                                                          : 0u;
+                entries[index] = virtualShadowEntryWith(static_cast<std::uint32_t>(index % 4096), flags);
+            }
+
+            for (int sphere = 0; sphere < 20; ++sphere) {
+                const float radius = 0.05f + unit(random) * unit(random) * 20.0f;
+                const Vec3 centre = camera + randomDirection(random) * (unit(random) * unit(random) * 400.0f);
+                const Vec3 lightCentre = lightPointOf(sun, centre - camera);
+                const std::uint32_t place = static_cast<std::uint32_t>(trial * 100 + sphere);
+
+                for (int level = 0; level < settings.levelCount; ++level) {
+                    std::vector<VirtualShadowPagePair> pairs;
+                    appendVirtualShadowPagePairs(place, lightCentre, radius, level, frame, entries, pairs);
+                    const VirtualShadowPlacement placement = virtualShadowPlacement(*clipmap, level, camera);
+                    const auto entryOf = [&](const VirtualShadowPage& onLevel) {
+                        const VirtualShadowPage slot = virtualShadowSlot(onLevel, placement.originSlot, pagesPerSide);
+                        return entries[static_cast<std::size_t>(virtualShadowTableIndex(level, slot, pagesPerSide))];
+                    };
+
+                    for (const VirtualShadowPagePair& pair : pairs) {
+                        assert(pair.place == place && pair.level == level);
+                        assert(virtualShadowEntryDrawn(entryOf(pair.page)) && pair.physical == virtualShadowPhysicalPage(entryOf(pair.page)));
+                        const Vec3 at = virtualShadowLevelPoint(lightCentre, placement);
+                        const float reach = radius * placement.inverseTexel + 1.0f;
+                        const float page = static_cast<float>(virtualShadowPageTexels);
+                        assert(static_cast<float>(pair.page.x) * page <= at.x + reach && static_cast<float>(pair.page.x + 1) * page >= at.x - reach);
+                        assert(static_cast<float>(pair.page.y) * page <= at.y + reach && static_cast<float>(pair.page.y + 1) * page >= at.y - reach);
+                    }
+
+                    for (int sample = 0; sample < 60; ++sample) {
+                        const Vec3 point = centre + randomDirection(random) * (radius * std::cbrt(unit(random)));
+                        const Vec3 at = inLevel(*clipmap, level, camera, point);
+
+                        if (at.x < 0.0f || at.y < 0.0f || at.x >= side || at.y >= side || at.z < 0.0f) {
+                            continue;
+                        }
+
+                        const VirtualShadowPage onLevel = virtualShadowPageOf(at.x, at.y);
+
+                        if (virtualShadowEntryDrawn(entryOf(onLevel))) {
+                            assert(std::any_of(pairs.begin(), pairs.end(), [&](const VirtualShadowPagePair& pair) { return pair.page == onLevel; }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The record carries the pool's layout and the pairs' room; the room grows to a power of two past what a frame found.
+    void testPoolInTheRecordAndRoom() {
+        VirtualShadowSettings settings;
+        settings.poolPages = 4097;
+        const VirtualShadowClipmap clipmap = freshClipmap(Vec3{}, Vec3{0.0f, -1.0f, 0.2f}.normalized(), settings);
+        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, Vec3{}, {}, Mat4::identity(), 100.0f, 100.0f, 2.5f, 1, 1u << 19);
+        assert(frame.pool[0] == 65 && frame.pool[1] == (1 << 19) && frame.pool[2] == 65 * 128 && frame.pool[3] == 64 * 128);
+        assert(frame.options[1] == 0.0f && frame.shading[0] == 0.0f);
+
+        assert(virtualShadowPairRoomFor(262144, 0) == 262144 && virtualShadowPairRoomFor(262144, 262144) == 262144);
+        assert(virtualShadowPairRoomFor(262144, 262145) == 524288 && virtualShadowPairRoomFor(262144, 3000000) == 4194304);
+        assert(virtualShadowPairRoomFor(262144, 0xFFFFFFFFu) == 4194304);
+    }
+
+    // The header by name, and F4's line after the casters' while drawn.
+    void testDrawnLine() {
+        std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS> header{};
+        header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_PLAIN] = 12000;
+        header[VIRTUAL_SHADOW_HEADER_PAIRS + VIRTUAL_SHADOW_PAIRS_CUT_OUT] = 3000;
+        header[VIRTUAL_SHADOW_HEADER_TRIANGLES] = 900000;
+        const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, 262144);
+        assert(drawn.pairs[0] == 12000 && drawn.pairs[1] == 3000 && drawn.triangles == 900000 && drawn.room == 262144);
+
+        RenderStats stats;
+        stats.virtualShadowPages = VirtualShadowCounts{};
+        stats.virtualShadowCasters = VirtualShadowCasters{};
+        const auto drawnLine = [](const std::vector<std::string>& lines) {
+            return std::find_if(lines.begin(), lines.end(), [](const std::string& line) { return line.starts_with("VSM DRAWN"); });
+        };
+        std::vector<std::string> lines = renderStatsLines(stats);
+        assert(drawnLine(lines) == lines.end());
+        stats.virtualShadowDrawn = drawn;
+        lines = renderStatsLines(stats);
+        const auto line = drawnLine(lines);
+        assert(line != lines.end() && *line == "VSM DRAWN 15000 PAIRS (3000 CUT-OUT)  ROOM 262144  TRIS 900K");
+        assert((line - 1)->starts_with("VSM CASTERS"));
+
+        stats.virtualShadowDrawn->pairs[1] = 300000;
+        lines = renderStatsLines(stats);
+        assert(drawnLine(lines)->ends_with("  FULL"));
+
+        // Drawn by atomics (4c-iv), said last.
+        stats.virtualShadowDrawn->atomics = true;
+        lines = renderStatsLines(stats);
+        assert(drawnLine(lines)->ends_with("  FULL  ATOMICS"));
+        stats.virtualShadowDrawn->pairs[1] = 3000;
+        lines = renderStatsLines(stats);
+        assert(*drawnLine(lines) == "VSM DRAWN 15000 PAIRS (3000 CUT-OUT)  ROOM 262144  TRIS 900K  ATOMICS");
+    }
+
+    /*
+    * The atomics' pool (4c-iv): a reversed depth kept as its float's bits, so the larger whole number is the nearer
+    * surface and imageAtomicMax keeps what the depth test GREATER keeps. Clamped to 0-1 as the depth target clamps, -0
+    * as 0 (its sign bit would make it the largest); read back through the pool's float view, the bits are the depth.
+    */
+    void testAtomicDepth() {
+        const std::uint32_t cleared = virtualShadowAtomicDepth(gpuFarDepth);
+        assert(cleared == 0u);
+        assert(virtualShadowAtomicDepth(-0.0f) == 0u && virtualShadowAtomicDepth(-0.25f) == 0u);
+        assert(virtualShadowAtomicDepth(1.5f) == virtualShadowAtomicDepth(1.0f));
+        assert(std::bit_cast<float>(virtualShadowAtomicDepth(1.0f)) == 1.0f);
+
+        std::mt19937 random(4);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        std::uniform_real_distribution<float> clamped(-0.3f, 1.3f);
+
+        for (int i = 0; i < 20000; ++i) {
+            const float a = unit(random);
+            const float b = i % 7 == 0 ? std::nextafter(a, 1.0f) : unit(random);
+            assert(std::bit_cast<float>(virtualShadowAtomicDepth(a)) == a);
+            assert((a < b) == (virtualShadowAtomicDepth(a) < virtualShadowAtomicDepth(b)));
+            assert((a == b) == (virtualShadowAtomicDepth(a) == virtualShadowAtomicDepth(b)));
+        }
+
+        // Texels each struck by 1 to 100 fragments (some past the depth range): both ways keep the same depth.
+        for (int texel = 0; texel < 2000; ++texel) {
+            float tested = gpuFarDepth;
+            std::uint32_t atomic = cleared;
+            const int fragments = 1 + texel % 100;
+
+            for (int fragment = 0; fragment < fragments; ++fragment) {
+                const float depth = clamped(random);
+                const float stored = std::clamp(depth, 0.0f, 1.0f);
+                tested = stored > tested ? stored : tested;
+                atomic = std::max(atomic, virtualShadowAtomicDepth(depth));
+            }
+
+            assert(std::bit_cast<float>(atomic) == tested);
+        }
+    }
+
+    // The main pass's bias (4c-iii): the cascades' (sunShadowBias) with the level's texel as its base, as a depth step;
+    // moving a point that far sunwards changes only its depth, by exactly that step.
+    void testMainPassBias() {
+        const Vec3 camera{120.0f, 4.0f, -75.0f};
+        const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{0.3f, -1.0f, 0.4f}.normalized());
+        std::mt19937 random(31);
+        std::uniform_real_distribution<float> across(-0.4f, 0.4f);
+
+        for (int level : {0, 7, 14}) {
+            const VirtualShadowPlacement placement = virtualShadowPlacement(clipmap, level, camera);
+            const float texel = 1.0f / placement.inverseTexel;
+            const float flat = virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 1.0f);
+            assert(near(flat, 2.5f * texel * placement.depthScale, 1e-5f * flat));
+
+            for (float nDotL : {1.0f, 0.8f, 0.5f, 0.2f, 0.05f, 0.0f, -0.3f}) {
+                const float expected = sunShadowBias(2.5f * texel, nDotL) * placement.depthScale;
+                assert(near(virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, nDotL), expected, 1e-5f * expected));
+            }
+
+            assert(virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 0.3f) >
+                   virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 0.6f));
+
+            const float halfWidth = virtualShadowHalfWidth(0.5f, level);
+
+            for (int i = 0; i < 50; ++i) {
+                const float nDotL = 0.1f + 0.9f * static_cast<float>(i) / 49.0f;
+                const Vec3 point{across(random) * halfWidth, across(random) * halfWidth, across(random) * halfWidth};
+                const float bias = sunShadowBias(2.5f * texel, nDotL);
+                const Vec3 at = virtualShadowLevelPoint(point, placement);
+                const Vec3 moved = virtualShadowLevelPoint(point + Vec3{0.0f, 0.0f, bias}, placement);
+                const float step = virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, nDotL);
+                assert(at.x == moved.x && at.y == moved.y);
+                // Within the depth's own rounding: a few float steps at 1.
+                assert(near(moved.z - at.z, step, 4.0f * std::numeric_limits<float>::epsilon() + 1e-3f * step));
+            }
+        }
+    }
+
+    // The comparison: shadowed only where the pool's depth (reversed: larger is sunward) is more than the bias sunward.
+    void testMainPassComparison() {
+        assert(virtualShadowLit(0.5f, 0.5f, 0.001f) == 1.0f);
+        assert(virtualShadowLit(0.5f + 0.001f, 0.5f, 0.001f) == 1.0f);
+        assert(virtualShadowLit(0.5f + 0.0011f, 0.5f, 0.001f) == 0.0f);
+        assert(virtualShadowLit(0.2f, 0.5f, 0.001f) == 1.0f);
+        assert(virtualShadowLit(1.0f, 0.0f, 0.0f) == 0.0f);
+    }
+
+    /*
+    * No shadow acne: a tilted surface drawn into the pool holds, at each texel, its depth at the texel's centre; any point
+    * of it within that texel compared with the bias is lit, for slopes up to the bias's cap (MAX_SUN_BIAS_SLOPE) in every
+    * level. And a blocker twice the bias sunward of flat ground shadows it; one at half the bias is lost to it.
+    */
+    void testMainPassNoAcne() {
+        const Vec3 camera{-300.0f, 12.0f, 900.0f};
+        const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{-0.2f, -1.0f, 0.5f}.normalized());
+        std::mt19937 random(77);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
+        for (int level : {0, 3, 8, 14}) {
+            const VirtualShadowPlacement placement = virtualShadowPlacement(clipmap, level, camera);
+            const float texel = 1.0f / placement.inverseTexel;
+            const float reach = 0.5f * virtualShadowUsableHalfWidth(virtualShadowHalfWidth(0.5f, level), 32);
+
+            for (int i = 0; i < 2000; ++i) {
+                const float slope = maxSunBiasSlope * unit(random);
+                const float turn = 2.0f * std::numbers::pi_v<float> * unit(random);
+                const float nDotL = 1.0f / std::sqrt(1.0f + slope * slope);
+                const float side = slope * nDotL;
+                const Vec3 normal{side * std::cos(turn), side * std::sin(turn), nDotL};
+                const Vec3 point{(2.0f * unit(random) - 1.0f) * reach, (2.0f * unit(random) - 1.0f) * reach, (2.0f * unit(random) - 1.0f) * reach};
+                const Vec3 at = virtualShadowLevelPoint(point, placement);
+
+                // The texel's centre back in the light's axes, and the surface's height there.
+                const float centreX = (std::floor(at.x) + 0.5f - placement.cameraTexelX) * texel;
+                const float centreY = (std::floor(at.y) + 0.5f - placement.cameraTexelY) * texel;
+                const float centreZ = point.z - (normal.x * (centreX - point.x) + normal.y * (centreY - point.y)) / normal.z;
+                const float stored = virtualShadowLevelPoint(Vec3{centreX, centreY, centreZ}, placement).z;
+                assert(virtualShadowLit(stored, at.z, virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, nDotL)) == 1.0f);
+            }
+
+            const Vec3 ground{0.3f * reach, -0.2f * reach, 0.1f * reach};
+            const float bias = sunShadowBias(2.5f * texel, 1.0f);
+            const float step = virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 1.0f);
+            const float groundDepth = virtualShadowLevelPoint(ground, placement).z;
+            assert(virtualShadowLit(virtualShadowLevelPoint(ground + Vec3{0.0f, 0.0f, 2.0f * bias}, placement).z, groundDepth, step) == 0.0f);
+            assert(virtualShadowLit(virtualShadowLevelPoint(ground + Vec3{0.0f, 0.0f, 0.5f * bias}, placement).z, groundDepth, step) == 1.0f);
+        }
     }
 }
 
 void testVirtualShadows() {
+    testMainPassBias();
+    testMainPassComparison();
+    testMainPassNoAcne();
+    testDrawnEntries();
+    testSpherePages();
+    testPagePairs();
+    testPoolPlacement();
+    testPageClip();
+    testPoolClip();
+    testPagePairsOfSpheres();
+    testPoolInTheRecordAndRoom();
+    testDrawnLine();
+    testAtomicDepth();
+    testCasterLevels();
+    testCasterBoxHoldsItsLevels();
     testMarkedPages();
     testSlotsTurnBackIntoPages();
     testEntries();

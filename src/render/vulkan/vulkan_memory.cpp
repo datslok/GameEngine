@@ -133,7 +133,7 @@ VulkanImage::VulkanImage(const VulkanDevice& device, const ImageDescription& des
 
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.flags = description.cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+    imageInfo.flags = (description.cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0) | (description.mutableFormat ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT : 0);
     imageInfo.imageType = description.volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     imageInfo.format = description.format;
     imageInfo.extent = {description.width, description.height, description.depth};

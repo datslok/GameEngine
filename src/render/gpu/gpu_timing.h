@@ -21,6 +21,7 @@ enum class GpuPass {
     Bones,        // the swaying trees' bones posed (render/vulkan/vulkan_bone_posing.h), after the wind's springs are stepped
     Twigs,        // the camera's twigs culled, each at its level (render/vulkan/vulkan_twig_drawing.h), while Passes "Twigs" draws them
     MeshCull,     // the camera's mesh clusters culled one by one (render/gpu/mesh_cluster_culling.h), while meshClusters is on
+    VirtualShadowCull, // the sun's virtual shadow maps' casters' clusters culled (render/gpu/virtual_shadows.h), while they are on
     RayScene,
     Atmosphere,
     Probes,
@@ -38,6 +39,7 @@ enum class GpuPass {
     AoUpsample,   // at half resolution, its result brought to the render's size
     ContactShadows, // the sun's contact shadows marched through the prepass's depth (render/gpu/contact_shadows.h)
     VirtualShadowPages, // the sun's virtual shadow maps' pages marked from the prepass's depth and given room (render/gpu/virtual_shadows.h)
+    VirtualShadowDraw,  // their casters' clusters expanded into page pairs and drawn into the pool
     MirroredLights, // light reflected off mirrors onto what the prepass drew (render/gpu/mirrored_light.h)
     Main,
     ProbeBalls,

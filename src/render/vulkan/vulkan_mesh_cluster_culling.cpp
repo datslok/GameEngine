@@ -99,6 +99,11 @@ VkBuffer VulkanMeshClusterCulling::getTaskCommands(std::uint32_t frameIndex) con
 * The lists sized by the room as it stands (the room grows only between frames, in collect), each list a room's run of
 * the items; the totals and the task commands; the lists and totals reached by address from the mesh shaders.
 */
+std::vector<ComputeBinding> VulkanMeshClusterCulling::listPassBindings(std::uint32_t frameIndex) const {
+    const PerFrame& frame = frames.at(frameIndex);
+    return passBindings(frame, {frame.items.get(), frame.totals.get()}, false);
+}
+
 VulkanMeshClusterCulling::ListAddresses VulkanMeshClusterCulling::prepare(std::uint32_t frameIndex) {
     PerFrame& frame = frames.at(frameIndex);
     const VmaAllocator allocator = device.getAllocator();
@@ -224,7 +229,7 @@ void VulkanMeshClusterCulling::cull(VkCommandBuffer commands, FrameDescriptors& 
     const VkDeviceSize itemBytes = MESH_CLUSTER_LISTS * VkDeviceSize{frame.room} * sizeof(GpuMeshClusterItem);
     ensureBuffer(allocator, frame.readback, totalBytes + (readItems ? itemBytes : 0), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback);
 
-    const std::uint32_t setup[4] = {places, blockRoom, frame.room, inputs.drawGroups};
+    const std::uint32_t setup[8] = {places, blockRoom, frame.room, inputs.drawGroups, inputs.placed.commandFirst, 0, 0, 0};
     MeshClusterOcclusionView view;
     view.previous = hasHistory ? previousRelativeViewProjection(historyViewProjection, historyOrigin, inputs.origin) : inputs.viewProjection;
     view.current = inputs.viewProjection;

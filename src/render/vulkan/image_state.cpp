@@ -48,6 +48,9 @@ ImageStateUse imageStateUse(ImageState state) {
         // Storage images are only readable and writable in the general layout.
         return {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_IMAGE_LAYOUT_GENERAL};
+    case ImageState::FragmentStorage:
+        return {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_IMAGE_LAYOUT_GENERAL};
     case ImageState::TransferSource:
         return {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_ACCESS_2_NONE,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL};
