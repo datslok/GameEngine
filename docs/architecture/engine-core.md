@@ -113,6 +113,6 @@ Conventions (row-major `Mat4`, column vectors, right-handed, unit `Quat`s): root
 | `scene/interpolation.h` | `getRenderTransform` (Interpolation above) |
 | `core/hash.h`, `hash.glsl`, `hash64.glsl` | `Fnv1aHash` (change checks, the simulation hash), `mixBits` (before using a hash's bits as random numbers; mirrored for shaders with 64-bit whole numbers, numbers in `hash_shared.h`), `pcg3d` (GPU-friendly, mirrored) |
 | `core/profiler.h` | `Profiler`, `timeSection`: CPU sections averaged over `defaultProfileWindowSeconds` for F4 |
-| `core/half_float.h`, `core/raw_image.h`, `core/pixel.h` | Half floats, CPU images and their PNG packing, `Pixel` |
+| `core/half_float.h`, `core/raw_image.h`, `core/pixel.h` | Half floats (nearest, or rounded outward for bounds: `floatToHalfBelow`, `floatToHalfAbove`), CPU images and their PNG packing, `Pixel` |
 | `core/build_info.h` | `isDebugBuild` (the makefile defines `ENGINE_DEBUG_BUILD` in debug builds) |
 | Others in `core/` | Each with its system's file: commands and settings visitor (`settings-and-commands.md`), dither (`image-pipeline.md`), blue noise (`ambient-occlusion.md`), coverage mips (`materials.md`), height maps (`parallax-and-grounds.md`), image comparison and float tolerance (`testing.md`) |
