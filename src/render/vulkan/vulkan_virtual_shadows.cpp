@@ -91,7 +91,7 @@ void VulkanVirtualShadows::setFramesInFlight(std::uint32_t count) {
 * levels: the main pass's debug view shows nothing, and the GPU's pages wait, unchanged, for the next frame that marks.
 */
 void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadowSettings& settings, const Vec3& camera, const Vec3& sunDirection,
-                                   float casterReach, const Mat4& inverseViewProjection, float width, float height) {
+                                   float casterReach, float biasTexels, const Mat4& inverseViewProjection, float width, float height) {
     VulkanBuffer& record = frameRecords.at(frameIndex);
     running = settings.enabled && sunDirection.lengthSquared() > 0.0f;
     GpuVirtualShadowFrame packed{};
@@ -138,7 +138,7 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
         }
 
         ++frameNumber;
-        packed = packVirtualShadowFrame(*clipmap, camera, generations, inverseViewProjection, width, height, settings.showPages, frameNumber,
+        packed = packVirtualShadowFrame(*clipmap, camera, generations, inverseViewProjection, width, height, biasTexels, frameNumber,
                                         readback.pairRoom);
         packed.options[2] = startAgain ? 1.0f : 0.0f;
     }

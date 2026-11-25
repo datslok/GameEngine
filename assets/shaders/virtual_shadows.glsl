@@ -5,6 +5,7 @@
 // takes (render/gpu/virtual_shadows.h mirrors it; the design is there and in docs/research/VIRTUALSHADOWMAPS.md).
 
 #include "render/gpu/virtual_shadows_shared.h"
+#include "cascades.glsl"
 
 // The finest level holding a point this far from the camera, or VIRTUAL_SHADOW_NO_LEVEL past the last. By doubling,
 // which is exact, not by log2, which is not: the CPU and every pass choose alike to the last bit.
@@ -161,6 +162,19 @@ vec4 virtualShadowPageClip(vec2 texel, ivec2 page) {
 // A pool texel and depth in clip space, for the flipped viewport every pass sets (its top at y = 0).
 vec4 virtualShadowPoolClip(vec2 poolTexel, float depth, ivec2 poolSize) {
     return vec4(2.0 * poolTexel.x / float(poolSize.x) - 1.0, 1.0 - 2.0 * poolTexel.y / float(poolSize.y), depth, 1.0);
+}
+
+// The main pass's lookup (stage 4c-iii).
+
+// The cascades' bias (sunShadowBias) with the level's texel times biasTexels as its base, as a step in the level's depth:
+// moving a point along the light changes only its depth.
+float virtualShadowBiasDepth(float biasTexels, float inverseTexel, float depthScale, float nDotL) {
+    return sunShadowBias(biasTexels / inverseTexel, nDotL) * depthScale;
+}
+
+// 0 where the pool holds a depth more than the bias sunward of the point (reversed: larger), else 1.
+float virtualShadowLit(float stored, float depth, float biasDepth) {
+    return stored > depth + biasDepth ? 0.0 : 1.0;
 }
 
 #endif

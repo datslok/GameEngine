@@ -95,11 +95,12 @@ namespace {
             visit(settings, visitor);
         };
         const std::vector<std::string> warnings = applySettings(
-            {{"enabled", "true"}, {"showPages", "true"}, {"poolPages", "2048"}, {"firstLevelHalfWidth", "1"}, {"levels", "12"},
-             {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}},
+            {{"enabled", "true"}, {"showPages", "true"}, {"mainPass", "true"}, {"poolPages", "2048"}, {"firstLevelHalfWidth", "1"},
+             {"levels", "12"}, {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}},
             walk, StartupFields::Keep);
         assert(warnings.empty());
-        assert(settings.enabled && settings.showPages && settings.poolPages == 2048);
+        assert(!VirtualShadowSettings{}.mainPass);
+        assert(settings.enabled && settings.showPages && settings.mainPass && settings.poolPages == 2048);
         assert(settings.firstHalfWidth == 1.0f && settings.levelCount == 12);
         assert(settings.resolution == VirtualShadowResolution::Pages64 && settings.depthSlack == 32.0f);
         assert(virtualShadowPagesPerSide(VirtualShadowResolution::Pages32) == 32);
@@ -570,7 +571,7 @@ namespace {
             points.push_back(camera + across * (0.06f * static_cast<float>(i)) + Vec3{0.0f, -0.5f, 0.0f});
         }
 
-        GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 1);
+        GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, 2.5f, 1);
         std::vector<int> asked = askedFor(frame, *clipmap, camera, points, 2);
         VirtualShadowCounts counts = pages.frame(frame, asked);
         assert(counts.requested == asked.size() && counts.allocated == asked.size() && counts.kept == 0 && counts.failed == 0);
@@ -585,7 +586,7 @@ namespace {
             const VirtualShadowClipmapUpdate update = updateVirtualShadowClipmap(clipmap, camera, sun, settings, casterReach);
             assert(update.droppedLevels == 0);
             clipmap = update.clipmap;
-            frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 2);
+            frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, 2.5f, 2);
             asked = askedFor(frame, *clipmap, camera, points, 2);
             counts = pages.frame(frame, asked);
             assert(counts.stale == 0 && counts.kept == asked.size() && counts.allocated == 0 && pages.consistent());
@@ -593,7 +594,7 @@ namespace {
 
         // A dropped level: every page of it stale, then given room again.
         ++generations[2];
-        frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, false, 3);
+        frame = packVirtualShadowFrame(*clipmap, camera, generations, Mat4::identity(), 1.0f, 1.0f, 2.5f, 3);
         counts = pages.frame(frame, asked);
         assert(counts.stale == asked.size() && counts.allocated == asked.size() && counts.kept == 0 && pages.consistent());
 
@@ -614,6 +615,8 @@ namespace {
         VirtualShadowSettings settings;
         settings.levelCount = 6;
         settings.poolPages = 512;
+        settings.showPages = true;
+        settings.mainPass = true;
         const Vec3 camera{-4000.5f, 30.0f, 2500.25f};
         const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{0.1f, -1.0f, 0.2f}.normalized(), settings);
         std::array<std::uint32_t, maxVirtualShadowLevels> generations{};
@@ -622,9 +625,10 @@ namespace {
             generations[level] = static_cast<std::uint32_t>(10 + level);
         }
 
-        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, camera, generations, Mat4::identity(), 1920.0f, 1080.0f, true, 77);
+        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, camera, generations, Mat4::identity(), 1920.0f, 1080.0f, 2.5f, 77);
         assert(frame.counts[0] == 6 && frame.counts[1] == 32 && frame.counts[2] == 512 && frame.counts[3] == 77);
         assert(frame.options[0] == virtualShadowUsableHalfWidth(0.5f, 32) && frame.options[1] == 1.0f);
+        assert(frame.shading[0] == 1.0f && frame.shading[1] == 2.5f);
         assert(frame.screen[0] == 1920.0f && frame.screen[3] == 1.0f / 1080.0f);
 
         for (int level = 0; level < 6; ++level) {
@@ -895,7 +899,7 @@ namespace {
                 clipmap = updateVirtualShadowClipmap(clipmap, camera + randomDirection(random) * (unit(random) * 30.0f), sun, settings, casterReach).clipmap;
             }
 
-            const GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, {}, Mat4::identity(), 1920.0f, 1080.0f, false, 1);
+            const GpuVirtualShadowFrame frame = packVirtualShadowFrame(*clipmap, camera, {}, Mat4::identity(), 1920.0f, 1080.0f, 2.5f, 1);
             std::vector<std::uint32_t> entries(static_cast<std::size_t>(settings.levelCount * pagesPerSide * pagesPerSide));
 
             for (std::size_t index = 0; index < entries.size(); ++index) {
@@ -956,8 +960,9 @@ namespace {
         VirtualShadowSettings settings;
         settings.poolPages = 4097;
         const VirtualShadowClipmap clipmap = freshClipmap(Vec3{}, Vec3{0.0f, -1.0f, 0.2f}.normalized(), settings);
-        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, Vec3{}, {}, Mat4::identity(), 100.0f, 100.0f, false, 1, 1u << 19);
+        const GpuVirtualShadowFrame frame = packVirtualShadowFrame(clipmap, Vec3{}, {}, Mat4::identity(), 100.0f, 100.0f, 2.5f, 1, 1u << 19);
         assert(frame.pool[0] == 65 && frame.pool[1] == (1 << 19) && frame.pool[2] == 65 * 128 && frame.pool[3] == 64 * 128);
+        assert(frame.options[1] == 0.0f && frame.shading[0] == 0.0f);
 
         assert(virtualShadowPairRoomFor(262144, 0) == 262144 && virtualShadowPairRoomFor(262144, 262144) == 262144);
         assert(virtualShadowPairRoomFor(262144, 262145) == 524288 && virtualShadowPairRoomFor(262144, 3000000) == 4194304);
@@ -991,9 +996,101 @@ namespace {
         lines = renderStatsLines(stats);
         assert(drawnLine(lines)->ends_with("  FULL"));
     }
+
+    // The main pass's bias (4c-iii): the cascades' (sunShadowBias) with the level's texel as its base, as a depth step;
+    // moving a point that far sunwards changes only its depth, by exactly that step.
+    void testMainPassBias() {
+        const Vec3 camera{120.0f, 4.0f, -75.0f};
+        const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{0.3f, -1.0f, 0.4f}.normalized());
+        std::mt19937 random(31);
+        std::uniform_real_distribution<float> across(-0.4f, 0.4f);
+
+        for (int level : {0, 7, 14}) {
+            const VirtualShadowPlacement placement = virtualShadowPlacement(clipmap, level, camera);
+            const float texel = 1.0f / placement.inverseTexel;
+            const float flat = virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 1.0f);
+            assert(near(flat, 2.5f * texel * placement.depthScale, 1e-5f * flat));
+
+            for (float nDotL : {1.0f, 0.8f, 0.5f, 0.2f, 0.05f, 0.0f, -0.3f}) {
+                const float expected = sunShadowBias(2.5f * texel, nDotL) * placement.depthScale;
+                assert(near(virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, nDotL), expected, 1e-5f * expected));
+            }
+
+            assert(virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 0.3f) >
+                   virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 0.6f));
+
+            const float halfWidth = virtualShadowHalfWidth(0.5f, level);
+
+            for (int i = 0; i < 50; ++i) {
+                const float nDotL = 0.1f + 0.9f * static_cast<float>(i) / 49.0f;
+                const Vec3 point{across(random) * halfWidth, across(random) * halfWidth, across(random) * halfWidth};
+                const float bias = sunShadowBias(2.5f * texel, nDotL);
+                const Vec3 at = virtualShadowLevelPoint(point, placement);
+                const Vec3 moved = virtualShadowLevelPoint(point + Vec3{0.0f, 0.0f, bias}, placement);
+                const float step = virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, nDotL);
+                assert(at.x == moved.x && at.y == moved.y);
+                // Within the depth's own rounding: a few float steps at 1.
+                assert(near(moved.z - at.z, step, 4.0f * std::numeric_limits<float>::epsilon() + 1e-3f * step));
+            }
+        }
+    }
+
+    // The comparison: shadowed only where the pool's depth (reversed: larger is sunward) is more than the bias sunward.
+    void testMainPassComparison() {
+        assert(virtualShadowLit(0.5f, 0.5f, 0.001f) == 1.0f);
+        assert(virtualShadowLit(0.5f + 0.001f, 0.5f, 0.001f) == 1.0f);
+        assert(virtualShadowLit(0.5f + 0.0011f, 0.5f, 0.001f) == 0.0f);
+        assert(virtualShadowLit(0.2f, 0.5f, 0.001f) == 1.0f);
+        assert(virtualShadowLit(1.0f, 0.0f, 0.0f) == 0.0f);
+    }
+
+    /*
+    * No shadow acne: a tilted surface drawn into the pool holds, at each texel, its depth at the texel's centre; any point
+    * of it within that texel compared with the bias is lit, for slopes up to the bias's cap (MAX_SUN_BIAS_SLOPE) in every
+    * level. And a blocker twice the bias sunward of flat ground shadows it; one at half the bias is lost to it.
+    */
+    void testMainPassNoAcne() {
+        const Vec3 camera{-300.0f, 12.0f, 900.0f};
+        const VirtualShadowClipmap clipmap = freshClipmap(camera, Vec3{-0.2f, -1.0f, 0.5f}.normalized());
+        std::mt19937 random(77);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
+        for (int level : {0, 3, 8, 14}) {
+            const VirtualShadowPlacement placement = virtualShadowPlacement(clipmap, level, camera);
+            const float texel = 1.0f / placement.inverseTexel;
+            const float reach = 0.5f * virtualShadowUsableHalfWidth(virtualShadowHalfWidth(0.5f, level), 32);
+
+            for (int i = 0; i < 2000; ++i) {
+                const float slope = maxSunBiasSlope * unit(random);
+                const float turn = 2.0f * std::numbers::pi_v<float> * unit(random);
+                const float nDotL = 1.0f / std::sqrt(1.0f + slope * slope);
+                const float side = slope * nDotL;
+                const Vec3 normal{side * std::cos(turn), side * std::sin(turn), nDotL};
+                const Vec3 point{(2.0f * unit(random) - 1.0f) * reach, (2.0f * unit(random) - 1.0f) * reach, (2.0f * unit(random) - 1.0f) * reach};
+                const Vec3 at = virtualShadowLevelPoint(point, placement);
+
+                // The texel's centre back in the light's axes, and the surface's height there.
+                const float centreX = (std::floor(at.x) + 0.5f - placement.cameraTexelX) * texel;
+                const float centreY = (std::floor(at.y) + 0.5f - placement.cameraTexelY) * texel;
+                const float centreZ = point.z - (normal.x * (centreX - point.x) + normal.y * (centreY - point.y)) / normal.z;
+                const float stored = virtualShadowLevelPoint(Vec3{centreX, centreY, centreZ}, placement).z;
+                assert(virtualShadowLit(stored, at.z, virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, nDotL)) == 1.0f);
+            }
+
+            const Vec3 ground{0.3f * reach, -0.2f * reach, 0.1f * reach};
+            const float bias = sunShadowBias(2.5f * texel, 1.0f);
+            const float step = virtualShadowBiasDepth(2.5f, placement.inverseTexel, placement.depthScale, 1.0f);
+            const float groundDepth = virtualShadowLevelPoint(ground, placement).z;
+            assert(virtualShadowLit(virtualShadowLevelPoint(ground + Vec3{0.0f, 0.0f, 2.0f * bias}, placement).z, groundDepth, step) == 0.0f);
+            assert(virtualShadowLit(virtualShadowLevelPoint(ground + Vec3{0.0f, 0.0f, 0.5f * bias}, placement).z, groundDepth, step) == 1.0f);
+        }
+    }
 }
 
 void testVirtualShadows() {
+    testMainPassBias();
+    testMainPassComparison();
+    testMainPassNoAcne();
     testDrawnEntries();
     testSpherePages();
     testPagePairs();

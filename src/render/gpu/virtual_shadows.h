@@ -60,6 +60,10 @@ struct VirtualShadowSettings {
     // the pool had no room for red.
     bool showPages = false;
 
+    // The main pass reads the pages for the sun's shadow (stage 4c-iii), the cascades where a point has no drawn page.
+    // Off until the pages are measured against the cascades (4c-iv): with it off the cascades shade every point.
+    bool mainPass = false;
+
     // The pool's pages, shared by every level (Unreal's default 4096: 256 MB of 32-bit depth once drawn into, 4c).
     int poolPages = 4096;
 
@@ -252,6 +256,15 @@ std::uint32_t virtualShadowEntryWith(std::uint32_t physicalPage, std::uint32_t f
 Vec3 virtualShadowLevelColour(int level);
 bool virtualShadowNearPageEdge(float texelX, float texelY, float width);
 
+/*
+* The main pass's lookup (stage 4c-iii). A point is moved towards the sun by the cascades' bias (sunShadowBias) with its
+* level's texel times biasTexels (ShadowSettings::normalOffsetTexels) as the base, more on slopes the sun grazes; along
+* the light that changes only its depth, by this step in the level's depth. It is in shadow where the pool holds a depth
+* more than that sunward of it (reversed: larger): 0 shadowed, 1 lit.
+*/
+float virtualShadowBiasDepth(float biasTexels, float inverseTexel, float depthScale, float nDotL);
+float virtualShadowLit(float stored, float depth, float biasDepth);
+
 // What the resolving and allocating passes counted this frame (VIRTUAL_SHADOW_COUNT_*), for F4's VSM line.
 struct VirtualShadowCounts {
     std::uint32_t requested = 0;
@@ -357,15 +370,17 @@ struct GpuVirtualShadowFrame {
     float options[4];                 // x the first level's usable half-width, y 1 shows the pages' debug view, z 1 starts the pages again, w 1 the pool is drawn this frame
     std::int32_t counts[4];           // x the levels, y the pages a level's side, z the pool's pages, w the frame
     std::int32_t pool[4];             // x the pool's pages a row, y the pairs' room, z, w the pool's width and height in texels
+    float shading[4];                 // x 1 the main pass reads the pages (mainPass), y the bias's base in a level's texels
     GpuVirtualShadowLevel levels[maxVirtualShadowLevels];
 };
 
-static_assert(sizeof(GpuVirtualShadowFrame) == 1216, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
+static_assert(sizeof(GpuVirtualShadowFrame) == 1232, "GpuVirtualShadowFrame must match virtual_shadow_data.glsl's");
 
-// The frame's record: the clipmap placed for this camera, each level's generation, the frame's counter, the pairs' room.
+// The frame's record: the clipmap placed for this camera (its settings' debug view and main pass switch), each level's
+// generation, the main pass's bias in texels, the frame's counter, the pairs' room.
 GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap, const Vec3& camera,
                                              const std::array<std::uint32_t, maxVirtualShadowLevels>& generations,
-                                             const Mat4& inverseViewProjection, float width, float height, bool showPages,
+                                             const Mat4& inverseViewProjection, float width, float height, float biasTexels,
                                              std::uint32_t frame, std::uint32_t pairRoom = virtualShadowFirstPairRoom);
 
 /*

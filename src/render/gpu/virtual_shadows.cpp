@@ -55,6 +55,7 @@ int virtualShadowPagesPerSide(VirtualShadowResolution resolution) {
 void visit(VirtualShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
     visitor.field("Show pages", settings.showPages);
+    visitor.field("Main pass", settings.mainPass);
     visitor.field("Pool pages", settings.poolPages, {.min = 64, .max = maxVirtualShadowPoolPages});
     visitor.field("First level half-width", settings.firstHalfWidth, {.min = 0.05f, .max = 100.0f, .sliderMax = 4.0f, .unit = "m"});
     visitor.field("Levels", settings.levelCount, {.min = 1, .max = maxVirtualShadowLevels});
@@ -325,13 +326,22 @@ VirtualShadowCounts virtualShadowCountsFrom(const std::array<std::uint32_t, VIRT
     return counts;
 }
 
+// The level's texel times biasTexels as the cascades' base bias; along the light, times the depth scale.
+float virtualShadowBiasDepth(float biasTexels, float inverseTexel, float depthScale, float nDotL) {
+    return sunShadowBias(biasTexels / inverseTexel, nDotL) * depthScale;
+}
+
+float virtualShadowLit(float stored, float depth, float biasDepth) {
+    return stored > depth + biasDepth ? 0.0f : 1.0f;
+}
+
 /*
 * The levels past the clipmap's count are left zero; the shader reads only counts.x of them. The light's rotation is
 * its orientation alone, so it turns camera-relative points into the light's axes as it turns world points.
 */
 GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap, const Vec3& camera,
                                              const std::array<std::uint32_t, maxVirtualShadowLevels>& generations,
-                                             const Mat4& inverseViewProjection, float width, float height, bool showPages,
+                                             const Mat4& inverseViewProjection, float width, float height, float biasTexels,
                                              std::uint32_t frame, std::uint32_t pairRoom) {
     const VirtualShadowSettings& settings = clipmap.settings;
     const int pagesPerSide = virtualShadowPagesPerSide(settings.resolution);
@@ -343,7 +353,9 @@ GpuVirtualShadowFrame packVirtualShadowFrame(const VirtualShadowClipmap& clipmap
     packed.screen[2] = width > 0.0f ? 1.0f / width : 0.0f;
     packed.screen[3] = height > 0.0f ? 1.0f / height : 0.0f;
     packed.options[0] = virtualShadowUsableHalfWidth(settings.firstHalfWidth, pagesPerSide);
-    packed.options[1] = showPages ? 1.0f : 0.0f;
+    packed.options[1] = settings.showPages ? 1.0f : 0.0f;
+    packed.shading[0] = settings.mainPass ? 1.0f : 0.0f;
+    packed.shading[1] = biasTexels;
     packed.counts[0] = settings.levelCount;
     packed.counts[1] = pagesPerSide;
     packed.counts[2] = settings.poolPages;

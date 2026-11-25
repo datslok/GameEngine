@@ -38,10 +38,11 @@ public:
 
     /*
     * Before the frame's scene set is written: the clipmap moved to the camera and this frame's record written (the main
-    * pass reads it too). Off, the record says so (no levels, no debug view) and the pages keep their places.
+    * pass reads it too). Off, the record says so (no levels, no debug view) and the pages keep their places. biasTexels:
+    * the main pass's bias in a level's texels, the cascades' own (ShadowSettings::normalOffsetTexels).
     */
     void prepare(std::uint32_t frameIndex, const VirtualShadowSettings& settings, const Vec3& camera, const Vec3& sunDirection,
-                 float casterReach, const Mat4& inverseViewProjection, float width, float height);
+                 float casterReach, float biasTexels, const Mat4& inverseViewProjection, float width, float height);
 
     // Whether prepare found the pages on this frame (enabled, with a sun).
     bool runs() const;

@@ -236,6 +236,34 @@ namespace {
             report.check("virtualShadowNearPageEdge", exactTolerance, virtualShadowNearPageEdge(in[1], in[2], in[3]) ? 1.0f : 0.0f, outputs[i][3]);
         }
     }
+
+    /*
+    * The main pass's bias across levels and slopes, facing away too: (texels, inverse texel, depth scale, n.l), and its
+    * comparison with depths on, short of and past the bias: (stored, depth, step). The GPU's square root and division
+    * may round apart: arithmetic tolerance for the step; the comparison's sum is one rounding both sides.
+    */
+    void checkMainPass(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{50};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 300; ++i) {
+            const float inverseTexel = 4096.0f / std::exp2(static_cast<float>(i % 15));
+            inputs.push_back(gpuVec4(random.between(0.5f, 6.0f), inverseTexel, random.between(1e-5f, 5e-3f), random.between(-0.3f, 1.0f)));
+            const float depth = random.between(0.0f, 1.0f);
+            const float step = random.between(1e-6f, 1e-3f);
+            const float shares[] = {0.0f, 0.5f, 1.0f, 2.0f, -1.0f};
+            inputs.push_back(gpuVec4(depth + step * shares[i % 5], depth, step, 0.0f));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_MAIN_PASS, inputs, 2, 1);
+
+        for (std::size_t i = 0; i < inputs.size() / 2; ++i) {
+            const GpuVec4& a = inputs[2 * i];
+            const GpuVec4& b = inputs[2 * i + 1];
+            report.check("virtualShadowBiasDepth", arithmeticTolerance, virtualShadowBiasDepth(a[0], a[1], a[2], a[3]), outputs[i][0]);
+            report.check("virtualShadowLit", exactTolerance, virtualShadowLit(b[0], b[1], b[2]), outputs[i][1]);
+        }
+    }
 }
 
 namespace {
@@ -348,6 +376,7 @@ void gpuTestVirtualShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkEntries(runner, report);
     checkAllocationSource(runner, report);
     checkPageView(runner, report);
+    checkMainPass(runner, report);
     checkSpherePages(runner, report);
     checkPairs(runner, report);
     checkPool(runner, report);

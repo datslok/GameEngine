@@ -2125,7 +2125,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     VirtualShadowSettings pageSettings = settings.virtualShadows;
     pageSettings.enabled = pageSettings.enabled && settings.depthPrepass && inverseViewProjection && sunCasts;
     virtualShadows->prepare(frame.frameIndex, pageSettings, cameraOrigin, sunCasts ? sunLights.front().direction : Vec3{},
-                            settings.shadows.directionalCasterReach, inverseViewProjection.value_or(Mat4::identity()),
+                            settings.shadows.directionalCasterReach, settings.shadows.normalOffsetTexels,
+                            inverseViewProjection.value_or(Mat4::identity()),
                             static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
 
     // Their casters (ROADMAP phase 21 4c-i): one more shadow view of the camera's culling, round every level the screen
