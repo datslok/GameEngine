@@ -62,6 +62,7 @@ Per cascade, finest first (`sunCascadeRow`):
 - Band and transition reach the shader in `GpuFrameData::cascadeOptions` (xy; z is impostor cards' shadow spread, `level-of-detail.md`).
 - Impostor cards read the sun's cascades once a plant, averaged over points round it (`sunShadowOverPlant`, `level-of-detail.md`).
 - `sunCascadeRow` returns its shadow and `ownShare`; `sunShadow` fills the rest from the mirror's row when there is one, else full light (`sunRowOrLit`).
+- With `virtualShadows.mainPass`, a point on a virtual shadow page drawn this frame takes the page's shadow before any cascade (`virtualShadowSun`, `virtual-shadows.md`).
 
 ### Soft edges
 
