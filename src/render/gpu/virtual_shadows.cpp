@@ -61,6 +61,7 @@ void visit(VirtualShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Levels", settings.levelCount, {.min = 1, .max = maxVirtualShadowLevels});
     visitor.choice("Level resolution", settings.resolution, virtualShadowResolutionNames);
     visitor.field("Depth slack", settings.depthSlack, {.min = 2.0f, .max = 1000.0f, .sliderMax = 64.0f, .unit = "half-widths"});
+    visitor.choice("Drawing", settings.drawing, virtualShadowDrawingNames);
 }
 
 void validateVirtualShadows(const VirtualShadowSettings& settings) {
@@ -455,6 +456,10 @@ Vec4 virtualShadowPageClip(float texelX, float texelY, const VirtualShadowPage& 
 
 Vec4 virtualShadowPoolClip(float poolX, float poolY, float depth, int poolWidth, int poolHeight) {
     return Vec4{2.0f * poolX / static_cast<float>(poolWidth) - 1.0f, 1.0f - 2.0f * poolY / static_cast<float>(poolHeight), depth, 1.0f};
+}
+
+std::uint32_t virtualShadowAtomicDepth(float depth) {
+    return std::bit_cast<std::uint32_t>(std::clamp(depth, 0.0f, 1.0f)) & 0x7FFFFFFFu;
 }
 
 VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room) {

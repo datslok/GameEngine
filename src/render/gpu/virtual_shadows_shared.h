@@ -57,10 +57,12 @@
 #define VIRTUAL_SHADOW_COUNTERS 12
 
 // Set 1's bindings the main pass reads the pages through (render/vulkan/scene_layout.h): the record, the table, the
-// pool's depth (4c-ii); the mesh shaders drawing into the pages read the first two.
+// pool's depth (4c-ii); the mesh shaders drawing into the pages read the first two. The atomics' fragment shaders
+// (4c-iv) write the pool's whole numbers through the last (a stand-in while the pool is a depth image).
 #define SCENE_VIRTUAL_SHADOW_FRAME_BINDING 59
 #define SCENE_VIRTUAL_SHADOW_TABLE_BINDING 60
 #define SCENE_VIRTUAL_SHADOW_POOL_BINDING 61
+#define SCENE_VIRTUAL_SHADOW_ATOMIC_POOL_BINDING 62
 
 // Drawing into the pages (stage 4c-ii). A page pair is two words: the caster's place in its clusters' list, then its
 // level (the top 4 bits: VIRTUAL_SHADOW_MAX_LEVELS 16), its page across (6 bits each: 64 pages a side at most) and its

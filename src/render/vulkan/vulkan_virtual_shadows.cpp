@@ -4,6 +4,7 @@
 #include "render/gpu/mesh_cluster_culling_shared.h"
 #include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/image_state.h"
+#include "render/vulkan/vulkan_check.h"
 #include "render/vulkan/vulkan_device.h"
 
 #include <algorithm>
@@ -35,6 +36,21 @@ namespace {
         return std::make_unique<ComputePipeline>(device, description);
     }
 
+    // A 2D view of a colour image in another format of the same size (the image made with mutableFormat).
+    OwnedHandle<VkImageView> viewAs(const VulkanDevice& device, const VulkanImage& image, VkFormat format) {
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = image.get();
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
+        VkImageView created = VK_NULL_HANDLE;
+        vulkanCheck(vkCreateImageView(device.getDevice(), &viewInfo, nullptr, &created), "Virtual shadow pool view creation failed");
+        return OwnedHandle<VkImageView>{device.getDevice(), created, vkDestroyImageView};
+    }
+
     // What changes the GPU's state: other settings (the debug view, the depth slack) only move levels or show them.
     bool sameLayout(const VirtualShadowSettings& a, const VirtualShadowSettings& b) {
         return a.levelCount == b.levelCount && a.resolution == b.resolution && a.poolPages == b.poolPages;
@@ -51,6 +67,13 @@ VulkanVirtualShadows::VulkanVirtualShadows(const VulkanDevice& device, VkSampler
     neededEntries(device.getAllocator(), largestTable * sizeof(std::uint32_t), storage, BufferMemory::Gpu),
     cachedEntries(device.getAllocator(), largestTable * sizeof(std::uint32_t), storage, BufferMemory::Gpu)
 {
+    ImageDescription standIn;
+    standIn.format = VK_FORMAT_R32_UINT;
+    standIn.width = 1;
+    standIn.height = 1;
+    standIn.usage = VK_IMAGE_USAGE_STORAGE_BIT;
+    standIn.name = "Virtual shadow atomics stand-in";
+    atomicStandIn = VulkanImage{device, standIn};
     clearPipeline = pagesPipeline(device, "assets/shaders/virtual_shadow_clear.comp.spv", 0);
     markPipeline = pagesPipeline(device, "assets/shaders/virtual_shadow_mark.comp.spv", 1);
     resolvePipeline = pagesPipeline(device, "assets/shaders/virtual_shadow_resolve.comp.spv", 0);
@@ -106,16 +129,29 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
         const std::uint32_t poolWidth = static_cast<std::uint32_t>(virtualShadowPoolColumns(settings.poolPages) * virtualShadowPageTexels);
         const std::uint32_t poolHeight = static_cast<std::uint32_t>(virtualShadowPoolRows(settings.poolPages) * virtualShadowPageTexels);
 
-        if (!pool || pool->getDescription().width != poolWidth || pool->getDescription().height != poolHeight) {
+        // Drawn by atomics: an R32 float image, its whole-number view written (the same bits), the float view sampled.
+        atomics = settings.drawing == VirtualShadowDrawing::Atomics && device.supportsFragmentAtomics();
+        const VkFormat poolFormat = atomics ? VK_FORMAT_R32_SFLOAT : VK_FORMAT_D32_SFLOAT;
+
+        if (!pool || pool->getDescription().width != poolWidth || pool->getDescription().height != poolHeight ||
+            pool->getDescription().format != poolFormat) {
             device.waitIdle();
+            atomicView.reset();
+            pool.reset();
             ImageDescription description;
-            description.format = VK_FORMAT_D32_SFLOAT;
+            description.format = poolFormat;
             description.width = poolWidth;
             description.height = poolHeight;
-            description.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-            description.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+            description.usage = atomics ? VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                        : VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            description.aspect = atomics ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_DEPTH_BIT;
+            description.mutableFormat = atomics;
             description.name = "Virtual shadow pool";
             pool = std::make_unique<VulkanImage>(device, description);
+
+            if (atomics) {
+                atomicView = viewAs(device, *pool, VK_FORMAT_R32_UINT);
+            }
         }
 
         // This frame's pairs, with the room the frames before asked for.
@@ -126,6 +162,7 @@ void VulkanVirtualShadows::prepare(std::uint32_t frameIndex, const VirtualShadow
                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                      BufferMemory::Gpu);
         readback.pairRoom = pairRoom;
+        readback.atomics = atomics;
 
         builtFor = settings;
         const VirtualShadowClipmapUpdate update = updateVirtualShadowClipmap(clipmap, camera, sunDirection, settings, casterReach);
@@ -293,6 +330,14 @@ VulkanImage* VulkanVirtualShadows::getPool() {
     return pool.get();
 }
 
+bool VulkanVirtualShadows::drawsByAtomics() const {
+    return atomics && pool;
+}
+
+VkImageView VulkanVirtualShadows::getAtomicPoolView() const {
+    return drawsByAtomics() ? atomicView.get() : atomicStandIn.getView();
+}
+
 VkBuffer VulkanVirtualShadows::getPairs(std::uint32_t frameIndex) const {
     return readbacks.at(frameIndex).pairs.get();
 }
@@ -308,7 +353,8 @@ std::optional<VirtualShadowDrawn> VulkanVirtualShadows::collectDrawn(std::uint32
     readback.header.invalidate();
     std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS> header{};
     std::memcpy(header.data(), readback.header.getMapped(), sizeof(header));
-    const VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, readback.pairRoom);
+    VirtualShadowDrawn drawn = virtualShadowDrawnFrom(header, readback.pairRoom);
+    drawn.atomics = readback.atomics;
     pairRoom = virtualShadowPairRoomFor(pairRoom, *std::max_element(drawn.pairs.begin(), drawn.pairs.end()));
     return drawn;
 }

@@ -504,6 +504,21 @@ void VulkanRenderer::createPipelines() {
         PipelineDescription pagesCutOut = pages;
         pagesCutOut.fragmentShader = "assets/shaders/virtual_shadow_cut_out.frag.spv";
         virtualShadowCutOutPagePipeline = std::make_unique<VulkanPipeline>(device, layouts, pagesCutOut);
+
+        // Drawn by atomics (4c-iv): no depth target, every fragment's depth kept by imageAtomicMax; the cut-outs' test
+        // behind the shader's constant.
+        if (device.supportsFragmentAtomics()) {
+            PipelineDescription atomic = pages;
+            atomic.fragmentShader = "assets/shaders/virtual_shadow_atomic.frag.spv";
+            atomic.depthFormat = VK_FORMAT_UNDEFINED;
+            atomic.depthTest = false;
+            atomic.depthWrite = false;
+            atomic.depthCompare = VK_COMPARE_OP_ALWAYS;
+            atomic.fragmentConstants = {0};
+            virtualShadowAtomicPagePipeline = std::make_unique<VulkanPipeline>(device, layouts, atomic);
+            atomic.fragmentConstants = {1};
+            virtualShadowAtomicCutOutPagePipeline = std::make_unique<VulkanPipeline>(device, layouts, atomic);
+        }
     }
 
     PipelineDescription reset = shadow;
@@ -2641,20 +2656,38 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Their casters drawn into the pages given room (ROADMAP phase 21 4c-ii): the casters' clusters expanded into page
     // pairs, then each pair's cluster drawn into its page's place in the pool, cleared first (every page drawn each frame
-    // until 4e), plain casters then cut-outs; the pool left for the main pass's reads.
+    // until 4e), plain casters then cut-outs; the pool left for the main pass's reads. By the depth test into a depth
+    // target, or by atomics (4c-iv): the pool cleared to the far depth's word, then drawn with no target at all.
     if (virtualShadowView) {
         beginGpuPass(frame, GpuPass::VirtualShadowDraw);
         virtualShadows->expand(frame.commands, frame.descriptors, frame.frameIndex, virtualShadowClusters->listPassBindings(frame.frameIndex),
                                virtualShadowClusters->getTaskCommands(frame.frameIndex), cullBones.stamp);
         VulkanImage& pool = *virtualShadows->getPool();
-        pool.transition(frame.commands, ImageState::DepthTarget, ImageContents::Discard);
-        const DepthAttachment poolTarget{pool.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-        beginRendering(frame.commands, {pool.getDescription().width, pool.getDescription().height}, nullptr, &poolTarget);
+        const VkExtent2D poolSize{pool.getDescription().width, pool.getDescription().height};
+        const bool atomics = virtualShadows->drawsByAtomics();
+
+        if (atomics) {
+            pool.transition(frame.commands, ImageState::TransferDestination, ImageContents::Discard);
+            VkClearColorValue far{};
+            far.uint32[0] = virtualShadowAtomicDepth(gpuFarDepth);
+            VkImageSubresourceRange whole{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            vkCmdClearColorImage(frame.commands, pool.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &far, 1, &whole);
+            pool.transition(frame.commands, ImageState::FragmentStorage);
+            beginRendering(frame.commands, poolSize, nullptr, nullptr);
+        }
+        else {
+            pool.transition(frame.commands, ImageState::DepthTarget, ImageContents::Discard);
+            const DepthAttachment poolTarget{pool.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+            beginRendering(frame.commands, poolSize, nullptr, &poolTarget);
+        }
+
         renderingOpen = true;
         bindScene(frame.commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
 
         for (std::uint32_t list = 0; list < VIRTUAL_SHADOW_PAIR_LISTS; ++list) {
-            const VulkanPipeline& pipeline = list == VIRTUAL_SHADOW_PAIRS_CUT_OUT ? *virtualShadowCutOutPagePipeline : *virtualShadowPagePipeline;
+            const bool cutOut = list == VIRTUAL_SHADOW_PAIRS_CUT_OUT;
+            const VulkanPipeline& pipeline = atomics ? (cutOut ? *virtualShadowAtomicCutOutPagePipeline : *virtualShadowAtomicPagePipeline)
+                                                     : (cutOut ? *virtualShadowCutOutPagePipeline : *virtualShadowPagePipeline);
             vkCmdBindPipeline(frame.commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
             const std::uint32_t drawn[3] = {0, list, MESH_CLUSTER_LEAF_TEST_NONE};
             vkCmdPushConstants(frame.commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_MESH_BIT_EXT, MESH_CLUSTER_PUSH_OFFSET, sizeof(drawn), drawn);
@@ -2664,7 +2697,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
         vkCmdEndRendering(frame.commands);
         renderingOpen = false;
-        pool.transition(frame.commands, ImageState::DepthFragmentRead);
+        pool.transition(frame.commands, atomics ? ImageState::FragmentRead : ImageState::DepthFragmentRead);
         endGpuPass(frame, GpuPass::VirtualShadowDraw);
     }
 
@@ -3140,8 +3173,11 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         wind->sampledPreviousSprings(),
         leafPyramidEarly.value_or(sampled(*noProbesTexture)),
         leafPyramidWhole.value_or(sampled(*noProbesTexture)),
-        frameVirtualShadowBuffers[0] != 0 ? SampledImage{virtualShadows->getPool()->getView(), nearestSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL}
-                                          : sampled(*noProbesTexture),
+        frameVirtualShadowBuffers[0] != 0
+            ? SampledImage{virtualShadows->getPool()->getView(), nearestSampler.get(),
+                           virtualShadows->drawsByAtomics() ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL}
+            : sampled(*noProbesTexture),
+        virtualShadows->getAtomicPoolView(),
     };
 
     SceneBufferViews views;

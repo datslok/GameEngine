@@ -57,7 +57,7 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 
 **Set 0, `BindlessTextures`:** one binding of 16,384 combined image samplers (or the device's update-after-bind limit if lower), all with the surface sampler; update-after-bind, partially bound, update-unused-while-pending, so `uploadTexture` writes slot handle + 1 while frames using other slots are in flight; slot 0 the white stand-in (`bindlessTextureSlot`). `checkTexturesUploaded` throws for a material texture never uploaded.
 
-**Set 1, the frame's scene** (`SceneBinding`, 62 bindings), written once a frame by `writeSceneSet` from the frame's descriptor pools. Absent features bind stand-ins, so the layout never changes.
+**Set 1, the frame's scene** (`SceneBinding`, 63 bindings), written once a frame by `writeSceneSet` from the frame's descriptor pools. Absent features bind stand-ins, so the layout never changes.
 
 | Bindings | Holds | Owner |
 |---|---|---|
@@ -80,7 +80,7 @@ Every mesh that does not deform lives in two pools (`VulkanMeshPool`, research `
 | 37-41 | wind field, springs (two; 37-39 compute too, for the bones pass), hanging vertices, anchors | wind (`render/gpu/wind`) |
 | 42 | card thinning records | card thinning (`scene/card_thinning`) |
 | 43-45 | the planting cells' slots' plants, placed parts' instances, every view's placed entries | `planting.md` (Placed plants drawn) |
-| 59-61 | the sun's virtual shadow maps' record and page table (vertex too: the mesh shaders drawing into the pages), their pool's depth (fragment; the debug view so far) | `virtual-shadows.md` |
+| 59-62 | the sun's virtual shadow maps' record and page table (vertex too: the mesh shaders drawing into the pages), their pool's depth (fragment: the main pass, the debug view), the pool's whole-number view as a storage image (the atomics' fragment shaders; a 1 x 1 stand-in otherwise) | `virtual-shadows.md` |
 
 **Sharing:** `SceneLayout` owns set 1's layout and one pipeline layout of both sets plus the push constant, shared by the main, prepass, shadow, tile reset, velocity and coloured-shadow pipelines and the cluster pass (`sharedLayout`). `bindScene` binds both sets once per pass (graphics by default; compute for the cluster pass) and they stay bound across those pipelines. The glass ray pipelines add the ray tracing set; transparent pipelines add a set 2 of their own.
 

@@ -352,6 +352,8 @@ private:
     // The sun's virtual shadow pages' casters drawn by mesh shaders (stage 4c-ii), plain and cut-out.
     std::unique_ptr<VulkanPipeline> virtualShadowPagePipeline;
     std::unique_ptr<VulkanPipeline> virtualShadowCutOutPagePipeline;
+    std::unique_ptr<VulkanPipeline> virtualShadowAtomicPagePipeline; // drawn by atomics (4c-iv), with fragment atomics
+    std::unique_ptr<VulkanPipeline> virtualShadowAtomicCutOutPagePipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
     std::unique_ptr<VulkanPipeline> shadowCutOutPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;

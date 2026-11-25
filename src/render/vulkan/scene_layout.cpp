@@ -82,6 +82,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment},           // the sun's virtual shadow maps' record (render/gpu/virtual_shadows.h; the mesh shaders drawing into the pages read it)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment},           // their page table
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // their pool's depth (render/vulkan/vulkan_virtual_shadows.h)
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, fragment},                     // the pool's whole numbers, written by the atomics' fragment shaders
     }};
 }
 
@@ -314,6 +315,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[LeafPyramidEarlyBinding] = imageInfo(images.leafPyramidEarly);
     imageInfos[LeafPyramidWholeBinding] = imageInfo(images.leafPyramidWhole);
     imageInfos[VirtualShadowPoolBinding] = imageInfo(images.virtualShadowPool);
+    imageInfos[VirtualShadowAtomicPoolBinding] = VkDescriptorImageInfo{VK_NULL_HANDLE, images.virtualShadowAtomicPool, VK_IMAGE_LAYOUT_GENERAL};
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 
@@ -325,7 +327,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         write.descriptorCount = 1;
         write.descriptorType = sceneBindings[binding].type;
 
-        if (write.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+        if (write.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || write.descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
             write.pImageInfo = &imageInfos[binding];
         }
         else {

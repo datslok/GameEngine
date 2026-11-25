@@ -155,6 +155,7 @@ An `ImageState` names a use; `imageStateUse` gives its stages, accesses and layo
 | `VertexRead` | Sampled by vertex and compute (the wind's springs) |
 | `DepthFragmentRead`, `DepthComputeRead` | A depth image sampled |
 | `ComputeRead`, `ComputeStorage` | Sampled by compute; read and written in place (`GENERAL`) |
+| `FragmentStorage` | Read and written by fragment shaders as a storage image (`GENERAL`; the virtual shadow pool's atomics) |
 | `MeshComputeRead` | Sampled by compute and mesh shaders (the occlusion pyramids) |
 | `TransferSource`, `TransferDestination` | Copies and blits |
 

@@ -24,6 +24,7 @@ enum class ImageState {
     ComputeRead,         // sampled by compute shaders (the light probes, read by the next frame's probe rays)
     MeshComputeRead,     // sampled by compute and mesh shaders (the occlusion pyramids: the cluster passes, the far leaves); mesh shaders only
     ComputeStorage,      // read and written in place by compute shaders as a storage image (the light probes' update)
+    FragmentStorage,     // read and written by fragment shaders as a storage image (the virtual shadow pool's atomics)
     TransferSource,      // copied or blitted from
     TransferDestination, // copied or blitted into
     Present              // handed to the screen

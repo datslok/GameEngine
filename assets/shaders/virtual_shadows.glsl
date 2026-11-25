@@ -164,6 +164,12 @@ vec4 virtualShadowPoolClip(vec2 poolTexel, float depth, ivec2 poolSize) {
     return vec4(2.0 * poolTexel.x / float(poolSize.x) - 1.0, 1.0 - 2.0 * poolTexel.y / float(poolSize.y), depth, 1.0);
 }
 
+// The atomics' pool word (4c-iv): a reversed depth's float bits, clamped to 0-1 as the depth target clamps, -0 made 0;
+// imageAtomicMax of it keeps the nearest surface, as the depth test GREATER does.
+uint virtualShadowAtomicDepth(float depth) {
+    return floatBitsToUint(clamp(depth, 0.0, 1.0)) & 0x7FFFFFFFu;
+}
+
 // The main pass's lookup (stage 4c-iii).
 
 // The cascades' bias (sunShadowBias) with the level's texel times biasTexels as its base, as a step in the level's depth:

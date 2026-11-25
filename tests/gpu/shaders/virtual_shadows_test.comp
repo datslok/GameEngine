@@ -71,5 +71,9 @@ void main() {
         // a: the bias's texels, the inverse texel, the depth scale, n.l; b: the stored depth, the point's, the bias's step.
         vec4 b = testInput(1);
         testOutput(0, vec4(virtualShadowBiasDepth(a.x, a.y, a.z, a.w), virtualShadowLit(b.x, b.y, b.z), 0.0, 0.0));
+    } else if (function == GPU_TEST_VIRTUAL_SHADOW_ATOMIC_DEPTH) {
+        // The word in halves, each exact as a float.
+        uint word = virtualShadowAtomicDepth(a.x);
+        testOutput(0, vec4(float(word >> 16u), float(word & 0xFFFFu), 0.0, 0.0));
     }
 }

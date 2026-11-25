@@ -264,6 +264,24 @@ namespace {
             report.check("virtualShadowLit", exactTolerance, virtualShadowLit(b[0], b[1], b[2]), outputs[i][1]);
         }
     }
+
+    // The atomics' pool word (4c-iv) for depths inside 0-1, past either end and -0: bits, so exact.
+    void checkAtomicDepth(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{51};
+        std::vector<GpuVec4> inputs{gpuVec4(-0.0f), gpuVec4(0.0f), gpuVec4(1.0f), gpuVec4(-2.0f), gpuVec4(3.0f)};
+
+        for (int i = 0; i < 300; ++i) {
+            inputs.push_back(gpuVec4(random.between(-0.2f, 1.2f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_VIRTUAL_SHADOW_ATOMIC_DEPTH, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const std::uint32_t word = virtualShadowAtomicDepth(inputs[i][0]);
+            report.check("virtualShadowAtomicDepth", exactTolerance, static_cast<float>(word >> 16u), outputs[i][0]);
+            report.check("virtualShadowAtomicDepth", exactTolerance, static_cast<float>(word & 0xFFFFu), outputs[i][1]);
+        }
+    }
 }
 
 namespace {
@@ -377,6 +395,7 @@ void gpuTestVirtualShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkAllocationSource(runner, report);
     checkPageView(runner, report);
     checkMainPass(runner, report);
+    checkAtomicDepth(runner, report);
     checkSpherePages(runner, report);
     checkPairs(runner, report);
     checkPool(runner, report);

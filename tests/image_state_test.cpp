@@ -212,6 +212,31 @@ namespace {
         assert(needsBarrier(ImageState::ComputeStorage, ImageState::FragmentRead));
     }
 
+    /*
+    * The virtual shadow pool drawn by atomics (ROADMAP phase 21 4c-iv): cleared by a transfer, then written by fragment
+    * shaders as a storage image (GENERAL), then sampled by the main pass's fragment shaders, each after the last's writes.
+    */
+    void testShadowPoolIsClearedWrittenInFragmentsAndSampled() {
+        const VkImageMemoryBarrier2 toWrite = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination,
+                                                           ImageState::FragmentStorage, ImageContents::Keep);
+        assert(toWrite.srcStageMask == VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+        assert(toWrite.srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        assert(toWrite.dstStageMask == VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        assert(toWrite.dstAccessMask == (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT));
+        assert(toWrite.oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        assert(toWrite.newLayout == VK_IMAGE_LAYOUT_GENERAL);
+
+        const VkImageMemoryBarrier2 toSample = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::FragmentStorage,
+                                                            ImageState::FragmentRead, ImageContents::Keep);
+        assert(toSample.srcStageMask == VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        assert(toSample.srcAccessMask == VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        assert(toSample.dstStageMask == VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        assert(toSample.dstAccessMask == VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        assert(toSample.oldLayout == VK_IMAGE_LAYOUT_GENERAL);
+        assert(toSample.newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        assert(needsBarrier(ImageState::FragmentStorage, ImageState::FragmentStorage));
+    }
+
     // The scene's textures are uploaded once and then sampled by the main pass and by the probes' rays, in compute: the
     // upload's last barrier must make them visible to both.
     void testSurfaceTexturesAreReadByFragmentAndComputeShaders() {
@@ -232,6 +257,7 @@ void testImageState() {
     testOverwritingWaitsForReadsWithoutFlushing();
     testAcquiredImageChainsWithTheSemaphore();
     testPresentTakesThePresentLayout();
+    testShadowPoolIsClearedWrittenInFragmentsAndSampled();
     testShadowAtlasRoundTrip();
     testSceneDepthIsMeasuredInCompute();
     testBarrierCoversChosenLevels();

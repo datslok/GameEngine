@@ -3,12 +3,14 @@
 #include "math/frustum.h"
 #include "math/mat4.h"
 #include "render/gpu/cascades.h"
+#include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/virtual_shadows.h"
 #include "render/render_stats.h"
 #include "test_levels.h"
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -96,10 +98,11 @@ namespace {
         };
         const std::vector<std::string> warnings = applySettings(
             {{"enabled", "true"}, {"showPages", "true"}, {"mainPass", "true"}, {"poolPages", "2048"}, {"firstLevelHalfWidth", "1"},
-             {"levels", "12"}, {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}},
+             {"levels", "12"}, {"levelResolution", "64 pages (8192)"}, {"depthSlack", "32"}, {"drawing", "Depth test"}},
             walk, StartupFields::Keep);
         assert(warnings.empty());
         assert(!VirtualShadowSettings{}.mainPass);
+        assert(VirtualShadowSettings{}.drawing == VirtualShadowDrawing::Atomics && settings.drawing == VirtualShadowDrawing::DepthTest);
         assert(settings.enabled && settings.showPages && settings.mainPass && settings.poolPages == 2048);
         assert(settings.firstHalfWidth == 1.0f && settings.levelCount == 12);
         assert(settings.resolution == VirtualShadowResolution::Pages64 && settings.depthSlack == 32.0f);
@@ -995,6 +998,55 @@ namespace {
         stats.virtualShadowDrawn->pairs[1] = 300000;
         lines = renderStatsLines(stats);
         assert(drawnLine(lines)->ends_with("  FULL"));
+
+        // Drawn by atomics (4c-iv), said last.
+        stats.virtualShadowDrawn->atomics = true;
+        lines = renderStatsLines(stats);
+        assert(drawnLine(lines)->ends_with("  FULL  ATOMICS"));
+        stats.virtualShadowDrawn->pairs[1] = 3000;
+        lines = renderStatsLines(stats);
+        assert(*drawnLine(lines) == "VSM DRAWN 15000 PAIRS (3000 CUT-OUT)  ROOM 262144  TRIS 900K  ATOMICS");
+    }
+
+    /*
+    * The atomics' pool (4c-iv): a reversed depth kept as its float's bits, so the larger whole number is the nearer
+    * surface and imageAtomicMax keeps what the depth test GREATER keeps. Clamped to 0-1 as the depth target clamps, -0
+    * as 0 (its sign bit would make it the largest); read back through the pool's float view, the bits are the depth.
+    */
+    void testAtomicDepth() {
+        const std::uint32_t cleared = virtualShadowAtomicDepth(gpuFarDepth);
+        assert(cleared == 0u);
+        assert(virtualShadowAtomicDepth(-0.0f) == 0u && virtualShadowAtomicDepth(-0.25f) == 0u);
+        assert(virtualShadowAtomicDepth(1.5f) == virtualShadowAtomicDepth(1.0f));
+        assert(std::bit_cast<float>(virtualShadowAtomicDepth(1.0f)) == 1.0f);
+
+        std::mt19937 random(4);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+        std::uniform_real_distribution<float> clamped(-0.3f, 1.3f);
+
+        for (int i = 0; i < 20000; ++i) {
+            const float a = unit(random);
+            const float b = i % 7 == 0 ? std::nextafter(a, 1.0f) : unit(random);
+            assert(std::bit_cast<float>(virtualShadowAtomicDepth(a)) == a);
+            assert((a < b) == (virtualShadowAtomicDepth(a) < virtualShadowAtomicDepth(b)));
+            assert((a == b) == (virtualShadowAtomicDepth(a) == virtualShadowAtomicDepth(b)));
+        }
+
+        // Texels each struck by 1 to 100 fragments (some past the depth range): both ways keep the same depth.
+        for (int texel = 0; texel < 2000; ++texel) {
+            float tested = gpuFarDepth;
+            std::uint32_t atomic = cleared;
+            const int fragments = 1 + texel % 100;
+
+            for (int fragment = 0; fragment < fragments; ++fragment) {
+                const float depth = clamped(random);
+                const float stored = std::clamp(depth, 0.0f, 1.0f);
+                tested = stored > tested ? stored : tested;
+                atomic = std::max(atomic, virtualShadowAtomicDepth(depth));
+            }
+
+            assert(std::bit_cast<float>(atomic) == tested);
+        }
     }
 
     // The main pass's bias (4c-iii): the cascades' (sunShadowBias) with the level's texel as its base, as a depth step;
@@ -1100,6 +1152,7 @@ void testVirtualShadows() {
     testPagePairsOfSpheres();
     testPoolInTheRecordAndRoom();
     testDrawnLine();
+    testAtomicDepth();
     testCasterLevels();
     testCasterBoxHoldsItsLevels();
     testMarkedPages();

@@ -2,6 +2,7 @@
 
 #include "render/gpu/virtual_shadows.h"
 #include "render/vulkan/frame_descriptors.h"
+#include "render/vulkan/owned_handle.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_memory.h"
 
@@ -75,9 +76,19 @@ public:
     void expand(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, const std::vector<ComputeBinding>& clusterBindings,
                 VkBuffer clusterTasks, std::uint32_t boneStamp);
 
-    // The pool's depth image (VIRTUAL_SHADOW_PAGE_TEXELS a page, virtualShadowPoolColumns pages a row), made by prepare
-    // for its settings; none before.
+    /*
+    * The pool (VIRTUAL_SHADOW_PAGE_TEXELS a page, virtualShadowPoolColumns pages a row), made by prepare for its settings;
+    * none before. Drawn by the depth test, a D32 depth image; by atomics (4c-iv), an R32 float image whose whole-number
+    * view the atomics write (virtualShadowAtomicDepth), its own view sampled as depth alike.
+    */
     VulkanImage* getPool();
+
+    // After prepare: whether this frame's pool is drawn by atomics (asked, with the GPU's fragment atomics).
+    bool drawsByAtomics() const;
+
+    // For set 1's atomics binding: the pool's whole-number view while drawn by atomics, else a 1 x 1 stand-in no shader
+    // that runs then reads (the atomics' pipelines are bound only with the pool).
+    VkImageView getAtomicPoolView() const;
 
     // This frame's pairs: each list's mesh shader draw at VIRTUAL_SHADOW_HEADER_TASKS words in.
     VkBuffer getPairs(std::uint32_t frameIndex) const;
@@ -95,6 +106,7 @@ private:
         std::uint32_t pairRoom = 0;
         VulkanBuffer header;
         bool headerPending = false;
+        bool atomics = false; // drawn by atomics, for F4
     };
 
     const VulkanDevice& device;
@@ -108,6 +120,9 @@ private:
 
     // The pool, made for the pages builtFor has; the pairs' room for frames from now.
     std::unique_ptr<VulkanImage> pool;
+    OwnedHandle<VkImageView> atomicView;
+    VulkanImage atomicStandIn;
+    bool atomics = false;
     std::uint32_t pairRoom = virtualShadowFirstPairRoom;
 
     // Sized for the most levels, pages and pool any settings ask for, so changing them never reallocates.

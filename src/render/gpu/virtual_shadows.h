@@ -49,6 +49,15 @@ enum class VirtualShadowResolution {
 
 inline constexpr std::array<const char*, 2> virtualShadowResolutionNames = {"32 pages (4096)", "64 pages (8192)"};
 
+// How depth reaches the pool (stage 4c-iv): the hardware's depth test into a depth image, or imageAtomicMax into a
+// 32-bit whole number image from fragment shaders with no depth target (Unreal's way, and a compute rasteriser's later).
+enum class VirtualShadowDrawing {
+    DepthTest,
+    Atomics,
+};
+
+inline constexpr std::array<const char*, 2> virtualShadowDrawingNames = {"Depth test", "Atomics"};
+
 int virtualShadowPagesPerSide(VirtualShadowResolution resolution);
 
 struct VirtualShadowSettings {
@@ -79,6 +88,10 @@ struct VirtualShadowSettings {
     // (all its pages dropped) once the camera has moved slack - 1 half-widths along the light: at 16, the finest level
     // every 7.5 m, a 128 m one every 1.9 km. Depth steps grow with the range, but stay far below a texel up to 1000.
     float depthSlack = 16.0f;
+
+    // Atomics by default: 24-39% faster than the depth test at the four spots (4c-iv). They need fragment shaders'
+    // stores (VulkanDevice::supportsFragmentAtomics), else the depth test draws.
+    VirtualShadowDrawing drawing = VirtualShadowDrawing::Atomics;
 
     bool operator==(const VirtualShadowSettings&) const = default;
 };
@@ -339,11 +352,19 @@ Vec4 virtualShadowPageClip(float texelX, float texelY, const VirtualShadowPage& 
 // texel lands on its own pixel of the pool.
 Vec4 virtualShadowPoolClip(float poolX, float poolY, float depth, int poolWidth, int poolHeight);
 
+/*
+* The atomics' pool word (4c-iv): a reversed depth's float bits, clamped to 0-1 as the depth target clamps and -0 made 0
+* (its sign bit would make it the largest). Bits of floats from 0 up order as the floats do, so imageAtomicMax keeps what
+* the depth test GREATER keeps; the far depth (0) is the cleared word, and the pool's float view reads the depth back.
+*/
+std::uint32_t virtualShadowAtomicDepth(float depth);
+
 // What the drawing found this frame, for F4's VSM DRAWN line: each list's pairs (past the room too), the room, triangles.
 struct VirtualShadowDrawn {
     std::array<std::uint32_t, VIRTUAL_SHADOW_PAIR_LISTS> pairs{};
     std::uint32_t room = 0;
     std::uint32_t triangles = 0;
+    bool atomics = false; // drawn by atomics (4c-iv), F4 says so
 };
 
 VirtualShadowDrawn virtualShadowDrawnFrom(const std::array<std::uint32_t, VIRTUAL_SHADOW_HEADER_WORDS>& header, std::uint32_t room);

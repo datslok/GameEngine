@@ -150,14 +150,16 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
                                             std::to_string(casters.tested) + "  TRIS " + std::to_string(casters.triangles / 1000) + "K");
 
             // What was drawn into the pages (stage 4c-ii), after: page pairs (cut-outs of them), the room a list has,
-            // triangles in thousands; FULL when a list found more pairs than its room (the rest went undrawn).
+            // triangles in thousands; FULL when a list found more pairs than its room (the rest went undrawn); ATOMICS when
+            // drawn by atomics (4c-iv).
             if (stats.virtualShadowDrawn) {
                 const VirtualShadowDrawn& drawn = *stats.virtualShadowDrawn;
                 const std::uint32_t cutOuts = drawn.pairs[VIRTUAL_SHADOW_PAIRS_CUT_OUT];
                 const bool full = std::any_of(drawn.pairs.begin(), drawn.pairs.end(), [&](std::uint32_t pairs) { return pairs > drawn.room; });
                 lines.insert(pagesLine + 2, "VSM DRAWN " + std::to_string(drawn.pairs[VIRTUAL_SHADOW_PAIRS_PLAIN] + cutOuts) + " PAIRS (" +
                                                 std::to_string(cutOuts) + " CUT-OUT)  ROOM " + std::to_string(drawn.room) + "  TRIS " +
-                                                std::to_string(drawn.triangles / 1000) + "K" + (full ? "  FULL" : ""));
+                                                std::to_string(drawn.triangles / 1000) + "K" + (full ? "  FULL" : "") +
+                                                (drawn.atomics ? "  ATOMICS" : ""));
             }
         }
     }
