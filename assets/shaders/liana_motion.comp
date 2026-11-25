@@ -1,0 +1,39 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The lianas' anchors' motions this frame (render/vulkan/vulkan_liana_trees.h; ROADMAP phase 21 4c-vii), after the bones
+* are posed: a thread an anchor of every liana record held, its motion as its tree's bark at the hold
+* (lianaAnchorMotion, as the lianas' vertex shaders move it), nothing while nothing sways. The mesh cluster passes bound
+* a liana's clusters by them (meshClusterLianaPose). Reads the scene set (set 1) after the textures' (set 0), as the
+* bones passes do; its own set 2.
+*/
+#include "liana_data.glsl"
+
+layout(local_size_x = LIANA_TREES_GROUP_SIZE) in;
+
+layout(std430, set = 2, binding = 0) writeonly buffer AnchorMotions {
+    vec4 anchorMotions[];
+};
+
+// The anchors (two a record) to move.
+layout(push_constant) uniform LianaMotionPush {
+    uint anchorCount;
+} push;
+
+void main() {
+    uint anchor = gl_GlobalInvocationID.x;
+
+    if (anchor >= push.anchorCount || anchor >= uint(anchorMotions.length())) {
+        return;
+    }
+
+    uint record = anchor / 2u;
+    vec3 motion = vec3(0.0);
+
+    if (windField.sway.x != 0.0 && record < uint(lianaShapes.length())) {
+        motion = lianaAnchorMotion(lianaShapes[record], record, anchor % 2u, false);
+    }
+
+    anchorMotions[anchor] = vec4(motion, 0.0);
+}

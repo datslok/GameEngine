@@ -33,6 +33,8 @@ namespace {
     // The shares sampled for a liana's deepest sag below its chord.
     constexpr int sagSamples = 64;
 
+    constexpr float tubeLength = static_cast<float>(LIANA_TUBE_TEMPLATE_LENGTH);
+
     Vec3 fromOf(const LianaShape& shape) {
         return Vec3{shape.from[0], shape.from[1], shape.from[2]};
     }
@@ -170,7 +172,7 @@ IndexedMesh lianaTemplateMesh(int rings, int sides) {
             const float angle = around * 2.0f * std::numbers::pi_v<float>;
             const float cosine = side == sides ? 1.0f : std::cos(angle);
             const float sine = side == sides ? 0.0f : std::sin(angle);
-            mesh.vertices.push_back(MeshVertex{Vec3{share, cosine, sine}, Vec3{0.0f, cosine, sine}, Vec2{around, share}, Vec4{0.0f, -sine, cosine, 1.0f}});
+            mesh.vertices.push_back(MeshVertex{Vec3{share * tubeLength, cosine, sine}, Vec3{0.0f, cosine, sine}, Vec2{around, share}, Vec4{0.0f, -sine, cosine, 1.0f}});
         }
     }
 
@@ -191,7 +193,7 @@ namespace {
     * lowest point (where its slope passes 0, else the lower hold) to reach above the higher hold (a catenary is highest
     * at an end), reach either side.
     */
-    Transform poseReaching(const LianaShape& shape, float radius) {
+    Transform poseReaching(const LianaShape& shape, float radius, float templateLength) {
         const Vec3 from = fromOf(shape);
         const Vec3 offset = toOf(shape) - from;
         const Vec3 run = lianaRun(shape);
@@ -214,21 +216,60 @@ namespace {
         Transform pose;
         pose.position = from + run * -radius + Vec3{0.0f, middle, 0.0f};
         pose.rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, std::atan2(-run.z, run.x));
-        pose.scale = Vec3{across + 2.0f * radius, half, radius};
+        pose.scale = Vec3{(across + 2.0f * radius) / templateLength, half, radius};
         return pose;
     }
 }
 
 // The tube reaches a radius out from its centre line.
 Transform lianaPose(const LianaShape& shape) {
-    return poseReaching(shape, shape.from[3]);
+    return poseReaching(shape, shape.from[3], tubeLength);
 }
 
 // A card's corner lies at most its grown length (sqrt 2 leaves) along and half its width across from its stem, which is
 // a radius out.
-Transform lianaLeafPose(const LianaShape& shape) {
+float lianaLeafReach(const LianaShape& shape) {
     const float longest = shape.leafLook[0] * std::numbers::sqrt2_v<float>;
-    return poseReaching(shape, shape.from[3] + longest * std::hypot(1.0f, 0.5f * leafWidthShare));
+    return shape.from[3] + longest * std::hypot(1.0f, 0.5f * leafWidthShare);
+}
+
+Transform lianaLeafPose(const LianaShape& shape) {
+    return poseReaching(shape, lianaLeafReach(shape), 1.0f);
+}
+
+// The template's x spans c.x +- half: the tube's its share times its length, the ivy's card / (cards - 1), so its cards
+// are the whole ones in that span.
+LianaSpan lianaClusterSpan(const LianaShape& shape, const float sphere[4], bool ivy) {
+    const float radius = static_cast<float>(ivy ? LIANA_IVY_TEMPLATE_RADIUS : LIANA_TUBE_TEMPLATE_RADIUS);
+    const float inside = radius - std::hypot(sphere[1], sphere[2]);
+    const float half = inside > 0.0f ? std::sqrt(std::max(sphere[3] * sphere[3] - inside * inside, 0.0f)) : sphere[3];
+
+    if (!ivy) {
+        return LianaSpan{std::clamp((sphere[0] - half) / tubeLength, 0.0f, 1.0f), std::clamp((sphere[0] + half) / tubeLength, 0.0f, 1.0f)};
+    }
+
+    const float lastCard = static_cast<float>(lianaLeafTemplateCardsOf(shape) - 1);
+    const float firstCard = std::clamp(std::floor((sphere[0] - half) * lastCard), 0.0f, lastCard);
+    const float endCard = std::clamp(std::ceil((sphere[0] + half) * lastCard), 0.0f, lastCard);
+    const float length = shape.to[3];
+
+    if (!(length > 0.0f)) {
+        return LianaSpan{};
+    }
+
+    return LianaSpan{lianaLeafPlace(shape, firstCard, 0.0f) / length, lianaLeafPlace(shape, endCard, 1.0f) / length};
+}
+
+LianaSpanBound lianaSpanBound(const LianaShape& shape, const LianaSpan& span, bool ivy) {
+    const Vec3 chord = toOf(shape) - fromOf(shape);
+    const Vec3 first = lianaCentre(shape, span.first).offset;
+    const Vec3 last = lianaCentre(shape, span.last).offset;
+    const float half = 0.5f * std::max(span.last - span.first, 0.0f) * shape.to[3];
+    const float reach = ivy ? lianaLeafReach(shape) : shape.from[3];
+    LianaSpanBound bound;
+    setFour(bound.sphere.data(), fromOf(shape) + (first + last) * 0.5f, half + reach + static_cast<float>(LIANA_SPAN_SLACK) * shape.to[3]);
+    bound.arm = std::max(armBelowChord(first, chord), armBelowChord(last, chord)) + half;
+    return bound;
 }
 
 void setLianaLeaves(LianaShape& shape, const LianaLeaves& leaves) {
@@ -372,10 +413,27 @@ std::size_t lianaLeafTemplate(float count) {
     return lianaLeafTemplateCards.size() - 1;
 }
 
+int lianaLeafTemplateCardsOf(const LianaShape& shape) {
+    return lianaLeafTemplateCards[lianaLeafTemplate(lianaLeafCount(shape))];
+}
+
 std::uint32_t lianaRecordOf(std::uint32_t named) {
     return (named & ~ivyBit) - 1u;
 }
 
 bool lianaDrawsIvy(std::uint32_t named) {
     return (named & ivyBit) != 0u;
+}
+
+std::vector<LianaShape> lianaRecords(const LianaShapes& shapes) {
+    std::vector<LianaShape> records(shapes.slots.size() * shapes.perSlot);
+
+    for (std::size_t slot = 0; slot < shapes.slots.size(); ++slot) {
+        if (shapes.slots[slot]) {
+            const std::vector<LianaShape>& block = *shapes.slots[slot];
+            std::copy_n(block.begin(), std::min(block.size(), static_cast<std::size_t>(shapes.perSlot)), records.begin() + static_cast<std::ptrdiff_t>(slot * shapes.perSlot));
+        }
+    }
+
+    return records;
 }

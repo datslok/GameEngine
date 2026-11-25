@@ -390,6 +390,12 @@ Vec3 windSwingOffset(float arm, const Vec3& place, float swing, float flutter, c
     return Vec3{out.x, rise, out.y} + windFlutterOffset(place, flutter * lean.length(), flutterRate, seconds);
 }
 
+float windSwingReach(float arm, float flutter) {
+    const float lean = std::min(static_cast<float>(WIND_MOST_LEAN), 1.0f);
+    const float swung = std::max(arm, 0.0f) * std::sqrt(std::max(2.0f - 2.0f * std::sqrt(1.0f - lean * lean), 0.0f));
+    return swung + windFlutterReach(flutter, Vec2{lean, 0.0f});
+}
+
 Vec3 windHangingOffset(const Vec3& first, const Vec3& second, float along, const Vec3& swing) {
     return first + (second - first) * along + swing;
 }

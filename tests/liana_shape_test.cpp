@@ -1,6 +1,7 @@
 #include "games/forest/island_hangings.h"
 #include "games/forest/lianas.h"
 #include "scene/liana_shape.h"
+#include "scene/mesh_clusters.h"
 #include "scene/wind.h"
 
 #include "forest_helpers.h"
@@ -10,6 +11,8 @@
 #include <vector>
 
 namespace {
+    constexpr float tubeLength = static_cast<float>(LIANA_TUBE_TEMPLATE_LENGTH);
+
     bool near(float a, float b, float tolerance) {
         return std::abs(a - b) <= tolerance;
     }
@@ -104,7 +107,7 @@ namespace {
             IndexedMesh bent = tube;
 
             for (MeshVertex& vertex : bent.vertices) {
-                const LianaVertex placed = lianaVertex(shape, vertex.position.x, vertex.uv.x, vertex.position.y, vertex.position.z);
+                const LianaVertex placed = lianaVertex(shape, vertex.position.x / tubeLength, vertex.uv.x, vertex.position.y, vertex.position.z);
                 vertex.position = placed.offset;
                 vertex.normal = placed.normal;
             }
@@ -113,7 +116,7 @@ namespace {
         }
     }
 
-    // The pose's box (the template's [0, 1] x [-1, 1] x [-1, 1] placed) holds every vertex of the liana's tube.
+    // The pose's box (the template's [0, length] x [-1, 1] x [-1, 1] placed) holds every vertex of the liana's tube.
     void testThePoseHoldsTheLiana() {
         const IndexedMesh tube = lianaTemplateMesh(64, 6);
 
@@ -124,15 +127,15 @@ namespace {
             const Vec3 side{-run.z, 0.0f, run.x};
 
             for (const MeshVertex& vertex : tube.vertices) {
-                const Vec3 world = fromOf(shape) + lianaVertex(shape, vertex.position.x, vertex.uv.x, vertex.position.y, vertex.position.z).offset;
+                const Vec3 world = fromOf(shape) + lianaVertex(shape, vertex.position.x / tubeLength, vertex.uv.x, vertex.position.y, vertex.position.z).offset;
                 const Vec3 local = world - pose.position;
-                assert(local.dot(run) >= -1e-3f && local.dot(run) <= pose.scale.x + 1e-3f);
+                assert(local.dot(run) >= -1e-3f && local.dot(run) <= pose.scale.x * tubeLength + 1e-3f);
                 assert(std::abs(local.y) <= pose.scale.y + 1e-3f && std::abs(local.dot(side)) <= pose.scale.z + 1e-3f);
             }
 
             // Its matrix maps the template's corner along the run.
-            const Vec3 corner = transformPoint(pose.getMatrix(), Vec3{1.0f, 0.0f, 0.0f}) - pose.position;
-            assert((corner - run * pose.scale.x).length() < 1e-3f);
+            const Vec3 corner = transformPoint(pose.getMatrix(), Vec3{tubeLength, 0.0f, 0.0f}) - pose.position;
+            assert((corner - run * (pose.scale.x * tubeLength)).length() < 1e-3f);
         }
     }
 
@@ -348,6 +351,131 @@ namespace {
         assert(lianaLeafTemplate(100.0f) == 3 && lianaLeafTemplate(1000.0f) == lianaLeafTemplateCards.size() - 1);
     }
 
+    // A template's clusters, cut with and without levels (the culling reads every level's spheres).
+    std::vector<MeshClusters> templateClusters(const IndexedMesh& mesh) {
+        return {buildMeshClusters(mesh, ClusterLevels::One), buildMeshClusters(mesh, ClusterLevels::All)};
+    }
+
+    const float* sphereOf(const MeshCluster& cluster, float sphere[4]) {
+        sphere[0] = cluster.centre.x;
+        sphere[1] = cluster.centre.y;
+        sphere[2] = cluster.centre.z;
+        sphere[3] = cluster.radius;
+        return sphere;
+    }
+
+    bool inSphere(const std::array<float, 4>& sphere, const Vec3& point) {
+        return (point - Vec3{sphere[0], sphere[1], sphere[2]}).length() <= sphere[3];
+    }
+
+    /*
+    * ROADMAP phase 21 4c-vii: every vertex of a tube template's cluster (the forest's three levels, cut with levels and
+    * without) has its share in the cluster's span, and the span of the finest's is a small part of the liana; bent onto
+    * each liana, every vertex lies in its span's bound and hangs no lower below the chord than its arm.
+    */
+    void testTheTubeSpansHoldTheirClusters() {
+        for (const auto& [rings, sides] : {std::pair{64, 6}, std::pair{16, 4}, std::pair{6, 3}}) {
+            const IndexedMesh tube = lianaTemplateMesh(rings, sides);
+            float least = tubeLength;
+            float most = 0.0f;
+
+            for (const MeshVertex& vertex : tube.vertices) {
+                least = std::min(least, vertex.position.x);
+                most = std::max(most, vertex.position.x);
+            }
+
+            // The template runs its whole length: its x the share times it.
+            assert(least == 0.0f && most == tubeLength);
+
+            for (const MeshClusters& cut : templateClusters(tube)) {
+                for (std::size_t number = 0; number < cut.clusters.size(); ++number) {
+                    const MeshCluster& cluster = cut.clusters[number];
+                    float sphere[4];
+                    const LianaShape anyShape = shapeOf(cases().front());
+                    const LianaSpan span = lianaClusterSpan(anyShape, sphereOf(cluster, sphere), false);
+                    assert(span.first <= span.last);
+
+                    if (rings == 64 && number < cut.originalCount) {
+                        assert(span.last - span.first < 0.2f);
+                    }
+
+                    for (const Hung& hung : cases()) {
+                        const LianaShape shape = shapeOf(hung);
+                        const LianaSpanBound bound = lianaSpanBound(shape, span, false);
+
+                        for (std::uint32_t corner = 0; corner < cluster.vertexCount; ++corner) {
+                            const MeshVertex& vertex = tube.vertices[cut.vertices[cluster.firstVertex + corner]];
+                            const float share = vertex.position.x / tubeLength;
+                            assert(share >= span.first && share <= span.last);
+                            const LianaVertex bent = lianaVertex(shape, share, vertex.uv.x, vertex.position.y, vertex.position.z);
+                            assert(inSphere(bound.sphere, fromOf(shape) + bent.offset));
+                            assert(bent.arm <= bound.arm + 1e-4f);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /*
+    * The same for the ivy's templates: a card cluster's span holds every card's stem at any stray, and its bound every
+    * corner grown at any distance (near, thinned and grown by sqrt 2, gone), its stem's arm no lower than the bound's.
+    */
+    void testTheIvySpansHoldTheirClusters() {
+        for (const Hung& hung : cases()) {
+            const LianaShape shape = leafyShapeOf(hung);
+            const IndexedMesh cards = lianaLeafTemplateMesh(lianaLeafTemplateCardsOf(shape));
+            const Vec3 eyes[3] = {fromOf(shape), fromOf(shape) + Vec3{0.0f, 0.0f, 110.0f}, fromOf(shape) + Vec3{0.0f, 0.0f, 400.0f}};
+
+            // A sphere round one card alone (its x a little under the card's, so the span takes it and the card before)
+            // holds the card's stem at its most stray.
+            const float lastCard = static_cast<float>(lianaLeafTemplateCardsOf(shape) - 1);
+            const float lone[4] = {2.75f / lastCard, 0.0f, 0.0f, static_cast<float>(LIANA_IVY_TEMPLATE_RADIUS)};
+            const LianaSpan cardSpan = lianaClusterSpan(shape, lone, true);
+            assert(cardSpan.last * shape.to[3] >= lianaLeafPlace(shape, 3.0f, 1.0f) - 1e-5f);
+            assert(cardSpan.first * shape.to[3] <= lianaLeafPlace(shape, 2.0f, 0.0f) + 1e-5f);
+
+            for (const MeshClusters& cut : templateClusters(cards)) {
+                for (const MeshCluster& cluster : cut.clusters) {
+                    float sphere[4];
+                    const LianaSpan span = lianaClusterSpan(shape, sphereOf(cluster, sphere), true);
+                    const LianaSpanBound bound = lianaSpanBound(shape, span, true);
+                    assert(span.first <= span.last);
+
+                    for (std::uint32_t corner = 0; corner < cluster.vertexCount; ++corner) {
+                        const MeshVertex& vertex = cards.vertices[cut.vertices[cluster.firstVertex + corner]];
+                        const float card = std::floor(vertex.uv.x * 0.5f);
+
+                        for (float stray : {0.0f, 0.5f, 1.0f}) {
+                            const float share = lianaLeafPlace(shape, card, stray) / shape.to[3];
+                            assert(share >= span.first - 1e-6f && share <= span.last + 1e-6f);
+                        }
+
+                        for (const Vec3& eye : eyes) {
+                            const LianaLeafVertex placed = lianaLeafVertex(shape, card, vertex.uv.x - 2.0f * card, vertex.uv.y, eye);
+                            assert(inSphere(bound.sphere, fromOf(shape) + placed.offset));
+                            assert(placed.arm <= bound.arm + 1e-4f);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The records as the GPU holds them: slot by slot, a slot's past its block (or an empty slot) zero.
+    void testTheRecordsSlotBySlot() {
+        const LianaShape first = shapeOf(cases()[0]);
+        const LianaShape second = shapeOf(cases()[1]);
+        LianaShapes shapes;
+        shapes.perSlot = 2;
+        shapes.slots = {std::make_shared<const std::vector<LianaShape>>(std::vector<LianaShape>{first}), nullptr,
+                        std::make_shared<const std::vector<LianaShape>>(std::vector<LianaShape>{first, second, first})};
+        const std::vector<LianaShape> records = lianaRecords(shapes);
+        assert(records.size() == 6u);
+        assert(records[0].to[3] == first.to[3] && records[1].to[3] == 0.0f && records[2].to[3] == 0.0f && records[3].to[3] == 0.0f);
+        assert(records[4].to[3] == first.to[3] && records[5].to[3] == second.to[3]);
+    }
+
     // A draw names its record plus 1, its ivy with the ivy bit.
     void testTheLianaNames() {
         assert(lianaRecordOf(5u) == 4u && !lianaDrawsIvy(5u));
@@ -366,5 +494,8 @@ void testLianaShape() {
     testTheLeavesThinWithDistance();
     testTheCardsSitOnTheLiana();
     testTheLeafTemplate();
+    testTheTubeSpansHoldTheirClusters();
+    testTheIvySpansHoldTheirClusters();
+    testTheRecordsSlotBySlot();
     testTheLianaNames();
 }

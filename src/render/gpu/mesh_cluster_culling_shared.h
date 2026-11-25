@@ -12,11 +12,12 @@
 #define MESH_CLUSTER_STYLES 4
 
 // The storage buffers every pass binds (mesh_cluster_pass.glsl: the camera's tables, the placed plants', the twigs',
-// then from MESH_CLUSTER_BONE_BINDING the bones' four, bone_cull_data.glsl, then the far leaf clusters); each pass's own
-// come after.
+// then from MESH_CLUSTER_BONE_BINDING the bones' four, bone_cull_data.glsl, then the far leaf clusters, then the lianas'
+// records and their anchors' motions); each pass's own come after.
 #define MESH_CLUSTER_BONE_BINDING 21
 #define MESH_CLUSTER_FAR_BINDING 25
-#define MESH_CLUSTER_PASS_BINDINGS 26
+#define MESH_CLUSTER_LIANA_BINDING 26
+#define MESH_CLUSTER_PASS_BINDINGS 28
 
 // MeshClusterDrawn::twig for a place that is not a twig.
 #define MESH_CLUSTER_NO_TWIG 0xFFFFFFFFu

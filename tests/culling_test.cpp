@@ -5,6 +5,7 @@
 #include "scene/frame_description.h"
 #include "scene/model.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -12,8 +13,8 @@
 #include <vector>
 
 namespace {
-    bool nearlyEqual(float actual, float expected) {
-        return std::abs(actual - expected) < 0.0001f;
+    bool nearlyEqual(float actual, float expected, float tolerance = 0.0001f) {
+        return std::abs(actual - expected) < tolerance;
     }
 
     bool contains(const std::vector<std::size_t>& indices, std::size_t index) {
@@ -113,13 +114,34 @@ namespace {
         assert(camera.mayIntersect(narrow) && narrow.mayIntersect(camera));
     }
 
-    // A box's bounding sphere: its centre moved by the model matrix, its half-diagonal grown by the largest scale.
+    /*
+    * A box's bounding sphere: its centre moved by the model matrix, its radius the farthest of its corners placed, so an
+    * unevenly scaled box (a liana's template, 64 long, posed 0.4 a unit along and 8 up) is not grown by its largest
+    * scale; turned and sheared too, every corner inside and one on it.
+    */
     void testBoundingSphere() {
         const Aabb cube{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}};
         const BoundingSphere sphere = boundingSphere(cube, Mat4::translation(5.0f, 0.0f, 0.0f) * Mat4::scaling(2.0f, 1.0f, 1.0f));
 
         assert(nearlyEqual(sphere.centre.x, 5.0f) && nearlyEqual(sphere.centre.y, 0.0f));
-        assert(nearlyEqual(sphere.radius, std::sqrt(3.0f) * 2.0f));
+        assert(nearlyEqual(sphere.radius, std::sqrt(6.0f)));
+
+        const Aabb stretched{Vec3{0.0f, -1.0f, -1.0f}, Vec3{64.0f, 1.0f, 1.0f}};
+        const Mat4 liana = Mat4::translation(3.0f, 20.0f, -4.0f) * Mat4::rotationY(0.7f) * Mat4::scaling(0.4f, 8.0f, 0.04f);
+        assert(nearlyEqual(boundingSphere(stretched, liana).radius, Vec3{12.8f, 8.0f, 0.04f}.length(), 1e-4f));
+
+        Mat4 sheared = liana;
+        sheared.values[0][1] = 2.5f;
+        sheared.values[2][0] = -0.3f;
+        const BoundingSphere skew = boundingSphere(stretched, sheared);
+        float farthest = 0.0f;
+
+        for (int corner = 0; corner < 8; ++corner) {
+            const Vec3 local{(corner & 1) != 0 ? 64.0f : 0.0f, (corner & 2) != 0 ? 1.0f : -1.0f, (corner & 4) != 0 ? 1.0f : -1.0f};
+            farthest = std::max(farthest, (transformPoint(sheared, local) - skew.centre).length());
+        }
+
+        assert(nearlyEqual(skew.radius, farthest, 1e-4f));
 
         // An off-centre box keeps its own centre.
         const Aabb raised{Vec3{0.0f, 2.0f, 0.0f}, Vec3{2.0f, 4.0f, 2.0f}};

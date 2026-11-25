@@ -266,6 +266,37 @@ namespace {
         assert(std::abs(fluttering.x) <= most && std::abs(fluttering.y) <= most && std::abs(fluttering.z) <= most);
     }
 
+    /*
+    * ROADMAP phase 21 4c-vii: the swing's reach holds every swing of an arm at most its own, at any spring, swing, fade,
+    * place and time, flutter included; a strong spring comes within 2% of it, so it is no looser than it must be.
+    */
+    void testTheSwingReach() {
+        float nearest = 0.0f;
+
+        for (int trial = 0; trial < 400; ++trial) {
+            const float unit = static_cast<float>(trial) / 400.0f;
+            const float arm = 0.2f + 9.0f * unit;
+            const float flutter = trial % 3 == 0 ? 0.0f : 0.3f * std::fmod(unit * 7.0f, 1.0f);
+            const Vec2 spring{8.0f * std::cos(37.0f * unit) * unit, 8.0f * std::sin(37.0f * unit) * unit};
+            const float reach = windSwingReach(arm, flutter);
+            const Vec3 place{3.0f * unit, 1.0f, -2.0f};
+
+            for (const float swing : {0.3f, 1.0f, 4.0f}) {
+                for (const float fade : {0.4f, 1.0f}) {
+                    const Vec3 swung = windSwingOffset(arm, place, swing, flutter, spring, fade, leafRate, 3.0f + 11.0f * unit);
+                    assert(swung.length() <= reach * 1.0001f);
+
+                    if (flutter == 0.0f) {
+                        nearest = std::max(nearest, swung.length() / reach);
+                    }
+                }
+            }
+        }
+
+        assert(nearest > 0.98f);
+        assert(windSwingReach(0.0f, 0.0f) == 0.0f && windSwingReach(-1.0f, 0.0f) == 0.0f);
+    }
+
     // The whole motion: the anchors' blended by the share along, plus the swing.
     void testTheBlend() {
         const Vec3 first{1.0f, 0.0f, 0.0f};
@@ -371,6 +402,7 @@ void testWindHanging() {
     testTheHangingSprings();
     testTubesAndLeavesHang();
     testTheSwing();
+    testTheSwingReach();
     testTheBlend();
     testTheRecordsReachTheGpu();
     testTheForestHangs();

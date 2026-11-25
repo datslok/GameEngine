@@ -91,6 +91,8 @@ public:
         PlacedInputs placed;
         TwigInputs twigs;
         BoneCullBuffers bones;
+        VkBuffer lianas = VK_NULL_HANDLE;       // the lianas' records (none: no lianas)
+        VkBuffer lianaMotions = VK_NULL_HANDLE; // their anchors' motions this frame (VulkanLianaTrees::getMotions; none: still)
         std::uint64_t pairBound = 0;
         bool occlusion = false;
         Mat4 viewProjection;

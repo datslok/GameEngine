@@ -7,6 +7,7 @@
 #include "render/vulkan/vulkan_memory.h"
 #include "volk/volk.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -24,16 +25,21 @@ class VulkanDevice;
 * The tables (each planting layer's record, each set's cells) are each frame's own, written from the frame's sets; the
 * found plants are shared by every frame in flight (each frame's pass waits for the frames before to finish reading).
 * For bones-compare a frame's found plants and the slots' counts are copied back with the tables it used.
+*
+* After the bones are posed, liana_motion.comp writes each anchor's motion this frame (ROADMAP phase 21 4c-vii), for the
+* mesh cluster passes to bound a liana's clusters by (meshClusterLianaPose); shared by the frames in flight as the found
+* plants are, and copied back for cluster-compare.
 */
 class VulkanLianaTrees {
 public:
-    VulkanLianaTrees(const VulkanDevice& device, std::uint32_t framesInFlight);
+    // textures and scene: the bindless textures' and the frame scene set's layouts, which the motion pass reads first.
+    VulkanLianaTrees(const VulkanDevice& device, VkDescriptorSetLayout textures, VkDescriptorSetLayout scene, std::uint32_t framesInFlight);
 
     // Between frames only: anything not yet collected is dropped.
     void setFramesInFlight(std::uint32_t count);
 
-    // Room for anchors anchors' plants (two a liana record held), before the scene set names the buffer; growing waits
-    // for the GPU first (the draws in flight read it).
+    // Room for anchors anchors' plants and motions (two a liana record held), before the scene set names the buffer;
+    // growing waits for the GPU first (the draws in flight read them).
     void prepare(std::uint32_t anchors);
 
     // What the pass reads: the lianas' records, the slots' plants and counts, each set's slots, the field's layers.
@@ -53,6 +59,14 @@ public:
     // Record the pass (outside any rendering block, after the planting and placed passes). Nothing without anchors.
     void record(VkCommandBuffer commands, FrameDescriptors& descriptors, const Inputs& inputs, std::uint32_t frameIndex);
 
+    /*
+    * Record the motion pass (after the bones pass, with the frame's textures and scene sets, which name the found plants
+    * and the poses): a thread an anchor (anchors of them, as record found), its motion made ready for the cluster passes;
+    * readBack: copied back too (cluster-compare). Nothing without anchors.
+    */
+    void recordMotions(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet scene, std::uint32_t anchors,
+                       std::uint32_t frameIndex, bool readBack);
+
     // A frame read back: the tables it found by, each anchor's plant, the slots' counts.
     struct Collected {
         LianaTreeTables tables;
@@ -60,11 +74,15 @@ public:
         std::vector<std::uint32_t> counts;
     };
 
+    // After a frame's fence: each anchor's motion it wrote, when read back (empty otherwise).
+    std::vector<std::array<float, 4>> collectMotions(std::uint32_t frameIndex);
+
     // After a frame's fence: what it read back (none unless asked).
     std::optional<Collected> collect(std::uint32_t frameIndex);
 
-    // Each anchor's plant (VK_NULL_HANDLE before any room).
+    // Each anchor's plant, and its motion this frame (VK_NULL_HANDLE before any room).
     VkBuffer getFound() const;
+    VkBuffer getMotions() const;
 
 private:
     struct PerFrame {
@@ -72,14 +90,19 @@ private:
         VulkanBuffer cells;
         VulkanBuffer foundReadback;
         VulkanBuffer countsReadback;
+        VulkanBuffer motionsReadback;
         LianaTreeTables tables;
         std::uint32_t anchors = 0;
         VkDeviceSize countsBytes = 0;
         bool pending = false;
+        std::uint32_t motionAnchors = 0;
+        bool motionsPending = false;
     };
 
     const VulkanDevice& device;
     std::unique_ptr<ComputePipeline> pass;
+    std::unique_ptr<ComputePipeline> motionPass;
     std::vector<PerFrame> frames;
     VulkanBuffer found;
+    VulkanBuffer motions;
 };

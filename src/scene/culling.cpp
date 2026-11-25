@@ -3,23 +3,21 @@
 #include <algorithm>
 
 /*
-* The box's centre goes through the model matrix; its half-diagonal is stretched by the largest of the matrix's three
-* axis lengths, so the sphere still covers the box however the object is rotated or unevenly scaled.
+* The box's centre goes through the model matrix; the radius is the farthest of its corners placed, centre to corner
+* sum of the turned half-extents with either sign (four pairs, each a corner and its opposite), so an unevenly scaled
+* box (a liana's long template, ROADMAP phase 21 4c-vii) is held as tightly as its corners allow, not grown by its
+* largest scale; exact for any matrix, sheared too.
 */
 BoundingSphere boundingSphere(const Aabb& localBounds, const Mat4& model) {
     const Vec3 localCentre = localBounds.centre();
     const Vec4 centre = model * Vec4{localCentre.x, localCentre.y, localCentre.z, 1.0f};
+    const Vec3 half = localBounds.size() * 0.5f;
+    const Vec3 x = Vec3{model.values[0][0], model.values[1][0], model.values[2][0]} * half.x;
+    const Vec3 y = Vec3{model.values[0][1], model.values[1][1], model.values[2][1]} * half.y;
+    const Vec3 z = Vec3{model.values[0][2], model.values[1][2], model.values[2][2]} * half.z;
+    const float radius = std::max({(x + y + z).length(), (x + y - z).length(), (x - y + z).length(), (x - y - z).length()});
 
-    float largestScale = 0.0f;
-
-    for (int column = 0; column < 3; ++column) {
-        const Vec3 axis{model.values[0][column], model.values[1][column], model.values[2][column]};
-        largestScale = std::max(largestScale, axis.length());
-    }
-
-    const float localRadius = (localBounds.size() * 0.5f).length();
-
-    return BoundingSphere{Vec3{centre.x, centre.y, centre.z}, localRadius * largestScale};
+    return BoundingSphere{Vec3{centre.x, centre.y, centre.z}, radius};
 }
 
 void attachBoundingSpheres(std::span<DrawItem> draws, const std::vector<Aabb>& boundsByMesh) {

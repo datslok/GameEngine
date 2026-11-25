@@ -192,6 +192,19 @@ namespace {
             const float expected = windSwayReach(Vec4{sway[0], sway[1], sway[2], sway[3]}, part[0], part[1], part[2]);
             report.check("windSwayReach", arithmeticTolerance, expected, partOut[i][0]);
         }
+
+        // How far a hanging vertex can swing (windSwingReach), arms below 0 among them. Inputs: the arm and the flutter.
+        std::vector<GpuVec4> arms;
+
+        for (int i = 0; i < 100; ++i) {
+            arms.push_back(gpuVec4(random.between(-1.0f, 20.0f), random.between(-0.4f, 0.4f)));
+        }
+
+        const std::vector<GpuVec4> armOut = runner.run(shader, GPU_TEST_WIND_SWING_REACH, arms, 1, 1);
+
+        for (std::size_t i = 0; i < armOut.size(); ++i) {
+            report.check("windSwingReach", arithmeticTolerance, windSwingReach(arms[i][0], arms[i][1]), armOut[i][0]);
+        }
     }
 
     // Places in, near the edges of and outside windows anywhere. Inputs: the place and the window's first cell; the cell.

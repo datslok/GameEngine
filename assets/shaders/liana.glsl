@@ -1,6 +1,6 @@
 // A liana's tube bent onto its catenary (scene/liana_shape.h mirrors every function and is tested against it): its
-// centre line at a share of its length, a template vertex placed round it, and its ivy's cards. Pure maths, read by the
-// scene's vertex shaders through liana_data.glsl.
+// centre line at a share of its length, a template vertex placed round it, its ivy's cards, and a template cluster's
+// span along it and its bound (the culling's). Pure maths, read by the scene's vertex shaders through liana_data.glsl.
 #ifndef LIANA_GLSL
 #define LIANA_GLSL
 
@@ -219,6 +219,72 @@ LianaLeafVertex lianaLeafVertex(LianaShape shape, float card, float across, floa
 LianaLeafVertex lianaLeafTemplateVertex(LianaShape shape, vec2 uv, vec3 eye) {
     float card = floor(uv.x * 0.5);
     return lianaLeafVertex(shape, card, uv.x - 2.0 * card, uv.y, eye);
+}
+
+// The cards of the ivy template a liana's draw uses: the smallest holding its leaves (lianaLeafTemplateCardsOf).
+int lianaLeafTemplateCardsOf(LianaShape shape) {
+    float count = lianaLeafCount(shape);
+    int cards = LIANA_LEAF_FEWEST_CARDS;
+
+    while (cards < LIANA_LEAF_MOST_CARDS && count > float(cards)) {
+        cards *= 2;
+    }
+
+    return cards;
+}
+
+// The farthest a grown ivy card's corner reaches from the centre line (lianaLeafReach).
+float lianaLeafReach(LianaShape shape) {
+    float longest = shape.leafLook.x * 1.41421356;
+    float halfWidth = 0.5 * float(LIANA_LEAF_WIDTH_SHARE);
+    return shape.from.w + longest * sqrt(1.0 + halfWidth * halfWidth);
+}
+
+// The shares along a liana a cluster of its draw's template holds (lianaClusterSpan).
+struct LianaSpan {
+    float first;
+    float last;
+};
+
+// From the cluster's sphere in the template's space: every vertex at the template's radius from its x axis.
+LianaSpan lianaClusterSpan(LianaShape shape, vec4 sphere, bool ivy) {
+    float radius = ivy ? float(LIANA_IVY_TEMPLATE_RADIUS) : float(LIANA_TUBE_TEMPLATE_RADIUS);
+    float inside = radius - length(sphere.yz);
+    float halfLength = inside > 0.0 ? sqrt(max(sphere.w * sphere.w - inside * inside, 0.0)) : sphere.w;
+
+    if (!ivy) {
+        float tubeLength = float(LIANA_TUBE_TEMPLATE_LENGTH);
+        return LianaSpan(clamp((sphere.x - halfLength) / tubeLength, 0.0, 1.0), clamp((sphere.x + halfLength) / tubeLength, 0.0, 1.0));
+    }
+
+    float lastCard = float(lianaLeafTemplateCardsOf(shape) - 1);
+    float firstCard = clamp(floor((sphere.x - halfLength) * lastCard), 0.0, lastCard);
+    float endCard = clamp(ceil((sphere.x + halfLength) * lastCard), 0.0, lastCard);
+    float len = shape.to.w;
+
+    if (!(len > 0.0)) {
+        return LianaSpan(0.0, 0.0);
+    }
+
+    return LianaSpan(lianaLeafPlace(shape, firstCard, 0.0) / len, lianaLeafPlace(shape, endCard, 1.0) / len);
+}
+
+// A span's bound before its sway: a sphere in the world, and the most its centre points hang below the chord (lianaSpanBound).
+struct LianaSpanBound {
+    vec4 sphere;
+    float arm;
+};
+
+LianaSpanBound lianaSpanBound(LianaShape shape, LianaSpan span, bool ivy) {
+    vec3 chord = shape.to.xyz - shape.from.xyz;
+    vec3 first = lianaCentre(shape, span.first).offset;
+    vec3 last = lianaCentre(shape, span.last).offset;
+    float halfLength = 0.5 * max(span.last - span.first, 0.0) * shape.to.w;
+    float reach = ivy ? lianaLeafReach(shape) : shape.from.w;
+    LianaSpanBound bound;
+    bound.sphere = vec4(shape.from.xyz + (first + last) * 0.5, halfLength + reach + float(LIANA_SPAN_SLACK) * shape.to.w);
+    bound.arm = max(lianaArmBelowChord(first, chord), lianaArmBelowChord(last, chord)) + halfLength;
+    return bound;
 }
 
 #endif

@@ -7,10 +7,13 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/instance_shared.h"
 #include "render/gpu/mesh_cluster_culling.h"
+#include "render/gpu/wind_shared.h"
 #include "scene/indexed_mesh.h"
+#include "scene/liana_shape.h"
 #include "scene/mesh.h"
 #include "scene/mesh_clusters.h"
 
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -329,10 +332,88 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A liana's clusters (its tube's and its ivy's, cut from the templates) where the view bounds them or not, swaying or
+    * still, the anchors moved, and the draw's bounds large or tight: meshClusterLianaPose's pose alike, its sphere to
+    * rounding (asinh and sqrt round differently on the GPU).
+    */
+    void checkLianaPose(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        struct LianaCase {
+            GpuMeshCluster cluster;
+            GpuInstance instance{};
+            GpuCullRecord record{};
+            GpuCameraCull view{};
+            Vec3 first;
+            Vec3 second;
+        };
+
+        const LianaTree tree{.foot = Vec3{0.0f, 0.0f, 0.0f}};
+        LianaShape shape = makeLianaShape(Vec3{-10.0f, 22.0f, 4.0f}, Vec3{14.0f, 23.0f, -2.0f}, 32.0f, 0.04f, 2.0f, tree, &tree);
+        setLianaLeaves(shape, LianaLeaves{.firstCrownMetres = 5.0f, .lastCrownMetres = 4.0f, .spacing = 0.35f, .sparseSpacing = 1.2f, .size = 0.3f,
+                                          .thinFrom = 80.0f, .goneBy = 150.0f, .seed = 0x1234u});
+        std::vector<LianaCase> cases;
+
+        for (const bool ivy : {false, true}) {
+            const IndexedMesh mesh = ivy ? lianaLeafTemplateMesh(lianaLeafTemplateCardsOf(shape)) : lianaTemplateMesh(64, 6);
+            const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(mesh, ClusterLevels::One), 0, 0, 0);
+
+            for (std::size_t number = 0; number < packed.clusters.size(); ++number) {
+                LianaCase c;
+                c.cluster = packed.clusters[number];
+                c.instance.hanging[3] = ivy ? 1u | LIANA_IVY_BIT : 1u;
+                c.instance.sway[0] = number % 3 == 0 ? -1.0f : static_cast<float>(WIND_CATEGORY_HANGING);
+                c.instance.sway[3] = 0.15f;
+                c.record.bounds[0] = shape.from[0];
+                c.record.bounds[1] = shape.from[1];
+                c.record.bounds[2] = shape.from[2];
+                c.record.bounds[3] = number % 4 == 1 ? 1.0f : 100.0f;
+                c.view.flags = number % 5 == 2 ? 0u : CAMERA_CULL_LIANA_BOUNDS;
+                c.first = Vec3{0.1f * static_cast<float>(number % 3), 0.05f, -0.2f};
+                c.second = Vec3{-0.15f, 0.0f, 0.1f * static_cast<float>(number % 2)};
+                cases.push_back(c);
+            }
+        }
+
+        std::vector<GpuVec4> inputs;
+
+        for (const LianaCase& c : cases) {
+            inputs.push_back(gpuVec4(c.cluster.sphere[0], c.cluster.sphere[1], c.cluster.sphere[2], c.cluster.sphere[3]));
+
+            for (const float* row : {shape.from, shape.to, shape.curve, shape.firstTree, shape.secondTree, shape.leaves, shape.leafLook}) {
+                inputs.push_back(gpuVec4(row[0], row[1], row[2], row[3]));
+            }
+
+            inputs.push_back(gpuVec4(std::bit_cast<float>(c.instance.hanging[3]), static_cast<float>(c.view.flags)));
+            inputs.push_back(gpuVec4(c.instance.sway[0], c.instance.sway[1], c.instance.sway[2], c.instance.sway[3]));
+            inputs.push_back(gpuVec4(c.record.bounds[0], c.record.bounds[1], c.record.bounds[2], c.record.bounds[3]));
+            inputs.push_back(gpuVec4(c.first));
+            inputs.push_back(gpuVec4(c.second));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MESH_CLUSTER_LIANA_POSE, inputs, 13, 2);
+        const FloatTolerance place{.absolute = 1e-4f, .relative = 1e-5f};
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            const LianaCase& c = cases[i];
+            const MeshClusterPose pose = meshClusterLianaPose(c.cluster, c.instance, c.record, c.view, shape, c.first, c.second, MeshClusterPose{});
+            report.check("meshClusterLianaPose", exactTolerance, Vec3{pose.bound ? 1.0f : 0.0f, pose.posed ? 1.0f : 0.0f, 0.0f},
+                         Vec3{outputs[2 * i][0], outputs[2 * i][1], 0.0f});
+
+            if (pose.posed) {
+                for (int axis = 0; axis < 4; ++axis) {
+                    report.check("meshClusterLianaPose sphere", place, pose.sphere[static_cast<std::size_t>(axis)], outputs[2 * i + 1][axis]);
+                }
+            }
+        }
+    }
+}
+
 void gpuTestMeshClusterCulling(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("mesh_cluster_culling.glsl");
     checkKept(runner, report);
     checkTasks(runner, report);
     checkScreenBox(runner, report);
     checkFarLeafScreenBox(runner, report);
+    checkLianaPose(runner, report);
 }
