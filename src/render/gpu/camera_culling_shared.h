@@ -20,12 +20,14 @@
 // GpuCameraCull::flags: the velocity pass's list is built (temporal anti-aliasing on; for a shadow tile, the casters
 // that moved in the second list, kept apart from the still ones); things sway this frame; a shadow tile (shadowTakes);
 // mesh clusters swaying unbound culled by their spheres grown by the sway's reach (meshClusterSwayingPose); lianas'
-// clusters culled by their spans' bounds as bent (meshClusterLianaPose).
+// clusters culled by their spans' bounds as bent (meshClusterLianaPose); terrain patches' clusters culled by their own
+// boxes on the land (meshClusterTerrainPose).
 #define CAMERA_CULL_MOTION 1u
 #define CAMERA_CULL_SWAY 2u
 #define CAMERA_CULL_SHADOW 4u
 #define CAMERA_CULL_SWAY_REACH 8u
 #define CAMERA_CULL_LIANA_BOUNDS 16u
+#define CAMERA_CULL_TERRAIN_BOUNDS 32u
 
 // The packed commands' counts (camera_cull_compact.comp): the camera's four styles, then the velocity pass's.
 #define CAMERA_CULL_STYLES 4

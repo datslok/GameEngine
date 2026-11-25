@@ -79,6 +79,37 @@ std::uint16_t floatToHalf(float value) {
     return static_cast<std::uint16_t>(sign | half);
 }
 
+namespace {
+    // The half one step up the number line (towards +infinity): a positive's magnitude grows, a negative's shrinks, -0
+    // goes to the smallest positive subnormal.
+    std::uint16_t halfStepUp(std::uint16_t bits) {
+        if (bits == signBit) {
+            return 0x0001;
+        }
+
+        return (bits & signBit) != 0 ? static_cast<std::uint16_t>(bits - 1) : static_cast<std::uint16_t>(bits + 1);
+    }
+
+    std::uint16_t halfStepDown(std::uint16_t bits) {
+        if (bits == 0x0000) {
+            return 0x8001;
+        }
+
+        return (bits & signBit) != 0 ? static_cast<std::uint16_t>(bits + 1) : static_cast<std::uint16_t>(bits - 1);
+    }
+}
+
+// The nearest half, stepped once the other way when it lies on the wrong side (the nearest is within a step).
+std::uint16_t floatToHalfBelow(float value) {
+    const std::uint16_t nearest = floatToHalf(value);
+    return halfToFloat(nearest) > value ? halfStepDown(nearest) : nearest;
+}
+
+std::uint16_t floatToHalfAbove(float value) {
+    const std::uint16_t nearest = floatToHalf(value);
+    return halfToFloat(nearest) < value ? halfStepUp(nearest) : nearest;
+}
+
 std::uint32_t halfStepDistance(std::uint16_t first, std::uint16_t second) {
     if (first == second) {
         return 0;

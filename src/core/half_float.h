@@ -14,6 +14,11 @@ float halfToFloat(std::uint16_t bits);
 // becomes infinity, too small a subnormal or zero, NaN stays NaN.
 std::uint16_t floatToHalf(float value);
 
+// The largest half at most a float, and the smallest at least it (bounds kept as halves round outward): past the halves'
+// range, the largest finite half on the near side and infinity on the far one. Not for NaN.
+std::uint16_t floatToHalfBelow(float value);
+std::uint16_t floatToHalfAbove(float value);
+
 // What halfStepDistance returns when one side is NaN and the bits differ: as far apart as anything can be.
 inline constexpr std::uint32_t halfStepDistanceNever = 0xFFFFFFFFu;
 

@@ -1,4 +1,5 @@
 #include "core/command_registry.h"
+#include "core/half_float.h"
 #include "engine/debug_views.h"
 #include "engine/engine_commands.h"
 #include "math/frustum.h"
@@ -24,6 +25,9 @@
 #include "scene/mesh.h"
 #include "scene/mesh_clusters.h"
 #include "scene/sway_bones.h"
+#include "scene/terrain.h"
+#include "scene/terrain_heights.h"
+#include "test_jobs.h"
 #include "test_levels.h"
 
 #include <algorithm>
@@ -137,6 +141,13 @@ namespace {
             assert(record.firstTriangleWord == nextWord);
             nextWord += meshClusterTriangleWords(cluster.triangleCount);
             assert(record.sphere[3] == cluster.radius && record.cone[3] == cluster.coneCutoff);
+
+            // Its footprint as halves rounded outward (low x, low z; high x, high z), holding the cluster's own.
+            const Vec4 footprint = meshClusterFootprint(record);
+            assert(footprint.x <= cluster.footprintLow.x && footprint.y <= cluster.footprintLow.y);
+            assert(footprint.z >= cluster.footprintHigh.x && footprint.w >= cluster.footprintHigh.y);
+            assert(halfStepDistance(floatToHalf(footprint.x), floatToHalf(cluster.footprintLow.x)) <= 1u);
+            assert(halfStepDistance(floatToHalf(footprint.w), floatToHalf(cluster.footprintHigh.y)) <= 1u);
 
             for (std::uint32_t triangle = 0; triangle < cluster.triangleCount; ++triangle) {
                 const std::array<std::uint32_t, 3> corners = packedTriangle(packed, record, 50, 70, triangle);
@@ -725,6 +736,64 @@ namespace {
             assert(moved.posed && std::abs(moved.sphere[3] - radius) < 1e-4f);
             assert((Vec3{moved.sphere[0], moved.sphere[1], moved.sphere[2]} - Vec3{bound.sphere[0], bound.sphere[1], bound.sphere[2]} - middle).length() < 1e-4f);
         }
+    }
+
+    /*
+    * The terrain bounds cull a patch's clusters one by one (CAMERA_CULL_TERRAIN_BOUNDS, ROADMAP phase 21 4c-viii): a
+    * patch round the eye, half of it behind, has clusters hidden, each posed unbound on its own sphere
+    * (terrainClusterBox's box at the land's heights: meshClusterTerrainPose); without the bounds the patch is kept
+    * whole, as it is when its bounds are no larger than a cluster's. Other draws keep their pose; meshClusterPoseIn
+    * takes a pair's patch and the heights from the tables, and leaves a draw naming a patch past them as it was.
+    */
+    void testTheTerrainBoundsCullEachCluster() {
+        const GpuCameraCull without = testView(Vec3{0.0f, 2.0f, 0.0f}, 0.0f, false, 0.0f);
+        GpuCameraCull view = without;
+        view.flags |= CAMERA_CULL_TERRAIN_BOUNDS;
+        TerrainHeights heights;
+        heights.grids.push_back(makeTerrainHeightGrid(Vec2{0.0f, 0.0f}, 128.0f, 2.0f, [](float x, float z) { return 0.05f * x - 0.02f * z; }, testJobs()));
+        const TerrainPatch patch{.corner = Vec2{-32.0f, -32.0f}, .size = 64.0f, .quads = 32.0f, .spacing = 2.0f, .morphStart = 100.0f, .morphEnd = 200.0f,
+                                 .uvCorner = Vec2{}, .uvPerMetre = 0.01f};
+        const std::vector<TerrainPatch> patches{patch};
+        const PackedMeshClusters packed = packMeshClusters(buildMeshClusters(buildIndexedMesh(terrainGridMesh(TERRAIN_GRID_QUADS)), ClusterLevels::One), 0, 0, 0);
+        Mat4 model = Mat4::translation(patch.corner.x, 0.0f, patch.corner.y);
+        model.values[0][0] = patch.size;
+        model.values[2][2] = patch.size;
+        GpuInstance instance = placedInstance(model);
+        instance.material[2] = 1u;
+        const GpuCullRecord record = stillRecord(Vec3{0.0f, 0.0f, 0.0f}, 46.0f);
+        GpuInstance plain = instance;
+        plain.material[2] = 0u;
+        int hidden = 0;
+        int kept = 0;
+
+        for (const GpuMeshCluster& cluster : packed.clusters) {
+            const Vec4 box = terrainClusterBox(patch, meshClusterFootprint(cluster));
+            const Vec4 sphere = terrainBoxSphere(box, terrainHeightRange(heights, box.x, box.z, box.y, box.w));
+            const MeshClusterPose pose = meshClusterTerrainPose(instance, record, view, sphere, MeshClusterPose{});
+            assert(pose.posed && !pose.bound && pose.sphere == (std::array<float, 4>{sphere.x, sphere.y, sphere.z, sphere.w}));
+            assert(!meshClusterSeenWhole(instance, 0u, record, view, pose));
+            (meshClusterKept(cluster, instance, 0u, record, view, pose) ? kept : hidden) += 1;
+
+            const MeshClusterPose unbounded = meshClusterTerrainPose(instance, record, without, sphere, MeshClusterPose{});
+            assert(!unbounded.posed && meshClusterSeenWhole(instance, 0u, record, without, unbounded));
+            GpuCullRecord tight = record;
+            tight.bounds[3] = sphere.w;
+            assert(!meshClusterTerrainPose(instance, tight, view, sphere, MeshClusterPose{}).posed);
+            assert(!meshClusterTerrainPose(plain, record, view, sphere, MeshClusterPose{}).posed);
+
+            MeshClusterDrawn drawn;
+            drawn.instance = instance;
+            drawn.record = record;
+            MeshClusterTables tables;
+            tables.terrainPatches = patches;
+            tables.terrainHeights = &heights;
+            assert(meshClusterPoseIn(tables, drawn, cluster, view).sphere == pose.sphere);
+            assert(!meshClusterPoseIn(tables, drawn, cluster, without).posed);
+            drawn.instance.material[2] = 2u;
+            assert(!meshClusterPoseIn(tables, drawn, cluster, view).posed);
+        }
+
+        assert(hidden >= 4 && kept >= 4);
     }
 
     // The clusters the cut draws, by number.
@@ -1722,6 +1791,7 @@ void testMeshClusterCulling() {
     testTheSwayReachCullsEachCluster();
     testTheLianaBoundsHoldEveryVertex();
     testTheLianaBoundsCullEachCluster();
+    testTheTerrainBoundsCullEachCluster();
     testAPosedClusterHidesNothing();
     testThePoseOfAPair();
     testPackingKeepsTheCut();

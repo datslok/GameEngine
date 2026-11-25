@@ -74,6 +74,30 @@ void main() {
         return;
     }
 
+    if (function == GPU_TEST_MESH_CLUSTER_TERRAIN_POSE) {
+        // Inputs: (the draw's patch number, the view's flags), the record's bounds, the cluster's sphere on the land.
+        // Outputs: (the pose's bound, posed), its sphere.
+        vec4 names = testInput(0);
+        InstanceData instance;
+        instance.material = uvec4(0u, 0u, uint(names.x), 0u);
+        CullRecord record;
+        record.bounds = testInput(1);
+        CameraCull view;
+        view.flags = uint(names.y);
+        MeshClusterPose pose = meshClusterTerrainPose(instance, record, view, testInput(2), meshClusterUnposed(false));
+        testOutput(0, vec4(pose.bound ? 1.0 : 0.0, pose.posed ? 1.0 : 0.0, 0.0, 0.0));
+        testOutput(1, pose.sphere);
+        return;
+    }
+
+    if (function == GPU_TEST_MESH_CLUSTER_FOOTPRINT) {
+        // Inputs: the footprint's two words as float bits. Output: it unpacked.
+        MeshCluster cluster;
+        cluster.footprint = floatBitsToUint(testInput(0).xy);
+        testOutput(0, meshClusterFootprint(cluster));
+        return;
+    }
+
     if (function == GPU_TEST_MESH_CLUSTER_KEPT) {
         // Inputs: the cluster's sphere, its cone (apex, cutoff), its axis, the model's four columns, (the entry's
         // thinned bit, the record's flags, the view's sway flag, its fade end), (terrain patch, kind, liana), the

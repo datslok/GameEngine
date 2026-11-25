@@ -1,7 +1,7 @@
 // Mesh clusters culled a view, included with #include "mesh_cluster_culling.glsl": mirrors render/gpu/mesh_cluster_culling.h
 // (meshClusterLargestScale, meshClusterPlacedSphere, meshClusterWorldSphere, meshClusterErrorPixels, meshClusterInCut,
 // meshClusterEyeInMesh, meshClusterFacesAway, meshClusterShapeFixed, meshClusterSways, meshClusterPosed, meshClusterSwayReach,
-// meshClusterSwayingPose, meshClusterLianaPose, meshClusterSeenWhole,
+// meshClusterSwayingPose, meshClusterLianaPose, meshClusterTerrainPose, meshClusterSeenWhole, meshClusterFootprint,
 // meshClusterBound, meshClusterCullSphere, meshClusterVisibility, meshClusterKept, meshClusterScreenBox, meshClusterEmptyBox,
 // meshClusterBoxTake, farLeafScreenBox, meshClusterBoxPixels, meshClusterPyramidLevel). Pure functions: the pyramid's and
 // the bones' reads are the passes' (mesh_cluster_pyramid.glsl, meshClusterBoxHidden; bone_cull_data.glsl).
@@ -39,7 +39,7 @@ struct MeshCluster {
     uint level;            // the level of the group it was simplified with (scene/mesh_clusters.h)
     uvec2 bones;           // up to MESH_CLUSTER_MOST_BONES of its vertices' bones, 16 bits each (meshClusterBones): the first four
     uvec2 moreBones;       // and the last four (two uvec2, not a uvec4, which would align past level)
-    uvec2 unused;
+    uvec2 footprint;       // its vertices' box across x and z as halves rounded outward: low x and z, high x and z
 };
 
 // A (draw list entry, cluster) pair a list draws. Must match GpuMeshClusterItem.
@@ -216,11 +216,32 @@ MeshClusterPose meshClusterLianaPose(MeshCluster cluster, InstanceData instance,
     return MeshClusterPose(false, true, sphere);
 }
 
-// Whether the view keeps every cluster of the draw (meshClusterSeenWhole): its shape not its mesh's (a liana's unless
-// posed by its span), or swaying unbound and not posed by its sway's reach.
+// Where the view bounds terrain clusters, a terrain patch's cluster posed unbound on its own sphere on the land (the
+// pass's terrainClusterBox, terrainHeightRange, terrainBoxSphere); else, or when no smaller than the patch's bounds,
+// the pose given (meshClusterTerrainPose).
+MeshClusterPose meshClusterTerrainPose(InstanceData instance, CullRecord record, CameraCull view, vec4 sphere, MeshClusterPose pose) {
+    if ((view.flags & CAMERA_CULL_TERRAIN_BOUNDS) == 0u || instance.material.z == 0u) {
+        return pose;
+    }
+
+    // A small patch's cluster can be no smaller than its patch: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds.w >= 0.0 && record.bounds.w <= sphere.w) {
+        return pose;
+    }
+
+    return MeshClusterPose(false, true, sphere);
+}
+
+// Whether the view keeps every cluster of the draw (meshClusterSeenWhole): its shape not its mesh's (a liana's or a
+// terrain patch's unless posed by its own bounds), or swaying unbound and not posed by its sway's reach.
 bool meshClusterSeenWhole(InstanceData instance, uint entry, CullRecord record, CameraCull view, MeshClusterPose pose) {
-    bool lianaPosed = instance.hanging.w != 0u && pose.posed;
-    return (!meshClusterShapeFixed(instance, entry) && !lianaPosed) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
+    bool ownBounds = (instance.hanging.w != 0u || instance.material.z != 0u) && pose.posed;
+    return (!meshClusterShapeFixed(instance, entry) && !ownBounds) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
+}
+
+// A cluster's footprint in the mesh's space: low x, low z, high x, high z (meshClusterFootprint).
+vec4 meshClusterFootprint(MeshCluster cluster) {
+    return vec4(unpackHalf2x16(cluster.footprint.x), unpackHalf2x16(cluster.footprint.y));
 }
 
 // Whether a cluster's vertices are bound to bones: its first slot not empty (meshClusterBound).

@@ -113,6 +113,11 @@ struct RenderSettings {
     // every cluster of a liana's draw, for comparing.
     bool meshClusterLianaBounds = true;
 
+    // Terrain patches' mesh clusters culled one by one by their own boxes on the land, the morph's slide included, between
+    // the heights there from the heights' min/max pyramids (meshClusterTerrainPose, ROADMAP phase 21 4c-viii), in the
+    // camera's and the sun's virtual shadow views; off keeps every cluster of a patch, for comparing.
+    bool meshClusterTerrainBounds = true;
+
     // With mesh clusters drawn and the depth prepass on: two-pass occlusion (docs/research/OCCLUSION.md), the early list
     // tested against last frame's depth, the late list against this frame's, F4's LATE and HIDDEN.
     bool meshClusterOcclusion = true;

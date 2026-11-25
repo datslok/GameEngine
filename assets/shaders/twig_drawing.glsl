@@ -135,7 +135,7 @@ MeshCluster twigFarMeshCluster(TwigFarCluster far) {
     cluster.level = 0u;
     cluster.bones = uvec2(0xFFFFFFFFu);
     cluster.moreBones = uvec2(0xFFFFFFFFu);
-    cluster.unused = uvec2(0u);
+    cluster.footprint = uvec2(0u);
     return cluster;
 }
 

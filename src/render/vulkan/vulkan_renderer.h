@@ -630,6 +630,8 @@ private:
         std::vector<std::uint32_t> twigBindings;
         std::vector<LianaShape> lianas;                   // the frame's lianas, slot by slot (lianaRecords)
         std::vector<std::array<float, 4>> lianaMotions; // their anchors' motions, read back when collected
+        std::vector<TerrainPatch> terrainPatches;           // the frame's terrain patches (meshClusterTerrainPose)
+        std::shared_ptr<const TerrainHeights> terrainHeights; // and the heights they stand on (none: no terrain)
     };
 
     // The trees and poses of the frame being collected, read back for its cluster-compare (takeBonePoses keeps them).

@@ -94,6 +94,23 @@ namespace {
         assert(found == expected);
     }
 
+    // Each cluster's footprint is its vertices' box across x and z exactly: every vertex within it, each side met by one.
+    void assertFootprintsAreTheirVerticesBoxes(const IndexedMesh& mesh, const MeshClusters& built) {
+        for (const MeshCluster& cluster : built.clusters) {
+            Vec2 low{1e30f, 1e30f};
+            Vec2 high{-1e30f, -1e30f};
+
+            for (std::uint32_t vertex = 0; vertex < cluster.vertexCount; ++vertex) {
+                const Vec3& position = mesh.vertices[built.vertices[cluster.firstVertex + vertex]].position;
+                low = Vec2{std::min(low.x, position.x), std::min(low.y, position.z)};
+                high = Vec2{std::max(high.x, position.x), std::max(high.y, position.z)};
+            }
+
+            assert(cluster.footprintLow.x == low.x && cluster.footprintLow.y == low.y);
+            assert(cluster.footprintHigh.x == high.x && cluster.footprintHigh.y == high.y);
+        }
+    }
+
     // Each cluster's sphere holds every vertex of its own (a millionth of the radius spare for rounding).
     void assertSpheresHoldTheirVertices(const IndexedMesh& mesh, const MeshClusters& built) {
         for (const MeshCluster& cluster : built.clusters) {
@@ -153,6 +170,8 @@ namespace {
         assertWithinLimits(sheet, built);
         assertEveryTriangleOnce(sheet, built);
         assertSpheresHoldTheirVertices(sheet, built);
+        assertFootprintsAreTheirVerticesBoxes(sheet, built);
+        assertFootprintsAreTheirVerticesBoxes(sheet, buildMeshClusters(sheet, ClusterLevels::All));
         checkFacing(sheet, built, 2.0f, 1u);
     }
 

@@ -25,7 +25,78 @@ TerrainHeightGrid makeTerrainHeightGrid(const Vec2& centre, float halfSize, floa
             grid.heights[row * grid.size + column] = height(grid.corner.x + static_cast<float>(column) * spacing, z);
         }
     });
+    grid.pyramid = terrainHeightPyramid(grid, jobs);
     return grid;
+}
+
+int terrainPyramidLevels(std::uint32_t size) {
+    int levels = 0;
+
+    while (terrainPyramidLevelSize(size, levels) > 1u) {
+        ++levels;
+    }
+
+    return levels;
+}
+
+// ceil(size / 2^level): each texel holds 2^level points a side, the last what is left.
+std::uint32_t terrainPyramidLevelSize(std::uint32_t size, int level) {
+    return (size + (1u << level) - 1u) >> level;
+}
+
+std::size_t terrainPyramidLevelStart(std::uint32_t size, int level) {
+    std::size_t start = 0;
+
+    for (int below = 1; below < level; ++below) {
+        const std::size_t across = terrainPyramidLevelSize(size, below);
+        start += across * across;
+    }
+
+    return start;
+}
+
+TerrainHeightRange terrainPyramidTexel(const TerrainHeightGrid& grid, int level, std::uint32_t column, std::uint32_t row) {
+    if (level == 0) {
+        const float height = grid.heights[static_cast<std::size_t>(row) * grid.size + column];
+        return TerrainHeightRange{height, height};
+    }
+
+    const std::size_t pair = terrainPyramidLevelStart(grid.size, level) + static_cast<std::size_t>(row) * terrainPyramidLevelSize(grid.size, level) + column;
+    return TerrainHeightRange{grid.pyramid[2 * pair], grid.pyramid[2 * pair + 1]};
+}
+
+// Each level from the one below (level 1 from the points): a texel the extremes of its 2 x 2, clamped at an odd side.
+std::vector<float> terrainHeightPyramid(const TerrainHeightGrid& grid, JobSystem& jobs) {
+    const int levels = terrainPyramidLevels(grid.size);
+    TerrainHeightGrid built = grid;
+    built.pyramid.assign(2 * terrainPyramidLevelStart(grid.size, levels + 1), 0.0f);
+
+    for (int level = 1; level <= levels; ++level) {
+        const std::uint32_t across = terrainPyramidLevelSize(grid.size, level);
+        const std::uint32_t below = terrainPyramidLevelSize(grid.size, level - 1);
+        const std::size_t start = terrainPyramidLevelStart(grid.size, level);
+        jobs.parallelFor(across, 1, [&](std::size_t row) {
+            const std::uint32_t top = 2 * static_cast<std::uint32_t>(row);
+
+            for (std::uint32_t column = 0; column < across; ++column) {
+                TerrainHeightRange range{std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest()};
+
+                for (std::uint32_t z = top; z < std::min(top + 2, below); ++z) {
+                    for (std::uint32_t x = 2 * column; x < std::min(2 * column + 2, below); ++x) {
+                        const TerrainHeightRange child = terrainPyramidTexel(built, level - 1, x, z);
+                        range.lowest = std::min(range.lowest, child.lowest);
+                        range.highest = std::max(range.highest, child.highest);
+                    }
+                }
+
+                const std::size_t pair = start + row * across + column;
+                built.pyramid[2 * pair] = range.lowest;
+                built.pyramid[2 * pair + 1] = range.highest;
+            }
+        });
+    }
+
+    return built.pyramid;
 }
 
 float terrainBilinear(float nearLeft, float nearRight, float farLeft, float farRight, float across, float down) {
@@ -97,22 +168,34 @@ TerrainHeightRange terrainHeightRange(const TerrainHeights& heights, float west,
     TerrainHeightRange range{std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
 
     for (const TerrainHeightGrid& grid : heights.grids) {
+        if (grid.pyramid.size() != 2 * terrainPyramidLevelStart(grid.size, terrainPyramidLevels(grid.size) + 1)) {
+            throw std::invalid_argument("A terrain height grid's range is read from its pyramid, built with it");
+        }
+
         const float last = static_cast<float>(grid.size - 1);
         const auto point = [&](float place, float corner, bool upper) {
             const float coordinate = std::clamp((place - corner) / grid.spacing, 0.0f, last);
             return static_cast<std::uint32_t>(upper ? std::ceil(coordinate) : std::floor(coordinate));
         };
-        const std::uint32_t firstColumn = point(west, grid.corner.x, false);
-        const std::uint32_t lastColumn = point(east, grid.corner.x, true);
-        const std::uint32_t firstRow = point(north, grid.corner.y, false);
-        const std::uint32_t lastRow = point(south, grid.corner.y, true);
 
         // One point wider each way: a place's squares are found by its rounded coordinate, which may slip a square.
-        for (std::uint32_t row = firstRow > 0 ? firstRow - 1 : 0; row <= std::min(lastRow + 1, grid.size - 1); ++row) {
-            for (std::uint32_t column = firstColumn > 0 ? firstColumn - 1 : 0; column <= std::min(lastColumn + 1, grid.size - 1); ++column) {
-                const float height = grid.heights[static_cast<std::size_t>(row) * grid.size + column];
-                range.lowest = std::min(range.lowest, height);
-                range.highest = std::max(range.highest, height);
+        const std::uint32_t firstColumn = std::max(point(west, grid.corner.x, false), 1u) - 1u;
+        const std::uint32_t lastColumn = std::min(point(east, grid.corner.x, true) + 1u, grid.size - 1u);
+        const std::uint32_t firstRow = std::max(point(north, grid.corner.y, false), 1u) - 1u;
+        const std::uint32_t lastRow = std::min(point(south, grid.corner.y, true) + 1u, grid.size - 1u);
+
+        // The finest level where the points span at most two texels each way: its four texels hold them all.
+        int level = 0;
+
+        while ((firstColumn >> level) + 1u < (lastColumn >> level) || (firstRow >> level) + 1u < (lastRow >> level)) {
+            ++level;
+        }
+
+        for (const std::uint32_t row : {firstRow >> level, lastRow >> level}) {
+            for (const std::uint32_t column : {firstColumn >> level, lastColumn >> level}) {
+                const TerrainHeightRange texel = terrainPyramidTexel(grid, level, column, row);
+                range.lowest = std::min(range.lowest, texel.lowest);
+                range.highest = std::max(range.highest, texel.highest);
             }
         }
 
@@ -135,6 +218,24 @@ Vec3 terrainNormal(const TerrainHeights& heights, float x, float z, float step) 
     const float slopeX = (terrainHeight(heights, x + step, z) - terrainHeight(heights, x - step, z)) / (2.0f * step);
     const float slopeZ = (terrainHeight(heights, x, z + step) - terrainHeight(heights, x, z - step)) / (2.0f * step);
     return Vec3{-slopeX, 1.0f, -slopeZ}.normalized();
+}
+
+Vec4 terrainClusterBox(const TerrainPatch& patch, const Vec4& footprint) {
+    const float west = std::max(std::floor(footprint.x * patch.quads) - 1.0f, 0.0f);
+    const float north = std::max(std::floor(footprint.y * patch.quads) - 1.0f, 0.0f);
+    const float east = std::min(std::ceil(footprint.z * patch.quads), patch.quads);
+    const float south = std::min(std::ceil(footprint.w * patch.quads), patch.quads);
+    return Vec4{patch.corner.x + west * patch.spacing, patch.corner.y + north * patch.spacing, patch.corner.x + east * patch.spacing,
+                patch.corner.y + south * patch.spacing};
+}
+
+Vec4 terrainBoxSphere(const Vec4& box, const TerrainHeightRange& heights) {
+    const Vec3 low{box.x, heights.lowest, box.y};
+    const Vec3 high{box.z, heights.highest, box.w};
+    const Vec3 centre = (low + high) * 0.5f;
+    const Vec3 half = (high - low) * 0.5f;
+    const float reach = std::max({std::abs(low.x), std::abs(low.y), std::abs(low.z), std::abs(high.x), std::abs(high.y), std::abs(high.z)});
+    return Vec4{centre.x, centre.y, centre.z, std::sqrt(half.dot(half)) + 1e-5f * reach};
 }
 
 float terrainMorph(float distance, float start, float end) {

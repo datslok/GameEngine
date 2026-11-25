@@ -1,4 +1,5 @@
 #include "render/gpu/mesh_cluster_culling.h"
+#include "core/half_float.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/instance_shared.h"
@@ -165,6 +166,13 @@ std::uint32_t meshClusterBone(const GpuMeshCluster& cluster, std::uint32_t slot)
     return (cluster.bones[slot / 2] >> (16u * (slot % 2))) & 0xFFFFu;
 }
 
+Vec4 meshClusterFootprint(const GpuMeshCluster& cluster) {
+    const auto half = [&](std::uint32_t word, std::uint32_t shift) {
+        return halfToFloat(static_cast<std::uint16_t>((cluster.footprint[word] >> shift) & 0xFFFFu));
+    };
+    return Vec4{half(0, 0), half(0, 16), half(1, 0), half(1, 16)};
+}
+
 /*
 * Vertex numbers become the vertex pool's (the mesh's first vertex added), so a mesh shader needs no offset; each
 * cluster's corner bytes start a word of their own, so a cluster reads whole words.
@@ -192,6 +200,8 @@ PackedMeshClusters packMeshClusters(const MeshClusters& built, std::uint32_t mes
         record.firstTriangleWord = firstTriangleWord + static_cast<std::uint32_t>(packed.triangleWords.size());
         record.counts = cluster.vertexCount | (cluster.triangleCount << MESH_CLUSTER_TRIANGLE_SHIFT);
         record.meshFirstVertex = meshFirstVertex;
+        record.footprint[0] = floatToHalfBelow(cluster.footprintLow.x) | (static_cast<std::uint32_t>(floatToHalfBelow(cluster.footprintLow.y)) << 16u);
+        record.footprint[1] = floatToHalfAbove(cluster.footprintHigh.x) | (static_cast<std::uint32_t>(floatToHalfAbove(cluster.footprintHigh.y)) << 16u);
         writeGroupSphere(built.groups[cluster.group], record.parentSphere);
         record.parentError = built.groups[cluster.group].error;
         record.level = built.groups[cluster.group].level;
@@ -377,10 +387,24 @@ MeshClusterPose meshClusterLianaPose(const GpuMeshCluster& cluster, const GpuIns
     return MeshClusterPose{.bound = false, .posed = true, .sphere = sphere};
 }
 
+MeshClusterPose meshClusterTerrainPose(const GpuInstance& instance, const GpuCullRecord& record, const GpuCameraCull& view, const Vec4& sphere,
+                                       const MeshClusterPose& pose) {
+    if ((view.flags & CAMERA_CULL_TERRAIN_BOUNDS) == 0u || instance.material[2] == 0u) {
+        return pose;
+    }
+
+    // A small patch's cluster can be no smaller than its patch: then its draw's bounds, kept whole as before, cost less.
+    if (record.bounds[3] >= 0.0f && record.bounds[3] <= sphere.w) {
+        return pose;
+    }
+
+    return MeshClusterPose{.bound = false, .posed = true, .sphere = {sphere.x, sphere.y, sphere.z, sphere.w}};
+}
+
 bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
                           const MeshClusterPose& pose) {
-    const bool lianaPosed = instance.hanging[3] != 0u && pose.posed;
-    return (!meshClusterShapeFixed(instance, entry) && !lianaPosed) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
+    const bool ownBounds = (instance.hanging[3] != 0u || instance.material[2] != 0u) && pose.posed;
+    return (!meshClusterShapeFixed(instance, entry) && !ownBounds) || (!pose.bound && !pose.posed && meshClusterSways(record, view));
 }
 
 bool meshClusterBound(const GpuMeshCluster& cluster) {
@@ -746,9 +770,22 @@ MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClu
     return meshClusterPosed(sphere, drawn.instance, drawn.instance.sway[3], Vec2{tree.lean[0], tree.lean[1]});
 }
 
-// A liana's anchors' motions from the table, still where it has none for them.
+// A liana's anchors' motions from the table, still where it has none for them; a terrain patch's cluster's sphere from
+// its patch and the heights, read only where the view bounds terrain clusters.
 MeshClusterPose meshClusterPoseIn(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster, const GpuCameraCull& view) {
     const MeshClusterPose pose = meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(tables, drawn, cluster));
+    const std::uint32_t patch = drawn.instance.material[2];
+
+    if (patch != 0u) {
+        if ((view.flags & CAMERA_CULL_TERRAIN_BOUNDS) == 0u || patch > tables.terrainPatches.size() || tables.terrainHeights == nullptr) {
+            return pose;
+        }
+
+        const Vec4 box = terrainClusterBox(tables.terrainPatches[patch - 1], meshClusterFootprint(cluster));
+        const TerrainHeightRange heights = terrainHeightRange(*tables.terrainHeights, box.x, box.z, box.y, box.w);
+        return meshClusterTerrainPose(drawn.instance, drawn.record, view, terrainBoxSphere(box, heights), pose);
+    }
+
     const std::uint32_t named = drawn.instance.hanging[3];
 
     if (named == 0u || lianaRecordOf(named) >= tables.lianas.size()) {

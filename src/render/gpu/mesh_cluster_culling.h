@@ -16,6 +16,7 @@
 #include "scene/liana_shape.h"
 #include "scene/mesh_clusters.h"
 #include "scene/sway_bones.h"
+#include "scene/terrain_heights.h"
 
 #include <array>
 #include <cstdint>
@@ -55,7 +56,9 @@ struct GpuMeshCluster {
     std::uint32_t level = 0;              // the level of the group it was simplified with (MeshClusterGroup::level)
     // Its vertices' own bones (meshClusterBones): up to MESH_CLUSTER_MOST_BONES, 16 bits each, low half first.
     std::uint32_t bones[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
-    std::uint32_t unused[2] = {};
+    // Its footprint (MeshCluster::footprintLow, footprintHigh) as halves rounded outward, as GLSL's packHalf2x16 packs
+    // them: low x and z, then high x and z (meshClusterFootprint).
+    std::uint32_t footprint[2] = {};
 };
 
 static_assert(sizeof(GpuMeshCluster) == 128, "GpuMeshCluster must match mesh_cluster_culling.glsl's MeshCluster");
@@ -105,6 +108,9 @@ std::array<std::uint32_t, 4> meshClusterBones(const MeshClusters& built, const M
 
 // A packed cluster's bone in a slot (0 to MESH_CLUSTER_MOST_BONES - 1).
 std::uint32_t meshClusterBone(const GpuMeshCluster& cluster, std::uint32_t slot);
+
+// A packed cluster's footprint unpacked: low x, low z, high x, high z, in the mesh's space (meshClusterFootprint).
+Vec4 meshClusterFootprint(const GpuMeshCluster& cluster);
 
 // The words a cluster's triangles take (three corner bytes each, four to a word).
 std::uint32_t meshClusterTriangleWords(std::uint32_t triangles);
@@ -201,8 +207,18 @@ MeshClusterPose meshClusterSwayingPose(const GpuMeshCluster& cluster, const GpuI
 MeshClusterPose meshClusterLianaPose(const GpuMeshCluster& cluster, const GpuInstance& instance, const GpuCullRecord& record, const GpuCameraCull& view,
                                      const LianaShape& shape, const Vec3& firstMotion, const Vec3& secondMotion, const MeshClusterPose& pose);
 
-// Whether the view keeps every cluster of the draw: its shape not its mesh's (a liana's unless posed by its span,
-// meshClusterLianaPose), or swaying per vertex, not bound to bones and not posed by its sway's reach (meshClusterSwayingPose).
+/*
+* Where the view bounds terrain clusters (CAMERA_CULL_TERRAIN_BOUNDS, RenderSettings::meshClusterTerrainBounds), a
+* cluster of a terrain patch's draw (its instance's material.z names the patch; ROADMAP phase 21 4c-viii): posed
+* unbound on its own sphere on the land (terrainClusterBox's box between terrainHeightRange's heights, terrainBoxSphere,
+* worked out by the caller from the patch and the heights) so the view culls it alone rather than keeping the patch
+* whole. Else, or when the sphere is no smaller than the draw's bounds, the pose given.
+*/
+MeshClusterPose meshClusterTerrainPose(const GpuInstance& instance, const GpuCullRecord& record, const GpuCameraCull& view, const Vec4& sphere,
+                                       const MeshClusterPose& pose);
+
+// Whether the view keeps every cluster of the draw: its shape not its mesh's (a liana's or a terrain patch's unless
+// posed by its own bounds: meshClusterLianaPose, meshClusterTerrainPose), or swaying per vertex, not bound to bones and not posed by its sway's reach (meshClusterSwayingPose).
 bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
                           const MeshClusterPose& pose);
 
@@ -400,6 +416,8 @@ struct MeshClusterTables {
     BoneCullTables bones{};
     std::span<const LianaShape> lianas{};                 // the frame's lianas' records (FrameDescription::lianaShapes, in order)
     std::span<const std::array<float, 4>> lianaMotions{}; // each anchor's motion this frame, two a record (none: still)
+    std::span<const TerrainPatch> terrainPatches{};        // the frame's terrain patches (FrameDescription::terrainPatches)
+    const TerrainHeights* terrainHeights = nullptr;        // and the land's heights with their pyramids (none: no terrain)
 };
 
 /*

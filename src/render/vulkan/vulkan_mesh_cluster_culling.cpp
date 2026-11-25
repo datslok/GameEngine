@@ -1,5 +1,6 @@
 #include "render/vulkan/vulkan_mesh_cluster_culling.h"
 #include "render/gpu/taa.h"
+#include "render/gpu/terrain_gpu.h"
 #include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/image_state.h"
 #include "render/vulkan/vulkan_device.h"
@@ -22,12 +23,14 @@ namespace {
     constexpr std::uint32_t dispatchWords = 3;
 
     // The shared storage buffers (mesh_cluster_pass.glsl's: the camera's tables, the placed plants', the twigs', the bones',
-    // the lianas').
+    // the lianas', the terrain's).
     constexpr std::uint32_t sharedBuffers = MESH_CLUSTER_PASS_BINDINGS;
 
-    // The unused record bound for each placed (or liana) buffer without its records: as large as the largest record read.
+    // The unused record bound for each placed (liana, terrain) buffer without its records: as large as the largest record
+    // read (the terrain's heights are never read without patches).
     constexpr VkDeviceSize noPlacedBytes = std::max({sizeof(GpuDrawCommand), sizeof(GpuPlacedGroup), sizeof(GpuPlacedEntry), sizeof(GpuInstance),
-                                                     sizeof(GpuPlacedPart), sizeof(GpuPlacedPlant), sizeof(LianaShape)});
+                                                     sizeof(GpuPlacedPart), sizeof(GpuPlacedPlant), sizeof(LianaShape), sizeof(GpuTerrainPatch),
+                                                     sizeof(GpuTerrainHeightsHeader)});
 
     // Every pass pushes the list it makes and the frame's bones stamp (mesh_cluster_pass.glsl's MeshClusterList); those
     // testing pairs read the two pyramids after their storage buffers.
@@ -170,8 +173,13 @@ std::vector<ComputeBinding> VulkanMeshClusterCulling::passBindings(const PerFram
         placedOr(frame.inputs.bones.plantTrees),     placedOr(frame.inputs.bones.trees),         placedOr(frame.inputs.bones.poses),
         placedOr(frame.inputs.bones.twigBindings),     placedOr(frame.inputs.twigs.farClusters),
         placedOr(frame.inputs.lianas),               placedOr(frame.inputs.lianaMotions),
+        placedOr(frame.inputs.terrainPatches.buffer), placedOr(frame.inputs.terrainHeights),
     };
     all[7].buffer = frame.inputs.instances;
+
+    if (frame.inputs.terrainPatches.buffer != VK_NULL_HANDLE) {
+        all[MESH_CLUSTER_TERRAIN_BINDING].buffer = frame.inputs.terrainPatches;
+    }
 
     if (placed.partInstances.buffer != VK_NULL_HANDLE) {
         all[15].buffer = placed.partInstances;

@@ -1,9 +1,13 @@
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/mesh_cluster_culling.h"
 #include "render/gpu/ray_tracing.h"
 #include "render/gpu/terrain_gpu.h"
 #include "scene/culling.h"
+#include "scene/indexed_mesh.h"
+#include "scene/mesh_clusters.h"
 #include "scene/terrain.h"
 #include "test_jobs.h"
+#include "test_levels.h"
 
 #include <algorithm>
 #include <cassert>
@@ -14,10 +18,6 @@
 #include <vector>
 
 namespace {
-    bool near(float a, float b, float tolerance) {
-        return std::abs(a - b) <= tolerance;
-    }
-
     // A tilted plane: bilinear sampling of any grid of it is exact anywhere.
     float plane(float x, float z) {
         return 0.5f * x + 0.25f * z + 3.0f;
@@ -304,6 +304,79 @@ namespace {
         assert(packed.placement[0] == patches[0].corner.x && packed.placement[2] == patches[0].size && packed.morph[1] == patches[0].morphEnd);
     }
 
+    // Hills up to 60 m: a fine grid 512 m across at 2 m, a coarse one 4 km across at 32 m, as the forest's rings are.
+    float hills(float x, float z) {
+        return 30.0f * std::sin(0.013f * x + 0.4f) * std::cos(0.017f * z) + 8.0f * std::sin(0.11f * x) * std::sin(0.07f * z + 1.0f);
+    }
+
+    Terrain hillyTerrain() {
+        Terrain terrain = flatTerrain();
+        auto heights = std::make_shared<TerrainHeights>();
+        heights->grids.push_back(makeTerrainHeightGrid(Vec2{0.0f, 0.0f}, 256.0f, 2.0f, hills, testJobs()));
+        heights->grids.push_back(makeTerrainHeightGrid(Vec2{0.0f, 0.0f}, 2048.0f, 32.0f, hills, testJobs()));
+        terrain.heights = heights;
+        terrain.bounds = std::make_shared<const TerrainBounds>(makeTerrainBounds(terrain, testJobs()));
+        return terrain;
+    }
+
+    /*
+    * A patch's cluster bounded on its own (terrainClusterBox, terrainBoxSphere; ROADMAP phase 21 4c-viii): its
+    * footprint's grid points on the patch, one spacing more towards the corner (the morph slides odd points down), the
+    * land's heights under that box. Every vertex the shaders make of the cluster (terrainVertex) lies in its sphere, for
+    * eyes on the land, above it and far off (every morph from none to whole), full and half grids; and the spheres are
+    * of use: well under the patch's own.
+    */
+    void testAPatchsClusterHoldsItsVertices() {
+        const Terrain terrain = hillyTerrain();
+        const IndexedMesh full = buildIndexedMesh(terrainGridMesh(TERRAIN_GRID_QUADS));
+        const IndexedMesh half = buildIndexedMesh(terrainGridMesh(TERRAIN_HALF_GRID_QUADS));
+        const MeshClusters fullClusters = buildMeshClusters(full, ClusterLevels::One);
+        const MeshClusters halfClusters = buildMeshClusters(half, ClusterLevels::One);
+        const PackedMeshClusters fullPacked = packMeshClusters(fullClusters, 0, 0, 0);
+        const PackedMeshClusters halfPacked = packMeshClusters(halfClusters, 0, 0, 0);
+        assert(fullClusters.clusters.size() >= 16);
+        double clusterRadii = 0.0;
+        double patchRadii = 0.0;
+
+        for (const Vec3& eye : {Vec3{10.0f, 40.0f, -20.0f}, Vec3{-150.0f, 5.0f, 90.0f}, Vec3{300.0f, 400.0f, 250.0f}, Vec3{-700.0f, 60.0f, -650.0f}}) {
+            const std::vector<TerrainNode> nodes = selectTerrainNodes(terrain, eye, ranges);
+            std::vector<DrawItem> draws;
+            draws.reserve(nodes.size());
+            std::vector<TerrainPatch> patches;
+            appendTerrainDraws(terrain, nodes, draws, patches);
+
+            for (std::size_t index = 0; index < patches.size(); ++index) {
+                const TerrainPatch& patch = patches[index];
+                const bool isHalf = nodes[index].half;
+                const IndexedMesh& mesh = isHalf ? half : full;
+                const MeshClusters& built = isHalf ? halfClusters : fullClusters;
+                const PackedMeshClusters& packed = isHalf ? halfPacked : fullPacked;
+
+                for (std::size_t number = 0; number < built.clusters.size(); ++number) {
+                    const MeshCluster& cluster = built.clusters[number];
+                    const Vec4 box = terrainClusterBox(patch, meshClusterFootprint(packed.clusters[number]));
+                    const Vec4 sphere = terrainBoxSphere(box, terrainHeightRange(*terrain.heights, box.x, box.z, box.y, box.w));
+
+                    for (std::uint32_t vertex = 0; vertex < cluster.vertexCount; ++vertex) {
+                        const Vec3& point = mesh.vertices[built.vertices[cluster.firstVertex + vertex]].position;
+                        const TerrainVertex made = terrainVertex(*terrain.heights, patch, Vec2{point.x, point.z}, eye);
+                        assert(made.position.x >= box.x && made.position.x <= box.z && made.position.z >= box.y && made.position.z <= box.w);
+                        const Vec3 offset = made.position - Vec3{sphere.x, sphere.y, sphere.z};
+                        assert(offset.dot(offset) <= sphere.w * sphere.w);
+                    }
+
+                    if (!isHalf) {
+                        clusterRadii += sphere.w;
+                        patchRadii += draws[index].bounds.radius;
+                    }
+                }
+            }
+        }
+
+        // A cluster an eighth of its patch's area or less: its sphere well under half the patch's.
+        assert(clusterRadii < 0.4 * patchRadii);
+    }
+
     /*
     * The heights as one buffer: a header of each grid's corner, spacing, size and where its heights start, then every
     * grid's heights one after another.
@@ -319,7 +392,62 @@ namespace {
         float second = 0.0f;
         std::memcpy(&second, &words[sizeof(header) / 4 + 1], sizeof(float));
         assert(second == heights->grids[0].heights[1]);
-        assert(words.size() == sizeof(header) / 4 + 65u * 65u * 2u);
+        assert(header.grids[0].pyramidOffset == 2u * 65u * 65u);
+        assert(header.grids[1].pyramidOffset == header.grids[0].pyramidOffset + heights->grids[0].pyramid.size());
+
+        // Each grid's pyramid after every grid's heights, in order.
+        float lowest = 0.0f;
+        std::memcpy(&lowest, &words[sizeof(header) / 4 + header.grids[1].pyramidOffset], sizeof(float));
+        assert(lowest == heights->grids[1].pyramid[0]);
+        assert(words.size() == sizeof(header) / 4 + 65u * 65u * 2u + heights->grids[0].pyramid.size() + heights->grids[1].pyramid.size());
+    }
+
+    /*
+    * Each grid's min/max pyramid: level 1 the lowest and highest of each 2 x 2 of points, each level above of the 2 x 2
+    * below, the last row and column taking what is left of an odd side, up to one texel; levels one after another, rows
+    * along x. Built with the grid.
+    */
+    void testTheHeightPyramidHoldsEachSquaresExtremes() {
+        const std::shared_ptr<const TerrainHeights> wavy = twoGrids(waves);
+
+        for (const TerrainHeightGrid& grid : wavy->grids) {
+            const int levels = terrainPyramidLevels(grid.size);
+            assert(levels == 7 && terrainPyramidLevelSize(grid.size, 1) == 33u && terrainPyramidLevelSize(grid.size, levels) == 1u);
+            std::size_t pairs = 0;
+
+            for (int level = 1; level <= levels; ++level) {
+                const std::uint32_t across = terrainPyramidLevelSize(grid.size, level);
+                assert(terrainPyramidLevelStart(grid.size, level) == pairs);
+                const std::uint32_t span = 1u << level;
+
+                for (std::uint32_t row = 0; row < across; ++row) {
+                    for (std::uint32_t column = 0; column < across; ++column) {
+                        float low = 1e30f;
+                        float high = -1e30f;
+
+                        for (std::uint32_t z = row * span; z < std::min((row + 1) * span, grid.size); ++z) {
+                            for (std::uint32_t x = column * span; x < std::min((column + 1) * span, grid.size); ++x) {
+                                low = std::min(low, grid.heights[z * grid.size + x]);
+                                high = std::max(high, grid.heights[z * grid.size + x]);
+                            }
+                        }
+
+                        const TerrainHeightRange texel = terrainPyramidTexel(grid, level, column, row);
+                        assert(texel.lowest == low && texel.highest == high);
+                    }
+                }
+
+                pairs += static_cast<std::size_t>(across) * across;
+            }
+
+            assert(grid.pyramid.size() == 2 * pairs);
+        }
+
+        TerrainHeightGrid unbuilt = wavy->grids[0];
+        unbuilt.pyramid.clear();
+        TerrainHeights without;
+        without.grids.push_back(unbuilt);
+        assert(throwsInvalid([&] { terrainHeightRange(without, 0.0f, 1.0f, 0.0f, 1.0f); }));
     }
 
     /*
@@ -339,9 +467,44 @@ namespace {
 
     /*
     * A box's range of heights holds every height the land gives inside it, drawn or bilinear: boxes inside the fine grid,
-    * across both grids' edges and past every grid (where the coarsest's nearest edge stands). Within the fine grid it is
-    * near the land's own range there, not the whole grid's.
+    * across both grids' edges and past every grid (where the coarsest's nearest edge stands), and all the points they can
+    * read. Within the fine grid it is near the land's own range there, not the whole grid's.
     */
+    /*
+    * The heights a box can read, point by point: every grid's points round its squares (one wider each way), from the
+    * finest up to the first holding the whole box, and a hair for rounding. What terrainHeightRange's four texel reads a
+    * grid must hold, at a cost growing with the box's points.
+    */
+    TerrainHeightRange pointByPointRange(const TerrainHeights& heights, float west, float east, float north, float south) {
+        TerrainHeightRange range{1e30f, -1e30f};
+
+        for (const TerrainHeightGrid& grid : heights.grids) {
+            const float last = static_cast<float>(grid.size - 1);
+            const auto point = [&](float place, float corner, bool upper) {
+                const float coordinate = std::clamp((place - corner) / grid.spacing, 0.0f, last);
+                return static_cast<std::uint32_t>(upper ? std::ceil(coordinate) : std::floor(coordinate));
+            };
+            const std::uint32_t firstColumn = point(west, grid.corner.x, false);
+            const std::uint32_t lastColumn = point(east, grid.corner.x, true);
+            const std::uint32_t firstRow = point(north, grid.corner.y, false);
+            const std::uint32_t lastRow = point(south, grid.corner.y, true);
+
+            for (std::uint32_t row = firstRow > 0 ? firstRow - 1 : 0; row <= std::min(lastRow + 1, grid.size - 1); ++row) {
+                for (std::uint32_t column = firstColumn > 0 ? firstColumn - 1 : 0; column <= std::min(lastColumn + 1, grid.size - 1); ++column) {
+                    range.lowest = std::min(range.lowest, grid.heights[static_cast<std::size_t>(row) * grid.size + column]);
+                    range.highest = std::max(range.highest, grid.heights[static_cast<std::size_t>(row) * grid.size + column]);
+                }
+            }
+
+            const float extent = last * grid.spacing;
+            if (west >= grid.corner.x && east <= grid.corner.x + extent && north >= grid.corner.y && south <= grid.corner.y + extent) {
+                break;
+            }
+        }
+
+        return range;
+    }
+
     void testABoxsRangeHoldsItsHeights() {
         const std::shared_ptr<const TerrainHeights> wavy = twoGrids(waves);
         std::uint32_t state = 7;
@@ -358,6 +521,10 @@ namespace {
             const float south = north + 1.0f + unit() * 64.0f;
             const TerrainHeightRange range = terrainHeightRange(*wavy, west, east, north, south);
             assert(range.lowest <= range.highest);
+
+            // At least every point the box can read, from four texels a grid.
+            const TerrainHeightRange points = pointByPointRange(*wavy, west, east, north, south);
+            assert(range.lowest <= points.lowest && range.highest >= points.highest);
 
             for (int sample = 0; sample < 40; ++sample) {
                 const float x = west + unit() * (east - west);
@@ -386,6 +553,8 @@ void testTerrain() {
     testAPatchVertexIsPlacedOnTheLand();
     testTheTerrainBecomesDraws();
     testTheHeightsArePackedForTheGpu();
+    testTheHeightPyramidHoldsEachSquaresExtremes();
+    testAPatchsClusterHoldsItsVertices();
     testHiddenDrawsAreDrawnByNoView();
     testABoxsRangeHoldsItsHeights();
 }
