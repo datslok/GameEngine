@@ -518,7 +518,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
   - [ ] 4c. Clusters drawn into their pages, every page every frame; the main pass reading them behind a switch
     - [x] 4c-i. The sun's casters: a shadow view to the farthest level seen, its clusters cut as the camera's; F4 counts (`vsm-4c-draw`)
     - [x] 4c-ii. Clusters sent to each page they touch, drawn by mesh shaders clipped to the page; the pool cleared each frame
-    - [ ] 4c-iii. The main pass reading a page's depth (hard edges, the cascades' bias), cascades where none; a switch
+    - [x] 4c-iii. The main pass reading a page's depth (hard edges, the cascades' bias), cascades where none; a switch
     - [ ] 4c-iv. Fragment atomics into an R32 pool behind a switch; both measured at the four spots
   - [ ] 4d. Soft shadows through the page table, a coarser page or the far map where one is missing
   - [ ] 4e. Pages cached until something in them moves; still and moving slices; swaying trees
