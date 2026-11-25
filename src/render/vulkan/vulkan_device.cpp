@@ -62,7 +62,7 @@ void VulkanDevice::createInstance(bool validation, const std::vector<std::string
     }
 
     vkb::InstanceBuilder builder{vkGetInstanceProcAddr};
-    builder.set_app_name("GameEngine")
+    builder.set_app_name("Mewton")
         .require_api_version(1, 3, 0)
         .set_headless(window == nullptr);
 
