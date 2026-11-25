@@ -512,6 +512,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
     - [x] 3e-v-a. Each far level's leaves ordered by a median split, 12 nearest a cluster; measured (`leaf-bricks-3e-v-a`)
     - [x] 3e-v-b. The mesh shader culls far leaves hidden behind the depth pyramid; measured: no gain (`leaf-bricks-3e-v-b`)
   - [x] 3f. Leaves' opaque shadows moved into stage 4; today's shadows measured (`leaf-shadows-3f-plan`)
+  - [x] 3g. Crowns handed to their cards over the fade band: twigs shrunk away by rank, the card dithered in (`tree-card-fade`)
 - [ ] 4. Virtual shadow maps for the sun, the cascades retired, leaves casting as drawn; then the lamps (plan: `docs/research/VIRTUALSHADOWMAPS.md`)
   - [x] 4a. Level boxes, page snapping, wrapped addresses, level choice: CPU maths mirrored in `.glsl` (`vsm-4a-clipmap`)
   - [x] 4b. Pages marked from depth, the page table and pool allocated on the GPU; F4 counts, a view by level (`vsm-4b-pages`)
@@ -527,6 +528,7 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
   - [ ] 5b. The material pass in place of the main pass for cluster pixels
   - [ ] 5c. A compute rasteriser for clusters of small triangles
 - [ ] 6. Cluster pages streamed, when scenes outgrow memory
+- [ ] 7. Far crowns as volumes, the trees' cards retired; research first (`docs/research/FARFOLIAGE.md`)
 
 **Milestone:** the forest walked and flown with no shadow or level popping, the sun's shadows costing what the screen needs, the frame measured on the laptop against today's.
 

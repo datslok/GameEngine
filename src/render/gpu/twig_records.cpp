@@ -3,9 +3,12 @@
 #include "render/gpu/bone_poses.h"
 #include "render/gpu/bone_records.h"
 #include "render/gpu/column_major.h"
+#include "render/gpu/level_fade.h"
 #include "render/gpu/mesh_cluster_culling.h"
 #include "core/half_float.h"
+#include "core/hash.h"
 #include "math/quat.h"
+#include "scene/card_thinning.h"
 #include "scene/twig_far_levels.h"
 
 #include <algorithm>
@@ -157,6 +160,20 @@ GpuTwigBrick packTwigBrick(const TwigBrick& brick) {
     packed.firstTwig = brick.firstTwig;
     packed.twigCount = brick.twigCount;
     return packed;
+}
+
+// The hash's top 24 bits, exact in a float, spread over the ranks.
+float twigFadeRank(std::uint32_t plant, std::uint32_t twig) {
+    const std::uint32_t hashed = pcg3d({plant, twig, TWIG_FADE_HASH_USE})[0] >> 8u;
+    return twigFadeLeastRank + (1.0f - twigFadeLeastRank) * static_cast<float>(hashed) * (1.0f / 16777216.0f);
+}
+
+float twigFadePresence(std::uint32_t fadeField, float rank) {
+    if (fadeField == 0u || (fadeField & DRAW_LIST_FADE_COARSE) != 0u) {
+        return 1.0f;
+    }
+
+    return cardPresence(rank, 1.0f - levelFadeThreshold(fadeField));
 }
 
 // Each group's clusters must run together, group by group: the chain's level k from its first cluster to the next's.

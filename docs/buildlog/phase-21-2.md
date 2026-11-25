@@ -177,3 +177,10 @@
   - **`memoryBarrier`** shared in `buffer_barrier` (cloth's own copy, the mesh pool's and ray tracing's built on it).
   - **Allocation tested on the CPU** by running the four passes' shared functions over frames (walking, a dropped level, a full pool).
   - **7 planted bugs caught** (the marked span's low edge shifted, a slot's page not wrapped, a stale entry not needing a place, the free list read one off, keys without the generation, every level packed with the first level's generation, F4's line above the tiles').
+- `tree-card-fade` (Nov 25 2026): 3g, crowns handed to their cards over the fade band (`twig-drawing.md`, Fading into the card).
+  - **Found by A/B in a hidden copy:** the user's mid-distance crown pop was the crown-to-card swap (impostors off removed it; the shadow pages, cascades' fit, occlusion, AO, contact shadows, AA and far leaves did not). The trees' card never faded, and is baked from the old leaf cards, darker than the twigs.
+  - **Shrink, not dither, for the twigs:** opaque leaves have no prepass fragment shader, and a discard would cost early depth on every leaf in the band; the card (cut-out) dithers in as the scanned plants' do.
+  - **One rank a twig, its far leaves too,** so a twig and the far leaves made from it go together; ranks start a thinning band plus a fade step up, so none is left at the switch.
+  - **Far crowns as volumes next (stage 7, the user's pick) over far leaves to the root:** a tree's coarsest far level keeps 6-9 leaves grown 20-92 times; Nanite draws far foliage as voxels.
+  - **Checked by the user:** looks great. Left: climbers and epiphytes still swap; turning the camera still pops cascade shadows (stand-ins thinned near the last cascade), for stage 4.
+  - **6 planted bugs caught** (the coarser level shrunk, the fade's share for the kept share, ranks from 0, the plant left out of the rank, the card and the leaves not fading); GPU test written, not run.

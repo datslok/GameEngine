@@ -5,6 +5,7 @@
 #include "math/transform.h"
 #include "render/gpu/bone_poses.h"
 #include "render/gpu/column_major.h"
+#include "render/gpu/level_fade.h"
 #include "render/gpu/mesh_cluster_culling.h"
 #include "render/gpu/render_settings.h"
 #include "render/gpu/twig_records.h"
@@ -1210,9 +1211,63 @@ namespace {
 
         assert(checked > 1000);
     }
+
+    /*
+    * A crown fading into its card (stage 3g): each twig's rank fixed by its plant and number, spread evenly over
+    * twigFadeLeastRank to 1, another plant's twig ranked apart; every twig whole where nothing fades and for the coarser
+    * level, all but the few ranked past it at the band's first step, none at its last; about the kept share whole halfway;
+    * no twig ever growing back as the fade goes on.
+    */
+    void testTwigsFadeIntoTheCard() {
+        std::vector<float> ranks;
+        std::size_t apart = 0;
+
+        for (const std::uint32_t plant : {0u, 0x3f2a1234u, 0xffffffffu}) {
+            for (std::uint32_t twig = 0; twig < 4000; ++twig) {
+                const float rank = twigFadeRank(plant, twig);
+                assert(rank >= twigFadeLeastRank && rank <= 1.0f && rank == twigFadeRank(plant, twig));
+                ranks.push_back(rank);
+                apart += rank != twigFadeRank(plant ^ 1u, twig) ? 1 : 0;
+            }
+        }
+
+        assert(apart > ranks.size() * 99 / 100);
+        std::array<std::size_t, 10> tenths{};
+
+        for (const float rank : ranks) {
+            tenths[std::min<std::size_t>(9, static_cast<std::size_t>((rank - twigFadeLeastRank) / (1.0f - twigFadeLeastRank) * 10.0f))] += 1;
+        }
+
+        for (const std::size_t count : tenths) {
+            assert(count > ranks.size() * 8 / 100 && count < ranks.size() * 12 / 100);
+        }
+
+        const std::uint32_t first = levelFadeField(0.0f, false);
+        const std::uint32_t last = levelFadeField(1.0f, false);
+        std::size_t wholeAtFirst = 0;
+        float halfway = 0.0f;
+
+        for (const float rank : ranks) {
+            assert(twigFadePresence(0u, rank) == 1.0f && twigFadePresence(levelFadeField(0.5f, true), rank) == 1.0f);
+            assert(twigFadePresence(last, rank) == 0.0f);
+            wholeAtFirst += twigFadePresence(first, rank) == 1.0f ? 1 : 0;
+            halfway += twigFadePresence(levelFadeField(0.5f, false), rank);
+            float before = 1.0f;
+
+            for (std::uint32_t step = 0; step < DRAW_LIST_FADE_STEPS; ++step) {
+                const float presence = twigFadePresence(levelFadeField((static_cast<float>(step) + 0.5f) / DRAW_LIST_FADE_STEPS, false), rank);
+                assert(presence >= 0.0f && presence <= before);
+                before = presence;
+            }
+        }
+
+        assert(wholeAtFirst > ranks.size() * 98 / 100);
+        assert(std::abs(halfway / static_cast<float>(ranks.size()) - (1.0f - levelFadeThreshold(levelFadeField(0.5f, false)))) < 0.05f);
+    }
 }
 
 void testTwigRecords() {
+    testTwigsFadeIntoTheCard();
     testAFarLeafsRecord();
     testFarLeavesAreTheTwigsLevel();
     testPackedSetsMoveTheirRuns();

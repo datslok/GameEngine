@@ -1271,6 +1271,11 @@ namespace {
             const MeshLevelOptions& cardOptions = assets.getMeshLevelOptions().at(card.parts.front().mesh.index);
             const MeshLevelOptions& barkOptions = assets.getMeshLevelOptions().at(bark.parts.front().mesh.index);
             assert(cardOptions.hiddenBelowError == cardError);
+
+            // The crown hands over to the card across the camera's fade band (stage 3g): leaves and card fade, the bark
+            // (drawn by its cluster levels at every distance) does not.
+            const MeshLevelOptions& leafOptions = assets.getMeshLevelOptions().at(leaves.parts.front().mesh.index);
+            assert(cardOptions.fadesLevels && leafOptions.fadesLevels && !barkOptions.fadesLevels);
             assert(cardOptions.chooseBounds && barkOptions.chooseBounds && cardOptions.chooseBounds->maximum.y == barkOptions.chooseBounds->maximum.y);
             assert(card.parts.front().material.impostorFrames > 0 && !card.castsShadows && card.sway.kind == SwayKind::Still);
 
