@@ -1,6 +1,6 @@
-# GameEngine
+# Mewton
 
-A game engine written from scratch in C++23, as a learning project: its own Vulkan 1.3 renderer, physics, cloth and tools, on a genre-agnostic core meant to host an **FPS** and a **MOBA**, and later a dressmaking game with real cloth, a real-scale solar system and a flying superhero.
+Mewton, a game engine written from scratch in C++23, as a learning project: its own Vulkan 1.3 renderer, physics, cloth and tools, on a genre-agnostic core meant to host an **FPS** and a **MOBA**, and later a dressmaking game with real cloth, a real-scale solar system and a flying superhero.
 
 - [ROADMAP.md](ROADMAP.md): what is built and what comes next
 - [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md): how it works and why, for people learning it
@@ -83,7 +83,7 @@ Everything else is in `external/`. Only DLSS's DLLs need fetching.
        mingw-w64-ucrt-x86_64-vulkan-validation-layers
    ```
 
-3. `git clone https://github.com/datslok/GameEngine.git` and `cd GameEngine`.
+3. `git clone https://github.com/datslok/GameEngine.git` and `cd GameEngine` (the repository keeps its first name).
 4. Optional, needing a real Python:
    - DLSS on RTX GPUs: `python tools/fetch_streamline.py` (about 276 MB).
    - The forest's scanned assets: `python tools/fetch_forest_assets.py` (45 CC0 assets, about 270 MB; without them its ground is plain colours).
@@ -125,7 +125,7 @@ Also `get`, `list`, `reset`, `preset`, `typical-gpu`, `save-settings`, `pause`, 
 
 ## Sharing the demo
 
-`python tools/package_demo.py` builds `build/GameEngineDemo.zip` for a PC without MSYS2: the exe, a launcher per game, every DLL it needs (checked), the assets and a README with the controls below. `--anonymous` makes a neutral `build/Demo.zip`; `--no-build` packages the existing build.
+`python tools/package_demo.py` builds `build/MewtonDemo.zip` for a PC without MSYS2: the exe, a launcher per game, every DLL it needs (checked), the assets and a README with the controls below. `--anonymous` makes a neutral `build/Demo.zip`; `--no-build` packages the existing build.
 
 ## Controls
 

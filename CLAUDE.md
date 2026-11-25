@@ -1,6 +1,6 @@
-# GameEngine
+# Mewton
 
-A from-scratch C++23 engine. A genre-agnostic core for **FPS** and **MOBA** games, with genre code in modules on top; later a dressmaking game with real cloth (phases 7, 10), a real-scale solar system (13) and a flying superhero bringing down buildings by real physics (15).
+Mewton: a from-scratch C++23 engine. A genre-agnostic core for **FPS** and **MOBA** games, with genre code in modules on top; later a dressmaking game with real cloth (phases 7, 10), a real-scale solar system (13) and a flying superhero bringing down buildings by real physics (15).
 
 Current phase and work order: `ROADMAP.md` (phase numbers are names; the file's order is the work order).
 

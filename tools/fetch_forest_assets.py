@@ -32,7 +32,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = REPO_ROOT / "tools" / "forest_assets.json"
 DOWNLOADS = REPO_ROOT / "build" / "downloads" / "forest"
-HEADERS = {"User-Agent": "GameEngineAssetFetch/1.0"}
+HEADERS = {"User-Agent": "MewtonAssetFetch/1.0"}
 
 # Poly Haven offers each map in several formats: lossless where precision shows (normals, heights), JPEG elsewhere.
 PREFERRED_FORMATS = {"normal": ["png", "jpg"], "height": ["png", "jpg"]}

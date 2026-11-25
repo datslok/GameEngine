@@ -6,7 +6,7 @@ Usage (from anywhere):
     python tools/package_demo.py --no-build    package the existing build/release/game.exe
     python tools/package_demo.py --anonymous   for sharing anonymously: nothing that matches the public repo
 
-Output: build/GameEngineDemo.zip, staged in build/package/GameEngineDemo/ (build/Demo.zip with --anonymous).
+Output: build/MewtonDemo.zip, staged in build/package/MewtonDemo/ (build/Demo.zip with --anonymous).
 
 Only the Python standard library is used. It needs MSYS2's UCRT64 tools (make, strip, objdump),
 found in C:/msys64 by default; pass --msys-root or set MSYS2_ROOT if MSYS2 lives elsewhere.
@@ -356,14 +356,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Package the demo into a zip for another Windows PC.")
     parser.add_argument("--no-build", action="store_true", help="package the existing build/release/game.exe without running make")
     parser.add_argument("--msys-root", type=Path, default=Path(os.environ.get("MSYS2_ROOT", r"C:\msys64")), help="MSYS2 install folder (default C:\\msys64)")
-    parser.add_argument("--name", help="name of the exe, folder and zip (default GameEngineDemo, or Demo with --anonymous)")
+    parser.add_argument("--name", help="name of the exe, folder and zip (default MewtonDemo, or Demo with --anonymous)")
     parser.add_argument("--anonymous", action="store_true",
                         help="for sharing anonymously: a README with only short generic control names, a neutral name and undated zip entries, "
                              "so nothing in the zip matches the public repo's text or says when it was made")
     arguments = parser.parse_args()
 
     if arguments.name is None:
-        arguments.name = ANONYMOUS_NAME if arguments.anonymous else "GameEngineDemo"
+        arguments.name = ANONYMOUS_NAME if arguments.anonymous else "MewtonDemo"
 
     msys_bin = arguments.msys_root / "ucrt64" / "bin"
     objdump = msys_bin / "objdump.exe"
@@ -436,7 +436,7 @@ def main() -> int:
         (stage / launcher).write_text(f'@echo off\r\n"%~dp0{exe.name}" --game {game_name}\r\n', encoding="ascii", newline="")
 
     controls = readme_controls((REPO_ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n"), brief=arguments.anonymous)
-    title = ANONYMOUS_NAME if arguments.anonymous else "GameEngine demo"
+    title = ANONYMOUS_NAME if arguments.anonymous else "Mewton demo"
     readme = README_TEXT.format(title=title, underline="=" * len(title), controls=controls)
     if streamline:
         readme += DLSS_CREDIT

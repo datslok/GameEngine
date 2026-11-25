@@ -46,7 +46,7 @@ Covers: `makefile`, `tools/package_demo.py`, `tools/hooks/`
 
 ## Packaging
 
-`python tools/package_demo.py` → `build/GameEngineDemo.zip` for a PC without MSYS2:
+`python tools/package_demo.py` → `build/MewtonDemo.zip` for a PC without MSYS2:
 
 - The stripped release exe, DLLs found by following import tables with MSYS2 `objdump`, plus SDL3_image's decoder DLLs for the formats the assets use (loaded at run time, so invisible in import tables). Fails if an imported DLL is neither packaged nor part of Windows.
 - `assets/` without shader sources, and a README whose controls come from `README.md`'s `## Controls` (`readme_controls`).
