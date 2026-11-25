@@ -272,6 +272,11 @@ MeshClusterPose meshClusterPoseAt(MeshClusterDrawn drawn, MeshCluster cluster) {
     return meshClusterPosed(meshClusterBonesSphere(cluster, tree), drawn.instance.model, drawn.instance.sway.w, tree.leans.xy);
 }
 
+// How a pair's cluster stands in the view (meshClusterPoseIn): meshClusterPoseAt's, or posed by its sway's reach.
+MeshClusterPose meshClusterPoseIn(MeshClusterDrawn drawn, MeshCluster cluster, CameraCull view) {
+    return meshClusterSwayingPose(cluster, drawn.instance, drawn.entry, drawn.record, view, meshClusterPoseAt(drawn, cluster));
+}
+
 // The first of the list's totals.
 uint listTotals() {
     return pass.list * uint(MESH_CLUSTER_TOTAL_WORDS);
@@ -330,7 +335,7 @@ bool meshClusterPairKept(uint pair, out MeshClusterItem item, out bool candidate
     MeshClusterDrawn drawn = meshClusterDrawnAt(item.entry);
     MeshCluster cluster = meshClusterOfPair(item.cluster);
     InstanceData instance = drawn.instance;
-    MeshClusterPose pose = meshClusterPoseAt(drawn, cluster);
+    MeshClusterPose pose = meshClusterPoseIn(drawn, cluster, views[0]);
     uint visibility = meshClusterVisibility(cluster, instance, drawn.entry, drawn.record, views[0], pose);
     bool late = pass.list == MESH_CLUSTER_LATE;
 

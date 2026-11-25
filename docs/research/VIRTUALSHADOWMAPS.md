@@ -151,6 +151,7 @@ What each cost grows with (hard rule 11):
 - **Cost:** a few operations a cluster where the draw sways (in the cluster passes and the expanding pass); it replaces a draw's every cluster in every page of its bounds with each cluster's own pages. The camera's passes gain too: today they keep every cluster of a swaying plant near the eye.
 - **Counted (4c-vi's first step):** of the whole draws' triangles, lianas 3.7-42.2 M (most at the wall and among the trees: a liana's bounds span its tree, so each of its clusters lands in 100-180 pages), swaying without bones 10.2-22.6 M, terrain patches 5.6-7.6 M; cards, ground-following and thinned none. Lianas and terrain patches need bounds of their own, not this reach.
 - **Later, by the same logic:** 4e's caching wants the same reach (a swaying cluster's pages redrawn, a still one's kept), and a disable distance (Unreal's WPO Disable Distance, our `swayFadeEnd`) already stops sway far off.
+- **Decided (the user, Nov 25 2026): the worst lean first.** `WIND_MOST_LEAN` times nothing else, not this frame's lean: the cluster passes read no wind springs (only bones' leans), and grass reads a spring a blade, so one lean a cluster bounds nothing. The fade is not taken either (`GpuCameraCull` has no room for its start). The bob's distance is across from the trunk, as `windSwayOffset` takes it. This frame's lean only if the measured gain is worth binding the springs to four passes.
 
 ## Decided (the user, Nov 24 2026)
 

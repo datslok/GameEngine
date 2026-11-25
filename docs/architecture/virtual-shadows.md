@@ -68,7 +68,7 @@ After the pages are given room, with the casters culled; every drawn page (`virt
 
 | Step | What |
 |---|---|
-| Expand (`virtual_shadow_expand.comp`) | a workgroup a survivor of one style's run (dispatched by the casters' list's own task command for that style; `listPassBindings` gives it the cluster passes' buffers), a thread a level: the cluster's sphere (posed; a draw kept whole, `meshClusterSeenWhole`, its draw's bounds; unknown bounds the whole level) laid into the level (`virtualShadowSpherePages`: none off the level or wholly past its far end), each drawn page a pair; mirrored by `appendVirtualShadowPagePairs` |
+| Expand (`virtual_shadow_expand.comp`) | a workgroup a survivor of one style's run (dispatched by the casters' list's own task command for that style; `listPassBindings` gives it the cluster passes' buffers), a thread a level: the cluster's sphere (posed, or grown by its sway's reach, `meshClusterPoseIn`; a draw kept whole, `meshClusterSeenWhole`, its draw's bounds; unknown bounds the whole level) laid into the level (`virtualShadowSpherePages`: none off the level or wholly past its far end), each drawn page a pair; mirrored by `appendVirtualShadowPagePairs` |
 | Tasks (`virtual_shadow_tasks.comp`) | one thread: each list's mesh shader draw (`meshClusterTaskGroups` of its pairs within the room) |
 | Draw (`virtual_shadow_draw.mesh`) | a workgroup a pair: its cluster placed by `drawPooledCluster` (the camera's mesh shaders' body: sway, bones), each vertex then into the light's axes, the level (`virtualShadowLevelPoint`), its page's place in the pool (`virtualShadowPoolTexel`) and clip space (`virtualShadowPoolClip`, for the flipped viewport); four clip distances at the page's edges (`virtualShadowPageClip`) |
 

@@ -2361,11 +2361,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // A view as its mesh clusters (and the camera's twigs) are culled: as the camera's culling placed it, given the wind's
-    // sway (the culling runs without it), so a draw swaying near the camera keeps every cluster (and twig), and the cut's
-    // pixel error. The camera's, and the sun's virtual shadow casters' (whose levels are the camera's).
+    // sway (the culling runs without it), so a draw swaying near the camera keeps every cluster (and twig) or, with the
+    // sway's reach, culls each by its grown sphere (meshClusterSwayingPose), and the cut's pixel error. The camera's, and the sun's virtual shadow casters' (whose levels are the camera's).
     const auto clusterViewOf = [&](std::uint32_t view) {
         GpuCameraCull placed = cameraCulling->placedView(frame.frameIndex, view);
         placed.flags |= settings.wind.enabled && settings.wind.sway ? CAMERA_CULL_SWAY : 0u;
+        placed.flags |= settings.meshClusterSwayReach ? CAMERA_CULL_SWAY_REACH : 0u;
         placed.swayFadeEnd = settings.wind.swayFadeEnd;
         placed.levels.pixelError = settings.meshClusterErrorPixels;
         return placed;

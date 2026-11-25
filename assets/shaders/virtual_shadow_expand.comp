@@ -53,9 +53,10 @@ void main() {
     MeshClusterItem item = items[place];
     MeshClusterDrawn drawn = meshClusterDrawnAt(item.entry);
     MeshCluster cluster = meshClusterOfPair(item.cluster);
-    MeshClusterPose pose = meshClusterPoseAt(drawn, cluster);
+    MeshClusterPose pose = meshClusterPoseIn(drawn, cluster, views[0]);
 
-    // A draw kept whole (its shape not its mesh's, or swaying unbound) may leave its clusters' spheres: its own bounds.
+    // A draw kept whole (its shape not its mesh's, or swaying unbound without the sway's reach) may leave its clusters'
+    // spheres: its own bounds.
     bool whole = meshClusterSeenWhole(drawn.instance, drawn.entry, drawn.record, views[0], pose);
     vec4 sphere = whole ? drawn.record.bounds : meshClusterCullSphere(cluster, drawn.instance.model, pose);
     uint triangles = cluster.counts >> MESH_CLUSTER_TRIANGLE_SHIFT;

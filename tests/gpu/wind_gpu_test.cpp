@@ -174,6 +174,24 @@ namespace {
         for (std::size_t i = 0; i < reachOut.size(); ++i) {
             report.check("windFlutterReach", arithmeticTolerance, windFlutterReach(reaches[i][0], Vec2{reaches[i][1], reaches[i][2]}), reachOut[i][0]);
         }
+
+        // How far a part of a swaying thing can move (windSwayReach), still sways and parts below the foot among them.
+        // Inputs: the sway; its scale, top and distance across from the trunk.
+        std::vector<GpuVec4> parts;
+
+        for (int i = 0; i < 300; ++i) {
+            parts.push_back(gpuVec4(i % 40 == 0 ? -1.0f : static_cast<float>(i % 3), random.between(0.2f, 30.0f), random.between(0.0f, 3.0f), random.between(-0.5f, 0.5f)));
+            parts.push_back(gpuVec4(random.between(0.3f, 4.0f), random.between(-2.0f, 40.0f), random.between(0.0f, 15.0f)));
+        }
+
+        const std::vector<GpuVec4> partOut = runner.run(shader, GPU_TEST_WIND_SWAY_REACH, parts, 2, 1);
+
+        for (std::size_t i = 0; i < partOut.size(); ++i) {
+            const GpuVec4& sway = parts[2 * i];
+            const GpuVec4& part = parts[2 * i + 1];
+            const float expected = windSwayReach(Vec4{sway[0], sway[1], sway[2], sway[3]}, part[0], part[1], part[2]);
+            report.check("windSwayReach", arithmeticTolerance, expected, partOut[i][0]);
+        }
     }
 
     // Places in, near the edges of and outside windows anywhere. Inputs: the place and the window's first cell; the cell.

@@ -31,6 +31,9 @@ void main() {
         testOutput(0, vec4(windFlutterAmount(a.x, a.yz, a.w, testInput(1).x), 0.0, 0.0, 0.0));
     } else if (function == GPU_TEST_WIND_FLUTTER_REACH) {
         testOutput(0, vec4(windFlutterReach(a.x, a.yz), 0.0, 0.0, 0.0));
+    } else if (function == GPU_TEST_WIND_SWAY_REACH) {
+        vec4 part = testInput(1);
+        testOutput(0, vec4(windSwayReach(a, part.x, part.y, part.z), 0.0, 0.0, 0.0));
     } else if (function == GPU_TEST_WIND_WINDOW_SHARE) {
         testOutput(0, vec4(windWindowShare(a.xy, ivec2(a.zw), testInput(1).x)));
     } else if (function == GPU_TEST_WIND_SWAY) {

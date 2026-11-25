@@ -158,7 +158,8 @@ bool meshClusterSways(const GpuCullRecord& record, const GpuCameraCull& view);
 * How a cluster stands this frame (ROADMAP phase 21 stage 3c-iv-b; docs/research/LEAFGEOMETRY.md, Bounds from the
 * poses): bound to bones (its mesh's vertices, or its twig), so never moved by the per-vertex sway (a bound vertex
 * whose tree is not posed stands still); posed when its tree is, with its sphere in the world (sphere) holding every
-* vertex as drawn, its leaves' flutter included. Mirrored by mesh_cluster_culling.glsl's MeshClusterPose.
+* vertex as drawn, its leaves' flutter included. Or posed unbound: swaying per vertex, its sphere grown by the sway's
+* reach (meshClusterSwayingPose). Mirrored by mesh_cluster_culling.glsl's MeshClusterPose.
 */
 struct MeshClusterPose {
     bool bound = false;
@@ -172,7 +173,23 @@ struct MeshClusterPose {
 */
 MeshClusterPose meshClusterPosed(const float sphere[4], const GpuInstance& placedBy, float flutter, const Vec2& lean);
 
-// Whether the view keeps every cluster of the draw: its shape not its mesh's, or swaying per vertex and not bound to bones.
+/*
+* The farthest the wind's per-vertex sway moves any of the cluster's vertices (windSwayReach): from the top of its
+* sphere and its farthest across from the trunk, through the draw's origin (for grass each blade's foot below it).
+*/
+float meshClusterSwayReach(const GpuMeshCluster& cluster, const GpuInstance& instance);
+
+/*
+* Where the view grows swaying clusters (CAMERA_CULL_SWAY_REACH, RenderSettings::meshClusterSwayReach), a cluster not
+* bound to bones of a draw of its mesh's shape swaying per vertex: posed unbound on its sphere in the world grown by
+* meshClusterSwayReach, so the view culls it alone rather than keeping the draw whole (ROADMAP phase 21 4c-vi). Else
+* the pose given.
+*/
+MeshClusterPose meshClusterSwayingPose(const GpuMeshCluster& cluster, const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record,
+                                       const GpuCameraCull& view, const MeshClusterPose& pose);
+
+// Whether the view keeps every cluster of the draw: its shape not its mesh's, or swaying per vertex, not bound to bones
+// and not posed by its sway's reach (meshClusterSwayingPose).
 bool meshClusterSeenWhole(const GpuInstance& instance, std::uint32_t entry, const GpuCullRecord& record, const GpuCameraCull& view,
                           const MeshClusterPose& pose);
 
@@ -424,6 +441,10 @@ MeshClusterDrawn meshClusterDrawnAt(const MeshClusterTables& tables, std::uint32
 * meshClusterBonesSphere, meshClusterPosed); a frame's draw's bound cluster stands still.
 */
 MeshClusterPose meshClusterPoseAt(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster);
+
+// How a pair's cluster stands in the view, as mesh_cluster_pass.glsl's meshClusterPoseIn finds it: meshClusterPoseAt's
+// pose, or posed by its sway's reach (meshClusterSwayingPose).
+MeshClusterPose meshClusterPoseIn(const MeshClusterTables& tables, const MeshClusterDrawn& drawn, const GpuMeshCluster& cluster, const GpuCameraCull& view);
 
 // A list culled: its pairs in drawing order (at most the room), each style's run of them, the pairs tested and the
 // survivors (all of them, past the room too).
