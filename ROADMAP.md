@@ -20,7 +20,7 @@ Each step is one short line: what it builds, its branch names (for `git log`) an
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising; costly graphics (ray tracing, GI quality) are settings that scale down to typical GPUs.
 
-**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase; its shadow and level popping wait for 21), 21 (virtual geometry and shadows), 22 (a cheaper reflection probe), 20 (clouds and weather) and 17 (rendering), then 7 onwards, as the phases sit in this file.
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 19 (the docs, taken ahead of the forest), 18 (a forest showcase; its shadow and level popping wait for 21), 21 (virtual geometry and shadows), 23 (a code review for readability), 22 (a cheaper reflection probe), 20 (clouds and weather) and 17 (rendering), then 7 onwards, as the phases sit in this file.
 
 ---
 
@@ -539,6 +539,23 @@ Shadows and levels without popping, at a cost that grows with the screen, not th
 - [ ] 7. Far crowns as volumes, the trees' cards retired; research first (`docs/research/FARFOLIAGE.md`)
 
 **Milestone:** the forest walked and flown with no shadow or level popping, the sun's shadows costing what the screen needs, the frame measured on the laptop against today's.
+
+---
+
+## Phase 23: A code review for readability
+
+Added Nov 27 2026, the first review of the code since phase 0: code a human reads easily, builds on easily, with sensible names. Agreed with the user: 1TBS with every brace at the end of its line, functions included; no line-length limit; one idea per line (a group of like declarations may share one); density only for speed, with a `// Speed:` comment saying why. No behaviour changes: the suite and the simulation hash stay the same. Research and the checklist: `docs/research/CODE_STYLE.md`.
+
+- [ ] Research: shipped style guides (C++ Core Guidelines, Google, LLVM, Unreal, id) and the checklist
+- [ ] The standard: `.clang-format` (braces, spacing, CRLF, no column limit), a format check in the suite, a style rule
+- [ ] One formatting-only commit over all code, listed in `.git-blame-ignore-revs`; aligned tables kept as written
+- [ ] One small folder (`math/` or `physics/`) reviewed and fixed first, read by the user to agree on taste
+- [ ] The rest folder by folder from the lowest layer up to `render/` and `games/`, a branch each
+- [ ] The tests and shaders reviewed the same way
+- [ ] The largest files split into one system each: `vulkan_renderer.cpp`, `forest_game.cpp` and others past ~1000 lines
+- [ ] New code kept to the standard: the format check in the suite, a readability pass before each merge
+
+**Milestone:** every folder reviewed against the checklist, the format check passing in the routine suite, and the user able to follow a file from any folder without help.
 
 ---
 
